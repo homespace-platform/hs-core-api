@@ -64,6 +64,15 @@ public class GlobalException {
                 ? fieldError.getDefaultMessage()
                 : errorCode.getMessage();
 
+        try {
+            com.hs.user.constant.base.ErrorCode userErrorCode =
+                    com.hs.user.constant.base.ErrorCode.valueOf(message);
+            return ResponseEntity.status(userErrorCode.getStatusCode())
+                    .body(buildErrorResponse(userErrorCode.getCode(), userErrorCode.getMessage()));
+        } catch (IllegalArgumentException ignored) {
+            // The validation message is plain text or belongs to another module.
+        }
+
         return ResponseEntity.status(errorCode.getStatusCode())
                 .body(buildErrorResponse(errorCode, message));
     }

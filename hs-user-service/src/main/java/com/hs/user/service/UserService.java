@@ -5,6 +5,7 @@ import com.hs.user.dto.request.UpdateAvatarRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
 import com.hs.user.dto.request.UserRoleAssign;
+import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
 
@@ -17,6 +18,10 @@ public interface UserService {
     UserPermissionsResponse getUserPermissions(String userId);
 
     void updateUserPassword(UpdatePasswordRequest request);
+
+    void setInitialPassword(SetInitialPasswordRequest request);
+
+    boolean hasPassword();
 
     UserProfileResponse getUserProfile();
 

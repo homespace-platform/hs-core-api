@@ -21,12 +21,14 @@ public enum ErrorCode {
     EMAIL_EXISTED(1014, "Email existed", HttpStatus.BAD_REQUEST),
     EMAIL_ALREADY_VERIFIED(1015, "Email already verified", HttpStatus.BAD_REQUEST),
     USER_ALREADY_HAS_ROLE(1016, "User already has this role", HttpStatus.BAD_REQUEST),
+    PASSWORD_ALREADY_SET(1017, "Password has already been set", HttpStatus.CONFLICT),
     ROLE_EXISTED(1101, "Role existed", HttpStatus.BAD_REQUEST),
     ROLE_NOT_EXISTED(1102, "Role not existed", HttpStatus.NOT_FOUND),
     PERMISSION_EXISTED(1201, "Permission existed", HttpStatus.BAD_REQUEST),
     PERMISSION_NOT_EXISTED(1202, "Permission not existed", HttpStatus.NOT_FOUND),
     KEYCLOAK_USER_UPDATE_FAILED(1301, "Keycloak user update failed", HttpStatus.BAD_GATEWAY),
-    KEYCLOAK_PASSWORD_UPDATE_FAILED(1302, "Keycloak password update failed", HttpStatus.BAD_GATEWAY);
+    KEYCLOAK_PASSWORD_UPDATE_FAILED(1302, "Keycloak password update failed", HttpStatus.BAD_GATEWAY),
+    KEYCLOAK_CREDENTIAL_READ_FAILED(1303, "Could not read Keycloak credentials", HttpStatus.BAD_GATEWAY);
 
     ErrorCode(int code, String message, HttpStatusCode statusCode) {
         this.code = code;

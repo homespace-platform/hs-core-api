@@ -14,6 +14,7 @@ import com.hs.user.config.security.KeycloakPasswordGrantClientFactory;
 import com.hs.user.constant.base.ErrorCode;
 import com.hs.user.dto.request.UpdateKeycloakUserRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
+import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.service.KeycloakUserService;
 
 import lombok.AccessLevel;
@@ -99,6 +100,42 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
         } catch (WebApplicationException exception) {
             log.error("Failed to update Keycloak password for user {}: {}", userId, exception.getMessage());
             throw new AppException(ErrorCode.KEYCLOAK_PASSWORD_UPDATE_FAILED);
+        }
+    }
+
+    @Override
+    public void setInitialPassword(String userId, SetInitialPasswordRequest request) {
+        var userResource = keycloakRealm.users().get(userId);
+
+        if (hasPassword(userId)) {
+            throw new AppException(ErrorCode.PASSWORD_ALREADY_SET);
+        }
+
+        try {
+            CredentialRepresentation credential = new CredentialRepresentation();
+            credential.setType(CredentialRepresentation.PASSWORD);
+            credential.setValue(request.newPassword());
+            credential.setTemporary(false);
+            userResource.resetPassword(credential);
+
+            log.info("Set initial Keycloak password for user {}", userId);
+        } catch (WebApplicationException exception) {
+            log.error("Failed to set initial Keycloak password for user {}: {}", userId, exception.getMessage());
+            throw new AppException(ErrorCode.KEYCLOAK_PASSWORD_UPDATE_FAILED);
+        }
+    }
+
+    @Override
+    public boolean hasPassword(String userId) {
+        try {
+            return keycloakRealm.users()
+                    .get(userId)
+                    .credentials()
+                    .stream()
+                    .anyMatch(credential -> CredentialRepresentation.PASSWORD.equals(credential.getType()));
+        } catch (WebApplicationException exception) {
+            log.error("Failed to read Keycloak credentials for user {}: {}", userId, exception.getMessage());
+            throw new AppException(ErrorCode.KEYCLOAK_CREDENTIAL_READ_FAILED);
         }
     }
 

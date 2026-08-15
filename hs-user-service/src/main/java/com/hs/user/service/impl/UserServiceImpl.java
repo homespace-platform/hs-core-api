@@ -14,6 +14,7 @@ import com.hs.user.dto.request.UpdateKeycloakUserRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
 import com.hs.user.dto.request.UserRoleAssign;
+import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
 import com.hs.user.mapper.UserMapper;
@@ -92,6 +93,17 @@ public class UserServiceImpl implements UserService {
                                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
 
                 keycloakUserService.updatePassword(userId, user.getUsername(), request);
+        }
+
+        @Override
+        public void setInitialPassword(SetInitialPasswordRequest request) {
+                keycloakUserService.setInitialPassword(currentUserUtils.getCurrentUserId(), request);
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public boolean hasPassword() {
+                return keycloakUserService.hasPassword(currentUserUtils.getCurrentUserId());
         }
 
         @Override

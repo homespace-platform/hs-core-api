@@ -11,6 +11,7 @@ import com.hs.common.dto.ApiResponse;
 import com.hs.user.dto.request.OnboardingRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
+import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.dto.response.UserProfileResponse;
 import com.hs.user.service.UserService;
 
@@ -40,6 +41,21 @@ public class UserController {
         userService.updateUserPassword(request);
         return ApiResponse.<Void>builder()
                 .message("Password updated successfully")
+                .build();
+    }
+
+    @PostMapping("/me/password/initial")
+    public ApiResponse<Void> setInitialPassword(@RequestBody @Valid SetInitialPasswordRequest request) {
+        userService.setInitialPassword(request);
+        return ApiResponse.<Void>builder()
+                .message("Initial password set successfully")
+                .build();
+    }
+
+    @GetMapping("/me/password/status")
+    public ApiResponse<Boolean> getPasswordStatus() {
+        return ApiResponse.<Boolean>builder()
+                .result(userService.hasPassword())
                 .build();
     }
 
