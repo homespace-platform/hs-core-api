@@ -8,6 +8,8 @@ public record UpdateKeycloakUserRequest(
         String email,
         String firstName,
         String lastName,
+        String phoneNumber,
+        String avatarUrl,
         Boolean enabled,
         Boolean emailVerified
 ) {
@@ -16,6 +18,8 @@ public record UpdateKeycloakUserRequest(
                 || hasText(email)
                 || hasText(firstName)
                 || hasText(lastName)
+                || hasText(phoneNumber)
+                || hasText(avatarUrl)
                 || enabled != null
                 || emailVerified != null;
     }

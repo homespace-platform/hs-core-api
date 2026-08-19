@@ -52,7 +52,7 @@ public class User extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     String avatarUrl;
 
-    @Column(length = 15)
+    @Column(length = 15, unique = true)
     String phone;
 
     LocalDate dob;

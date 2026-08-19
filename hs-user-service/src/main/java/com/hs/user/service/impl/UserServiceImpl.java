@@ -51,11 +51,16 @@ public class UserServiceImpl implements UserService {
                         throw new AppException(ErrorCode.USER_ALREADY_ONBOARDED);
                 }
 
+                if (userRepository.existsByPhoneAndIdNot(onboardingRequest.phone(), user.getId())) {
+                        throw new AppException(ErrorCode.PHONE_EXISTED);
+                }
+
                 keycloakUserService.updateUserIfChanged(
                                 user.getId(),
                                 UpdateKeycloakUserRequest.builder()
                                                 .firstName(onboardingRequest.firstName())
                                                 .lastName(onboardingRequest.lastName())
+                                                .phoneNumber(onboardingRequest.phone())
                                                 .build());
 
                 user.setPhone(onboardingRequest.phone());
@@ -124,6 +129,7 @@ public class UserServiceImpl implements UserService {
                                                 .email(request.email())
                                                 .firstName(request.firstName())
                                                 .lastName(request.lastName())
+                                                .phoneNumber(request.phone())
                                                 .build());
 
                 if (request.phone() != null) {
@@ -142,7 +148,17 @@ public class UserServiceImpl implements UserService {
 
         @Override
         public void updateUserAvatar(UpdateAvatarRequest request) {
-                // TODO Auto-generated method stub
+                User user = currentUserUtils.getCurrentUser();
+
+                keycloakUserService.updateUserIfChanged(
+                                user.getId(),
+                                UpdateKeycloakUserRequest.builder()
+                                                .avatarUrl(request.avatarUrl())
+                                                .build());
+
+                user.setAvatarUrl(request.avatarUrl());
+                userRepository.save(user);
+                log.info("Updated avatar for user {}", user.getId());
         }
 
         @Override
@@ -204,6 +220,12 @@ public class UserServiceImpl implements UserService {
                                 && !request.email().equals(user.getEmail())
                                 && userRepository.existsByEmailAndIdNot(request.email(), user.getId())) {
                         throw new AppException(ErrorCode.EMAIL_EXISTED);
+                }
+
+                if (hasText(request.phone())
+                                && !request.phone().equals(user.getPhone())
+                                && userRepository.existsByPhoneAndIdNot(request.phone(), user.getId())) {
+                        throw new AppException(ErrorCode.PHONE_EXISTED);
                 }
         }
 

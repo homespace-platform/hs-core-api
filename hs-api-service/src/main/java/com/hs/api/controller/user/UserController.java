@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.hs.common.dto.ApiResponse;
 import com.hs.user.dto.request.OnboardingRequest;
+import com.hs.user.dto.request.UpdateAvatarRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
 import com.hs.user.dto.request.SetInitialPasswordRequest;
@@ -71,6 +72,14 @@ public class UserController {
         userService.updateUserProfile(request);
         return ApiResponse.<Void>builder()
                 .message("Profile updated successfully")
+                .build();
+    }
+
+    @PutMapping("/me/avatar")
+    public ApiResponse<Void> updateUserAvatar(@RequestBody @Valid UpdateAvatarRequest request) {
+        userService.updateUserAvatar(request);
+        return ApiResponse.<Void>builder()
+                .message("Avatar updated successfully")
                 .build();
     }
 

@@ -1,5 +1,9 @@
 package com.hs.user.service.impl;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import jakarta.ws.rs.WebApplicationException;
@@ -28,6 +32,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class KeycloakUserServiceImpl implements KeycloakUserService {
 
+    private static final String PHONE_NUMBER_ATTRIBUTE = "phoneNumber";
+    private static final String PICTURE_ATTRIBUTE = "picture";
+
     RealmResource keycloakRealm;
     KeycloakPasswordGrantClientFactory keycloakPasswordGrantClientFactory;
 
@@ -49,6 +56,12 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
             Boolean resolvedEmailVerified = request.emailVerified() != null
                     ? request.emailVerified()
                     : userRepresentation.isEmailVerified();
+            String resolvedPhoneNumber = resolveValue(
+                    request.phoneNumber(),
+                    getFirstAttribute(userRepresentation, PHONE_NUMBER_ATTRIBUTE));
+            String resolvedAvatarUrl = resolveValue(
+                    request.avatarUrl(),
+                    getFirstAttribute(userRepresentation, PICTURE_ATTRIBUTE));
             boolean emailChanged = !Objects.equals(userRepresentation.getEmail(), resolvedEmail);
             if (emailChanged) {
                 resolvedEmailVerified = false;
@@ -60,6 +73,8 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
                     resolvedEmail,
                     resolvedFirstName,
                     resolvedLastName,
+                    resolvedPhoneNumber,
+                    resolvedAvatarUrl,
                     resolvedEnabled,
                     resolvedEmailVerified)) {
                 log.info("Keycloak user information is unchanged for user {}", userId);
@@ -72,6 +87,8 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
             userRepresentation.setLastName(resolvedLastName);
             userRepresentation.setEnabled(resolvedEnabled);
             userRepresentation.setEmailVerified(resolvedEmailVerified);
+            setAttribute(userRepresentation, PHONE_NUMBER_ATTRIBUTE, resolvedPhoneNumber);
+            setAttribute(userRepresentation, PICTURE_ATTRIBUTE, resolvedAvatarUrl);
 
             userResource.update(userRepresentation);
             log.info("Requested Keycloak user information update for user {}", userId);
@@ -153,6 +170,8 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
             String email,
             String firstName,
             String lastName,
+            String phoneNumber,
+            String avatarUrl,
             Boolean enabled,
             Boolean emailVerified
     ) {
@@ -160,8 +179,32 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
                 || !Objects.equals(userRepresentation.getEmail(), email)
                 || !Objects.equals(userRepresentation.getFirstName(), firstName)
                 || !Objects.equals(userRepresentation.getLastName(), lastName)
+                || !Objects.equals(getFirstAttribute(userRepresentation, PHONE_NUMBER_ATTRIBUTE), phoneNumber)
+                || !Objects.equals(getFirstAttribute(userRepresentation, PICTURE_ATTRIBUTE), avatarUrl)
                 || !Objects.equals(userRepresentation.isEnabled(), enabled)
                 || !Objects.equals(userRepresentation.isEmailVerified(), emailVerified);
+    }
+
+    private String getFirstAttribute(UserRepresentation userRepresentation, String attributeName) {
+        Map<String, List<String>> attributes = userRepresentation.getAttributes();
+        if (attributes == null) {
+            return null;
+        }
+
+        List<String> values = attributes.get(attributeName);
+        return values == null || values.isEmpty() ? null : values.getFirst();
+    }
+
+    private void setAttribute(UserRepresentation userRepresentation, String attributeName, String value) {
+        Map<String, List<String>> attributes = userRepresentation.getAttributes() == null
+                ? new HashMap<>()
+                : new HashMap<>(userRepresentation.getAttributes());
+
+        if (hasText(value)) {
+            attributes.put(attributeName, new ArrayList<>(List.of(value)));
+        }
+
+        userRepresentation.setAttributes(attributes);
     }
 
     private String resolveValue(String requestValue, String currentValue) {

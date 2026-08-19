@@ -24,6 +24,7 @@ public enum ErrorCode {
     EMAIL_ALREADY_VERIFIED(2011, "Email already verified", HttpStatus.BAD_REQUEST),
     USER_ALREADY_HAS_ROLE(2012, "User already has this role", HttpStatus.BAD_REQUEST),
     PASSWORD_ALREADY_SET(2013, "Password has already been set", HttpStatus.CONFLICT),
+    PHONE_EXISTED(2014, "Phone number existed", HttpStatus.CONFLICT),
 
     // 21xx role
     ROLE_EXISTED(2101, "Role existed", HttpStatus.BAD_REQUEST),
