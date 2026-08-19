@@ -1,3 +1,7 @@
+```
+(Get-Item -LiteralPath "C:\duong-dan\android-chrome-192x192.png").Length
+```
+
 # Test Storage Service bằng Postman
 
 Import collection:
