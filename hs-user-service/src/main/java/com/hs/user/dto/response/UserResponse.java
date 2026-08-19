@@ -8,7 +8,7 @@ import com.hs.user.model.constant.Gender;
 import lombok.Builder;
 
 @Builder
-public record UserProfileResponse(
+public record UserResponse(
         String id,
         String username,
         String email,
@@ -24,7 +24,8 @@ public record UserProfileResponse(
         Boolean onBoarded,
         Boolean active,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String createdBy,
+        String updatedBy
 ) {
 }
-

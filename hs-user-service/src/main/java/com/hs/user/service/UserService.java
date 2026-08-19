@@ -8,10 +8,20 @@ import com.hs.user.dto.request.UserRoleAssign;
 import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
+import com.hs.user.dto.response.UserResponse;
 
 import org.springframework.transaction.annotation.Transactional;
+import org.jspecify.annotations.NonNull;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 public interface UserService {
+    @Transactional(readOnly = true)
+    Page<@NonNull UserResponse> findAllUsers(Pageable pageable);
+
+    @Transactional(readOnly = true)
+    UserResponse findUserById(String userId);
+
     void processOnboarding(OnboardingRequest onboardingRequest);
 
     @Transactional(readOnly = true)

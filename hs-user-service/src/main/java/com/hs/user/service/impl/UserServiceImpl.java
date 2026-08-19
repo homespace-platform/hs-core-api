@@ -5,6 +5,9 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.jspecify.annotations.NonNull;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import com.hs.user.advice.base.AppException;
 import com.hs.user.constant.base.ErrorCode;
@@ -17,6 +20,7 @@ import com.hs.user.dto.request.UserRoleAssign;
 import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
+import com.hs.user.dto.response.UserResponse;
 import com.hs.user.mapper.UserMapper;
 import com.hs.user.model.Role;
 import com.hs.user.model.User;
@@ -42,6 +46,21 @@ public class UserServiceImpl implements UserService {
         RoleRepository roleRepository;
         KeycloakUserService keycloakUserService;
         CurrentUserUtils currentUserUtils;
+
+        @Override
+        @Transactional(readOnly = true)
+        public Page<@NonNull UserResponse> findAllUsers(Pageable pageable) {
+                return userRepository.findAll(pageable)
+                                .map(UserMapper::mapToUserResponse);
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public UserResponse findUserById(String userId) {
+                return userRepository.findById(userId)
+                                .map(UserMapper::mapToUserResponse)
+                                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+        }
 
         @Override
         public void processOnboarding(OnboardingRequest onboardingRequest) {
