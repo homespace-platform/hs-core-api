@@ -13,7 +13,6 @@ public class UserMapper {
                 .email(user.getEmail())
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
-                .emailVerified(user.getEmailVerified())
                 .avatarUrl(user.getAvatarUrl())
                 .phone(user.getPhone())
                 .dob(user.getDob())
@@ -34,7 +33,6 @@ public class UserMapper {
                 .email(user.getEmail())
                 .firstName(user.getFirstName())
                 .lastName(user.getLastName())
-                .emailVerified(user.getEmailVerified())
                 .avatarUrl(user.getAvatarUrl())
                 .phone(user.getPhone())
                 .dob(user.getDob())
@@ -50,4 +48,3 @@ public class UserMapper {
                 .build();
     }
 }
-

@@ -14,7 +14,6 @@ public record UserResponse(
         String email,
         String firstName,
         String lastName,
-        Boolean emailVerified,
         String avatarUrl,
         String phone,
         LocalDate dob,

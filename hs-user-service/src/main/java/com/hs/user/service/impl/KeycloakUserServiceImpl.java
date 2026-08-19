@@ -53,9 +53,7 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
             String resolvedFirstName = resolveValue(request.firstName(), userRepresentation.getFirstName());
             String resolvedLastName = resolveValue(request.lastName(), userRepresentation.getLastName());
             Boolean resolvedEnabled = request.enabled() != null ? request.enabled() : userRepresentation.isEnabled();
-            Boolean resolvedEmailVerified = request.emailVerified() != null
-                    ? request.emailVerified()
-                    : userRepresentation.isEmailVerified();
+            Boolean resolvedEmailVerified = userRepresentation.isEmailVerified();
             String resolvedPhoneNumber = resolveValue(
                     request.phoneNumber(),
                     getFirstAttribute(userRepresentation, PHONE_NUMBER_ATTRIBUTE));

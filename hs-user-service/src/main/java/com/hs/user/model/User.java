@@ -46,9 +46,6 @@ public class User extends BaseEntity {
     @Column(length = 50)
     String lastName;
 
-    @Column(nullable = false)
-    Boolean emailVerified = false;
-
     @Column(columnDefinition = "TEXT")
     String avatarUrl;
 

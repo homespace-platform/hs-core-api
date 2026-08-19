@@ -10,8 +10,7 @@ public record UpdateKeycloakUserRequest(
         String lastName,
         String phoneNumber,
         String avatarUrl,
-        Boolean enabled,
-        Boolean emailVerified
+        Boolean enabled
 ) {
     public boolean hasAnyValue() {
         return hasText(username)
@@ -20,8 +19,7 @@ public record UpdateKeycloakUserRequest(
                 || hasText(lastName)
                 || hasText(phoneNumber)
                 || hasText(avatarUrl)
-                || enabled != null
-                || emailVerified != null;
+                || enabled != null;
     }
 
     private boolean hasText(String value) {
