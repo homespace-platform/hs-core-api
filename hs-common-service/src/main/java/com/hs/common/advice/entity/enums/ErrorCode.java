@@ -1,5 +1,6 @@
-package com.hs.common.constant.base;
+package com.hs.common.advice.entity.enums;
 
+import com.hs.common.advice.entity.AppException;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.experimental.FieldDefaults;
@@ -8,7 +9,7 @@ import org.springframework.http.HttpStatusCode;
 
 @Getter
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
-public enum ErrorCode {
+public enum ErrorCode implements AppException.ErrorCode {
     // 1xxx — platform / common
     INVALID_REQUEST(1001, "Invalid request", HttpStatus.BAD_REQUEST),
     UNAUTHENTICATED(1002, "Unauthenticated", HttpStatus.UNAUTHORIZED),

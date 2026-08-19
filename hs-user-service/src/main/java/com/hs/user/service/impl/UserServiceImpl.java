@@ -9,8 +9,8 @@ import org.jspecify.annotations.NonNull;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
-import com.hs.user.advice.base.AppException;
-import com.hs.user.constant.base.ErrorCode;
+import com.hs.common.advice.entity.AppException;
+import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.request.OnboardingRequest;
 import com.hs.user.dto.request.UpdateAvatarRequest;
 import com.hs.user.dto.request.UpdateKeycloakUserRequest;
@@ -59,7 +59,7 @@ public class UserServiceImpl implements UserService {
         public UserResponse findUserById(String userId) {
                 return userRepository.findById(userId)
                                 .map(UserMapper::mapToUserResponse)
-                                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
         }
 
         @Override
@@ -67,11 +67,11 @@ public class UserServiceImpl implements UserService {
                 User user = currentUserUtils.getCurrentUser();
 
                 if (Boolean.TRUE.equals(user.getOnBoarded())) {
-                        throw new AppException(ErrorCode.USER_ALREADY_ONBOARDED);
+                        throw new AppException(UserErrorCode.USER_ALREADY_ONBOARDED);
                 }
 
                 if (userRepository.existsByPhoneAndIdNot(onboardingRequest.phone(), user.getId())) {
-                        throw new AppException(ErrorCode.PHONE_EXISTED);
+                        throw new AppException(UserErrorCode.PHONE_EXISTED);
                 }
 
                 keycloakUserService.updateUserIfChanged(
@@ -94,7 +94,7 @@ public class UserServiceImpl implements UserService {
         @Override
         public UserPermissionsResponse getUserPermissions(String userId) {
                 User user = userRepository.findById(userId)
-                                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
 
                 var role = user.getRole();
                 var permissions = role == null || role.getPermissions() == null
@@ -114,7 +114,7 @@ public class UserServiceImpl implements UserService {
         public void updateUserPassword(UpdatePasswordRequest request) {
                 String userId = currentUserUtils.getCurrentUserId();
                 User user = userRepository.findById(userId)
-                                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
 
                 keycloakUserService.updatePassword(userId, user.getUsername(), request);
         }
@@ -183,7 +183,7 @@ public class UserServiceImpl implements UserService {
         @Override
         public void updateUserStatus(String userId, boolean enabled) {
                 userRepository.findById(userId)
-                                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
 
                 keycloakUserService.updateUserIfChanged(
                                 userId,
@@ -197,13 +197,13 @@ public class UserServiceImpl implements UserService {
         @Override
         public void assignRole(UserRoleAssign request) {
                 User user = userRepository.findById(request.userId())
-                                .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));
+                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
                 Role role = roleRepository
                                 .findById(request.roleId())
-                                .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
+                                .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
 
                 if (user.getRole() != null && request.roleId().equals(user.getRole().getId())) {
-                        throw new AppException(ErrorCode.USER_ALREADY_HAS_ROLE);
+                        throw new AppException(UserErrorCode.USER_ALREADY_HAS_ROLE);
                 }
 
                 user.setRole(role);
@@ -215,19 +215,19 @@ public class UserServiceImpl implements UserService {
                 if (hasText(request.username())
                                 && !request.username().equals(user.getUsername())
                                 && userRepository.existsByUsernameAndIdNot(request.username(), user.getId())) {
-                        throw new AppException(ErrorCode.USERNAME_EXISTED);
+                        throw new AppException(UserErrorCode.USERNAME_EXISTED);
                 }
 
                 if (hasText(request.email())
                                 && !request.email().equals(user.getEmail())
                                 && userRepository.existsByEmailAndIdNot(request.email(), user.getId())) {
-                        throw new AppException(ErrorCode.EMAIL_EXISTED);
+                        throw new AppException(UserErrorCode.EMAIL_EXISTED);
                 }
 
                 if (hasText(request.phone())
                                 && !request.phone().equals(user.getPhone())
                                 && userRepository.existsByPhoneAndIdNot(request.phone(), user.getId())) {
-                        throw new AppException(ErrorCode.PHONE_EXISTED);
+                        throw new AppException(UserErrorCode.PHONE_EXISTED);
                 }
         }
 

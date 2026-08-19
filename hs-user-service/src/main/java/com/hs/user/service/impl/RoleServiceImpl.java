@@ -14,8 +14,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.hs.user.advice.base.AppException;
-import com.hs.user.constant.base.ErrorCode;
+import com.hs.common.advice.entity.AppException;
+import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.request.UpsertRoleRequest;
 import com.hs.user.dto.response.RoleResponse;
 import com.hs.user.mapper.RoleMapper;
@@ -40,7 +40,7 @@ public class RoleServiceImpl implements RoleService {
         String name = upsertRoleRequest.name().toUpperCase();
 
         if (roleRepository.existsByName(name))
-            throw new AppException(ErrorCode.ROLE_EXISTED);
+            throw new AppException(UserErrorCode.ROLE_EXISTED);
 
         Role role = RoleMapper.mapToRole(upsertRoleRequest);
 
@@ -74,19 +74,19 @@ public class RoleServiceImpl implements RoleService {
         return roleRepository
                 .findById(id)
                 .map(RoleMapper::mapToRoleResponse)
-                .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
+                .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
     }
 
     @Override
     public void updateRole(String id, UpsertRoleRequest upsertRoleRequest) {
         Role role = roleRepository
                 .findById(id)
-                .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
+                .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
 
         String name = upsertRoleRequest.name().toUpperCase();
 
         if (roleRepository.existsByNameAndIdNot(name, role.getId()))
-            throw new AppException(ErrorCode.ROLE_EXISTED);
+            throw new AppException(UserErrorCode.ROLE_EXISTED);
 
         RoleMapper.updateRoleFromRequest(role, upsertRoleRequest);
 
@@ -101,7 +101,7 @@ public class RoleServiceImpl implements RoleService {
     public void deleteRoleById(String id) {
         Role role = roleRepository
                 .findById(id)
-                .orElseThrow(() -> new AppException(ErrorCode.ROLE_NOT_EXISTED));
+                .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
 
         roleRepository.delete(role);
     }
@@ -110,7 +110,7 @@ public class RoleServiceImpl implements RoleService {
         Set<Permission> permissions = new HashSet<>(permissionRepository.findAllById(permissionIds));
 
         if (permissions.size() != permissionIds.size()) {
-            throw new AppException(ErrorCode.PERMISSION_NOT_EXISTED);
+            throw new AppException(UserErrorCode.PERMISSION_NOT_EXISTED);
         }
 
         return permissions;

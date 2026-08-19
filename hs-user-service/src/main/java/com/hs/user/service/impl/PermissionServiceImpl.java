@@ -12,8 +12,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.hs.user.advice.base.AppException;
-import com.hs.user.constant.base.ErrorCode;
+import com.hs.common.advice.entity.AppException;
+import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.request.UpsertPermissionRequest;
 import com.hs.user.dto.response.PermissionResponse;
 import com.hs.user.mapper.PermissionMapper;
@@ -35,7 +35,7 @@ public class PermissionServiceImpl implements PermissionService {
         String name = upsertPermissionRequest.name().toUpperCase();
 
         if (permissionRepository.existsByName(name)) {
-            throw new AppException(ErrorCode.PERMISSION_EXISTED);
+            throw new AppException(UserErrorCode.PERMISSION_EXISTED);
         }
 
         permissionRepository.save(PermissionMapper.mapToPermission(upsertPermissionRequest));
@@ -45,7 +45,7 @@ public class PermissionServiceImpl implements PermissionService {
     public void deletePermissionById(String id) {
         Permission permission = permissionRepository
                 .findById(id)
-                .orElseThrow(() -> new AppException(ErrorCode.PERMISSION_NOT_EXISTED));
+                .orElseThrow(() -> new AppException(UserErrorCode.PERMISSION_NOT_EXISTED));
 
         permissionRepository.delete(permission);
     }
@@ -72,12 +72,12 @@ public class PermissionServiceImpl implements PermissionService {
     public void updatePermission(String id, UpsertPermissionRequest upsertPermissionRequest) {
         Permission permission = permissionRepository
                 .findById(id)
-                .orElseThrow(() -> new AppException(ErrorCode.PERMISSION_NOT_EXISTED));
+                .orElseThrow(() -> new AppException(UserErrorCode.PERMISSION_NOT_EXISTED));
 
         String name = upsertPermissionRequest.name().toUpperCase();
 
         if (permissionRepository.existsByNameAndIdNot(name, permission.getId())) {
-            throw new AppException(ErrorCode.PERMISSION_EXISTED);
+            throw new AppException(UserErrorCode.PERMISSION_EXISTED);
         }
 
         PermissionMapper.updatePermissionFromRequest(permission, upsertPermissionRequest);

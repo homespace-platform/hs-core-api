@@ -13,9 +13,9 @@ import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.stereotype.Service;
 
-import com.hs.user.advice.base.AppException;
+import com.hs.common.advice.entity.AppException;
 import com.hs.user.config.security.KeycloakPasswordGrantClientFactory;
-import com.hs.user.constant.base.ErrorCode;
+import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.request.UpdateKeycloakUserRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.SetInitialPasswordRequest;
@@ -94,7 +94,7 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
             log.info("Requested Keycloak user information update for user {}", userId);
         } catch (WebApplicationException exception) {
             log.error("Failed to update Keycloak user {}: {}", userId, exception.getMessage());
-            throw new AppException(ErrorCode.KEYCLOAK_USER_UPDATE_FAILED);
+            throw new AppException(UserErrorCode.KEYCLOAK_USER_UPDATE_FAILED);
         }
     }
 
@@ -116,7 +116,7 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
             log.info("Updated Keycloak password for user {}", userId);
         } catch (WebApplicationException exception) {
             log.error("Failed to update Keycloak password for user {}: {}", userId, exception.getMessage());
-            throw new AppException(ErrorCode.KEYCLOAK_PASSWORD_UPDATE_FAILED);
+            throw new AppException(UserErrorCode.KEYCLOAK_PASSWORD_UPDATE_FAILED);
         }
     }
 
@@ -125,7 +125,7 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
         var userResource = keycloakRealm.users().get(userId);
 
         if (hasPassword(userId)) {
-            throw new AppException(ErrorCode.PASSWORD_ALREADY_SET);
+            throw new AppException(UserErrorCode.PASSWORD_ALREADY_SET);
         }
 
         try {
@@ -138,7 +138,7 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
             log.info("Set initial Keycloak password for user {}", userId);
         } catch (WebApplicationException exception) {
             log.error("Failed to set initial Keycloak password for user {}: {}", userId, exception.getMessage());
-            throw new AppException(ErrorCode.KEYCLOAK_PASSWORD_UPDATE_FAILED);
+            throw new AppException(UserErrorCode.KEYCLOAK_PASSWORD_UPDATE_FAILED);
         }
     }
 
@@ -152,7 +152,7 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
                     .anyMatch(credential -> CredentialRepresentation.PASSWORD.equals(credential.getType()));
         } catch (WebApplicationException exception) {
             log.error("Failed to read Keycloak credentials for user {}: {}", userId, exception.getMessage());
-            throw new AppException(ErrorCode.KEYCLOAK_CREDENTIAL_READ_FAILED);
+            throw new AppException(UserErrorCode.KEYCLOAK_CREDENTIAL_READ_FAILED);
         }
     }
 
@@ -160,7 +160,7 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
         try (Keycloak keycloak = keycloakPasswordGrantClientFactory.createPasswordGrantClient(username, oldPassword)) {
             keycloak.tokenManager().getAccessToken();
         } catch (WebApplicationException exception) {
-            throw new AppException(ErrorCode.INVALID_OLD_PASSWORD);
+            throw new AppException(UserErrorCode.INVALID_OLD_PASSWORD);
         }
     }
 

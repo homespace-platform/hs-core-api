@@ -1,5 +1,6 @@
-package com.hs.user.constant.base;
+package com.hs.user.advice.entity.enums;
 
+import com.hs.common.advice.entity.AppException;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.experimental.FieldDefaults;
@@ -8,7 +9,7 @@ import org.springframework.http.HttpStatusCode;
 
 @Getter
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
-public enum ErrorCode {
+public enum UserErrorCode implements AppException.ErrorCode {
     // 2xxx — user service
     // 20xx user / account
     USER_EXISTED(2001, "User existed", HttpStatus.BAD_REQUEST),
@@ -38,7 +39,7 @@ public enum ErrorCode {
     KEYCLOAK_PASSWORD_UPDATE_FAILED(2302, "Keycloak password update failed", HttpStatus.BAD_GATEWAY),
     KEYCLOAK_CREDENTIAL_READ_FAILED(2303, "Could not read Keycloak credentials", HttpStatus.BAD_GATEWAY);
 
-    ErrorCode(int code, String message, HttpStatusCode statusCode) {
+    UserErrorCode(int code, String message, HttpStatusCode statusCode) {
         this.code = code;
         this.message = message;
         this.statusCode = statusCode;

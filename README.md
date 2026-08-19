@@ -4,14 +4,14 @@
     "configurations": [
         {
             "type": "java",
-            "name": "Spring Boot-HsApiServiceApplication<com.hs-hs-api-service>",
+            "name": "Spring Boot-HsGatewayServerApplication<com.hs-hs-gateway-server>",
             "request": "launch",
             "cwd": "${workspaceFolder}",
-            "mainClass": "com.hs.HsApiServiceApplication",
-            "projectName": "com.hs-hs-api-service",
+            "mainClass": "com.hs.gateway.HsGatewayServerApplication",
+            "projectName": "com.hs-hs-gateway-server",
             "args": "",
-            "envFile": "${workspaceFolder}/.env",
-            "console": "integratedTerminal"
+            "envFile": "${workspaceFolder}/hs-gateway-server/.env",
+            "console": "integratedTerminal",
         },
         {
             "type": "java",
@@ -21,21 +21,20 @@
             "mainClass": "com.hs.discovery.HsDiscoveryServerApplication",
             "projectName": "com.hs-hs-discovery-server",
             "args": "",
-            "envFile": "${workspaceFolder}/.env",
-            "console": "integratedTerminal"
+            "envFile": "${workspaceFolder}/hs-discovery-server/.env",
+            "console": "integratedTerminal",
         },
         {
             "type": "java",
-            "name": "Spring Boot-HsGatewayServerApplication<com.hs-hs-gateway-server>",
+            "name": "Spring Boot-HsApiServiceApplication<com.hs-hs-api-service>",
             "request": "launch",
             "cwd": "${workspaceFolder}",
-            "mainClass": "com.hs.gateway.HsGatewayServerApplication",
-            "projectName": "com.hs-hs-gateway-server",
+            "mainClass": "com.hs.HsApiServiceApplication",
+            "projectName": "com.hs-hs-api-service",
             "args": "",
-            "envFile": "${workspaceFolder}/.env",
+            "envFile": "${workspaceFolder}/hs-core-api/.env",
             "console": "integratedTerminal"
-        },
-        ...
+        }
     ]
 }
 ```
