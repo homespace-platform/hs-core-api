@@ -176,23 +176,6 @@ public class UserServiceImpl implements UserService {
         }
 
         @Override
-        public void verifyCurrentUserEmail() {
-                User user = currentUserUtils.getCurrentUser();
-
-                if (Boolean.TRUE.equals(user.getEmailVerified())) {
-                        throw new AppException(ErrorCode.EMAIL_ALREADY_VERIFIED);
-                }
-
-                keycloakUserService.updateUserIfChanged(
-                                user.getId(),
-                                UpdateKeycloakUserRequest.builder()
-                                                .emailVerified(true)
-                                                .build());
-
-                log.info("Requested email verification for user {}", user.getId());
-        }
-
-        @Override
         public void assignRole(UserRoleAssign request) {
                 User user = userRepository.findById(request.userId())
                                 .orElseThrow(() -> new AppException(ErrorCode.USER_NOT_EXISTED));

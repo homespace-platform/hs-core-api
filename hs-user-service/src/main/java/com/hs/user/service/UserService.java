@@ -31,8 +31,6 @@ public interface UserService {
 
     void updateUserStatus(String userId, boolean enabled);
 
-    void verifyCurrentUserEmail();
-
     void assignRole(UserRoleAssign request);
 }
 

@@ -21,7 +21,6 @@ public enum ErrorCode {
     PASSWORD_WEAK(2008, "Password must include at least 1 uppercase letter, 1 digit and 1 special character", HttpStatus.BAD_REQUEST),
     USERNAME_EXISTED(2009, "Username existed", HttpStatus.BAD_REQUEST),
     EMAIL_EXISTED(2010, "Email existed", HttpStatus.BAD_REQUEST),
-    EMAIL_ALREADY_VERIFIED(2011, "Email already verified", HttpStatus.BAD_REQUEST),
     USER_ALREADY_HAS_ROLE(2012, "User already has this role", HttpStatus.BAD_REQUEST),
     PASSWORD_ALREADY_SET(2013, "Password has already been set", HttpStatus.CONFLICT),
     PHONE_EXISTED(2014, "Phone number existed", HttpStatus.CONFLICT),
