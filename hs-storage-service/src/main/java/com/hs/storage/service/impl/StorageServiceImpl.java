@@ -166,6 +166,22 @@ public class StorageServiceImpl implements StorageService {
 
     @Override
     @Transactional(readOnly = true)
+    public String getOwnedPublicUrl(String storageId, StoragePurpose expectedPurpose) {
+        StorageObject object = getOwnedObject(storageId);
+        if (object.getStatus() != StorageStatus.READY) {
+            throw new AppException(StorageErrorCode.STORAGE_NOT_READY);
+        }
+        if (object.getPurpose() != expectedPurpose) {
+            throw new AppException(StorageErrorCode.STORAGE_INVALID_PURPOSE);
+        }
+        if (object.getVisibility() != StorageVisibility.PUBLIC) {
+            throw new AppException(StorageErrorCode.STORAGE_OBJECT_NOT_PUBLIC);
+        }
+        return properties.publicBaseUrl() + "/" + object.getObjectKey();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public PageResponse<StorageObjectResponse> getCurrentUserObjects(
             String referenceType, String referenceId, int page, int size) {
         String ownerId = currentUserId();

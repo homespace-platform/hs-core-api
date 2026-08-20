@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.hs.common.dto.ApiResponse;
+import com.hs.api.facade.UserAvatarFacade;
 import com.hs.user.dto.request.OnboardingRequest;
 import com.hs.user.dto.request.UpdateAvatarRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
@@ -28,6 +29,7 @@ import lombok.experimental.FieldDefaults;
 public class UserController {
 
     UserService userService;
+    UserAvatarFacade userAvatarFacade;
 
     @PutMapping("/me/onboarding")
     public ApiResponse<Void> onboarding(@RequestBody @Valid OnboardingRequest request) {
@@ -77,7 +79,7 @@ public class UserController {
 
     @PutMapping("/me/avatar")
     public ApiResponse<Void> updateUserAvatar(@RequestBody @Valid UpdateAvatarRequest request) {
-        userService.updateUserAvatar(request);
+        userAvatarFacade.updateCurrentUserAvatar(request.storageId());
         return ApiResponse.<Void>builder()
                 .message("Avatar updated successfully")
                 .build();

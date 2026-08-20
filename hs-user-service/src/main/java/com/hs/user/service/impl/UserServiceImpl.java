@@ -12,7 +12,6 @@ import org.springframework.data.domain.Pageable;
 import com.hs.common.advice.entity.AppException;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.request.OnboardingRequest;
-import com.hs.user.dto.request.UpdateAvatarRequest;
 import com.hs.user.dto.request.UpdateKeycloakUserRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
@@ -166,16 +165,16 @@ public class UserServiceImpl implements UserService {
         }
 
         @Override
-        public void updateUserAvatar(UpdateAvatarRequest request) {
+        public void updateUserAvatar(String avatarUrl) {
                 User user = currentUserUtils.getCurrentUser();
 
                 keycloakUserService.updateUserIfChanged(
                                 user.getId(),
                                 UpdateKeycloakUserRequest.builder()
-                                                .avatarUrl(request.avatarUrl())
+                                                .avatarUrl(avatarUrl)
                                                 .build());
 
-                user.setAvatarUrl(request.avatarUrl());
+                user.setAvatarUrl(avatarUrl);
                 userRepository.save(user);
                 log.info("Updated avatar for user {}", user.getId());
         }

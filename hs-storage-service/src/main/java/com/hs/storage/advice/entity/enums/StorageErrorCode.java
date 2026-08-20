@@ -15,7 +15,9 @@ public enum StorageErrorCode implements AppException.ErrorCode {
     STORAGE_UPLOAD_MISMATCH(3006, "Uploaded object metadata does not match", HttpStatus.CONFLICT),
     STORAGE_NOT_READY(3007, "Storage object is not ready", HttpStatus.CONFLICT),
     STORAGE_PROVIDER_ERROR(3008, "Storage provider request failed", HttpStatus.BAD_GATEWAY),
-    STORAGE_UNAUTHENTICATED(3009, "Authentication is required", HttpStatus.UNAUTHORIZED);
+    STORAGE_UNAUTHENTICATED(3009, "Authentication is required", HttpStatus.UNAUTHORIZED),
+    STORAGE_INVALID_PURPOSE(3010, "Storage object has an invalid purpose", HttpStatus.BAD_REQUEST),
+    STORAGE_OBJECT_NOT_PUBLIC(3011, "Storage object is not public", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

@@ -1,7 +1,6 @@
 package com.hs.user.service;
 
 import com.hs.user.dto.request.OnboardingRequest;
-import com.hs.user.dto.request.UpdateAvatarRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
 import com.hs.user.dto.request.UserRoleAssign;
@@ -37,7 +36,7 @@ public interface UserService {
 
     void updateUserProfile(UpdateProfileRequest request);
 
-    void updateUserAvatar(UpdateAvatarRequest request);
+    void updateUserAvatar(String avatarUrl);
 
     void updateUserStatus(String userId, boolean enabled);
 
