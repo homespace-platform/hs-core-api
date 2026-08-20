@@ -36,7 +36,7 @@ public interface UserService {
 
     void updateUserProfile(UpdateProfileRequest request);
 
-    void updateUserAvatar(String avatarUrl);
+    void updateUserAvatar(String avatarUrl, String avatarStorageId);
 
     void updateUserStatus(String userId, boolean enabled);
 

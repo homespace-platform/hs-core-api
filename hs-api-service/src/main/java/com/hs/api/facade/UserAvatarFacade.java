@@ -16,6 +16,6 @@ public class UserAvatarFacade {
 
     public void updateCurrentUserAvatar(String storageId) {
         String publicUrl = storageService.getOwnedPublicUrl(storageId, StoragePurpose.USER_AVATAR);
-        userService.updateUserAvatar(publicUrl);
+        userService.updateUserAvatar(publicUrl, storageId);
     }
 }

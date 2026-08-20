@@ -165,7 +165,7 @@ public class UserServiceImpl implements UserService {
         }
 
         @Override
-        public void updateUserAvatar(String avatarUrl) {
+        public void updateUserAvatar(String avatarUrl, String avatarStorageId) {
                 User user = currentUserUtils.getCurrentUser();
 
                 keycloakUserService.updateUserIfChanged(
@@ -175,6 +175,7 @@ public class UserServiceImpl implements UserService {
                                                 .build());
 
                 user.setAvatarUrl(avatarUrl);
+                user.setAvatarStorageId(avatarStorageId);
                 userRepository.save(user);
                 log.info("Updated avatar for user {}", user.getId());
         }

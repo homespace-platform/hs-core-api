@@ -15,6 +15,7 @@ public record UserProfileResponse(
         String firstName,
         String lastName,
         String avatarUrl,
+        String avatarStorageId,
         String phone,
         LocalDate dob,
         Gender gender,

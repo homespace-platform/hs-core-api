@@ -25,4 +25,5 @@ public interface StorageService {
             String referenceType, String referenceId, int page, int size);
 
     void delete(String storageId);
+
 }

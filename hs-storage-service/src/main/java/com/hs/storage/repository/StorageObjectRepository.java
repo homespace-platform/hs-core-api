@@ -10,4 +10,5 @@ public interface StorageObjectRepository extends JpaRepository<StorageObject, St
 
     Page<StorageObject> findAllByOwnerIdAndReferenceTypeAndReferenceIdAndActiveTrue(
             String ownerId, String referenceType, String referenceId, Pageable pageable);
+
 }

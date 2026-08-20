@@ -49,6 +49,9 @@ public class User extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     String avatarUrl;
 
+    @Column(name = "avatar_storage_id", length = 255)
+    String avatarStorageId;
+
     @Column(length = 15, unique = true)
     String phone;
 
