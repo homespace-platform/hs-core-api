@@ -2,6 +2,7 @@ package com.hs.user.event.consumer;
 
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.hs.user.constant.RoleConstants;
 import com.hs.common.context.UserContextHolder;
@@ -30,6 +31,7 @@ public class UserSyncConsumer {
     ObjectMapper objectMapper;
 
     @KafkaListener(topics = "${spring.kafka.topic.keycloak-user-events}")
+    @Transactional
     public void userSyncListener(String msg) {
         try {
             JsonNode payload = objectMapper.readTree(msg);
