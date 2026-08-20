@@ -5,6 +5,9 @@ import jakarta.validation.constraints.*;
 import java.time.LocalDate;
 
 import com.hs.user.model.constant.Gender;
+import com.hs.user.validation.Adult;
+
+import static com.hs.user.validation.UserValidationPatterns.VIETNAMESE_PHONE;
 
 public record OnboardingRequest(
         @NotBlank(message = "First name must not be blank")
@@ -16,11 +19,11 @@ public record OnboardingRequest(
         String lastName,
 
         @NotBlank(message = "Phone number must not be blank")
-        @Pattern(regexp = "^[0-9]{10,15}$", message = "Phone number must contain between 10 and 15 digits")
+        @Pattern(regexp = VIETNAMESE_PHONE, message = "Vietnamese phone number format is invalid")
         String phone,
 
         @NotNull(message = "Date of birth must not be null")
-        @Past(message = "Date of birth must be in the past")
+        @Adult(message = "User must be at least 18 years old")
         LocalDate dob,
 
         @NotNull(message = "Gender must not be null")

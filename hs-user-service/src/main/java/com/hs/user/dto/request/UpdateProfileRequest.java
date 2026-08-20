@@ -3,11 +3,13 @@ package com.hs.user.dto.request;
 import java.time.LocalDate;
 
 import com.hs.user.model.constant.Gender;
+import com.hs.user.validation.Adult;
 
 import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+
+import static com.hs.user.validation.UserValidationPatterns.VIETNAMESE_PHONE;
 
 public record UpdateProfileRequest(
         @Size(min = 3, max = 50, message = "Username must be between 3 and 50 characters")
@@ -24,10 +26,10 @@ public record UpdateProfileRequest(
         @Size(min = 2, max = 50, message = "Last name must be between 2 and 50 characters")
         String lastName,
 
-        @Pattern(regexp = "^[0-9]{10,15}$", message = "Phone number must contain between 10 and 15 digits")
+        @Pattern(regexp = VIETNAMESE_PHONE, message = "Vietnamese phone number format is invalid")
         String phone,
 
-        @Past(message = "Date of birth must be in the past")
+        @Adult(message = "User must be at least 18 years old")
         LocalDate dob,
 
         Gender gender
