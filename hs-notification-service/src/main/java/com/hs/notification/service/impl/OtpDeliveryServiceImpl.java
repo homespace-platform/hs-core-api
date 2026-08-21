@@ -36,10 +36,10 @@ public class OtpDeliveryServiceImpl implements OtpDeliveryService {
     private final NotificationDeliveryRepository deliveryRepository;
     private final SpringTemplateEngine templateEngine;
 
-    @Value("${notification.mail.from:}")
+    @Value("${notification.mail.from}")
     private String from;
 
-    @Value("${notification.mail.from-name:HomeSpace}")
+    @Value("${notification.mail.from-name}")
     private String fromName;
 
     @Override

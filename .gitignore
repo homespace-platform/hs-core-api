@@ -32,8 +32,8 @@ build/
 ### VS Code ###
 .vscode/
 
-### Local secrets ###
+### Environment Variables ###
 .env
-.env.*
+.env.dev
 !.env.example
-AWS.md
+!.env.dev.example
