@@ -69,21 +69,34 @@ public class UserServiceImpl implements UserService {
                         throw new AppException(UserErrorCode.USER_ALREADY_ONBOARDED);
                 }
 
-                if (userRepository.existsByPhoneAndIdNot(onboardingRequest.phone(), user.getId())) {
+                if (hasText(onboardingRequest.phone())
+                                && userRepository.existsByPhoneAndIdNot(onboardingRequest.phone(), user.getId())) {
                         throw new AppException(UserErrorCode.PHONE_EXISTED);
                 }
 
                 keycloakUserService.updateUserIfChanged(
                                 user.getId(),
                                 UpdateKeycloakUserRequest.builder()
-                                                .firstName(onboardingRequest.firstName())
-                                                .lastName(onboardingRequest.lastName())
-                                                .phoneNumber(onboardingRequest.phone())
+                                                .firstName(trimToNull(onboardingRequest.firstName()))
+                                                .lastName(trimToNull(onboardingRequest.lastName()))
+                                                .phoneNumber(trimToNull(onboardingRequest.phone()))
                                                 .build());
 
-                user.setPhone(onboardingRequest.phone());
-                user.setDob(onboardingRequest.dob());
-                user.setGender(onboardingRequest.gender());
+                if (hasText(onboardingRequest.firstName())) {
+                        user.setFirstName(onboardingRequest.firstName().trim());
+                }
+                if (hasText(onboardingRequest.lastName())) {
+                        user.setLastName(onboardingRequest.lastName().trim());
+                }
+                if (hasText(onboardingRequest.phone())) {
+                        user.setPhone(onboardingRequest.phone().trim());
+                }
+                if (onboardingRequest.dob() != null) {
+                        user.setDob(onboardingRequest.dob());
+                }
+                if (onboardingRequest.gender() != null) {
+                        user.setGender(onboardingRequest.gender());
+                }
                 user.setOnBoarded(true);
 
                 userRepository.save(user);
@@ -233,6 +246,10 @@ public class UserServiceImpl implements UserService {
 
         private boolean hasText(String value) {
                 return value != null && !value.isBlank();
+        }
+
+        private String trimToNull(String value) {
+                return hasText(value) ? value.trim() : null;
         }
 
 }
