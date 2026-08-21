@@ -18,6 +18,7 @@
         <module>hs-common-service</module>
         <module>hs-user-service</module>
         <module>hs-storage-service</module>
+        <module>hs-notification-service</module>
         <module>hs-api-service</module>
     </modules>
     <properties>
