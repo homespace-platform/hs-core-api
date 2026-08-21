@@ -2,11 +2,14 @@ package com.hs.notification.service.impl;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Locale;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
+import org.thymeleaf.context.Context;
+import org.thymeleaf.spring6.SpringTemplateEngine;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.notification.advice.entity.enums.NotificationErrorCode;
@@ -31,6 +34,7 @@ public class OtpDeliveryServiceImpl implements OtpDeliveryService {
     private final JavaMailSender mailSender;
     private final Environment environment;
     private final NotificationDeliveryRepository deliveryRepository;
+    private final SpringTemplateEngine templateEngine;
 
     @Value("${notification.mail.from:}")
     private String from;
@@ -102,14 +106,11 @@ public class OtpDeliveryServiceImpl implements OtpDeliveryService {
     }
 
     private String buildEmailHtml(String code, OtpPurpose purpose, long expiresInMinutes) {
-        return """
-                <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto">
-                  <h2>HomeSpace verification code</h2>
-                  <p>Use this code to complete <strong>%s</strong>:</p>
-                  <div style="font-size:32px;font-weight:700;letter-spacing:8px">%s</div>
-                  <p>This code expires in %d minutes. Do not share it with anyone.</p>
-                </div>
-                """.formatted(purpose.name().toLowerCase().replace('_', ' '), code, expiresInMinutes);
+        Context context = new Context(Locale.ENGLISH);
+        context.setVariable("code", code);
+        context.setVariable("purpose", purpose.name().toLowerCase(Locale.ROOT).replace('_', ' '));
+        context.setVariable("expiresInMinutes", expiresInMinutes);
+        return templateEngine.process("email/otp-verification", context);
     }
 
     private String mask(String value) {

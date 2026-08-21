@@ -4,33 +4,33 @@
     "configurations": [
         {
             "type": "java",
-            "name": "Spring Boot-HsGatewayServerApplication<com.hs-hs-gateway-server>",
+            "name": "Spring Boot-HsGatewayServerApplication<hs-gateway-server>",
             "request": "launch",
             "cwd": "${workspaceFolder}",
             "mainClass": "com.hs.gateway.HsGatewayServerApplication",
-            "projectName": "com.hs-hs-gateway-server",
+            "projectName": "hs-gateway-server",
             "args": "",
-            "envFile": "${workspaceFolder}/hs-gateway-server/.env",
-            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/hs-core-gateway/.env",
+            "console": "integratedTerminal"
         },
         {
             "type": "java",
-            "name": "Spring Boot-HsDiscoveryServerApplication<com.hs-hs-discovery-server>",
+            "name": "Spring Boot-HsDiscoveryServerApplication<hs-discovery-server>",
             "request": "launch",
             "cwd": "${workspaceFolder}",
             "mainClass": "com.hs.discovery.HsDiscoveryServerApplication",
-            "projectName": "com.hs-hs-discovery-server",
+            "projectName": "hs-discovery-server",
             "args": "",
-            "envFile": "${workspaceFolder}/hs-discovery-server/.env",
-            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/hs-core-discovery/.env",
+            "console": "integratedTerminal"
         },
         {
             "type": "java",
-            "name": "Spring Boot-HsApiServiceApplication<com.hs-hs-api-service>",
+            "name": "Spring Boot-HsApiServiceApplication<hs-api-service>",
             "request": "launch",
             "cwd": "${workspaceFolder}",
             "mainClass": "com.hs.HsApiServiceApplication",
-            "projectName": "com.hs-hs-api-service",
+            "projectName": "hs-api-service",
             "args": "",
             "envFile": "${workspaceFolder}/hs-core-api/.env",
             "console": "integratedTerminal"
