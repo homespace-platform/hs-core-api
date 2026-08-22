@@ -1,5 +1,6 @@
 package com.hs.user.service;
 
+import com.hs.user.dto.request.AdminCreateUserRequest;
 import com.hs.user.dto.request.OnboardingRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
@@ -8,6 +9,7 @@ import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
 import com.hs.user.dto.response.UserResponse;
+import com.hs.user.dto.response.AdminCreateUserResponse;
 
 import org.springframework.transaction.annotation.Transactional;
 import org.jspecify.annotations.NonNull;
@@ -15,6 +17,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 public interface UserService {
+    AdminCreateUserResponse createUser(AdminCreateUserRequest request);
+
     @Transactional(readOnly = true)
     Page<@NonNull UserResponse> findAllUsers(Pageable pageable);
 
@@ -42,4 +46,3 @@ public interface UserService {
 
     void assignRole(UserRoleAssign request);
 }
-

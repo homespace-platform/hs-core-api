@@ -5,8 +5,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Locale;
 
 import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.Response;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
@@ -19,6 +21,8 @@ import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.request.UpdateKeycloakUserRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.SetInitialPasswordRequest;
+import com.hs.user.dto.request.AdminCreateUserRequest;
+import com.hs.user.dto.response.AdminCreateUserResponse;
 import com.hs.user.service.KeycloakUserService;
 
 import lombok.AccessLevel;
@@ -34,9 +38,70 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
 
     private static final String PHONE_NUMBER_ATTRIBUTE = "phoneNumber";
     private static final String PICTURE_ATTRIBUTE = "picture";
+    private static final List<String> INITIAL_REQUIRED_ACTIONS = List.of("VERIFY_EMAIL", "UPDATE_PASSWORD");
 
     RealmResource keycloakRealm;
     KeycloakPasswordGrantClientFactory keycloakPasswordGrantClientFactory;
+
+    @Override
+    public AdminCreateUserResponse createUser(AdminCreateUserRequest request) {
+        UserRepresentation user = new UserRepresentation();
+        String username = request.username().trim();
+        String email = request.email().trim().toLowerCase(Locale.ROOT);
+
+        user.setUsername(username);
+        user.setEmail(email);
+        user.setFirstName(trimToNull(request.firstName()));
+        user.setLastName(trimToNull(request.lastName()));
+        user.setEnabled(request.enabled());
+        user.setEmailVerified(false);
+        user.setRequiredActions(new ArrayList<>(INITIAL_REQUIRED_ACTIONS));
+
+        String phone = trimToNull(request.phone());
+        if (phone != null) {
+            user.setAttributes(Map.of(PHONE_NUMBER_ATTRIBUTE, List.of(phone)));
+        }
+
+        String userId;
+        try (Response response = keycloakRealm.users().create(user)) {
+            if (response.getStatus() == Response.Status.CONFLICT.getStatusCode()) {
+                throw new AppException(UserErrorCode.USER_EXISTED);
+            }
+            if (response.getStatusInfo().getFamily() != Response.Status.Family.SUCCESSFUL
+                    || response.getLocation() == null) {
+                log.error("Keycloak rejected user creation with status {}", response.getStatus());
+                throw new AppException(UserErrorCode.KEYCLOAK_USER_CREATE_FAILED);
+            }
+            userId = extractCreatedUserId(response);
+        } catch (AppException exception) {
+            throw exception;
+        } catch (WebApplicationException exception) {
+            log.error("Failed to create Keycloak user {}: {}", username, exception.getMessage());
+            throw new AppException(UserErrorCode.KEYCLOAK_USER_CREATE_FAILED);
+        }
+
+        boolean invitationSent = false;
+        if (Boolean.TRUE.equals(request.sendInvitation())) {
+            try {
+                keycloakRealm.users().get(userId).executeActionsEmail(INITIAL_REQUIRED_ACTIONS);
+                invitationSent = true;
+            } catch (RuntimeException exception) {
+                // The account already exists. SMTP failure must not make the create operation look rolled back.
+                log.error("Created Keycloak user {}, but failed to send invitation email: {}",
+                        userId, exception.getMessage());
+            }
+        }
+
+        log.info("Created Keycloak user {} and queued synchronization through the Keycloak event publisher", userId);
+        return AdminCreateUserResponse.builder()
+                .id(userId)
+                .username(username)
+                .email(email)
+                .enabled(Boolean.TRUE.equals(request.enabled()))
+                .invitationSent(invitationSent)
+                .provisioningStatus("PROVISIONING")
+                .build();
+    }
 
     @Override
     public void updateUserIfChanged(String userId, UpdateKeycloakUserRequest request) {
@@ -211,6 +276,19 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String trimToNull(String value) {
+        return hasText(value) ? value.trim() : null;
+    }
+
+    private String extractCreatedUserId(Response response) {
+        String path = response.getLocation().getPath();
+        int separator = path.lastIndexOf('/');
+        if (separator < 0 || separator == path.length() - 1) {
+            throw new AppException(UserErrorCode.KEYCLOAK_USER_CREATE_FAILED);
+        }
+        return path.substring(separator + 1);
     }
 }
 

@@ -17,6 +17,8 @@ import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
 import com.hs.user.dto.request.UserRoleAssign;
 import com.hs.user.dto.request.SetInitialPasswordRequest;
+import com.hs.user.dto.request.AdminCreateUserRequest;
+import com.hs.user.dto.response.AdminCreateUserResponse;
 import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
 import com.hs.user.dto.response.UserResponse;
@@ -45,6 +47,11 @@ public class UserServiceImpl implements UserService {
         RoleRepository roleRepository;
         KeycloakUserService keycloakUserService;
         CurrentUserUtils currentUserUtils;
+
+        @Override
+        public AdminCreateUserResponse createUser(AdminCreateUserRequest request) {
+                return keycloakUserService.createUser(request);
+        }
 
         @Override
         @Transactional(readOnly = true)

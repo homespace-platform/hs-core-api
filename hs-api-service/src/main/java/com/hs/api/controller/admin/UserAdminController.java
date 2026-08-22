@@ -3,6 +3,8 @@ package com.hs.api.controller.admin;
 import com.hs.common.dto.ApiResponse;
 import com.hs.common.dto.PageResponse;
 import com.hs.user.dto.request.UserRoleAssign;
+import com.hs.user.dto.request.AdminCreateUserRequest;
+import com.hs.user.dto.response.AdminCreateUserResponse;
 import com.hs.user.dto.response.UserResponse;
 import com.hs.user.service.UserService;
 
@@ -22,6 +24,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.http.HttpStatus;
 
 @RestController
 @RequiredArgsConstructor
@@ -31,6 +35,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserAdminController {
 
     UserService userService;
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasAuthority('USER_CREATE')")
+    public ApiResponse<AdminCreateUserResponse> createUser(
+            @RequestBody @Valid AdminCreateUserRequest request) {
+        return ApiResponse.<AdminCreateUserResponse>builder()
+                .message("User created successfully and queued for synchronization")
+                .result(userService.createUser(request))
+                .build();
+    }
 
     @GetMapping
     public ApiResponse<PageResponse<UserResponse>> findAllUsers(

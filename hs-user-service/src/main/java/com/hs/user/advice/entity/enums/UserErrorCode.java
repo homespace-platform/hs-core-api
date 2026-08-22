@@ -37,7 +37,8 @@ public enum UserErrorCode implements AppException.ErrorCode {
     // 23xx keycloak integration
     KEYCLOAK_USER_UPDATE_FAILED(2301, "Keycloak user update failed", HttpStatus.BAD_GATEWAY),
     KEYCLOAK_PASSWORD_UPDATE_FAILED(2302, "Keycloak password update failed", HttpStatus.BAD_GATEWAY),
-    KEYCLOAK_CREDENTIAL_READ_FAILED(2303, "Could not read Keycloak credentials", HttpStatus.BAD_GATEWAY);
+    KEYCLOAK_CREDENTIAL_READ_FAILED(2303, "Could not read Keycloak credentials", HttpStatus.BAD_GATEWAY),
+    KEYCLOAK_USER_CREATE_FAILED(2304, "Keycloak user creation failed", HttpStatus.BAD_GATEWAY);
 
     UserErrorCode(int code, String message, HttpStatusCode statusCode) {
         this.code = code;
