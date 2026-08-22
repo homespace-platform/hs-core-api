@@ -177,7 +177,12 @@ public class StorageServiceImpl implements StorageService {
         if (object.getVisibility() != StorageVisibility.PUBLIC) {
             throw new AppException(StorageErrorCode.STORAGE_OBJECT_NOT_PUBLIC);
         }
-        return properties.publicBaseUrl() + "/" + object.getObjectKey();
+        return buildS3PublicUrl(object);
+    }
+
+    private String buildS3PublicUrl(StorageObject object) {
+        return "https://%s.s3.%s.amazonaws.com/%s"
+                .formatted(object.getBucketName(), properties.region(), object.getObjectKey());
     }
 
     @Override
