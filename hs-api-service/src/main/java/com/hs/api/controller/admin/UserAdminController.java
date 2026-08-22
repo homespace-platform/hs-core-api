@@ -79,6 +79,15 @@ public class UserAdminController {
                 .build();
     }
 
+    @PostMapping("/{userId}/resend-invitation")
+    @PreAuthorize("hasAuthority('USER_CREATE')")
+    public ApiResponse<@NonNull Void> resendInvitation(@PathVariable String userId) {
+        userService.resendInvitation(userId);
+        return ApiResponse.<Void>builder()
+                .message("Invitation email sent successfully")
+                .build();
+    }
+
     @PostMapping("/assign-role")
     public ApiResponse<Void> assignRole(@RequestBody @Valid UserRoleAssign request) {
         userService.assignRole(request);

@@ -54,6 +54,13 @@ public class UserServiceImpl implements UserService {
         }
 
         @Override
+        public void resendInvitation(String userId) {
+                userRepository.findById(userId)
+                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
+                keycloakUserService.resendInvitation(userId);
+        }
+
+        @Override
         @Transactional(readOnly = true)
         public Page<@NonNull UserResponse> findAllUsers(Pageable pageable) {
                 return userRepository.findAll(pageable)

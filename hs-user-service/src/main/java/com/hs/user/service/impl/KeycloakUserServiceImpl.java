@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Locale;
 
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.keycloak.admin.client.Keycloak;
@@ -83,7 +84,7 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
         boolean invitationSent = false;
         if (Boolean.TRUE.equals(request.sendInvitation())) {
             try {
-                keycloakRealm.users().get(userId).executeActionsEmail(INITIAL_REQUIRED_ACTIONS);
+                sendInvitationEmail(userId, INITIAL_REQUIRED_ACTIONS);
                 invitationSent = true;
             } catch (RuntimeException exception) {
                 // The account already exists. SMTP failure must not make the create operation look rolled back.
@@ -101,6 +102,33 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
                 .invitationSent(invitationSent)
                 .provisioningStatus("PROVISIONING")
                 .build();
+    }
+
+    @Override
+    public void resendInvitation(String userId) {
+        try {
+            var userResource = keycloakRealm.users().get(userId);
+            UserRepresentation user = userResource.toRepresentation();
+
+            if (!Boolean.TRUE.equals(user.isEnabled())) {
+                throw new AppException(UserErrorCode.USER_DISABLED);
+            }
+
+            List<String> actions = resolveInvitationActions(user, userId);
+            if (actions.isEmpty()) {
+                throw new AppException(UserErrorCode.USER_ALREADY_ACTIVATED);
+            }
+
+            sendInvitationEmail(userId, actions);
+            log.info("Resent invitation email to Keycloak user {}", userId);
+        } catch (AppException exception) {
+            throw exception;
+        } catch (NotFoundException exception) {
+            throw new AppException(UserErrorCode.USER_NOT_EXISTED);
+        } catch (RuntimeException exception) {
+            log.error("Failed to resend invitation for Keycloak user {}: {}", userId, exception.getMessage());
+            throw new AppException(UserErrorCode.KEYCLOAK_INVITATION_SEND_FAILED);
+        }
     }
 
     @Override
@@ -217,6 +245,26 @@ public class KeycloakUserServiceImpl implements KeycloakUserService {
             log.error("Failed to read Keycloak credentials for user {}: {}", userId, exception.getMessage());
             throw new AppException(UserErrorCode.KEYCLOAK_CREDENTIAL_READ_FAILED);
         }
+    }
+
+    private void sendInvitationEmail(String userId, List<String> actions) {
+        keycloakRealm.users().get(userId).executeActionsEmail(actions);
+    }
+
+    private List<String> resolveInvitationActions(UserRepresentation user, String userId) {
+        List<String> requiredActions = user.getRequiredActions() == null
+                ? List.of()
+                : user.getRequiredActions();
+        List<String> actions = new ArrayList<>();
+
+        boolean emailVerified = Boolean.TRUE.equals(user.isEmailVerified());
+        if (!emailVerified || requiredActions.contains("VERIFY_EMAIL")) {
+            actions.add("VERIFY_EMAIL");
+        }
+        if (!hasPassword(userId) || requiredActions.contains("UPDATE_PASSWORD")) {
+            actions.add("UPDATE_PASSWORD");
+        }
+        return actions;
     }
 
     private void verifyOldPassword(String username, String oldPassword) {

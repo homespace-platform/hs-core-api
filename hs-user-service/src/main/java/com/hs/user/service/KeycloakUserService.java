@@ -10,6 +10,8 @@ public interface KeycloakUserService {
 
     AdminCreateUserResponse createUser(AdminCreateUserRequest request);
 
+    void resendInvitation(String userId);
+
     void updateUserIfChanged(String userId, UpdateKeycloakUserRequest request);
 
     void updatePassword(String userId, String username, UpdatePasswordRequest request);

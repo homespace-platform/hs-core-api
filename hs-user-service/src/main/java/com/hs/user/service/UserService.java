@@ -19,6 +19,8 @@ import org.springframework.data.domain.Pageable;
 public interface UserService {
     AdminCreateUserResponse createUser(AdminCreateUserRequest request);
 
+    void resendInvitation(String userId);
+
     @Transactional(readOnly = true)
     Page<@NonNull UserResponse> findAllUsers(Pageable pageable);
 
