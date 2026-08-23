@@ -14,10 +14,8 @@ public final class PermissionConstants {
         public static final String USER_UPDATE = "USER_UPDATE";
         public static final String ROLE_VIEW = "ROLE_VIEW";
         public static final String ROLE_UPDATE = "ROLE_UPDATE";
-        public static final String ROLE_DELETE = "ROLE_DELETE";
         public static final String PERMISSION_VIEW = "PERMISSION_VIEW";
         public static final String PERMISSION_UPDATE = "PERMISSION_UPDATE";
-        public static final String PERMISSION_DELETE = "PERMISSION_DELETE";
     }
 }
 

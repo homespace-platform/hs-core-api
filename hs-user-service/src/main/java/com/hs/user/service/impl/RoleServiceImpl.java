@@ -2,7 +2,10 @@ package com.hs.user.service.impl;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
@@ -21,8 +24,10 @@ import com.hs.user.dto.response.RoleResponse;
 import com.hs.user.mapper.RoleMapper;
 import com.hs.user.model.Permission;
 import com.hs.user.model.Role;
+import com.hs.user.model.User;
 import com.hs.user.repository.PermissionRepository;
 import com.hs.user.repository.RoleRepository;
+import com.hs.user.repository.UserRepository;
 import com.hs.user.service.RoleService;
 
 @Service
@@ -34,35 +39,36 @@ public class RoleServiceImpl implements RoleService {
 
     RoleRepository roleRepository;
     PermissionRepository permissionRepository;
+    UserRepository userRepository;
 
     @Transactional(readOnly = true)
     @Override
     public Page<@NonNull RoleResponse> findAllRoles(Pageable pageable, boolean includePermissions) {
-        return roleRepository
-                .findAll(pageable)
-                .map(role -> RoleMapper.mapToRoleResponse(role, includePermissions));
+        Page<Role> roles = roleRepository.findAll(pageable);
+        Map<String, User> actors = loadActors(roles.getContent());
+        return roles.map(role -> RoleMapper.mapToRoleResponse(role, includePermissions, actors));
     }
 
     @Transactional(readOnly = true)
     @Override
     public List<RoleResponse> findAllRoles() {
-        return roleRepository
-                .findAll()
-                .stream()
-                .map(role -> RoleMapper.mapToRoleResponse(role, false))
+        List<Role> roles = roleRepository.findAll();
+        Map<String, User> actors = loadActors(roles);
+        return roles.stream()
+                .map(role -> RoleMapper.mapToRoleResponse(role, false, actors))
                 .toList();
     }
 
     @Override
     public RoleResponse findById(String id) {
-        return roleRepository
+        Role role = roleRepository
                 .findById(id)
-                .map(RoleMapper::mapToRoleResponse)
                 .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
+        return RoleMapper.mapToRoleResponse(role, true, loadActors(List.of(role)));
     }
 
     @Override
-    public void updateRole(String id, UpdateRoleRequest updateRoleRequest) {
+    public RoleResponse updateRole(String id, UpdateRoleRequest updateRoleRequest) {
         Role role = roleRepository
                 .findById(id)
                 .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
@@ -73,16 +79,8 @@ public class RoleServiceImpl implements RoleService {
             role.setPermissions(getPermissions(updateRoleRequest.permissionIdList()));
         }
 
-        roleRepository.save(role);
-    }
-
-    @Override
-    public void deleteRoleById(String id) {
-        Role role = roleRepository
-                .findById(id)
-                .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
-
-        roleRepository.delete(role);
+        Role saved = roleRepository.save(role);
+        return RoleMapper.mapToRoleResponse(saved, true, loadActors(List.of(saved)));
     }
 
     private Set<Permission> getPermissions(Set<String> permissionIds) {
@@ -95,5 +93,30 @@ public class RoleServiceImpl implements RoleService {
         return permissions;
     }
 
-}
+    private Map<String, User> loadActors(List<Role> roles) {
+        Set<String> actorIds = new HashSet<>();
+        for (Role role : roles) {
+            addActorId(actorIds, role.getCreatedBy());
+            addActorId(actorIds, role.getUpdatedBy());
+            if (role.getPermissions() == null) {
+                continue;
+            }
+            for (Permission permission : role.getPermissions()) {
+                addActorId(actorIds, permission.getCreatedBy());
+                addActorId(actorIds, permission.getUpdatedBy());
+            }
+        }
+        if (actorIds.isEmpty()) {
+            return Map.of();
+        }
+        return userRepository.findAllById(actorIds).stream()
+                .collect(Collectors.toMap(User::getId, Function.identity()));
+    }
 
+    private void addActorId(Set<String> actorIds, String actorId) {
+        if (actorId != null && !actorId.isBlank()) {
+            actorIds.add(actorId);
+        }
+    }
+
+}

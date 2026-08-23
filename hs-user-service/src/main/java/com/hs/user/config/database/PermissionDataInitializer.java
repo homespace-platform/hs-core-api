@@ -36,10 +36,8 @@ public class PermissionDataInitializer implements CommandLineRunner {
                 Map.entry(PermissionConstants.Admin.USER_UPDATE, "Update users"),
                 Map.entry(PermissionConstants.Admin.ROLE_VIEW, "View roles"),
                 Map.entry(PermissionConstants.Admin.ROLE_UPDATE, "Update roles"),
-                Map.entry(PermissionConstants.Admin.ROLE_DELETE, "Delete roles"),
                 Map.entry(PermissionConstants.Admin.PERMISSION_VIEW, "View permissions"),
-                Map.entry(PermissionConstants.Admin.PERMISSION_UPDATE, "Update permissions"),
-                Map.entry(PermissionConstants.Admin.PERMISSION_DELETE, "Delete permissions"));
+                Map.entry(PermissionConstants.Admin.PERMISSION_UPDATE, "Update permissions"));
 
         permissions.forEach((name, description) -> {
             if (!permissionRepository.existsByName(name)) {

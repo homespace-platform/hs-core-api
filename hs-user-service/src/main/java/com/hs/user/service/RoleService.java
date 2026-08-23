@@ -19,8 +19,6 @@ public interface RoleService {
 
     RoleResponse findById(String id);
 
-    void updateRole(String id, UpdateRoleRequest updateRoleRequest);
-
-    void deleteRoleById(String id);
+    RoleResponse updateRole(String id, UpdateRoleRequest updateRoleRequest);
 }
 

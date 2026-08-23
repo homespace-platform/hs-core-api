@@ -55,7 +55,7 @@ public class UserMapper {
                 .build();
     }
 
-    private static UserAuditActorResponse resolveActor(String actorId, Map<String, User> actors) {
+    public static UserAuditActorResponse resolveActor(String actorId, Map<String, User> actors) {
         if (actorId == null || actorId.isBlank()) {
             return null;
         }

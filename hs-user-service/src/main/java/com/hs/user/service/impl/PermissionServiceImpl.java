@@ -1,6 +1,11 @@
 package com.hs.user.service.impl;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +23,9 @@ import com.hs.user.dto.request.UpdatePermissionRequest;
 import com.hs.user.dto.response.PermissionResponse;
 import com.hs.user.mapper.PermissionMapper;
 import com.hs.user.model.Permission;
+import com.hs.user.model.User;
 import com.hs.user.repository.PermissionRepository;
+import com.hs.user.repository.UserRepository;
 import com.hs.user.service.PermissionService;
 
 @Service
@@ -29,42 +36,60 @@ import com.hs.user.service.PermissionService;
 public class PermissionServiceImpl implements PermissionService {
 
     PermissionRepository permissionRepository;
-
-    @Override
-    public void deletePermissionById(String id) {
-        Permission permission = permissionRepository
-                .findById(id)
-                .orElseThrow(() -> new AppException(UserErrorCode.PERMISSION_NOT_EXISTED));
-
-        permissionRepository.delete(permission);
-    }
+    UserRepository userRepository;
 
     @Transactional(readOnly = true)
     @Override
     public Page<@NonNull PermissionResponse> findAllPermissions(Pageable pageable) {
-        return permissionRepository
-                .findAll(pageable)
-                .map(PermissionMapper::mapToPermissionResponse);
+        Page<Permission> permissions = permissionRepository.findAll(pageable);
+        Map<String, User> actors = loadActors(permissions.getContent());
+        return permissions.map(permission -> PermissionMapper.mapToPermissionResponse(permission, actors));
     }
 
     @Transactional(readOnly = true)
     @Override
     public List<PermissionResponse> findAllPermissions() {
-        return permissionRepository
-                .findAll()
-                .stream()
-                .map(PermissionMapper::mapToPermissionResponse)
+        List<Permission> permissions = permissionRepository.findAll();
+        Map<String, User> actors = loadActors(permissions);
+        return permissions.stream()
+                .map(permission -> PermissionMapper.mapToPermissionResponse(permission, actors))
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public void updatePermission(String id, UpdatePermissionRequest updatePermissionRequest) {
+    public PermissionResponse findById(String id) {
+        Permission permission = permissionRepository
+                .findById(id)
+                .orElseThrow(() -> new AppException(UserErrorCode.PERMISSION_NOT_EXISTED));
+        return PermissionMapper.mapToPermissionResponse(permission, loadActors(List.of(permission)));
+    }
+
+    @Override
+    public PermissionResponse updatePermission(String id, UpdatePermissionRequest updatePermissionRequest) {
         Permission permission = permissionRepository
                 .findById(id)
                 .orElseThrow(() -> new AppException(UserErrorCode.PERMISSION_NOT_EXISTED));
 
         PermissionMapper.updatePermissionFromRequest(permission, updatePermissionRequest);
-        permissionRepository.save(permission);
+        Permission saved = permissionRepository.save(permission);
+        return PermissionMapper.mapToPermissionResponse(saved, loadActors(List.of(saved)));
+    }
+
+    private Map<String, User> loadActors(List<Permission> permissions) {
+        Set<String> actorIds = new HashSet<>();
+        for (Permission permission : permissions) {
+            if (permission.getCreatedBy() != null && !permission.getCreatedBy().isBlank()) {
+                actorIds.add(permission.getCreatedBy());
+            }
+            if (permission.getUpdatedBy() != null && !permission.getUpdatedBy().isBlank()) {
+                actorIds.add(permission.getUpdatedBy());
+            }
+        }
+        if (actorIds.isEmpty()) {
+            return Map.of();
+        }
+        return userRepository.findAllById(actorIds).stream()
+                .collect(Collectors.toMap(User::getId, Function.identity()));
     }
 }
-

@@ -4,7 +4,6 @@ import jakarta.validation.Valid;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
-import org.jspecify.annotations.NonNull;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -54,18 +53,12 @@ public class RoleAdminController {
     }
 
     @PostMapping("/{id}")
-    public ApiResponse<@NonNull Void> updateRole(
+    public ApiResponse<RoleResponse> updateRole(
             @RequestBody @Valid UpdateRoleRequest updateRoleRequest,
             @PathVariable("id") String id) {
-        roleService.updateRole(id, updateRoleRequest);
-        return ApiResponse.<Void>builder().build();
-    }
-
-    @DeleteMapping("/{id}")
-    public ApiResponse<@NonNull Void> deleteRole(
-            @PathVariable("id") String id) {
-        roleService.deleteRoleById(id);
-        return ApiResponse.<Void>builder().build();
+        return ApiResponse.<RoleResponse>builder()
+                .result(roleService.updateRole(id, updateRoleRequest))
+                .build();
     }
 
 }

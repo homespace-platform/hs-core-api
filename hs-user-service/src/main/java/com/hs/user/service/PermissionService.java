@@ -16,8 +16,8 @@ public interface PermissionService {
     @Transactional(readOnly = true)
     List<PermissionResponse> findAllPermissions();
 
-    void updatePermission(String id, UpdatePermissionRequest updatePermissionRequest);
+    PermissionResponse findById(String id);
 
-    void deletePermissionById(String id);
+    PermissionResponse updatePermission(String id, UpdatePermissionRequest updatePermissionRequest);
 }
 

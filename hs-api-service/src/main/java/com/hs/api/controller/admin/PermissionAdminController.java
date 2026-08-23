@@ -4,7 +4,6 @@ import jakarta.validation.Valid;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
-import org.jspecify.annotations.NonNull;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -45,19 +44,20 @@ public class PermissionAdminController {
                                 .build();
         }
 
-        @PostMapping("/{id}")
-        public ApiResponse<@NonNull Void> updatePermission(
-                        @RequestBody @Valid UpdatePermissionRequest updatePermissionRequest,
-                        @PathVariable("id") String id) {
-                permissionService.updatePermission(id, updatePermissionRequest);
-                return ApiResponse.<Void>builder().build();
+        @GetMapping("/{id}")
+        public ApiResponse<PermissionResponse> findById(@PathVariable("id") String id) {
+                return ApiResponse.<PermissionResponse>builder()
+                                .result(permissionService.findById(id))
+                                .build();
         }
 
-        @DeleteMapping("/{id}")
-        public ApiResponse<@NonNull Void> deletePermission(
+        @PostMapping("/{id}")
+        public ApiResponse<PermissionResponse> updatePermission(
+                        @RequestBody @Valid UpdatePermissionRequest updatePermissionRequest,
                         @PathVariable("id") String id) {
-                permissionService.deletePermissionById(id);
-                return ApiResponse.<Void>builder().build();
+                return ApiResponse.<PermissionResponse>builder()
+                                .result(permissionService.updatePermission(id, updatePermissionRequest))
+                                .build();
         }
 
 }
