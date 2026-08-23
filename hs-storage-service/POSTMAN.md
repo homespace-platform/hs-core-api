@@ -104,8 +104,8 @@ Mở collection > **Variables** và điền:
 
 | Variable | Ví dụ | Ý nghĩa |
 |---|---|---|
-| `username` | `admin` | Tài khoản Keycloak |
-| `password` | `Admin@123` | Mật khẩu Keycloak |
+| `username` | `homespace` | Tài khoản Keycloak; mặc định đã trỏ sẵn vào admin được seed |
+| `password` | `Homespace@123` | Mật khẩu Keycloak |
 | `storageFileName` | `avatar.png` | Tên file muốn upload |
 | `storageContentType` | `image/png` | MIME type của file |
 | `storageFileSize` | `245817` | Kích thước chính xác theo byte |
