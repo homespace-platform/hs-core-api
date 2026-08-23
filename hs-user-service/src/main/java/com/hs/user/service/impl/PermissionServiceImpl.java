@@ -14,7 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.user.advice.entity.enums.UserErrorCode;
-import com.hs.user.dto.request.UpsertPermissionRequest;
+import com.hs.user.dto.request.UpdatePermissionRequest;
 import com.hs.user.dto.response.PermissionResponse;
 import com.hs.user.mapper.PermissionMapper;
 import com.hs.user.model.Permission;
@@ -29,17 +29,6 @@ import com.hs.user.service.PermissionService;
 public class PermissionServiceImpl implements PermissionService {
 
     PermissionRepository permissionRepository;
-
-    @Override
-    public void createPermission(UpsertPermissionRequest upsertPermissionRequest) {
-        String name = upsertPermissionRequest.name().toUpperCase();
-
-        if (permissionRepository.existsByName(name)) {
-            throw new AppException(UserErrorCode.PERMISSION_EXISTED);
-        }
-
-        permissionRepository.save(PermissionMapper.mapToPermission(upsertPermissionRequest));
-    }
 
     @Override
     public void deletePermissionById(String id) {
@@ -69,18 +58,12 @@ public class PermissionServiceImpl implements PermissionService {
     }
 
     @Override
-    public void updatePermission(String id, UpsertPermissionRequest upsertPermissionRequest) {
+    public void updatePermission(String id, UpdatePermissionRequest updatePermissionRequest) {
         Permission permission = permissionRepository
                 .findById(id)
                 .orElseThrow(() -> new AppException(UserErrorCode.PERMISSION_NOT_EXISTED));
 
-        String name = upsertPermissionRequest.name().toUpperCase();
-
-        if (permissionRepository.existsByNameAndIdNot(name, permission.getId())) {
-            throw new AppException(UserErrorCode.PERMISSION_EXISTED);
-        }
-
-        PermissionMapper.updatePermissionFromRequest(permission, upsertPermissionRequest);
+        PermissionMapper.updatePermissionFromRequest(permission, updatePermissionRequest);
         permissionRepository.save(permission);
     }
 }

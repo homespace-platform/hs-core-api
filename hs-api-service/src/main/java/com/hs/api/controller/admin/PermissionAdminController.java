@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import com.hs.common.dto.ApiResponse;
 import com.hs.common.dto.PageResponse;
-import com.hs.user.dto.request.UpsertPermissionRequest;
+import com.hs.user.dto.request.UpdatePermissionRequest;
 import com.hs.user.dto.response.PermissionResponse;
 import com.hs.user.service.PermissionService;
 
@@ -26,13 +26,6 @@ import java.util.List;
 public class PermissionAdminController {
 
         PermissionService permissionService;
-
-        @PostMapping()
-        public ApiResponse<@NonNull Void> createPermission(
-                        @RequestBody @Valid UpsertPermissionRequest upsertPermissionRequest) {
-                permissionService.createPermission(upsertPermissionRequest);
-                return ApiResponse.<Void>builder().build();
-        }
 
         @GetMapping()
         public ApiResponse<PageResponse<PermissionResponse>> findAllPermissions(
@@ -54,9 +47,9 @@ public class PermissionAdminController {
 
         @PostMapping("/{id}")
         public ApiResponse<@NonNull Void> updatePermission(
-                        @RequestBody @Valid UpsertPermissionRequest upsertPermissionRequest,
+                        @RequestBody @Valid UpdatePermissionRequest updatePermissionRequest,
                         @PathVariable("id") String id) {
-                permissionService.updatePermission(id, upsertPermissionRequest);
+                permissionService.updatePermission(id, updatePermissionRequest);
                 return ApiResponse.<Void>builder().build();
         }
 

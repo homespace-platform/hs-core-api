@@ -1,51 +1,46 @@
 package com.hs.user.mapper;
 
 import java.util.Collections;
+import java.util.Set;
 import java.util.stream.Collectors;
 
-import com.hs.user.dto.request.UpsertRoleRequest;
+import com.hs.user.dto.request.UpdateRoleRequest;
+import com.hs.user.dto.response.PermissionResponse;
 import com.hs.user.dto.response.RoleResponse;
 import com.hs.user.model.Role;
 
 public class RoleMapper {
 
     public static RoleResponse mapToRoleResponse(Role role) {
+        return mapToRoleResponse(role, true);
+    }
+
+    public static RoleResponse mapToRoleResponse(Role role, boolean includePermissions) {
         return RoleResponse
                 .builder()
                 .id(role.getId().toString())
                 .name(role.getName())
                 .description(role.getDescription())
-                .permissions(role.getPermissions() == null
-                        ? Collections.emptySet()
-                        : role.getPermissions()
-                                .stream()
-                                .map(PermissionMapper::mapToPermissionResponse)
-                                .collect(Collectors.toSet()))
+                .permissions(includePermissions ? mapPermissions(role) : null)
                 .build();
     }
 
-    public static Role mapToRole(UpsertRoleRequest upsertRoleRequest) {
-        String name = upsertRoleRequest.name().toUpperCase();
-        String description =
-                upsertRoleRequest.description() != null && !upsertRoleRequest.description().isBlank()
-                        ? upsertRoleRequest.description()
-                        : null;
-
-        return Role
-                .builder()
-                .name(name)
-                .description(description)
-                .build();
+    private static Set<PermissionResponse> mapPermissions(Role role) {
+        if (role.getPermissions() == null) {
+            return Collections.emptySet();
+        }
+        return role.getPermissions()
+                .stream()
+                .map(PermissionMapper::mapToPermissionResponse)
+                .collect(Collectors.toSet());
     }
 
-    public static void updateRoleFromRequest(Role role, UpsertRoleRequest upsertRoleRequest) {
-        String name = upsertRoleRequest.name().toUpperCase();
-        String description = upsertRoleRequest.description() != null && !upsertRoleRequest.description().isBlank()
-                ? upsertRoleRequest.description()
-                : null;
-
-        role.setName(name);
-        role.setDescription(description);
+    public static void updateRoleFromRequest(Role role, UpdateRoleRequest updateRoleRequest) {
+        if (updateRoleRequest.description() != null) {
+            role.setDescription(updateRoleRequest.description().isBlank()
+                    ? null
+                    : updateRoleRequest.description());
+        }
     }
 
 }

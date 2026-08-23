@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import com.hs.common.dto.ApiResponse;
 import com.hs.common.dto.PageResponse;
-import com.hs.user.dto.request.UpsertRoleRequest;
+import com.hs.user.dto.request.UpdateRoleRequest;
 import com.hs.user.dto.response.RoleResponse;
 import com.hs.user.service.RoleService;
 
@@ -27,18 +27,12 @@ public class RoleAdminController {
 
     RoleService roleService;
 
-    @PostMapping()
-    public ApiResponse<@NonNull Void> createRole(
-            @RequestBody @Valid UpsertRoleRequest upsertRoleRequest) {
-        roleService.createRole(upsertRoleRequest);
-        return ApiResponse.<Void>builder().build();
-    }
-
     @GetMapping()
     public ApiResponse<PageResponse<RoleResponse>> findAllRoles(
-            @PageableDefault(value = 10) Pageable pageable) {
+            @PageableDefault(value = 10) Pageable pageable,
+            @RequestParam(defaultValue = "false") boolean includePermissions) {
         PageResponse<RoleResponse> page = new PageResponse<>(
-                roleService.findAllRoles(pageable));
+                roleService.findAllRoles(pageable, includePermissions));
 
         return ApiResponse.<PageResponse<RoleResponse>>builder()
                 .result(page)
@@ -61,9 +55,9 @@ public class RoleAdminController {
 
     @PostMapping("/{id}")
     public ApiResponse<@NonNull Void> updateRole(
-            @RequestBody @Valid UpsertRoleRequest upsertRoleRequest,
+            @RequestBody @Valid UpdateRoleRequest updateRoleRequest,
             @PathVariable("id") String id) {
-        roleService.updateRole(id, upsertRoleRequest);
+        roleService.updateRole(id, updateRoleRequest);
         return ApiResponse.<Void>builder().build();
     }
 

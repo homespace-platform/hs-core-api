@@ -7,21 +7,19 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.hs.user.dto.request.UpsertRoleRequest;
+import com.hs.user.dto.request.UpdateRoleRequest;
 import com.hs.user.dto.response.RoleResponse;
 
 public interface RoleService {
-    void createRole(UpsertRoleRequest upsertRoleRequest);
-
     @Transactional(readOnly = true)
-    Page<@NonNull RoleResponse> findAllRoles(Pageable pageable);
+    Page<@NonNull RoleResponse> findAllRoles(Pageable pageable, boolean includePermissions);
 
     @Transactional(readOnly = true)
     List<RoleResponse> findAllRoles();
 
     RoleResponse findById(String id);
 
-    void updateRole(String id, UpsertRoleRequest upsertRoleRequest);
+    void updateRole(String id, UpdateRoleRequest updateRoleRequest);
 
     void deleteRoleById(String id);
 }

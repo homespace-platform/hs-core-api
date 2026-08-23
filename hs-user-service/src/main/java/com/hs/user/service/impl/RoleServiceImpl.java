@@ -16,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.user.advice.entity.enums.UserErrorCode;
-import com.hs.user.dto.request.UpsertRoleRequest;
+import com.hs.user.dto.request.UpdateRoleRequest;
 import com.hs.user.dto.response.RoleResponse;
 import com.hs.user.mapper.RoleMapper;
 import com.hs.user.model.Permission;
@@ -35,28 +35,12 @@ public class RoleServiceImpl implements RoleService {
     RoleRepository roleRepository;
     PermissionRepository permissionRepository;
 
-    @Override
-    public void createRole(UpsertRoleRequest upsertRoleRequest) {
-        String name = upsertRoleRequest.name().toUpperCase();
-
-        if (roleRepository.existsByName(name))
-            throw new AppException(UserErrorCode.ROLE_EXISTED);
-
-        Role role = RoleMapper.mapToRole(upsertRoleRequest);
-
-        if (upsertRoleRequest.permissionIdList() != null && !upsertRoleRequest.permissionIdList().isEmpty()) {
-            role.setPermissions(getPermissions(upsertRoleRequest.permissionIdList()));
-        }
-
-        roleRepository.save(role);
-    }
-
     @Transactional(readOnly = true)
     @Override
-    public Page<@NonNull RoleResponse> findAllRoles(Pageable pageable) {
+    public Page<@NonNull RoleResponse> findAllRoles(Pageable pageable, boolean includePermissions) {
         return roleRepository
                 .findAll(pageable)
-                .map(RoleMapper::mapToRoleResponse);
+                .map(role -> RoleMapper.mapToRoleResponse(role, includePermissions));
     }
 
     @Transactional(readOnly = true)
@@ -65,7 +49,7 @@ public class RoleServiceImpl implements RoleService {
         return roleRepository
                 .findAll()
                 .stream()
-                .map(RoleMapper::mapToRoleResponse)
+                .map(role -> RoleMapper.mapToRoleResponse(role, false))
                 .toList();
     }
 
@@ -78,20 +62,15 @@ public class RoleServiceImpl implements RoleService {
     }
 
     @Override
-    public void updateRole(String id, UpsertRoleRequest upsertRoleRequest) {
+    public void updateRole(String id, UpdateRoleRequest updateRoleRequest) {
         Role role = roleRepository
                 .findById(id)
                 .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
 
-        String name = upsertRoleRequest.name().toUpperCase();
+        RoleMapper.updateRoleFromRequest(role, updateRoleRequest);
 
-        if (roleRepository.existsByNameAndIdNot(name, role.getId()))
-            throw new AppException(UserErrorCode.ROLE_EXISTED);
-
-        RoleMapper.updateRoleFromRequest(role, upsertRoleRequest);
-
-        if (upsertRoleRequest.permissionIdList() != null && !upsertRoleRequest.permissionIdList().isEmpty()) {
-            role.setPermissions(getPermissions(upsertRoleRequest.permissionIdList()));
+        if (updateRoleRequest.permissionIdList() != null) {
+            role.setPermissions(getPermissions(updateRoleRequest.permissionIdList()));
         }
 
         roleRepository.save(role);

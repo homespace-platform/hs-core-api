@@ -1,6 +1,6 @@
 package com.hs.user.mapper;
 
-import com.hs.user.dto.request.UpsertPermissionRequest;
+import com.hs.user.dto.request.UpdatePermissionRequest;
 import com.hs.user.dto.response.PermissionResponse;
 import com.hs.user.model.Permission;
 
@@ -15,31 +15,14 @@ public class PermissionMapper {
                                 .build();
         }
 
-        public static Permission mapToPermission(UpsertPermissionRequest upsertPermissionRequest) {
-                String name = upsertPermissionRequest.name().toUpperCase();
-                String description = upsertPermissionRequest.description() != null
-                                && !upsertPermissionRequest.description().isBlank()
-                                                ? upsertPermissionRequest.description()
-                                                : null;
-
-                return Permission
-                                .builder()
-                                .name(name)
-                                .description(description)
-                                .build();
-        }
-
         public static void updatePermissionFromRequest(
                         Permission permission,
-                        UpsertPermissionRequest upsertPermissionRequest) {
-                String name = upsertPermissionRequest.name().toUpperCase();
-                String description = upsertPermissionRequest.description() != null
-                                && !upsertPermissionRequest.description().isBlank()
-                                                ? upsertPermissionRequest.description()
-                                                : null;
-
-                permission.setName(name);
-                permission.setDescription(description);
+                        UpdatePermissionRequest updatePermissionRequest) {
+                if (updatePermissionRequest.description() != null) {
+                        permission.setDescription(updatePermissionRequest.description().isBlank()
+                                        ? null
+                                        : updatePermissionRequest.description());
+                }
         }
 
 }
