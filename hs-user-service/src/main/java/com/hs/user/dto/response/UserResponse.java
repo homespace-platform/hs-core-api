@@ -25,7 +25,7 @@ public record UserResponse(
         Boolean active,
         Instant createdAt,
         Instant updatedAt,
-        String createdBy,
-        String updatedBy
+        UserAuditActorResponse createdBy,
+        UserAuditActorResponse updatedBy
 ) {
 }

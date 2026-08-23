@@ -1,6 +1,11 @@
 package com.hs.user.service.impl;
 
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -18,6 +23,7 @@ import com.hs.user.dto.request.UpdateProfileRequest;
 import com.hs.user.dto.request.UserRoleAssign;
 import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.dto.request.AdminCreateUserRequest;
+import com.hs.user.dto.request.AdminUpdateUserRequest;
 import com.hs.user.dto.response.AdminCreateUserResponse;
 import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
@@ -54,6 +60,50 @@ public class UserServiceImpl implements UserService {
         }
 
         @Override
+        public UserResponse updateUser(String userId, AdminUpdateUserRequest request) {
+                User user = userRepository.findById(userId)
+                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
+
+                validateUniqueAccountFields(user, request.username(), request.email(), request.phone());
+
+                keycloakUserService.updateUserIfChanged(
+                                userId,
+                                UpdateKeycloakUserRequest.builder()
+                                                .username(trimToNull(request.username()))
+                                                .email(trimToNull(request.email()))
+                                                .firstName(trimToNull(request.firstName()))
+                                                .lastName(trimToNull(request.lastName()))
+                                                .phoneNumber(trimToNull(request.phone()))
+                                                .build());
+
+                if (hasText(request.username())) {
+                        user.setUsername(request.username().trim());
+                }
+                if (hasText(request.email())) {
+                        user.setEmail(request.email().trim().toLowerCase());
+                }
+                if (hasText(request.firstName())) {
+                        user.setFirstName(request.firstName().trim());
+                }
+                if (hasText(request.lastName())) {
+                        user.setLastName(request.lastName().trim());
+                }
+                if (hasText(request.phone())) {
+                        user.setPhone(request.phone().trim());
+                }
+                if (request.dob() != null) {
+                        user.setDob(request.dob());
+                }
+                if (request.gender() != null) {
+                        user.setGender(request.gender());
+                }
+
+                userRepository.save(user);
+                log.info("Admin updated user {}", userId);
+                return toUserResponse(user);
+        }
+
+        @Override
         public void resendInvitation(String userId) {
                 userRepository.findById(userId)
                                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
@@ -63,16 +113,17 @@ public class UserServiceImpl implements UserService {
         @Override
         @Transactional(readOnly = true)
         public Page<@NonNull UserResponse> findAllUsers(Pageable pageable) {
-                return userRepository.findAll(pageable)
-                                .map(UserMapper::mapToUserResponse);
+                Page<User> users = userRepository.findAll(pageable);
+                Map<String, User> actors = loadActors(users.getContent());
+                return users.map(user -> UserMapper.mapToUserResponse(user, actors));
         }
 
         @Override
         @Transactional(readOnly = true)
         public UserResponse findUserById(String userId) {
-                return userRepository.findById(userId)
-                                .map(UserMapper::mapToUserResponse)
+                User user = userRepository.findById(userId)
                                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
+                return toUserResponse(user);
         }
 
         @Override
@@ -165,7 +216,7 @@ public class UserServiceImpl implements UserService {
         @Override
         public void updateUserProfile(UpdateProfileRequest request) {
                 User user = currentUserUtils.getCurrentUser();
-                validateUniqueAccountFields(user, request);
+                validateUniqueAccountFields(user, request.username(), request.email(), request.phone());
 
                 keycloakUserService.updateUserIfChanged(
                                 user.getId(),
@@ -242,22 +293,43 @@ public class UserServiceImpl implements UserService {
                 log.info("Assigned role {} to user {}", role.getId(), user.getId());
         }
 
-        private void validateUniqueAccountFields(User user, UpdateProfileRequest request) {
-                if (hasText(request.username())
-                                && !request.username().equals(user.getUsername())
-                                && userRepository.existsByUsernameAndIdNot(request.username(), user.getId())) {
+        private UserResponse toUserResponse(User user) {
+                return UserMapper.mapToUserResponse(user, loadActors(List.of(user)));
+        }
+
+        private Map<String, User> loadActors(List<User> users) {
+                Set<String> actorIds = new HashSet<>();
+                for (User user : users) {
+                        if (hasText(user.getCreatedBy())) {
+                                actorIds.add(user.getCreatedBy());
+                        }
+                        if (hasText(user.getUpdatedBy())) {
+                                actorIds.add(user.getUpdatedBy());
+                        }
+                }
+                if (actorIds.isEmpty()) {
+                        return Map.of();
+                }
+                return userRepository.findAllById(actorIds).stream()
+                                .collect(Collectors.toMap(User::getId, Function.identity()));
+        }
+
+        private void validateUniqueAccountFields(User user, String username, String email, String phone) {
+                if (hasText(username)
+                                && !username.equals(user.getUsername())
+                                && userRepository.existsByUsernameAndIdNot(username, user.getId())) {
                         throw new AppException(UserErrorCode.USERNAME_EXISTED);
                 }
 
-                if (hasText(request.email())
-                                && !request.email().equals(user.getEmail())
-                                && userRepository.existsByEmailAndIdNot(request.email(), user.getId())) {
+                if (hasText(email)
+                                && !email.equals(user.getEmail())
+                                && userRepository.existsByEmailAndIdNot(email, user.getId())) {
                         throw new AppException(UserErrorCode.EMAIL_EXISTED);
                 }
 
-                if (hasText(request.phone())
-                                && !request.phone().equals(user.getPhone())
-                                && userRepository.existsByPhoneAndIdNot(request.phone(), user.getId())) {
+                if (hasText(phone)
+                                && !phone.equals(user.getPhone())
+                                && userRepository.existsByPhoneAndIdNot(phone, user.getId())) {
                         throw new AppException(UserErrorCode.PHONE_EXISTED);
                 }
         }

@@ -4,6 +4,7 @@ import com.hs.common.dto.ApiResponse;
 import com.hs.common.dto.PageResponse;
 import com.hs.user.dto.request.UserRoleAssign;
 import com.hs.user.dto.request.AdminCreateUserRequest;
+import com.hs.user.dto.request.AdminUpdateUserRequest;
 import com.hs.user.dto.response.AdminCreateUserResponse;
 import com.hs.user.dto.response.UserResponse;
 import com.hs.user.service.UserService;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -60,6 +62,17 @@ public class UserAdminController {
     public ApiResponse<UserResponse> findUserById(@PathVariable String userId) {
         return ApiResponse.<UserResponse>builder()
                 .result(userService.findUserById(userId))
+                .build();
+    }
+
+    @PutMapping("/{userId}")
+    @PreAuthorize("hasAuthority('USER_UPDATE')")
+    public ApiResponse<UserResponse> updateUser(
+            @PathVariable String userId,
+            @RequestBody @Valid AdminUpdateUserRequest request) {
+        return ApiResponse.<UserResponse>builder()
+                .message("User updated successfully")
+                .result(userService.updateUser(userId, request))
                 .build();
     }
 

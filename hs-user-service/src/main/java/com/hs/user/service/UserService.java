@@ -1,6 +1,7 @@
 package com.hs.user.service;
 
 import com.hs.user.dto.request.AdminCreateUserRequest;
+import com.hs.user.dto.request.AdminUpdateUserRequest;
 import com.hs.user.dto.request.OnboardingRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
@@ -18,6 +19,8 @@ import org.springframework.data.domain.Pageable;
 
 public interface UserService {
     AdminCreateUserResponse createUser(AdminCreateUserRequest request);
+
+    UserResponse updateUser(String userId, AdminUpdateUserRequest request);
 
     void resendInvitation(String userId);
 

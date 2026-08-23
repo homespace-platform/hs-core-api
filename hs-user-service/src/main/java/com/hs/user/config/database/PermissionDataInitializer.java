@@ -30,17 +30,18 @@ public class PermissionDataInitializer implements CommandLineRunner {
     @Override
     @Transactional
     public void run(String... args) {
-        Map<String, String> permissions = Map.of(
-                PermissionConstants.Admin.USER_VIEW, "View users",
-                PermissionConstants.Admin.USER_CREATE, "Create users",
-                PermissionConstants.Admin.ROLE_VIEW, "View roles",
-                PermissionConstants.Admin.ROLE_CREATE, "Create roles",
-                PermissionConstants.Admin.ROLE_UPDATE, "Update roles",
-                PermissionConstants.Admin.ROLE_DELETE, "Delete roles",
-                PermissionConstants.Admin.PERMISSION_VIEW, "View permissions",
-                PermissionConstants.Admin.PERMISSION_CREATE, "Create permissions",
-                PermissionConstants.Admin.PERMISSION_UPDATE, "Update permissions",
-                PermissionConstants.Admin.PERMISSION_DELETE, "Delete permissions");
+        Map<String, String> permissions = Map.ofEntries(
+                Map.entry(PermissionConstants.Admin.USER_VIEW, "View users"),
+                Map.entry(PermissionConstants.Admin.USER_CREATE, "Create users"),
+                Map.entry(PermissionConstants.Admin.USER_UPDATE, "Update users"),
+                Map.entry(PermissionConstants.Admin.ROLE_VIEW, "View roles"),
+                Map.entry(PermissionConstants.Admin.ROLE_CREATE, "Create roles"),
+                Map.entry(PermissionConstants.Admin.ROLE_UPDATE, "Update roles"),
+                Map.entry(PermissionConstants.Admin.ROLE_DELETE, "Delete roles"),
+                Map.entry(PermissionConstants.Admin.PERMISSION_VIEW, "View permissions"),
+                Map.entry(PermissionConstants.Admin.PERMISSION_CREATE, "Create permissions"),
+                Map.entry(PermissionConstants.Admin.PERMISSION_UPDATE, "Update permissions"),
+                Map.entry(PermissionConstants.Admin.PERMISSION_DELETE, "Delete permissions"));
 
         permissions.forEach((name, description) -> {
             if (!permissionRepository.existsByName(name)) {

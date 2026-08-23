@@ -1,5 +1,10 @@
 package com.hs.user.mapper;
 
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import com.hs.user.dto.response.UserAuditActorResponse;
 import com.hs.user.dto.response.UserProfileResponse;
 import com.hs.user.dto.response.UserResponse;
 import com.hs.user.model.User;
@@ -27,7 +32,7 @@ public class UserMapper {
                 .build();
     }
 
-    public static UserResponse mapToUserResponse(User user) {
+    public static UserResponse mapToUserResponse(User user, Map<String, User> actors) {
         return UserResponse.builder()
                 .id(user.getId())
                 .username(user.getUsername())
@@ -45,8 +50,32 @@ public class UserMapper {
                 .active(user.getActive())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
-                .createdBy(user.getCreatedBy())
-                .updatedBy(user.getUpdatedBy())
+                .createdBy(resolveActor(user.getCreatedBy(), actors))
+                .updatedBy(resolveActor(user.getUpdatedBy(), actors))
+                .build();
+    }
+
+    private static UserAuditActorResponse resolveActor(String actorId, Map<String, User> actors) {
+        if (actorId == null || actorId.isBlank()) {
+            return null;
+        }
+
+        User actor = actors == null ? null : actors.get(actorId);
+        if (actor == null) {
+            return UserAuditActorResponse.builder().id(actorId).build();
+        }
+
+        String fullName = Stream.of(actor.getFirstName(), actor.getLastName())
+                .filter(value -> value != null && !value.isBlank())
+                .map(String::trim)
+                .collect(Collectors.joining(" "));
+
+        return UserAuditActorResponse.builder()
+                .id(actor.getId())
+                .fullName(fullName.isBlank() ? null : fullName)
+                .username(actor.getUsername())
+                .phone(actor.getPhone())
+                .email(actor.getEmail())
                 .build();
     }
 }
