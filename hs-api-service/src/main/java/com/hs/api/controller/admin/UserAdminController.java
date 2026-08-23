@@ -2,7 +2,6 @@ package com.hs.api.controller.admin;
 
 import com.hs.common.dto.ApiResponse;
 import com.hs.common.dto.PageResponse;
-import com.hs.user.dto.request.UserRoleAssign;
 import com.hs.user.dto.request.AdminCreateUserRequest;
 import com.hs.user.dto.request.AdminUpdateUserRequest;
 import com.hs.user.dto.response.AdminCreateUserResponse;
@@ -98,14 +97,6 @@ public class UserAdminController {
         userService.resendInvitation(userId);
         return ApiResponse.<Void>builder()
                 .message("Invitation email sent successfully")
-                .build();
-    }
-
-    @PostMapping("/assign-role")
-    public ApiResponse<Void> assignRole(@RequestBody @Valid UserRoleAssign request) {
-        userService.assignRole(request);
-        return ApiResponse.<Void>builder()
-                .message("Role assigned successfully")
                 .build();
     }
 }

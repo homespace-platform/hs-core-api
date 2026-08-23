@@ -20,7 +20,6 @@ import com.hs.user.dto.request.OnboardingRequest;
 import com.hs.user.dto.request.UpdateKeycloakUserRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
-import com.hs.user.dto.request.UserRoleAssign;
 import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.dto.request.AdminCreateUserRequest;
 import com.hs.user.dto.request.AdminUpdateUserRequest;
@@ -97,6 +96,8 @@ public class UserServiceImpl implements UserService {
                 if (request.gender() != null) {
                         user.setGender(request.gender());
                 }
+
+                applyRoleChange(user, request.roleId());
 
                 userRepository.save(user);
                 log.info("Admin updated user {}", userId);
@@ -276,23 +277,6 @@ public class UserServiceImpl implements UserService {
                 log.info("Requested user {} status update to enabled={}", userId, enabled);
         }
 
-        @Override
-        public void assignRole(UserRoleAssign request) {
-                User user = userRepository.findById(request.userId())
-                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
-                Role role = roleRepository
-                                .findById(request.roleId())
-                                .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
-
-                if (user.getRole() != null && request.roleId().equals(user.getRole().getId())) {
-                        throw new AppException(UserErrorCode.USER_ALREADY_HAS_ROLE);
-                }
-
-                user.setRole(role);
-                userRepository.save(user);
-                log.info("Assigned role {} to user {}", role.getId(), user.getId());
-        }
-
         private UserResponse toUserResponse(User user) {
                 return UserMapper.mapToUserResponse(user, loadActors(List.of(user)));
         }
@@ -332,6 +316,25 @@ public class UserServiceImpl implements UserService {
                                 && userRepository.existsByPhoneAndIdNot(phone, user.getId())) {
                         throw new AppException(UserErrorCode.PHONE_EXISTED);
                 }
+        }
+
+        private void applyRoleChange(User user, String roleId) {
+                if (!hasText(roleId)) {
+                        return;
+                }
+                if (user.getId().equals(currentUserUtils.getCurrentUserId())) {
+                        throw new AppException(UserErrorCode.USER_CANNOT_UPDATE_OWN_ROLE);
+                }
+
+                Role role = roleRepository
+                                .findById(roleId.trim())
+                                .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
+
+                if (user.getRole() != null && role.getId().equals(user.getRole().getId())) {
+                        return;
+                }
+
+                user.setRole(role);
         }
 
         private boolean hasText(String value) {

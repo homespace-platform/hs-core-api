@@ -32,6 +32,8 @@ public record AdminUpdateUserRequest(
         @Adult(message = "User must be at least 18 years old")
         LocalDate dob,
 
-        Gender gender
+        Gender gender,
+
+        String roleId
 ) {
 }

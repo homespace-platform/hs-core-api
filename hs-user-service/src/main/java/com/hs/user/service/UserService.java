@@ -5,7 +5,6 @@ import com.hs.user.dto.request.AdminUpdateUserRequest;
 import com.hs.user.dto.request.OnboardingRequest;
 import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
-import com.hs.user.dto.request.UserRoleAssign;
 import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
@@ -48,6 +47,4 @@ public interface UserService {
     void updateUserAvatar(String avatarUrl, String avatarStorageId);
 
     void updateUserStatus(String userId, boolean enabled);
-
-    void assignRole(UserRoleAssign request);
 }

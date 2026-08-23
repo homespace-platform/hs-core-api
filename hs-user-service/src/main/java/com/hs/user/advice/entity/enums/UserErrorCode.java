@@ -22,12 +22,12 @@ public enum UserErrorCode implements AppException.ErrorCode {
     PASSWORD_WEAK(2008, "Password must include at least 1 uppercase letter, 1 digit and 1 special character", HttpStatus.BAD_REQUEST),
     USERNAME_EXISTED(2009, "Username existed", HttpStatus.BAD_REQUEST),
     EMAIL_EXISTED(2010, "Email existed", HttpStatus.BAD_REQUEST),
-    USER_ALREADY_HAS_ROLE(2012, "User already has this role", HttpStatus.BAD_REQUEST),
     PASSWORD_ALREADY_SET(2013, "Password has already been set", HttpStatus.CONFLICT),
     PHONE_EXISTED(2014, "Phone number existed", HttpStatus.CONFLICT),
     USER_DISABLED(2015, "User is disabled", HttpStatus.BAD_REQUEST),
     USER_ALREADY_ACTIVATED(2016, "User already completed invitation actions", HttpStatus.CONFLICT),
     USER_CANNOT_DISABLE_SELF(2017, "You cannot disable your own account", HttpStatus.CONFLICT),
+    USER_CANNOT_UPDATE_OWN_ROLE(2018, "You cannot update your own role", HttpStatus.CONFLICT),
 
     // 21xx role
     ROLE_EXISTED(2101, "Role existed", HttpStatus.BAD_REQUEST),
