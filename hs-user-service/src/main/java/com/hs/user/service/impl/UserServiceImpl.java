@@ -208,11 +208,15 @@ public class UserServiceImpl implements UserService {
         }
 
         @Override
-        public void updateUserStatus(String userId, boolean enabled) {
-                userRepository.findById(userId)
-                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
+    public void updateUserStatus(String userId, boolean enabled) {
+        userRepository.findById(userId)
+                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
 
-                keycloakUserService.updateUserIfChanged(
+        if (!enabled && userId.equals(currentUserUtils.getCurrentUserId())) {
+            throw new AppException(UserErrorCode.USER_CANNOT_DISABLE_SELF);
+        }
+
+        keycloakUserService.updateUserIfChanged(
                                 userId,
                                 UpdateKeycloakUserRequest.builder()
                                                 .enabled(enabled)

@@ -27,6 +27,7 @@ public enum UserErrorCode implements AppException.ErrorCode {
     PHONE_EXISTED(2014, "Phone number existed", HttpStatus.CONFLICT),
     USER_DISABLED(2015, "User is disabled", HttpStatus.BAD_REQUEST),
     USER_ALREADY_ACTIVATED(2016, "User already completed invitation actions", HttpStatus.CONFLICT),
+    USER_CANNOT_DISABLE_SELF(2017, "You cannot disable your own account", HttpStatus.CONFLICT),
 
     // 21xx role
     ROLE_EXISTED(2101, "Role existed", HttpStatus.BAD_REQUEST),
