@@ -44,7 +44,7 @@ public class RoleServiceImpl implements RoleService {
     @Transactional(readOnly = true)
     @Override
     public Page<@NonNull RoleResponse> findAllRoles(Pageable pageable, boolean includePermissions) {
-        Page<Role> roles = roleRepository.findAll(pageable);
+        Page<Role> roles = roleRepository.findAllByActiveTrue(pageable);
         Map<String, User> actors = loadActors(roles.getContent());
         return roles.map(role -> RoleMapper.mapToRoleResponse(role, includePermissions, actors));
     }
@@ -52,7 +52,7 @@ public class RoleServiceImpl implements RoleService {
     @Transactional(readOnly = true)
     @Override
     public List<RoleResponse> findAllRoles() {
-        List<Role> roles = roleRepository.findAll();
+        List<Role> roles = roleRepository.findAllByActiveTrue();
         Map<String, User> actors = loadActors(roles);
         return roles.stream()
                 .map(role -> RoleMapper.mapToRoleResponse(role, false, actors))
@@ -62,7 +62,7 @@ public class RoleServiceImpl implements RoleService {
     @Override
     public RoleResponse findById(String id) {
         Role role = roleRepository
-                .findById(id)
+                .findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
         return RoleMapper.mapToRoleResponse(role, true, loadActors(List.of(role)));
     }
@@ -70,7 +70,7 @@ public class RoleServiceImpl implements RoleService {
     @Override
     public RoleResponse updateRole(String id, UpdateRoleRequest updateRoleRequest) {
         Role role = roleRepository
-                .findById(id)
+                .findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
 
         RoleMapper.updateRoleFromRequest(role, updateRoleRequest);
@@ -86,7 +86,8 @@ public class RoleServiceImpl implements RoleService {
     private Set<Permission> getPermissions(Set<String> permissionIds) {
         Set<Permission> permissions = new HashSet<>(permissionRepository.findAllById(permissionIds));
 
-        if (permissions.size() != permissionIds.size()) {
+        if (permissions.size() != permissionIds.size()
+                || permissions.stream().anyMatch(permission -> !Boolean.TRUE.equals(permission.getActive()))) {
             throw new AppException(UserErrorCode.PERMISSION_NOT_EXISTED);
         }
 

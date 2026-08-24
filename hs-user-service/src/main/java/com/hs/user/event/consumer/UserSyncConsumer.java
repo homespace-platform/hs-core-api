@@ -9,6 +9,7 @@ import com.hs.common.context.UserContextHolder;
 import com.hs.common.context.UserContext;
 import com.hs.user.model.Role;
 import com.hs.user.model.User;
+import com.hs.user.repository.AddressRepository;
 import com.hs.user.repository.RoleRepository;
 import com.hs.user.repository.UserRepository;
 
@@ -27,6 +28,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 public class UserSyncConsumer {
 
     UserRepository userRepository;
+    AddressRepository addressRepository;
     RoleRepository roleRepository;
     ObjectMapper objectMapper;
 
@@ -106,13 +108,15 @@ public class UserSyncConsumer {
     }
 
     private void handleDeleteUser(String userId) {
-        if (!userRepository.existsById(userId)) {
-            log.warn("User {} not found. Skipping delete.", userId);
-            return;
-        }
-
-        userRepository.deleteById(userId);
-        log.info("Successfully deleted user {} from DB.", userId);
+        userRepository.findById(userId).ifPresentOrElse(user -> {
+            user.setActive(false);
+            userRepository.save(user);
+            addressRepository.findByUser_IdAndActiveTrue(userId).ifPresent(address -> {
+                address.setActive(false);
+                addressRepository.save(address);
+            });
+            log.info("Soft-deleted user {} from DB.", userId);
+        }, () -> log.warn("User {} not found. Skipping delete.", userId));
     }
 
     private Role resolveDefaultRole() {

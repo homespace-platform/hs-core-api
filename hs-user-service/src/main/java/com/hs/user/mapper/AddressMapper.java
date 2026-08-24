@@ -20,6 +20,7 @@ public class AddressMapper {
                 .wardName(address.getWardName())
                 .streetLine(address.getStreetLine())
                 .fullAddress(address.getFullAddress())
+                .active(address.getActive())
                 .createdAt(address.getCreatedAt())
                 .updatedAt(address.getUpdatedAt())
                 .build();

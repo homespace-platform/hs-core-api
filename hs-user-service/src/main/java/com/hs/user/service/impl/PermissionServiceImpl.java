@@ -41,7 +41,7 @@ public class PermissionServiceImpl implements PermissionService {
     @Transactional(readOnly = true)
     @Override
     public Page<@NonNull PermissionResponse> findAllPermissions(Pageable pageable) {
-        Page<Permission> permissions = permissionRepository.findAll(pageable);
+        Page<Permission> permissions = permissionRepository.findAllByActiveTrue(pageable);
         Map<String, User> actors = loadActors(permissions.getContent());
         return permissions.map(permission -> PermissionMapper.mapToPermissionResponse(permission, actors));
     }
@@ -49,7 +49,7 @@ public class PermissionServiceImpl implements PermissionService {
     @Transactional(readOnly = true)
     @Override
     public List<PermissionResponse> findAllPermissions() {
-        List<Permission> permissions = permissionRepository.findAll();
+        List<Permission> permissions = permissionRepository.findAllByActiveTrue();
         Map<String, User> actors = loadActors(permissions);
         return permissions.stream()
                 .map(permission -> PermissionMapper.mapToPermissionResponse(permission, actors))
@@ -60,7 +60,7 @@ public class PermissionServiceImpl implements PermissionService {
     @Override
     public PermissionResponse findById(String id) {
         Permission permission = permissionRepository
-                .findById(id)
+                .findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new AppException(UserErrorCode.PERMISSION_NOT_EXISTED));
         return PermissionMapper.mapToPermissionResponse(permission, loadActors(List.of(permission)));
     }
@@ -68,7 +68,7 @@ public class PermissionServiceImpl implements PermissionService {
     @Override
     public PermissionResponse updatePermission(String id, UpdatePermissionRequest updatePermissionRequest) {
         Permission permission = permissionRepository
-                .findById(id)
+                .findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new AppException(UserErrorCode.PERMISSION_NOT_EXISTED));
 
         PermissionMapper.updatePermissionFromRequest(permission, updatePermissionRequest);

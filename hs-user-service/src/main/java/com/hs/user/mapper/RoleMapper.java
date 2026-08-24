@@ -39,6 +39,7 @@ public class RoleMapper {
         }
         return role.getPermissions()
                 .stream()
+                .filter(permission -> Boolean.TRUE.equals(permission.getActive()))
                 .map(permission -> PermissionMapper.mapToPermissionResponse(permission, actors))
                 .collect(Collectors.toSet());
     }

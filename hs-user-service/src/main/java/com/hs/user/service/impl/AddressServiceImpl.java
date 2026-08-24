@@ -32,7 +32,7 @@ public class AddressServiceImpl implements AddressService {
     @Override
     @Transactional(readOnly = true)
     public AddressResponse getCurrentUserAddress() {
-        return AddressMapper.mapToAddressResponse(requireCurrentAddress());
+        return AddressMapper.mapToAddressResponse(requireActiveAddress());
     }
 
     @Override
@@ -40,6 +40,7 @@ public class AddressServiceImpl implements AddressService {
         User user = currentUserUtils.getCurrentUser();
         Address address = addressRepository.findByUser_Id(user.getId()).orElseGet(Address::new);
         address.setUser(user);
+        address.setActive(true);
         apply(address, request);
         Address saved = addressRepository.save(address);
         log.info("Upserted address {} for user {}", saved.getId(), user.getId());
@@ -48,14 +49,15 @@ public class AddressServiceImpl implements AddressService {
 
     @Override
     public void deleteCurrentUserAddress() {
-        Address address = requireCurrentAddress();
-        addressRepository.delete(address);
-        log.info("Deleted address {} for user {}", address.getId(), address.getUser().getId());
+        Address address = requireActiveAddress();
+        address.setActive(false);
+        addressRepository.save(address);
+        log.info("Soft-deleted address {} for user {}", address.getId(), address.getUser().getId());
     }
 
-    private Address requireCurrentAddress() {
+    private Address requireActiveAddress() {
         return addressRepository
-                .findByUser_Id(currentUserUtils.getCurrentUserId())
+                .findByUser_IdAndActiveTrue(currentUserUtils.getCurrentUserId())
                 .orElseThrow(() -> new AppException(UserErrorCode.ADDRESS_NOT_EXISTED));
     }
 

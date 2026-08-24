@@ -32,7 +32,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -203,17 +202,9 @@ public class StorageServiceImpl implements StorageService {
     @Transactional
     public void delete(String storageId) {
         StorageObject object = getOwnedObject(storageId);
-        try {
-            s3Client.deleteObject(DeleteObjectRequest.builder()
-                    .bucket(object.getBucketName())
-                    .key(object.getObjectKey())
-                    .build());
-            object.setStatus(StorageStatus.DELETED);
-            object.setActive(false);
-            repository.save(object);
-        } catch (SdkException exception) {
-            throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
-        }
+        object.setStatus(StorageStatus.DELETED);
+        object.setActive(false);
+        repository.save(object);
     }
 
     private StorageUrlResponse createGetUrl(StorageObject object, boolean inline) {

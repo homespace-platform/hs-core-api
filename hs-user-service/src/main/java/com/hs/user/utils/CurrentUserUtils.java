@@ -24,8 +24,12 @@ public class CurrentUserUtils {
     }
 
     public User getCurrentUser() {
-        return userRepository.findById(getCurrentUserId())
+        User user = userRepository.findById(getCurrentUserId())
                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
+        if (!Boolean.TRUE.equals(user.getActive())) {
+            throw new AppException(UserErrorCode.USER_DISABLED);
+        }
+        return user;
     }
 }
 

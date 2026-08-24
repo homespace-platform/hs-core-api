@@ -176,11 +176,17 @@ public class UserServiceImpl implements UserService {
         public UserPermissionsResponse getUserPermissions(String userId) {
                 User user = userRepository.findById(userId)
                                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
+                if (!Boolean.TRUE.equals(user.getActive())) {
+                        throw new AppException(UserErrorCode.USER_DISABLED);
+                }
 
-                var role = user.getRole();
+                var role = user.getRole() != null && Boolean.TRUE.equals(user.getRole().getActive())
+                                ? user.getRole()
+                                : null;
                 var permissions = role == null || role.getPermissions() == null
                                 ? Collections.<String>emptySet()
                                 : role.getPermissions().stream()
+                                                .filter(permission -> Boolean.TRUE.equals(permission.getActive()))
                                                 .map(permission -> permission.getName())
                                                 .collect(Collectors.toSet());
 
@@ -193,21 +199,20 @@ public class UserServiceImpl implements UserService {
 
         @Override
         public void updateUserPassword(UpdatePasswordRequest request) {
-                String userId = currentUserUtils.getCurrentUserId();
-                User user = userRepository.findById(userId)
-                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
-
-                keycloakUserService.updatePassword(userId, user.getUsername(), request);
+                User user = currentUserUtils.getCurrentUser();
+                keycloakUserService.updatePassword(user.getId(), user.getUsername(), request);
         }
 
         @Override
         public void setInitialPassword(SetInitialPasswordRequest request) {
+                currentUserUtils.getCurrentUser();
                 keycloakUserService.setInitialPassword(currentUserUtils.getCurrentUserId(), request);
         }
 
         @Override
         @Transactional(readOnly = true)
         public boolean hasPassword() {
+                currentUserUtils.getCurrentUser();
                 return keycloakUserService.hasPassword(currentUserUtils.getCurrentUserId());
         }
 
@@ -215,7 +220,7 @@ public class UserServiceImpl implements UserService {
         @Transactional(readOnly = true)
         public UserProfileResponse getUserProfile() {
                 User user = currentUserUtils.getCurrentUser();
-                Address address = addressRepository.findByUser_Id(user.getId()).orElse(null);
+                Address address = addressRepository.findByUser_IdAndActiveTrue(user.getId()).orElse(null);
                 return UserMapper.mapToUserProfileResponse(user, address);
         }
 
@@ -266,21 +271,24 @@ public class UserServiceImpl implements UserService {
 
         @Override
     public void updateUserStatus(String userId, boolean enabled) {
-        userRepository.findById(userId)
+        User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
 
         if (!enabled && userId.equals(currentUserUtils.getCurrentUserId())) {
             throw new AppException(UserErrorCode.USER_CANNOT_DISABLE_SELF);
         }
 
-        keycloakUserService.updateUserIfChanged(
-                                userId,
-                                UpdateKeycloakUserRequest.builder()
-                                                .enabled(enabled)
-                                                .build());
+        user.setActive(enabled);
+        userRepository.save(user);
 
-                log.info("Requested user {} status update to enabled={}", userId, enabled);
-        }
+        keycloakUserService.updateUserIfChanged(
+                userId,
+                UpdateKeycloakUserRequest.builder()
+                        .enabled(enabled)
+                        .build());
+
+        log.info("Requested user {} status update to enabled={}", userId, enabled);
+    }
 
         private UserResponse toUserResponse(User user) {
                 return UserMapper.mapToUserResponse(user, loadActors(List.of(user)));
@@ -332,7 +340,7 @@ public class UserServiceImpl implements UserService {
                 }
 
                 Role role = roleRepository
-                                .findById(roleId.trim())
+                                .findByIdAndActiveTrue(roleId.trim())
                                 .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
 
                 if (user.getRole() != null && role.getId().equals(user.getRole().getId())) {

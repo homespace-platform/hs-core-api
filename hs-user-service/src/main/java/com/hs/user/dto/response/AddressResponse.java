@@ -13,6 +13,7 @@ public record AddressResponse(
         String wardName,
         String streetLine,
         String fullAddress,
+        Boolean active,
         Instant createdAt,
         Instant updatedAt
 ) {
