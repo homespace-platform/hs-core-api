@@ -1,6 +1,7 @@
 package com.hs.listing.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -16,11 +18,15 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
+import com.hs.common.dto.PageResponse;
 import com.hs.listing.dto.request.CreateListingRequest;
 import com.hs.listing.dto.request.AddListingImageRequest;
 import com.hs.listing.dto.request.UpdateListingRequest;
 import com.hs.listing.dto.response.ListingResponse;
+import com.hs.common.advice.entity.AppException;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.ListingImage;
 import com.hs.listing.model.constant.ListingCategory;
@@ -148,5 +154,57 @@ class ListingServiceTest {
         assertEquals(ListingStatus.PUBLISHED, listing.getStatus());
         assertEquals(ListingStatus.PUBLISHED, response.status());
         verify(listingRepository).save(listing);
+    }
+
+    @Test
+    void getsPublishedListingForAnonymousViewer() {
+        Listing listing = Listing.builder()
+                .id("listing-1")
+                .ownerId("user-1")
+                .title("Phòng trọ")
+                .category(ListingCategory.ROOM)
+                .status(ListingStatus.PUBLISHED)
+                .build();
+        when(listingRepository.findById("listing-1")).thenReturn(Optional.of(listing));
+
+        ListingResponse response = listingService.getById(null, "listing-1");
+
+        assertEquals("listing-1", response.id());
+        assertEquals(ListingStatus.PUBLISHED, response.status());
+    }
+
+    @Test
+    void hidesDraftFromOtherViewer() {
+        Listing listing = Listing.builder()
+                .id("listing-1")
+                .ownerId("user-1")
+                .title("Phòng trọ")
+                .category(ListingCategory.ROOM)
+                .status(ListingStatus.DRAFT)
+                .build();
+        when(listingRepository.findById("listing-1")).thenReturn(Optional.of(listing));
+
+        assertThrows(AppException.class, () -> listingService.getById("user-2", "listing-1"));
+    }
+
+    @Test
+    void getsOnlyPublishedAndRentedListings() {
+        Listing listing = Listing.builder()
+                .id("listing-1")
+                .ownerId("user-1")
+                .title("Phòng trọ")
+                .category(ListingCategory.ROOM)
+                .status(ListingStatus.PUBLISHED)
+                .build();
+        var pageable = PageRequest.of(0, 20);
+        var statuses = List.of(ListingStatus.PUBLISHED, ListingStatus.RENTED);
+        when(listingRepository.findAllByStatusIn(statuses, pageable))
+                .thenReturn(new PageImpl<>(List.of(listing), pageable, 1));
+
+        PageResponse<ListingResponse> response = listingService.getAll(pageable);
+
+        assertEquals(1, response.getTotalElements());
+        assertEquals("listing-1", response.getResult().get(0).id());
+        verify(listingRepository).findAllByStatusIn(statuses, pageable);
     }
 }

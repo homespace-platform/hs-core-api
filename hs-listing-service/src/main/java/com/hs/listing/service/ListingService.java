@@ -5,6 +5,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
+import com.hs.common.dto.PageResponse;
 import com.hs.listing.dto.request.CreateListingRequest;
 import com.hs.listing.dto.request.AddListingImageRequest;
 import com.hs.listing.dto.request.UpdateListingRequest;
@@ -22,6 +23,7 @@ import com.hs.storage.service.StorageService;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -57,6 +59,24 @@ public class ListingService {
                 .build();
 
         return toResponse(listingRepository.save(listing));
+    }
+
+    @Transactional(readOnly = true)
+    public ListingResponse getById(String viewerId, String listingId) {
+        Listing listing = listingRepository.findById(listingId)
+                .orElseThrow(() -> new AppException(ErrorCode.ROUTE_NOT_FOUND));
+        boolean owner = viewerId != null && viewerId.equals(listing.getOwnerId());
+        boolean visible = listing.getStatus() == ListingStatus.PUBLISHED
+                || listing.getStatus() == ListingStatus.RENTED;
+        if (!owner && !visible) throw new AppException(ErrorCode.ROUTE_NOT_FOUND);
+        return toResponse(listing);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<ListingResponse> getAll(Pageable pageable) {
+        return new PageResponse<>(listingRepository.findAllByStatusIn(
+                List.of(ListingStatus.PUBLISHED, ListingStatus.RENTED), pageable)
+                .map(this::toResponse));
     }
 
     @Transactional
