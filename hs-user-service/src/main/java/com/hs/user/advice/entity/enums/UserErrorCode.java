@@ -29,6 +29,9 @@ public enum UserErrorCode implements AppException.ErrorCode {
     USER_CANNOT_DISABLE_SELF(2017, "You cannot disable your own account", HttpStatus.CONFLICT),
     USER_CANNOT_UPDATE_OWN_ROLE(2018, "You cannot update your own role", HttpStatus.CONFLICT),
 
+    // 24xx address
+    ADDRESS_NOT_EXISTED(2401, "Address not existed", HttpStatus.NOT_FOUND),
+
     // 21xx role
     ROLE_EXISTED(2101, "Role existed", HttpStatus.BAD_REQUEST),
     ROLE_NOT_EXISTED(2102, "Role not existed", HttpStatus.NOT_FOUND),

@@ -28,8 +28,10 @@ import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
 import com.hs.user.dto.response.UserResponse;
 import com.hs.user.mapper.UserMapper;
+import com.hs.user.model.Address;
 import com.hs.user.model.Role;
 import com.hs.user.model.User;
+import com.hs.user.repository.AddressRepository;
 import com.hs.user.repository.RoleRepository;
 import com.hs.user.repository.UserRepository;
 import com.hs.user.service.KeycloakUserService;
@@ -50,6 +52,7 @@ public class UserServiceImpl implements UserService {
 
         UserRepository userRepository;
         RoleRepository roleRepository;
+        AddressRepository addressRepository;
         KeycloakUserService keycloakUserService;
         CurrentUserUtils currentUserUtils;
 
@@ -211,7 +214,9 @@ public class UserServiceImpl implements UserService {
         @Override
         @Transactional(readOnly = true)
         public UserProfileResponse getUserProfile() {
-                return UserMapper.mapToUserProfileResponse(currentUserUtils.getCurrentUser());
+                User user = currentUserUtils.getCurrentUser();
+                Address address = addressRepository.findByUser_Id(user.getId()).orElse(null);
+                return UserMapper.mapToUserProfileResponse(user, address);
         }
 
         @Override

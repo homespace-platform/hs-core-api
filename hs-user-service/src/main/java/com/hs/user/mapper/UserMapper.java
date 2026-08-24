@@ -7,11 +7,16 @@ import java.util.stream.Stream;
 import com.hs.user.dto.response.UserAuditActorResponse;
 import com.hs.user.dto.response.UserProfileResponse;
 import com.hs.user.dto.response.UserResponse;
+import com.hs.user.model.Address;
 import com.hs.user.model.User;
 
 public class UserMapper {
 
     public static UserProfileResponse mapToUserProfileResponse(User user) {
+        return mapToUserProfileResponse(user, null);
+    }
+
+    public static UserProfileResponse mapToUserProfileResponse(User user, Address address) {
         return UserProfileResponse.builder()
                 .id(user.getId())
                 .username(user.getUsername())
@@ -29,6 +34,7 @@ public class UserMapper {
                 .active(user.getActive())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
+                .address(AddressMapper.mapToAddressResponse(address))
                 .build();
     }
 

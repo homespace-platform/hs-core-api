@@ -24,7 +24,8 @@ public record UserProfileResponse(
         Boolean onBoarded,
         Boolean active,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        AddressResponse address
 ) {
 }
 
