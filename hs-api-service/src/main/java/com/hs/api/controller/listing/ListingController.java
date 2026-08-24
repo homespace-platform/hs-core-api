@@ -60,6 +60,14 @@ public class ListingController {
                 .build();
     }
 
+    @PostMapping("/{listingId}/publish")
+    public ApiResponse<ListingResponse> publish(@PathVariable String listingId) {
+        return ApiResponse.<ListingResponse>builder()
+                .message("Listing published")
+                .result(listingService.publish(currentUserId(), listingId))
+                .build();
+    }
+
     private String currentUserId() {
         UserContext context = UserContextHolder.get();
         return context == null ? null : context.userId();

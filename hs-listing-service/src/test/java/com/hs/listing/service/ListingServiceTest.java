@@ -130,4 +130,23 @@ class ListingServiceTest {
         verify(storageService).getById("storage-1");
         verify(listingRepository, never()).save(any(Listing.class));
     }
+
+    @Test
+    void publishesOwnedDraft() {
+        Listing listing = Listing.builder()
+                .id("listing-1")
+                .ownerId("user-1")
+                .title("Phòng trọ")
+                .category(ListingCategory.ROOM)
+                .status(ListingStatus.DRAFT)
+                .build();
+        when(listingRepository.findById("listing-1")).thenReturn(Optional.of(listing));
+        when(listingRepository.save(any(Listing.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ListingResponse response = listingService.publish("user-1", "listing-1");
+
+        assertEquals(ListingStatus.PUBLISHED, listing.getStatus());
+        assertEquals(ListingStatus.PUBLISHED, response.status());
+        verify(listingRepository).save(listing);
+    }
 }
