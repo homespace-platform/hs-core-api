@@ -104,6 +104,13 @@ public class ListingService {
         return toResponse(listing);
     }
 
+    @Transactional
+    public ListingResponse publish(String ownerId, String listingId) {
+        Listing listing = findOwnedDraft(ownerId, listingId);
+        listing.setStatus(ListingStatus.PUBLISHED);
+        return toResponse(listingRepository.save(listing));
+    }
+
     private Listing findOwnedDraft(String ownerId, String listingId) {
         if (ownerId == null || ownerId.isBlank()) throw new AppException(ErrorCode.UNAUTHENTICATED);
         Listing listing = listingRepository.findById(listingId)
