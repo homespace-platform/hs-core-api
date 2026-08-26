@@ -91,32 +91,38 @@ Không thêm `"*"` vào `AllowedOrigins` cho production. Khi deploy, thêm chín
 
 CORS không làm bucket thành public và không thay thế IAM policy. Request vẫn phải có presigned URL hợp lệ.
 
-## 2A. Public riêng avatar khi chưa dùng được CloudFront
+## 2A. Public tất cả prefix, trừ user_contract khi chưa dùng được CloudFront
 
-Nếu tài khoản AWS chưa được xác minh để tạo CloudFront, có thể public **chỉ** các object nằm dưới prefix:
+Nếu tài khoản AWS chưa được xác minh để tạo CloudFront, có thể cho phép public read hầu hết object để frontend truy cập trực tiếp. Với yêu cầu hiện tại:
+
+- Public read cho mọi object trong bucket.
+- Không public `user_contract/*`.
+
+Prefix cần giữ private:
 
 ```text
-user_avatar/*
+user_contract/*
 ```
 
-Các prefix khác như `contract_document/*`, `identity_document/*`, `property_image/*` và `general/*` vẫn private và tiếp tục được truy cập bằng presigned URL có thời hạn.
+Các prefix khác như `user_avatar/*`, `contract_document/*`, `identity_document/*`, `property_image/*` và `general/*` sẽ public read theo bucket policy.
 
-Luồng avatar khi dùng phương án này:
+Luồng truy cập file khi dùng phương án này:
 
 ```text
 Frontend -> presigned PUT -> S3
 Frontend -> complete upload -> Storage Service
 Backend tạo URL cố định từ objectKey
-Browser -> public S3 URL của user_avatar/*
+Browser -> public S3 URL của hầu hết prefix
+Browser -> AccessDenied với user_contract/*
 ```
 
-URL avatar cố định có dạng:
+URL object public cố định có dạng:
 
 ```text
-https://homespace-dev-files.s3.ap-southeast-1.amazonaws.com/user_avatar/{userId}/{storageId}.png
+https://homespace-dev-files.s3.ap-southeast-1.amazonaws.com/{prefix}/{path-to-file}
 ```
 
-URL này không tự hết hạn. URL chỉ ngừng hoạt động nếu object bị xóa, đổi key hoặc bucket policy bị thu hồi.
+URL này không tự hết hạn. URL chỉ ngừng hoạt động nếu object bị xóa, đổi key hoặc bucket policy bị thu hồi. Với `user_contract/*`, truy cập trực tiếp sẽ bị từ chối.
 
 ### 2A.1. Điều chỉnh Block Public Access của bucket
 
@@ -137,7 +143,7 @@ Bỏ chọn `Block all public access`, sau đó cấu hình riêng từng mục:
 
 Xác nhận cảnh báo và lưu thay đổi.
 
-Hai mục ACL vẫn phải bật vì dự án sử dụng `Bucket owner enforced` và không cần public object bằng ACL. Chỉ bucket policy được phép public prefix avatar.
+Hai mục ACL vẫn phải bật vì dự án sử dụng `Bucket owner enforced` và không cần public object bằng ACL. Chỉ bucket policy được phép public object theo prefix mong muốn.
 
 Nếu lưu bucket policy vẫn báo bị chặn, kiểm tra thêm:
 
@@ -147,7 +153,7 @@ S3 -> Block Public Access settings for this account
 
 AWS áp dụng cấu hình hạn chế nhất giữa account và bucket. Nếu account đang chặn toàn bộ public bucket policy, cần tắt hai mục liên quan đến public bucket policy ở cấp account. Việc thay đổi cấp account ảnh hưởng các bucket khác, vì vậy phải kiểm tra kỹ từng bucket và không thêm public policy ngoài bucket `homespace-dev-files`.
 
-### 2A.2. Thêm bucket policy chỉ đọc avatar
+### 2A.2. Thêm bucket policy public toàn bộ, trừ user_contract
 
 Mở:
 
@@ -162,11 +168,18 @@ Nếu bucket chưa có policy, dùng:
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AllowPublicReadUserAvatarsOnly",
+      "Sid": "AllowPublicReadAllObjects",
       "Effect": "Allow",
       "Principal": "*",
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::homespace-dev-files/user_avatar/*"
+      "Resource": "arn:aws:s3:::homespace-dev-files/*"
+    },
+    {
+      "Sid": "DenyPublicReadUserContract",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::homespace-dev-files/user_contract/*"
     }
   ]
 }
@@ -176,15 +189,29 @@ Nếu bucket đã có policy, chỉ thêm object sau vào mảng `Statement`; kh
 
 ```json
 {
-  "Sid": "AllowPublicReadUserAvatarsOnly",
+  "Sid": "AllowPublicReadAllObjects",
   "Effect": "Allow",
   "Principal": "*",
   "Action": "s3:GetObject",
-  "Resource": "arn:aws:s3:::homespace-dev-files/user_avatar/*"
+  "Resource": "arn:aws:s3:::homespace-dev-files/*"
 }
 ```
 
-Policy này chỉ cho người ngoài đọc object avatar. Nó không cấp các quyền sau:
+và thêm tiếp object deny này:
+
+```json
+{
+  "Sid": "DenyPublicReadUserContract",
+  "Effect": "Deny",
+  "Principal": "*",
+  "Action": "s3:GetObject",
+  "Resource": "arn:aws:s3:::homespace-dev-files/user_contract/*"
+}
+```
+
+Do `Deny` luôn được ưu tiên hơn `Allow`, `user_contract/*` vẫn private dù có rule allow toàn bucket.
+
+Policy này chỉ cấp read công khai cho object không thuộc `user_contract/*`. Nó không cấp các quyền sau:
 
 ```text
 s3:PutObject
@@ -194,9 +221,9 @@ s3:ListBucket
 
 Upload và xóa vẫn phải đi qua IAM/presigned URL của Storage Service.
 
-### 2A.3. Kiểm tra public avatar
+### 2A.3. Kiểm tra policy public trừ user_contract
 
-Sau khi upload và complete một object có `purpose = USER_AVATAR`, lấy `objectKey` từ response tạo upload, ví dụ:
+Sau khi upload và complete một object không thuộc `user_contract/*`, lấy `objectKey` từ response tạo upload, ví dụ:
 
 ```text
 user_avatar/4336d812-4e87-4766-b68b-081a8faabd66/c4e050b2-67fa-4364-a685-adb6421d4d1b.png
@@ -210,9 +237,15 @@ https://homespace-dev-files.s3.ap-southeast-1.amazonaws.com/user_avatar/4336d812
 
 Kết quả đúng là ảnh hiển thị mà không cần đăng nhập AWS và không cần query string presigned.
 
-Kiểm tra thêm một object không thuộc `user_avatar/*`. URL S3 trực tiếp của object đó phải trả `AccessDenied`; chỉ presigned view/download URL mới được phép hoạt động.
+Kiểm tra thêm một object thuộc `user_contract/*`, ví dụ:
 
-> Avatar public có thể bị xem hoặc thu thập bởi bất kỳ ai biết URL. Không lưu giấy tờ tùy thân, hợp đồng hoặc dữ liệu nhạy cảm dưới prefix `user_avatar/`.
+```text
+https://homespace-dev-files.s3.ap-southeast-1.amazonaws.com/user_contract/abc/contract.pdf
+```
+
+URL S3 trực tiếp của object này phải trả `AccessDenied`; chỉ presigned view/download URL mới được phép hoạt động.
+
+> Object public có thể bị xem hoặc thu thập bởi bất kỳ ai biết URL. Nên đặt tài liệu nhạy cảm dưới `user_contract/` để luôn buộc truy cập qua presigned URL.
 
 ## 3. Tạo IAM policy giới hạn cho bucket
 
