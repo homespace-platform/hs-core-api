@@ -26,17 +26,22 @@ public record ListingResponse(
         String wardCode,
         String address,
         JsonNode details,
-        List<ListingImageResponse> images,
+        List<String> imageUrls,
+        List<String> videoUrls,
         Instant createdAt,
         Instant updatedAt
 ) {
 
-    public static ListingResponse from(Listing listing, JsonNode details, List<ListingImageResponse> images) {
+    public static ListingResponse from(
+            Listing listing,
+            JsonNode details,
+            List<String> imageUrls,
+            List<String> videoUrls) {
         return new ListingResponse(
                 listing.getId(), listing.getOwnerId(), listing.getTitle(), listing.getDescription(),
                 listing.getCategory(), listing.getStatus(), listing.getPriceMonthly(), listing.getDepositAmount(),
                 listing.getAreaM2(), listing.getBedrooms(), listing.getBathrooms(), listing.getProvinceCode(),
-                listing.getDistrictCode(), listing.getWardCode(), listing.getAddress(), details, images,
-                listing.getCreatedAt(), listing.getUpdatedAt());
+                listing.getDistrictCode(), listing.getWardCode(), listing.getAddress(), details, imageUrls,
+                videoUrls, listing.getCreatedAt(), listing.getUpdatedAt());
     }
 }

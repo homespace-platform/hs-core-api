@@ -85,6 +85,12 @@ public class Listing extends BaseEntity {
     @Column(name = "details_json", columnDefinition = "TEXT")
     String detailsJson;
 
+    @Column(name = "image_urls_json", columnDefinition = "TEXT")
+    String imageUrlsJson;
+
+    @Column(name = "video_urls_json", columnDefinition = "TEXT")
+    String videoUrlsJson;
+
     @PrePersist
     void prePersist() {
         if (id == null || id.isBlank()) id = UUID.randomUUID().toString();

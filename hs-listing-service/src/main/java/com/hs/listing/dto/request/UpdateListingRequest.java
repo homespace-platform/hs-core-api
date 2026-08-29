@@ -1,11 +1,13 @@
 package com.hs.listing.dto.request;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import tools.jackson.databind.JsonNode;
 
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 public record UpdateListingRequest(
@@ -20,6 +22,8 @@ public record UpdateListingRequest(
         @Size(max = 20) String districtCode,
         @Size(max = 20) String wardCode,
         @Size(max = 500) String address,
-        JsonNode details
+        JsonNode details,
+        List<@NotBlank @Size(max = 2048) String> imageUrls,
+        List<@NotBlank @Size(max = 2048) String> videoUrls
 ) {
 }

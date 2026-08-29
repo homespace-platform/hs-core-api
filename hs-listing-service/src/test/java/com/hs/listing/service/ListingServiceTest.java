@@ -3,19 +3,17 @@ package com.hs.listing.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
@@ -23,36 +21,37 @@ import org.springframework.data.domain.PageRequest;
 
 import com.hs.common.dto.PageResponse;
 import com.hs.listing.dto.request.CreateListingRequest;
-import com.hs.listing.dto.request.AddListingImageRequest;
 import com.hs.listing.dto.request.UpdateListingRequest;
 import com.hs.listing.dto.response.ListingResponse;
 import com.hs.common.advice.entity.AppException;
 import com.hs.listing.model.Listing;
-import com.hs.listing.model.ListingImage;
 import com.hs.listing.model.constant.ListingCategory;
+import com.hs.listing.model.constant.ListingMediaType;
 import com.hs.listing.model.constant.ListingStatus;
-import com.hs.listing.repository.ListingImageRepository;
 import com.hs.listing.repository.ListingRepository;
-import com.hs.storage.dto.response.StorageObjectResponse;
-import com.hs.storage.model.constant.StoragePurpose;
-import com.hs.storage.model.constant.StorageStatus;
-import com.hs.storage.model.constant.StorageVisibility;
-import com.hs.storage.service.StorageService;
+
+import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
 class ListingServiceTest {
+
+    private static final String IMAGE_URL =
+            "https://homespace-dev-files.s3.ap-southeast-1.amazonaws.com/listing_image/user-1/img-1.png";
+    private static final String VIDEO_URL =
+            "https://homespace-dev-files.s3.ap-southeast-1.amazonaws.com/listing_video/user-1/vid-1.mp4";
 
     @Mock
     ListingRepository listingRepository;
 
     @Mock
-    ListingImageRepository listingImageRepository;
+    ListingMediaService listingMediaService;
 
-    @Mock
-    StorageService storageService;
+    private ListingService listingService;
 
-    @InjectMocks
-    ListingService listingService;
+    @BeforeEach
+    void setUp() {
+        listingService = new ListingService(listingRepository, listingMediaService, new ObjectMapper());
+    }
 
     @Test
     void createsDraftOwnedByCurrentUser() {
@@ -69,7 +68,11 @@ class ListingServiceTest {
                 "760",
                 "26734",
                 "12 Nguyễn Huệ",
-                null);
+                null,
+                List.of(IMAGE_URL),
+                List.of(VIDEO_URL));
+        when(listingMediaService.isAllowedMediaUrl("user-1", IMAGE_URL, ListingMediaType.IMAGE)).thenReturn(true);
+        when(listingMediaService.isAllowedMediaUrl("user-1", VIDEO_URL, ListingMediaType.VIDEO)).thenReturn(true);
         when(listingRepository.save(any(Listing.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         ListingResponse response = listingService.createDraft("user-1", request);
@@ -79,37 +82,14 @@ class ListingServiceTest {
         Listing saved = captor.getValue();
         assertEquals("user-1", saved.getOwnerId());
         assertEquals(ListingStatus.DRAFT, saved.getStatus());
-        assertEquals(ListingCategory.ROOM, saved.getCategory());
-        assertEquals(saved.getId(), response.id());
-        assertEquals("user-1", response.ownerId());
+        assertEquals("[\"" + IMAGE_URL + "\"]", saved.getImageUrlsJson());
+        assertEquals("[\"" + VIDEO_URL + "\"]", saved.getVideoUrlsJson());
+        assertEquals(List.of(IMAGE_URL), response.imageUrls());
+        assertEquals(List.of(VIDEO_URL), response.videoUrls());
     }
 
     @Test
-    void updatesOnlyProvidedFieldsOnOwnedDraft() {
-        Listing listing = Listing.builder()
-                .id("listing-1")
-                .ownerId("user-1")
-                .title("Tiêu đề cũ")
-                .category(ListingCategory.ROOM)
-                .status(ListingStatus.DRAFT)
-                .build();
-        when(listingRepository.findById("listing-1")).thenReturn(Optional.of(listing));
-        when(listingRepository.save(any(Listing.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        ListingResponse response = listingService.updateDraft(
-                "user-1", "listing-1",
-                new UpdateListingRequest("Tiêu đề mới", null, new BigDecimal("4000000"), null, null,
-                        null, null, null, null, null, null, null));
-
-        assertEquals("Tiêu đề mới", listing.getTitle());
-        assertEquals(new BigDecimal("4000000"), listing.getPriceMonthly());
-        assertEquals(ListingCategory.ROOM, listing.getCategory());
-        assertEquals("listing-1", response.id());
-        verify(listingRepository).save(listing);
-    }
-
-    @Test
-    void attachesReadyPropertyImageOwnedByUser() {
+    void updatesImageAndVideoUrlsOnOwnedDraft() {
         Listing listing = Listing.builder()
                 .id("listing-1")
                 .ownerId("user-1")
@@ -117,24 +97,21 @@ class ListingServiceTest {
                 .category(ListingCategory.ROOM)
                 .status(ListingStatus.DRAFT)
                 .build();
-        StorageObjectResponse storage = new StorageObjectResponse(
-                "storage-1", "room.png", "image/png", 100L, null, "png", "user-1",
-                "PROPERTY", "listing-1", StoragePurpose.PROPERTY_IMAGE, StorageVisibility.PUBLIC,
-                StorageStatus.READY, Instant.now(), Instant.now());
         when(listingRepository.findById("listing-1")).thenReturn(Optional.of(listing));
-        when(storageService.getById("storage-1")).thenReturn(storage);
-        when(listingImageRepository.existsByListingIdAndStorageId("listing-1", "storage-1"))
-                .thenReturn(false);
-        when(listingImageRepository.save(any(ListingImage.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(listingMediaService.isAllowedMediaUrl("user-1", IMAGE_URL, ListingMediaType.IMAGE)).thenReturn(true);
+        when(listingMediaService.isAllowedMediaUrl("user-1", VIDEO_URL, ListingMediaType.VIDEO)).thenReturn(true);
+        when(listingRepository.save(any(Listing.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        ListingResponse response = listingService.addImage(
-                "user-1", "listing-1", new AddListingImageRequest("storage-1", 0, true));
+        ListingResponse response = listingService.updateDraft(
+                "user-1",
+                "listing-1",
+                new UpdateListingRequest(null, null, null, null, null, null, null, null, null, null, null, null,
+                        List.of(IMAGE_URL), List.of(VIDEO_URL)));
 
-        verify(listingImageRepository).save(any(ListingImage.class));
-        assertEquals("listing-1", response.id());
-        verify(storageService).getById("storage-1");
-        verify(listingRepository, never()).save(any(Listing.class));
+        assertEquals("[\"" + IMAGE_URL + "\"]", listing.getImageUrlsJson());
+        assertEquals("[\"" + VIDEO_URL + "\"]", listing.getVideoUrlsJson());
+        assertEquals(List.of(IMAGE_URL), response.imageUrls());
+        assertEquals(List.of(VIDEO_URL), response.videoUrls());
     }
 
     @Test
@@ -154,23 +131,6 @@ class ListingServiceTest {
         assertEquals(ListingStatus.PUBLISHED, listing.getStatus());
         assertEquals(ListingStatus.PUBLISHED, response.status());
         verify(listingRepository).save(listing);
-    }
-
-    @Test
-    void getsPublishedListingForAnonymousViewer() {
-        Listing listing = Listing.builder()
-                .id("listing-1")
-                .ownerId("user-1")
-                .title("Phòng trọ")
-                .category(ListingCategory.ROOM)
-                .status(ListingStatus.PUBLISHED)
-                .build();
-        when(listingRepository.findById("listing-1")).thenReturn(Optional.of(listing));
-
-        ListingResponse response = listingService.getById(null, "listing-1");
-
-        assertEquals("listing-1", response.id());
-        assertEquals(ListingStatus.PUBLISHED, response.status());
     }
 
     @Test

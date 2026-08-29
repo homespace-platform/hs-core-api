@@ -283,7 +283,6 @@ public class StorageServiceImpl implements StorageService {
         long maxSize;
         switch (purpose) {
             case USER_AVATAR -> { typeAllowed = IMAGE_TYPES.contains(contentType); maxSize = 5 * MIB; }
-            case PROPERTY_IMAGE -> { typeAllowed = IMAGE_TYPES.contains(contentType); maxSize = 10 * MIB; }
             case CONTRACT_DOCUMENT -> { typeAllowed = DOCUMENT_TYPES.contains(contentType); maxSize = 25 * MIB; }
             case IDENTITY_DOCUMENT -> {
                 typeAllowed = IMAGE_TYPES.contains(contentType) || contentType.equals("application/pdf");

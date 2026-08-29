@@ -1,26 +1,22 @@
 package com.hs.listing.service;
 
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.dto.PageResponse;
 import com.hs.listing.dto.request.CreateListingRequest;
-import com.hs.listing.dto.request.AddListingImageRequest;
 import com.hs.listing.dto.request.UpdateListingRequest;
 import com.hs.listing.dto.response.ListingResponse;
-import com.hs.listing.dto.response.ListingImageResponse;
 import com.hs.listing.model.Listing;
-import com.hs.listing.model.ListingImage;
+import com.hs.listing.model.constant.ListingMediaType;
 import com.hs.listing.model.constant.ListingStatus;
-import com.hs.listing.repository.ListingImageRepository;
 import com.hs.listing.repository.ListingRepository;
-import com.hs.storage.dto.response.StorageObjectResponse;
-import com.hs.storage.model.constant.StoragePurpose;
-import com.hs.storage.model.constant.StorageStatus;
-import com.hs.storage.service.StorageService;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -31,14 +27,20 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ListingService {
 
+    private static final TypeReference<List<String>> URL_LIST_TYPE = new TypeReference<>() {};
+
     private final ListingRepository listingRepository;
-    private final ListingImageRepository listingImageRepository;
-    private final StorageService storageService;
+    private final ListingMediaService listingMediaService;
     private final ObjectMapper objectMapper;
 
     @Transactional
     public ListingResponse createDraft(String ownerId, CreateListingRequest request) {
         if (ownerId == null || ownerId.isBlank()) throw new AppException(ErrorCode.UNAUTHENTICATED);
+
+        List<String> imageUrls = normalizeUrls(request.imageUrls());
+        List<String> videoUrls = normalizeUrls(request.videoUrls());
+        validateMediaUrls(ownerId, imageUrls, ListingMediaType.IMAGE);
+        validateMediaUrls(ownerId, videoUrls, ListingMediaType.VIDEO);
 
         Listing listing = Listing.builder()
                 .title(request.title().trim())
@@ -56,6 +58,8 @@ public class ListingService {
                 .wardCode(request.wardCode())
                 .address(request.address())
                 .detailsJson(writeDetails(request.details()))
+                .imageUrlsJson(writeUrls(imageUrls))
+                .videoUrlsJson(writeUrls(videoUrls))
                 .build();
 
         return toResponse(listingRepository.save(listing));
@@ -97,31 +101,17 @@ public class ListingService {
         if (request.wardCode() != null) listing.setWardCode(request.wardCode());
         if (request.address() != null) listing.setAddress(request.address());
         if (request.details() != null) listing.setDetailsJson(writeDetails(request.details()));
+        if (request.imageUrls() != null) {
+            List<String> imageUrls = normalizeUrls(request.imageUrls());
+            validateMediaUrls(ownerId, imageUrls, ListingMediaType.IMAGE);
+            listing.setImageUrlsJson(writeUrls(imageUrls));
+        }
+        if (request.videoUrls() != null) {
+            List<String> videoUrls = normalizeUrls(request.videoUrls());
+            validateMediaUrls(ownerId, videoUrls, ListingMediaType.VIDEO);
+            listing.setVideoUrlsJson(writeUrls(videoUrls));
+        }
         return toResponse(listingRepository.save(listing));
-    }
-
-    @Transactional
-    public ListingResponse addImage(String ownerId, String listingId, AddListingImageRequest request) {
-        Listing listing = findOwnedDraft(ownerId, listingId);
-        StorageObjectResponse storage = storageService.getById(request.storageId());
-        if (storage == null
-                || !ownerId.equals(storage.ownerId())
-                || storage.purpose() != StoragePurpose.PROPERTY_IMAGE
-                || storage.status() != StorageStatus.READY) {
-            throw new AppException(ErrorCode.INVALID_REQUEST);
-        }
-        if (listingImageRepository.existsByListingIdAndStorageId(listingId, request.storageId())) {
-            throw new AppException(ErrorCode.INVALID_REQUEST);
-        }
-        boolean cover = Boolean.TRUE.equals(request.cover());
-        if (cover) listingImageRepository.clearCoverByListingId(listingId);
-        listingImageRepository.save(ListingImage.builder()
-                .listingId(listingId)
-                .storageId(request.storageId())
-                .sortOrder(request.sortOrder() == null ? 0 : request.sortOrder())
-                .cover(cover)
-                .build());
-        return toResponse(listing);
     }
 
     @Transactional
@@ -141,14 +131,47 @@ public class ListingService {
     }
 
     private ListingResponse toResponse(Listing listing) {
-        return ListingResponse.from(listing, readDetails(listing.getDetailsJson()), readImages(listing.getId()));
+        return ListingResponse.from(
+                listing,
+                readDetails(listing.getDetailsJson()),
+                readUrls(listing.getImageUrlsJson()),
+                readUrls(listing.getVideoUrlsJson()));
     }
 
-    private List<ListingImageResponse> readImages(String listingId) {
-        if (listingId == null || listingId.isBlank()) return List.of();
-        return listingImageRepository.findAllByListingIdOrderBySortOrderAsc(listingId).stream()
-                .map(ListingImageResponse::from)
-                .toList();
+    private List<String> normalizeUrls(List<String> urls) {
+        if (urls == null || urls.isEmpty()) return List.of();
+        LinkedHashSet<String> uniqueUrls = new LinkedHashSet<>();
+        for (String url : urls) {
+            if (url == null || url.isBlank()) continue;
+            uniqueUrls.add(url.trim());
+        }
+        return new ArrayList<>(uniqueUrls);
+    }
+
+    private void validateMediaUrls(String ownerId, List<String> urls, ListingMediaType mediaType) {
+        for (String url : urls) {
+            if (!listingMediaService.isAllowedMediaUrl(ownerId, url, mediaType)) {
+                throw new AppException(ErrorCode.INVALID_REQUEST);
+            }
+        }
+    }
+
+    private String writeUrls(List<String> urls) {
+        if (urls == null || urls.isEmpty()) return null;
+        try {
+            return objectMapper.writeValueAsString(urls);
+        } catch (JacksonException exception) {
+            throw new AppException(ErrorCode.INVALID_REQUEST);
+        }
+    }
+
+    private List<String> readUrls(String urlsJson) {
+        if (urlsJson == null || urlsJson.isBlank()) return List.of();
+        try {
+            return objectMapper.readValue(urlsJson, URL_LIST_TYPE);
+        } catch (JacksonException exception) {
+            throw new AppException(ErrorCode.UNCATEGORIZED_EXCEPTION);
+        }
     }
 
     private String writeDetails(JsonNode details) {
