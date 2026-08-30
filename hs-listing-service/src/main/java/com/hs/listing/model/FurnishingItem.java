@@ -1,0 +1,2 @@
+package com.hs.listing.model; import com.hs.common.persistence.BaseEntity; import jakarta.persistence.*; import lombok.*;
+@Entity @Table(name="furnishing_items") @Getter @Setter @NoArgsConstructor public class FurnishingItem extends BaseEntity { @Id @Column(length=36) private String id; @Column(nullable=false,unique=true) private String code; @Column(nullable=false) private String name; @Column(name="sort_order",nullable=false) private Integer sortOrder; }

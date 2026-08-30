@@ -5,5 +5,7 @@ public enum StoragePurpose {
     CONTRACT_DOCUMENT,
     IDENTITY_DOCUMENT,
     CHAT_ATTACHMENT,
+    LISTING_IMAGE,
+    LISTING_VIDEO,
     GENERAL
 }

@@ -46,6 +46,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 public class StorageServiceImpl implements StorageService {
     private static final long MIB = 1024L * 1024L;
     private static final Set<String> IMAGE_TYPES = Set.of("image/jpeg", "image/png", "image/webp");
+    private static final Set<String> VIDEO_TYPES = Set.of("video/mp4", "video/webm", "video/quicktime");
     private static final Set<String> DOCUMENT_TYPES = Set.of(
             "application/pdf",
             "application/msword",
@@ -61,11 +62,14 @@ public class StorageServiceImpl implements StorageService {
     public CreateUploadResponse createUpload(CreateUploadRequest request) {
         String ownerId = currentUserId();
         String normalizedContentType = request.contentType().trim().toLowerCase(Locale.ROOT);
-        validateFile(request.purpose(), normalizedContentType, request.size());
+        String referenceType = normalizeReferenceType(request.referenceType());
+        StoragePurpose effectivePurpose = resolvePurpose(
+                request.purpose(), referenceType, normalizedContentType);
+        validateFile(effectivePurpose, normalizedContentType, request.size());
 
         String storageId = UUID.randomUUID().toString();
         String extension = extractExtension(request.fileName());
-        String objectKey = buildObjectKey(request.purpose(), ownerId, storageId, extension);
+        String objectKey = buildObjectKey(effectivePurpose, ownerId, storageId, extension);
         StorageVisibility visibility = request.visibility() == null
                 ? StorageVisibility.PRIVATE
                 : request.visibility();
@@ -79,9 +83,9 @@ public class StorageServiceImpl implements StorageService {
                 .sizeBytes(request.size())
                 .extension(extension)
                 .ownerId(ownerId)
-                .referenceType(normalizeReferenceType(request.referenceType()))
+                .referenceType(referenceType)
                 .referenceId(normalizeNullable(request.referenceId()))
-                .purpose(request.purpose())
+                .purpose(effectivePurpose)
                 .visibility(visibility)
                 .status(StorageStatus.PENDING)
                 .build();
@@ -288,7 +292,19 @@ public class StorageServiceImpl implements StorageService {
                 typeAllowed = IMAGE_TYPES.contains(contentType) || contentType.equals("application/pdf");
                 maxSize = 15 * MIB;
             }
-            case CHAT_ATTACHMENT, GENERAL -> {
+            case CHAT_ATTACHMENT -> {
+                typeAllowed = IMAGE_TYPES.contains(contentType) || DOCUMENT_TYPES.contains(contentType);
+                maxSize = 25 * MIB;
+            }
+            case LISTING_IMAGE -> {
+                typeAllowed = IMAGE_TYPES.contains(contentType);
+                maxSize = 25 * MIB;
+            }
+            case LISTING_VIDEO -> {
+                typeAllowed = VIDEO_TYPES.contains(contentType);
+                maxSize = 200 * MIB;
+            }
+            case GENERAL -> {
                 typeAllowed = IMAGE_TYPES.contains(contentType) || DOCUMENT_TYPES.contains(contentType);
                 maxSize = 25 * MIB;
             }
@@ -301,6 +317,16 @@ public class StorageServiceImpl implements StorageService {
     private String buildObjectKey(StoragePurpose purpose, String ownerId, String id, String extension) {
         return purpose.name().toLowerCase(Locale.ROOT) + "/" + ownerId + "/" + id
                 + (extension.isEmpty() ? "" : "." + extension);
+    }
+
+    private StoragePurpose resolvePurpose(
+            StoragePurpose requestedPurpose, String referenceType, String contentType) {
+        if (requestedPurpose == StoragePurpose.GENERAL && "LISTING".equals(referenceType)) {
+            if (IMAGE_TYPES.contains(contentType)) return StoragePurpose.LISTING_IMAGE;
+            if (VIDEO_TYPES.contains(contentType)) return StoragePurpose.LISTING_VIDEO;
+            throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
+        }
+        return requestedPurpose;
     }
 
     private String extractExtension(String fileName) {

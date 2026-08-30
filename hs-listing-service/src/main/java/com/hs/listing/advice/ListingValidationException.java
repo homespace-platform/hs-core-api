@@ -1,0 +1,2 @@
+package com.hs.listing.advice; import lombok.Getter; import java.util.List;
+@Getter public class ListingValidationException extends RuntimeException { private final List<FieldError> errors; public ListingValidationException(String field,String code,String message){super(message);this.errors=List.of(new FieldError(field,code,message));} public record FieldError(String field,String code,String message){} }

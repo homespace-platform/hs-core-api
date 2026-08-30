@@ -1,0 +1,2 @@
+package com.hs.listing.dto.request; import com.hs.listing.model.constant.*; import jakarta.validation.constraints.*; import java.math.BigDecimal;
+public record ListingPricingRequest(@NotNull @DecimalMin("0.01") BigDecimal amount,String currency,@NotNull PriceUnit unit,boolean negotiable,@NotNull DepositType depositType,@DecimalMin("0") BigDecimal depositAmount,@Min(1) Integer depositMonths,@NotNull PaymentCycle paymentCycle,@NotNull @Min(1) Integer minimumLeaseMonths,boolean managementFeeIncluded,Boolean vatIncluded) {}

@@ -1,0 +1,5 @@
+package com.hs.listing.service;
+import com.hs.listing.dto.response.*; import com.hs.listing.model.constant.ListingCategory; import com.hs.listing.repository.*; import lombok.RequiredArgsConstructor; import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Transactional; import java.util.*;
+@Service @RequiredArgsConstructor public class ListingOptionsService { private final AmenityRepository amenityRepository; private final FurnishingItemRepository furnishingItemRepository;
+ @Transactional(readOnly=true) public ListingOptionsResponse getOptions(ListingCategory category){var amenities=amenityRepository.findPublicByCategory(category).stream().map(i->new ListingOptionItemResponse(i.getCode(),i.getName(),i.getSortOrder())).toList();var furnishings=category==ListingCategory.ROOM?furnishingItemRepository.findAllByActiveTrueOrderBySortOrderAscCodeAsc().stream().map(i->new ListingOptionItemResponse(i.getCode(),i.getName(),i.getSortOrder())).toList():List.<ListingOptionItemResponse>of();return new ListingOptionsResponse(category,amenities,furnishings);}
+}

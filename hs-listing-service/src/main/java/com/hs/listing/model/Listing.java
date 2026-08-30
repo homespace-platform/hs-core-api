@@ -1,87 +1,13 @@
 package com.hs.listing.model;
-
-import java.math.BigDecimal;
-import java.util.UUID;
-
-import com.hs.common.persistence.BaseEntity;
-import com.hs.listing.model.constant.ListingCategory;
-import com.hs.listing.model.constant.ListingStatus;
-
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.Id;
-import jakarta.persistence.Index;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.Table;
-import lombok.AccessLevel;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-import lombok.experimental.FieldDefaults;
-
-@Entity
-@Table(name = "listings", indexes = {
-        @Index(name = "idx_listing_owner", columnList = "owner_id"),
-        @Index(name = "idx_listing_status", columnList = "status"),
-        @Index(name = "idx_listing_category", columnList = "category")
-})
-@Getter
-@Setter
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-@FieldDefaults(level = AccessLevel.PRIVATE)
+import com.hs.common.persistence.BaseEntity; import com.hs.listing.model.constant.*; import jakarta.persistence.*; import lombok.*; import java.math.BigDecimal; import java.time.*; import java.util.*;
+@Entity @Table(name="listings") @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
 public class Listing extends BaseEntity {
-
-    @Id
-    @Column(nullable = false, unique = true, updatable = false, length = 36)
-    String id;
-
-    @Column(nullable = false, length = 255)
-    String title;
-
-    @Column(columnDefinition = "TEXT")
-    String description;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
-    ListingCategory category;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
-    ListingStatus status;
-
-    @Column(name = "owner_id", nullable = false, length = 255)
-    String ownerId;
-
-    @Column(name = "price_monthly", precision = 15, scale = 2)
-    BigDecimal priceMonthly;
-
-    @Column(name = "deposit_amount", precision = 15, scale = 2)
-    BigDecimal depositAmount;
-
-    @Column(name = "area_m2", precision = 10, scale = 2)
-    BigDecimal areaM2;
-
-    Integer bedrooms;
-    Integer bathrooms;
-
-    @Column(name = "details_json", columnDefinition = "TEXT")
-    String detailsJson;
-
-    @Column(name = "image_urls_json", columnDefinition = "TEXT")
-    String imageUrlsJson;
-
-    @Column(name = "video_urls_json", columnDefinition = "TEXT")
-    String videoUrlsJson;
-
-    @PrePersist
-    void prePersist() {
-        if (id == null || id.isBlank()) id = UUID.randomUUID().toString();
-        if (status == null) status = ListingStatus.DRAFT;
-    }
+ @Id @Column(length=36,updatable=false) private String id; @Column(name="owner_id",nullable=false) private String ownerId; @Column(nullable=false) private String title; @Column(nullable=false,columnDefinition="text") private String description;
+ @Enumerated(EnumType.STRING) @Column(nullable=false) private ListingCategory category; @Enumerated(EnumType.STRING) @Column(nullable=false) private ListingSubtype subtype; @Enumerated(EnumType.STRING) @Column(name="rental_mode",nullable=false) private RentalMode rentalMode; @Enumerated(EnumType.STRING) @Column(nullable=false) private ListingStatus status;
+ @Column(name="available_from",nullable=false) private LocalDate availableFrom; @Column(name="area_m2",nullable=false,precision=12,scale=2) private BigDecimal areaM2; @Column(name="price_amount",nullable=false,precision=18,scale=2) private BigDecimal priceAmount; @Column(nullable=false,length=3) private String currency; @Enumerated(EnumType.STRING) @Column(name="price_unit",nullable=false) private PriceUnit priceUnit; @Column(nullable=false) private boolean negotiable;
+ @Enumerated(EnumType.STRING) @Column(name="deposit_type",nullable=false) private DepositType depositType; @Column(name="deposit_amount",precision=18,scale=2) private BigDecimal depositAmount; @Column(name="deposit_months") private Integer depositMonths; @Enumerated(EnumType.STRING) @Column(name="payment_cycle",nullable=false) private PaymentCycle paymentCycle; @Column(name="minimum_lease_months",nullable=false) private Integer minimumLeaseMonths; @Column(name="management_fee_included",nullable=false) private boolean managementFeeIncluded; @Column(name="vat_included") private Boolean vatIncluded; @Column(name="published_at",nullable=false) private Instant publishedAt;
+ @OneToOne(mappedBy="listing",cascade=CascadeType.ALL,orphanRemoval=true,fetch=FetchType.LAZY) private ListingApartmentDetail apartmentDetail; @OneToOne(mappedBy="listing",cascade=CascadeType.ALL,orphanRemoval=true,fetch=FetchType.LAZY) private ListingHouseDetail houseDetail; @OneToOne(mappedBy="listing",cascade=CascadeType.ALL,orphanRemoval=true,fetch=FetchType.LAZY) private ListingOfficeDetail officeDetail; @OneToOne(mappedBy="listing",cascade=CascadeType.ALL,orphanRemoval=true,fetch=FetchType.LAZY) private ListingCommercialDetail commercialDetail; @OneToOne(mappedBy="listing",cascade=CascadeType.ALL,orphanRemoval=true,fetch=FetchType.LAZY) private ListingRoomDetail roomDetail;
+ @OneToMany(mappedBy="listing",cascade=CascadeType.ALL,orphanRemoval=true) @Builder.Default private List<ListingMedia> media=new ArrayList<>(); @OneToMany(mappedBy="listing",cascade=CascadeType.ALL,orphanRemoval=true) @Builder.Default private List<ListingCharge> charges=new ArrayList<>(); @OneToMany(mappedBy="listing",cascade=CascadeType.ALL,orphanRemoval=true) @Builder.Default private List<ListingCustomAmenity> customAmenities=new ArrayList<>();
+ @ManyToMany(fetch=FetchType.LAZY) @JoinTable(name="listing_amenities",joinColumns=@JoinColumn(name="listing_id"),inverseJoinColumns=@JoinColumn(name="amenity_id")) @Builder.Default private Set<Amenity> amenities=new HashSet<>(); @ManyToMany(fetch=FetchType.LAZY) @JoinTable(name="listing_furnishings",joinColumns=@JoinColumn(name="listing_id"),inverseJoinColumns=@JoinColumn(name="furnishing_item_id")) @Builder.Default private Set<FurnishingItem> furnishings=new HashSet<>();
+ @PrePersist void prePersist(){if(id==null)id=UUID.randomUUID().toString();if(getActive()==null)setActive(true);}
 }

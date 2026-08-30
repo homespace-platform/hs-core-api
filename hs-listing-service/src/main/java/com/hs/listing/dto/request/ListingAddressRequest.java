@@ -8,6 +8,7 @@ public record ListingAddressRequest(
         @NotBlank @Size(max = 100) String provinceName,
         @NotBlank @Size(max = 20) String wardCode,
         @NotBlank @Size(max = 100) String wardName,
-        @NotBlank @Size(max = 255) String streetLine
+        @NotBlank @Size(max = 255) String streetLine,
+        @Size(max = 500) String fullAddress
 ) {
 }

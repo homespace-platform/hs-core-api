@@ -1,0 +1,2 @@
+package com.hs.listing.model; import jakarta.persistence.*; import lombok.*; import java.util.UUID;
+@Entity @Table(name="listing_custom_amenities") @Getter @Setter @NoArgsConstructor public class ListingCustomAmenity { @Id @Column(length=36) private String id; @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(name="listing_id") private Listing listing; @Column(nullable=false) private String name; @PrePersist void pre(){if(id==null)id=UUID.randomUUID().toString();} }

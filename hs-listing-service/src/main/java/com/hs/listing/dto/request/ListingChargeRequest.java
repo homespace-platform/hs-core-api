@@ -1,0 +1,2 @@
+package com.hs.listing.dto.request; import com.hs.listing.model.constant.ListingEnums.*; import jakarta.validation.constraints.*; import java.math.BigDecimal;
+public record ListingChargeRequest(@NotNull ChargeType chargeType,@NotNull BillingMethod billingMethod,@DecimalMin("0") BigDecimal amount,String currency,String unit,boolean includedInRent,String customName,String description,@NotNull @Min(0) Integer sortOrder) {}

@@ -10,6 +10,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.dto.ApiResponse;
+import com.hs.listing.advice.ListingValidationException;
 import com.hs.storage.advice.entity.enums.StorageErrorCode;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 
@@ -41,16 +42,18 @@ public class GlobalException {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    ResponseEntity<ApiResponse<Void>> handlingValidation(MethodArgumentNotValidException exception) {
-        var fieldError = exception.getFieldError();
-        String message = fieldError != null && fieldError.getDefaultMessage() != null
-                ? fieldError.getDefaultMessage()
-                : ErrorCode.INVALID_REQUEST.getMessage();
+    ResponseEntity<Object> handlingValidation(MethodArgumentNotValidException exception) {
+        var errors = exception.getBindingResult().getFieldErrors().stream()
+                .map(error -> new ListingValidationException.FieldError(
+                        error.getField(), "INVALID", error.getDefaultMessage()))
+                .toList();
+        return ResponseEntity.badRequest().body(java.util.Map.of("code", "VALIDATION_ERROR", "errors", errors));
+    }
 
-        AppException.ErrorCode errorCode = resolveValidationError(message);
-        return errorCode != null
-                ? buildResponse(errorCode)
-                : buildResponse(ErrorCode.INVALID_REQUEST, message);
+    @ExceptionHandler(ListingValidationException.class)
+    ResponseEntity<Object> handlingListingValidation(ListingValidationException exception) {
+        return ResponseEntity.unprocessableEntity()
+                .body(java.util.Map.of("code", "VALIDATION_ERROR", "errors", exception.getErrors()));
     }
 
     private AppException.ErrorCode resolveValidationError(String key) {
