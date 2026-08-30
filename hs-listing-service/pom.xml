@@ -18,6 +18,11 @@
         </dependency>
         <dependency>
             <groupId>com.hs</groupId>
+            <artifactId>hs-user-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.hs</groupId>
             <artifactId>hs-storage-service</artifactId>
             <version>${project.version}</version>
         </dependency>

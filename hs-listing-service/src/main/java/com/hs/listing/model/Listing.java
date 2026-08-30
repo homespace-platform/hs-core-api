@@ -70,18 +70,6 @@ public class Listing extends BaseEntity {
     Integer bedrooms;
     Integer bathrooms;
 
-    @Column(name = "province_code", length = 20)
-    String provinceCode;
-
-    @Column(name = "district_code", length = 20)
-    String districtCode;
-
-    @Column(name = "ward_code", length = 20)
-    String wardCode;
-
-    @Column(length = 500)
-    String address;
-
     @Column(name = "details_json", columnDefinition = "TEXT")
     String detailsJson;
 

@@ -4,16 +4,22 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.dto.PageResponse;
 import com.hs.listing.dto.request.CreateListingRequest;
+import com.hs.listing.dto.request.ListingAddressRequest;
 import com.hs.listing.dto.request.UpdateListingRequest;
 import com.hs.listing.dto.response.ListingResponse;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.constant.ListingMediaType;
 import com.hs.listing.model.constant.ListingStatus;
 import com.hs.listing.repository.ListingRepository;
+import com.hs.user.model.Address;
+import com.hs.user.model.User;
+import com.hs.user.repository.AddressRepository;
+import com.hs.user.repository.UserRepository;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -30,6 +36,8 @@ public class ListingService {
     private static final TypeReference<List<String>> URL_LIST_TYPE = new TypeReference<>() {};
 
     private final ListingRepository listingRepository;
+    private final AddressRepository addressRepository;
+    private final UserRepository userRepository;
     private final ListingMediaService listingMediaService;
     private final ObjectMapper objectMapper;
 
@@ -53,16 +61,14 @@ public class ListingService {
                 .areaM2(request.areaM2())
                 .bedrooms(request.bedrooms())
                 .bathrooms(request.bathrooms())
-                .provinceCode(request.provinceCode())
-                .districtCode(request.districtCode())
-                .wardCode(request.wardCode())
-                .address(request.address())
                 .detailsJson(writeDetails(request.details()))
                 .imageUrlsJson(writeUrls(imageUrls))
                 .videoUrlsJson(writeUrls(videoUrls))
                 .build();
 
-        return toResponse(listingRepository.save(listing));
+        Listing savedListing = listingRepository.save(listing);
+        Address address = createListingAddress(savedListing.getId(), request.address());
+        return toResponse(savedListing, address);
     }
 
     @Transactional(readOnly = true)
@@ -96,10 +102,6 @@ public class ListingService {
         if (request.areaM2() != null) listing.setAreaM2(request.areaM2());
         if (request.bedrooms() != null) listing.setBedrooms(request.bedrooms());
         if (request.bathrooms() != null) listing.setBathrooms(request.bathrooms());
-        if (request.provinceCode() != null) listing.setProvinceCode(request.provinceCode());
-        if (request.districtCode() != null) listing.setDistrictCode(request.districtCode());
-        if (request.wardCode() != null) listing.setWardCode(request.wardCode());
-        if (request.address() != null) listing.setAddress(request.address());
         if (request.details() != null) listing.setDetailsJson(writeDetails(request.details()));
         if (request.imageUrls() != null) {
             List<String> imageUrls = normalizeUrls(request.imageUrls());
@@ -111,7 +113,14 @@ public class ListingService {
             validateMediaUrls(ownerId, videoUrls, ListingMediaType.VIDEO);
             listing.setVideoUrlsJson(writeUrls(videoUrls));
         }
-        return toResponse(listingRepository.save(listing));
+
+        Address address = null;
+        if (request.address() != null) {
+            address = upsertListingAddress(listingId, request.address());
+        }
+
+        Listing savedListing = listingRepository.save(listing);
+        return toResponse(savedListing, address);
     }
 
     @Transactional
@@ -131,11 +140,51 @@ public class ListingService {
     }
 
     private ListingResponse toResponse(Listing listing) {
+        Address address = addressRepository.findByListingIdAndActiveTrue(listing.getId()).orElse(null);
+        return toResponse(listing, address);
+    }
+
+    private ListingResponse toResponse(Listing listing, Address address) {
+        if (address == null) {
+            address = addressRepository.findByListingIdAndActiveTrue(listing.getId()).orElse(null);
+        }
+        User owner = userRepository.findById(listing.getOwnerId()).orElse(null);
         return ListingResponse.from(
                 listing,
+                address,
+                owner,
                 readDetails(listing.getDetailsJson()),
                 readUrls(listing.getImageUrlsJson()),
                 readUrls(listing.getVideoUrlsJson()));
+    }
+
+    private Address createListingAddress(String listingId, ListingAddressRequest request) {
+        Address address = new Address();
+        address.setListingId(listingId);
+        address.setActive(true);
+        applyAddressFields(address, request);
+        return addressRepository.save(address);
+    }
+
+    private Address upsertListingAddress(String listingId, ListingAddressRequest request) {
+        Address address = addressRepository.findByListingIdAndActiveTrue(listingId).orElseGet(Address::new);
+        address.setListingId(listingId);
+        address.setActive(true);
+        applyAddressFields(address, request);
+        return addressRepository.save(address);
+    }
+
+    private void applyAddressFields(Address address, ListingAddressRequest request) {
+        String streetLine = request.streetLine().trim();
+        String wardName = request.wardName().trim();
+        String provinceName = request.provinceName().trim();
+
+        address.setProvinceCode(request.provinceCode().trim());
+        address.setProvinceName(provinceName);
+        address.setWardCode(request.wardCode().trim());
+        address.setWardName(wardName);
+        address.setStreetLine(streetLine);
+        address.setFullAddress(streetLine + ", " + wardName + ", " + provinceName);
     }
 
     private List<String> normalizeUrls(List<String> urls) {
@@ -177,10 +226,20 @@ public class ListingService {
     private String writeDetails(JsonNode details) {
         if (details == null || details.isNull()) return null;
         try {
-            return objectMapper.writeValueAsString(details);
+            return objectMapper.writeValueAsString(sanitizeDetails(details));
         } catch (JacksonException exception) {
             throw new AppException(ErrorCode.INVALID_REQUEST);
         }
+    }
+
+    private JsonNode sanitizeDetails(JsonNode details) {
+        if (!details.isObject()) {
+            return details;
+        }
+        ObjectNode node = (ObjectNode) details.deepCopy();
+        node.remove("landlordName");
+        node.remove("phone");
+        return node;
     }
 
     private JsonNode readDetails(String detailsJson) {

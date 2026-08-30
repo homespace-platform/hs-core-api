@@ -8,6 +8,8 @@ import tools.jackson.databind.JsonNode;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.constant.ListingCategory;
 import com.hs.listing.model.constant.ListingStatus;
+import com.hs.user.model.Address;
+import com.hs.user.model.User;
 
 public record ListingResponse(
         String id,
@@ -21,10 +23,8 @@ public record ListingResponse(
         BigDecimal areaM2,
         Integer bedrooms,
         Integer bathrooms,
-        String provinceCode,
-        String districtCode,
-        String wardCode,
-        String address,
+        ListingAddressResponse address,
+        ListingOwnerResponse owner,
         JsonNode details,
         List<String> imageUrls,
         List<String> videoUrls,
@@ -34,14 +34,16 @@ public record ListingResponse(
 
     public static ListingResponse from(
             Listing listing,
+            Address address,
+            User owner,
             JsonNode details,
             List<String> imageUrls,
             List<String> videoUrls) {
         return new ListingResponse(
                 listing.getId(), listing.getOwnerId(), listing.getTitle(), listing.getDescription(),
                 listing.getCategory(), listing.getStatus(), listing.getPriceMonthly(), listing.getDepositAmount(),
-                listing.getAreaM2(), listing.getBedrooms(), listing.getBathrooms(), listing.getProvinceCode(),
-                listing.getDistrictCode(), listing.getWardCode(), listing.getAddress(), details, imageUrls,
+                listing.getAreaM2(), listing.getBedrooms(), listing.getBathrooms(),
+                ListingAddressResponse.from(address), ListingOwnerResponse.from(owner), details, imageUrls,
                 videoUrls, listing.getCreatedAt(), listing.getUpdatedAt());
     }
 }

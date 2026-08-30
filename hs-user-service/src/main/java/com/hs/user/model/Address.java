@@ -9,10 +9,9 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.OneToOne;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -21,10 +20,7 @@ import lombok.Setter;
 import lombok.experimental.FieldDefaults;
 
 @Entity
-@Table(
-        name = "addresses",
-        uniqueConstraints = @UniqueConstraint(name = "uk_addresses_user_id", columnNames = "user_id")
-)
+@Table(name = "addresses")
 @AllArgsConstructor
 @NoArgsConstructor
 @Getter
@@ -36,9 +32,12 @@ public class Address extends BaseEntity {
     @Column(nullable = false, unique = true)
     String id;
 
-    @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false, unique = true)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", unique = true)
     User user;
+
+    @Column(name = "listing_id", unique = true, length = 36)
+    String listingId;
 
     @Column(name = "province_code", nullable = false, length = 20)
     String provinceCode;
