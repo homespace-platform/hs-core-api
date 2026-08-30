@@ -12,6 +12,7 @@ public final class ListingEnums {
     public enum MeterType { PRIVATE, SHARED }
     public enum ParkingPolicy { NONE, FREE, PAID }
     public enum MediaType { IMAGE, VIDEO }
+    public enum ViewingSlot { MORNING, AFTERNOON, EVENING }
     public enum AddressSourceType { SAVED, NEW }
     public enum ChargeType { ELECTRICITY, WATER, MANAGEMENT, INTERNET, SERVICE_OR_GARBAGE, MOTORBIKE_PARKING, CAR_PARKING, OVERTIME_AIR_CONDITIONING, OTHER }
     public enum BillingMethod { PER_KWH, STATE_WATER_RATE, PER_M3, PER_PERSON_MONTH, PER_MONTH, PER_M2_MONTH, PER_VEHICLE_MONTH, PER_HOUR, FREE, INCLUDED, NOT_APPLICABLE, NEGOTIABLE, CUSTOM }
