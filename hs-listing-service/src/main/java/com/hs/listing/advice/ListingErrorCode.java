@@ -16,7 +16,11 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     LISTING_ALREADY_REVIEWED(4007, "Listing has already been reviewed", HttpStatus.CONFLICT),
     LISTING_VERSION_CONFLICT(4008, "Listing was changed by another request", HttpStatus.CONFLICT),
     LISTING_AUTHENTICATION_REQUIRED(4009, "Authentication is required", HttpStatus.UNAUTHORIZED),
-    LISTING_OWNER_NOT_FOUND(4010, "Listing owner not found", HttpStatus.NOT_FOUND);
+    LISTING_OWNER_NOT_FOUND(4010, "Listing owner not found", HttpStatus.NOT_FOUND),
+    LISTING_PUBLICATION_WINDOW_ENDED(
+            4011,
+            "Publication period has ended, submit the listing for review again",
+            HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

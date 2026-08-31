@@ -13,10 +13,23 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 import java.util.Set;
 
 @Service
 public class ListingStatusService {
+    /**
+     * Owner may hide a published listing or mark it rented outside the platform.
+     * {@link ListingStatus#RENTED} is reserved for the contract flow and is not owner-initiated.
+     */
+    private static final Map<ListingStatus, Set<ListingStatus>> OWNER_TRANSITIONS = Map.of(
+            ListingStatus.PUBLISHED, Set.of(ListingStatus.HIDDEN, ListingStatus.RENTED_EXTERNALLY),
+            ListingStatus.HIDDEN, Set.of(
+                    ListingStatus.PUBLISHED, ListingStatus.RENTED_EXTERNALLY, ListingStatus.PENDING_REVIEW),
+            ListingStatus.RENTED_EXTERNALLY, Set.of(ListingStatus.PUBLISHED),
+            ListingStatus.EXPIRED, Set.of(ListingStatus.PENDING_REVIEW),
+            ListingStatus.REJECTED, Set.of(ListingStatus.PENDING_REVIEW));
+
     private final ListingRepository listingRepository;
     private final ListingStatusHistoryRepository historyRepository;
     private final int publicationDurationDays;
@@ -42,19 +55,34 @@ public class ListingStatusService {
     }
 
     @Transactional
-    public Listing changeByOwner(String ownerId, String listingId, ListingStatus target) {
+    public Listing changeByOwner(String ownerId, String listingId, ListingStatus target, String note) {
         Listing listing = requireOwned(ownerId, listingId);
         if (listing.getStatus() == ListingStatus.VIOLATION) {
             throw new AppException(ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
         }
-        if (target == ListingStatus.HIDDEN) {
-            change(listing, target, null, ownerId, ListingStatusActorType.USER, false);
-        } else if (target == ListingStatus.RENTED && listing.getStatus() == ListingStatus.PUBLISHED) {
-            change(listing, target, null, ownerId, ListingStatusActorType.USER, false);
-        } else {
+        if (listing.getStatus() == ListingStatus.RENTED) {
+            throw new AppException(ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT);
+        }
+        if (target == ListingStatus.RENTED) {
             throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
         }
+        if (!OWNER_TRANSITIONS.getOrDefault(listing.getStatus(), Set.of()).contains(target)) {
+            throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
+        }
+        if (target == ListingStatus.PUBLISHED && !hasRemainingPublicationWindow(listing)) {
+            throw new AppException(ListingErrorCode.LISTING_PUBLICATION_WINDOW_ENDED);
+        }
+        if (target == ListingStatus.PENDING_REVIEW
+                && listing.getStatus() == ListingStatus.HIDDEN
+                && hasRemainingPublicationWindow(listing)) {
+            throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
+        }
+        change(listing, target, normalizeReason(note), ownerId, ListingStatusActorType.USER, false);
         return listing;
+    }
+
+    private boolean hasRemainingPublicationWindow(Listing listing) {
+        return listing.getExpiresAt() != null && listing.getExpiresAt().isAfter(Instant.now());
     }
 
     @Transactional
@@ -95,15 +123,17 @@ public class ListingStatusService {
     private void validateAdminTransition(ListingStatus from, ListingStatus to) {
         if (from == to) throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
         boolean allowed = switch (to) {
-            case PUBLISHED -> from == ListingStatus.PENDING_REVIEW;
+            case PUBLISHED -> from == ListingStatus.PENDING_REVIEW || from == ListingStatus.VIOLATION;
             case REJECTED -> from == ListingStatus.PENDING_REVIEW;
-            case RENTED -> from == ListingStatus.PUBLISHED;
+            case RENTED -> from == ListingStatus.PUBLISHED || from == ListingStatus.RENTED_EXTERNALLY;
+            case RENTED_EXTERNALLY -> from == ListingStatus.PUBLISHED || from == ListingStatus.RENTED;
             case EXPIRED -> from == ListingStatus.PUBLISHED;
             case VIOLATION -> from != ListingStatus.VIOLATION;
             case HIDDEN -> from != ListingStatus.HIDDEN;
             case PENDING_REVIEW -> Set.of(
                     ListingStatus.DRAFT, ListingStatus.REJECTED, ListingStatus.EXPIRED,
-                    ListingStatus.HIDDEN, ListingStatus.RENTED).contains(from);
+                    ListingStatus.HIDDEN, ListingStatus.RENTED, ListingStatus.RENTED_EXTERNALLY,
+                    ListingStatus.VIOLATION).contains(from);
             case DRAFT -> false;
         };
         if (!allowed) throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
@@ -131,7 +161,11 @@ public class ListingStatusService {
         listing.setStatusChangedAt(now);
         listing.setStatusChangedBy(actorId);
         if (target == ListingStatus.PENDING_REVIEW) listing.setSubmittedAt(now);
-        if (target == ListingStatus.PUBLISHED) {
+        boolean startsNewPublicationWindow = target == ListingStatus.PUBLISHED
+                && (previous == ListingStatus.PENDING_REVIEW
+                || previous == ListingStatus.VIOLATION
+                || listing.getPublishedAt() == null);
+        if (startsNewPublicationWindow) {
             listing.setPublishedAt(now);
             listing.setExpiresAt(now.plus(publicationDurationDays, ChronoUnit.DAYS));
         }

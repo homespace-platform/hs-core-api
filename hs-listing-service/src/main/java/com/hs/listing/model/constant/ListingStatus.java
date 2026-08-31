@@ -5,6 +5,7 @@ public enum ListingStatus {
     PENDING_REVIEW,
     PUBLISHED,
     RENTED,
+    RENTED_EXTERNALLY,
     EXPIRED,
     REJECTED,
     HIDDEN,

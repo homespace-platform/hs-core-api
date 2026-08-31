@@ -3,6 +3,7 @@ package com.hs.api.controller.listing;
 import com.hs.common.context.*;
 import com.hs.common.dto.ApiResponse;
 import com.hs.common.dto.PageResponse;
+import com.hs.listing.dto.request.ChangeListingStatusRequest;
 import com.hs.listing.dto.request.CreateListingRequest;
 import com.hs.listing.dto.response.CreateListingResponse;
 import com.hs.listing.dto.response.ListingDetailResponse;
@@ -55,24 +56,28 @@ public class ListingController {
                 .build();
     }
 
-    @PatchMapping("/{listingId}/hide")
-    public ApiResponse<ListingDetailResponse> hide(@PathVariable String listingId) {
-        String ownerId = currentUserId();
-        listingStatusService.changeByOwner(ownerId, listingId, ListingStatus.HIDDEN);
+    @PatchMapping("/{listingId}/status")
+    public ApiResponse<ListingDetailResponse> changeStatus(
+            @PathVariable String listingId,
+            @RequestBody @Valid ChangeListingStatusRequest request) {
         return ApiResponse.<ListingDetailResponse>builder()
-                .message("Listing hidden")
-                .result(listingQueryService.getById(ownerId, listingId))
+                .message("Listing status updated")
+                .result(applyOwnerStatus(listingId, request.status(), request.reason()))
                 .build();
     }
 
-    @PatchMapping("/{listingId}/mark-rented")
-    public ApiResponse<ListingDetailResponse> markRented(@PathVariable String listingId) {
-        String ownerId = currentUserId();
-        listingStatusService.changeByOwner(ownerId, listingId, ListingStatus.RENTED);
+    @PatchMapping("/{listingId}/hide")
+    public ApiResponse<ListingDetailResponse> hide(@PathVariable String listingId) {
         return ApiResponse.<ListingDetailResponse>builder()
-                .message("Listing marked as rented")
-                .result(listingQueryService.getById(ownerId, listingId))
+                .message("Listing hidden")
+                .result(applyOwnerStatus(listingId, ListingStatus.HIDDEN, null))
                 .build();
+    }
+
+    private ListingDetailResponse applyOwnerStatus(String listingId, ListingStatus status, String reason) {
+        String ownerId = currentUserId();
+        listingStatusService.changeByOwner(ownerId, listingId, status, reason);
+        return listingQueryService.getById(ownerId, listingId);
     }
 
     private String currentUserId() {
