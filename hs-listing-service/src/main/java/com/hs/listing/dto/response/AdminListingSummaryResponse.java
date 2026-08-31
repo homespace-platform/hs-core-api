@@ -4,28 +4,25 @@ import com.hs.listing.model.constant.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.time.LocalDate;
 
-public record MyListingSummaryResponse(
+public record AdminListingSummaryResponse(
         String id,
         String title,
         ListingCategory category,
         ListingSubtype subtype,
         ListingStatus status,
-        LocalDate availableFrom,
-        BigDecimal areaM2,
+        String statusReason,
         BigDecimal priceAmount,
         String currency,
         PriceUnit priceUnit,
-        boolean negotiable,
         String coverImageUrl,
-        String coverStorageObjectId,
-        int mediaCount,
         String fullAddress,
-        String statusReason,
+        ListingOwnerResponse owner,
         Instant submittedAt,
         Instant publishedAt,
         Instant expiresAt,
+        Instant statusChangedAt,
+        String statusChangedBy,
         Instant createdAt,
         Instant updatedAt
 ) {

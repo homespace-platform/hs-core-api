@@ -16,6 +16,7 @@ import com.hs.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,13 +34,24 @@ public class ListingQueryService {
     private final StorageProperties storageProperties;
 
     @Transactional(readOnly = true)
-    public PageResponse<MyListingSummaryResponse> getMyListings(String ownerId, int page) {
+    public PageResponse<MyListingSummaryResponse> getMyListings(
+            String ownerId, int page, ListingStatus status, String keyword) {
         requireAuthentication(ownerId);
         var pageable = PageRequest.of(
                 page - 1,
                 MY_LISTING_PAGE_SIZE,
-                Sort.by(Sort.Direction.DESC, "publishedAt").and(Sort.by(Sort.Direction.DESC, "createdAt")));
-        return new PageResponse<>(listingRepository.findAllByOwnerIdAndActiveTrue(ownerId, pageable)
+                Sort.by(Sort.Direction.DESC, "updatedAt").and(Sort.by(Sort.Direction.DESC, "createdAt")));
+        Specification<Listing> specification = (root, query, cb) -> cb.and(
+                cb.equal(root.get("ownerId"), ownerId), cb.isTrue(root.get("active")));
+        if (status != null) {
+            specification = specification.and((root, query, cb) -> cb.equal(root.get("status"), status));
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String pattern = "%" + keyword.trim().toLowerCase() + "%";
+            specification = specification.and((root, query, cb) ->
+                    cb.like(cb.lower(root.get("title")), pattern));
+        }
+        return new PageResponse<>(listingRepository.findAll(specification, pageable)
                 .map(this::toSummary));
     }
 
@@ -48,8 +60,7 @@ public class ListingQueryService {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> new AppException(ErrorCode.ROUTE_NOT_FOUND));
         boolean owner = viewerId != null && viewerId.equals(listing.getOwnerId());
-        boolean publicListing = listing.getStatus() == ListingStatus.PUBLISHED
-                || listing.getStatus() == ListingStatus.RENTED;
+        boolean publicListing = listing.getStatus() == ListingStatus.PUBLISHED;
         if (!owner && !publicListing) throw new AppException(ErrorCode.ROUTE_NOT_FOUND);
         return toDetail(listing);
     }
@@ -71,10 +82,11 @@ public class ListingQueryService {
                 listing.getAvailableFrom(), listing.getAreaM2(), listing.getPriceAmount(), listing.getCurrency(),
                 listing.getPriceUnit(), listing.isNegotiable(), cover == null ? null : publicUrl(cover.getStorageObject()),
                 cover == null ? null : cover.getStorageObject().getId(), listing.getMedia().size(), fullAddress,
-                listing.getPublishedAt(), listing.getCreatedAt(), listing.getUpdatedAt());
+                listing.getStatusReason(), listing.getSubmittedAt(), listing.getPublishedAt(), listing.getExpiresAt(),
+                listing.getCreatedAt(), listing.getUpdatedAt());
     }
 
-    private ListingDetailResponse toDetail(Listing listing) {
+    public ListingDetailResponse toDetail(Listing listing) {
         var amenities = listing.getAmenities().stream()
                 .sorted(Comparator.comparing(Amenity::getSortOrder).thenComparing(Amenity::getCode))
                 .map(item -> new ListingOptionItemResponse(item.getCode(), item.getName(), item.getSortOrder()))
@@ -115,7 +127,9 @@ public class ListingQueryService {
                 toOffice(listing.getOfficeDetail()), toCommercial(listing.getCommercialDetail()),
                 toRoom(listing.getRoomDetail()), amenities, customAmenities, furnishings, charges,
                 address, owner, media, viewingDays, viewingSlots,
-                Boolean.TRUE.equals(listing.getActive()), listing.getPublishedAt(),
+                Boolean.TRUE.equals(listing.getActive()), listing.getStatusReason(), listing.getSubmittedAt(),
+                listing.getPublishedAt(), listing.getExpiresAt(), listing.getStatusChangedAt(),
+                listing.getStatusChangedBy(), listing.getVersion(),
                 listing.getCreatedAt(), listing.getUpdatedAt(), listing.getCreatedBy(), listing.getUpdatedBy());
     }
 

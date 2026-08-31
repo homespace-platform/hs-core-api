@@ -10,7 +10,8 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.dto.ApiResponse;
-import com.hs.listing.advice.ListingValidationException;
+import com.hs.listing.advice.ListingErrorCode;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.hs.storage.advice.entity.enums.StorageErrorCode;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 
@@ -44,16 +45,15 @@ public class GlobalException {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<Object> handlingValidation(MethodArgumentNotValidException exception) {
         var errors = exception.getBindingResult().getFieldErrors().stream()
-                .map(error -> new ListingValidationException.FieldError(
+                .map(error -> new FieldError(
                         error.getField(), "INVALID", error.getDefaultMessage()))
                 .toList();
         return ResponseEntity.badRequest().body(java.util.Map.of("code", "VALIDATION_ERROR", "errors", errors));
     }
 
-    @ExceptionHandler(ListingValidationException.class)
-    ResponseEntity<Object> handlingListingValidation(ListingValidationException exception) {
-        return ResponseEntity.unprocessableEntity()
-                .body(java.util.Map.of("code", "VALIDATION_ERROR", "errors", exception.getErrors()));
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    ResponseEntity<ApiResponse<Void>> handlingOptimisticLock(ObjectOptimisticLockingFailureException exception) {
+        return buildResponse(ListingErrorCode.LISTING_VERSION_CONFLICT);
     }
 
     private AppException.ErrorCode resolveValidationError(String key) {
@@ -83,5 +83,8 @@ public class GlobalException {
 
     private ApiResponse<Void> buildErrorResponse(int code, String message) {
         return ApiResponse.<Void>builder().code(code).message(message).build();
+    }
+
+    private record FieldError(String field, String code, String message) {
     }
 }

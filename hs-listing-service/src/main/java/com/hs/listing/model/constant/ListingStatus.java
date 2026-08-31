@@ -2,7 +2,11 @@ package com.hs.listing.model.constant;
 
 public enum ListingStatus {
     DRAFT,
+    PENDING_REVIEW,
     PUBLISHED,
     RENTED,
-    ARCHIVED
+    EXPIRED,
+    REJECTED,
+    HIDDEN,
+    VIOLATION
 }

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -27,16 +28,16 @@ class ListingQueryServiceTest {
         ListingRepository listings = mock(ListingRepository.class);
         AddressRepository addresses = mock(AddressRepository.class);
         Listing listing = listing();
-        when(listings.findAllByOwnerIdAndActiveTrue(eq("owner-1"), any(Pageable.class)))
+        when(listings.findAll(any(Specification.class), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(listing)));
         when(addresses.findByListingIdAndActiveTrue("listing-1")).thenReturn(Optional.empty());
         ListingQueryService service = new ListingQueryService(
                 listings, addresses, mock(UserRepository.class), properties());
 
-        var response = service.getMyListings("owner-1", 2);
+        var response = service.getMyListings("owner-1", 2, null, null);
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(listings).findAllByOwnerIdAndActiveTrue(eq("owner-1"), pageable.capture());
+        verify(listings).findAll(any(Specification.class), pageable.capture());
         assertEquals(10, pageable.getValue().getPageSize());
         assertEquals(1, pageable.getValue().getPageNumber());
         assertEquals("listing-1", response.getResult().getFirst().id());

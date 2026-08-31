@@ -1,6 +1,5 @@
 package com.hs.listing.service;
 
-import com.hs.listing.advice.ListingValidationException;
 import com.hs.storage.model.constant.StoragePurpose;
 import com.hs.common.advice.entity.AppException;
 import com.hs.listing.dto.request.*;
@@ -30,6 +29,7 @@ public class ListingService {
     private final StorageObjectRepository storageObjectRepository;
     private final AmenityRepository amenityRepository;
     private final FurnishingItemRepository furnishingItemRepository;
+    private final ListingStatusService listingStatusService;
 
     @Transactional
     public CreateListingResponse upsert(String ownerId, CreateListingRequest r) {
@@ -38,6 +38,8 @@ public class ListingService {
         validate(r);
         boolean updating = r.id() != null && !r.id().isBlank();
         Listing l = upsertTarget(ownerId, r.id());
+        if (l.getStatus() == ListingStatus.VIOLATION)
+            throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
         if (updating) {
             clearOwnedData(l);
             listingRepository.flush();
@@ -48,10 +50,65 @@ public class ListingService {
         attachCharges(l, r);
         attachMedia(l, r, ownerId);
         attachViewingSchedule(l, r);
+        listingStatusService.applySubmission(
+                l, r.submissionAction(), ownerId, ListingStatusActorType.USER);
         Listing saved = listingRepository.save(l);
         linkStorageObjects(saved);
         upsertAddress(saved.getId(), ownerId, r.addressSource());
-        return new CreateListingResponse(saved.getId(), saved.getStatus(), saved.getTitle(), saved.getPublishedAt());
+        return response(saved);
+    }
+
+    @Transactional
+    public CreateListingResponse createByAdmin(String adminId, String ownerId, CreateListingRequest request) {
+        requireActor(adminId);
+        if (ownerId == null || ownerId.isBlank())
+            throw error(400, "OWNER_REQUIRED", "ownerId is required");
+        validate(request);
+        Listing listing = new Listing();
+        applyContent(listing, ownerId, request);
+        listingStatusService.applySubmission(
+                listing, request.submissionAction(), adminId, ListingStatusActorType.ADMIN);
+        Listing saved = listingRepository.save(listing);
+        linkStorageObjects(saved);
+        upsertAddress(saved.getId(), ownerId, request.addressSource());
+        return response(saved);
+    }
+
+    @Transactional
+    public CreateListingResponse updateByAdmin(String adminId, String listingId, CreateListingRequest request) {
+        requireActor(adminId);
+        validate(request);
+        Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
+                .orElseThrow(() -> error(404, "LISTING_NOT_FOUND", "Listing not found"));
+        ListingStatus preservedStatus = listing.getStatus();
+        clearOwnedData(listing);
+        listingRepository.flush();
+        applyContent(listing, listing.getOwnerId(), request);
+        listing.setStatus(preservedStatus);
+        Listing saved = listingRepository.save(listing);
+        linkStorageObjects(saved);
+        upsertAddress(saved.getId(), saved.getOwnerId(), request.addressSource());
+        return response(saved);
+    }
+
+    private void applyContent(Listing listing, String ownerId, CreateListingRequest request) {
+        applyCommonFields(listing, ownerId, request);
+        attachDetail(listing, request);
+        attachCatalogs(listing, request);
+        attachCharges(listing, request);
+        attachMedia(listing, request, ownerId);
+        attachViewingSchedule(listing, request);
+    }
+
+    private CreateListingResponse response(Listing listing) {
+        return new CreateListingResponse(
+                listing.getId(), listing.getStatus(), listing.getTitle(),
+                listing.getSubmittedAt(), listing.getPublishedAt());
+    }
+
+    private void requireActor(String actorId) {
+        if (actorId == null || actorId.isBlank())
+            throw error(401, "AUTHENTICATION_REQUIRED", "Authentication is required");
     }
 
     private Listing upsertTarget(String ownerId, String listingId) {
@@ -72,7 +129,6 @@ public class ListingService {
         l.setCategory(r.category());
         l.setSubtype(r.subtype());
         l.setRentalMode(r.rentalMode());
-        l.setStatus(ListingStatus.PUBLISHED);
         l.setAvailableFrom(r.availableFrom());
         l.setAreaM2(r.areaM2());
         l.setPriceAmount(p.amount());
@@ -87,8 +143,6 @@ public class ListingService {
         l.setMinimumLeaseMonths(p.minimumLeaseMonths());
         l.setManagementFeeIncluded(p.managementFeeIncluded());
         l.setVatIncluded(p.vatIncluded());
-        if (l.getPublishedAt() == null)
-            l.setPublishedAt(Instant.now());
         l.setActive(true);
     }
 
@@ -397,7 +451,10 @@ public class ListingService {
     }
 
     private void invalid(String field, String code) {
-        throw new ListingValidationException(field, code, validationMessage(field, code));
+        throw new AppException(
+                422,
+                field + " [" + code + "]: " + validationMessage(field, code),
+                HttpStatus.UNPROCESSABLE_ENTITY);
     }
 
     private String validationMessage(String field, String code) {
