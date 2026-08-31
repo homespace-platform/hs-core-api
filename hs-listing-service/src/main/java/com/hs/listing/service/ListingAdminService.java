@@ -25,6 +25,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
 import java.util.Comparator;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -89,8 +92,17 @@ public class ListingAdminService {
     public AdminListingDetailResponse getById(String listingId) {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
-        var history = historyRepository.findAllByListingIdOrderByCreatedAtAsc(listingId).stream()
-                .map(ListingStatusHistoryResponse::from)
+        var histories = historyRepository.findAllByListingIdOrderByCreatedAtAsc(listingId);
+        var actorIds = histories.stream()
+                .map(item -> item.getChangedBy())
+                .filter(Objects::nonNull)
+                .filter(id -> !id.isBlank() && !"SYSTEM".equalsIgnoreCase(id))
+                .collect(Collectors.toSet());
+        var actorsById = userRepository.findAllById(actorIds).stream()
+                .collect(Collectors.toMap(com.hs.user.model.User::getId, Function.identity()));
+        var history = histories.stream()
+                .map(item -> ListingStatusHistoryResponse.from(
+                        item, actorsById.get(item.getChangedBy())))
                 .toList();
         return new AdminListingDetailResponse(queryService.toDetail(listing), history);
     }
