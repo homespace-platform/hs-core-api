@@ -37,10 +37,13 @@ public class ListingStatusService {
     public ListingStatusService(
             ListingRepository listingRepository,
             ListingStatusHistoryRepository historyRepository,
-            @Value("${listing.publication-duration-days:30}") int publicationDurationDays) {
+            @Value("${listing.publication-duration-days}") int publicationDurationDays) {
         this.listingRepository = listingRepository;
         this.historyRepository = historyRepository;
-        this.publicationDurationDays = publicationDurationDays > 0 ? publicationDurationDays : 30;
+        if (publicationDurationDays <= 0) {
+            throw new IllegalArgumentException("listing.publication-duration-days must be positive");
+        }
+        this.publicationDurationDays = publicationDurationDays;
     }
 
     @Transactional

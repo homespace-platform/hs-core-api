@@ -13,7 +13,7 @@ import java.time.Instant;
 public class ListingExpirationScheduler {
     private final ListingStatusService listingStatusService;
 
-    @Scheduled(fixedDelayString = "${listing.expiration-check-delay-ms:3600000}")
+    @Scheduled(fixedDelayString = "${listing.expiration-check-delay-ms}")
     public void expireListings() {
         int count = listingStatusService.expirePublishedListings(Instant.now());
         if (count > 0) log.info("Expired {} listing(s)", count);

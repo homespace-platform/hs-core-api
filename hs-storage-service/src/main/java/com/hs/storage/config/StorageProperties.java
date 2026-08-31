@@ -2,6 +2,7 @@ package com.hs.storage.config;
 
 import java.time.Duration;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -10,11 +11,7 @@ import org.springframework.validation.annotation.Validated;
 public record StorageProperties(
         @NotBlank String bucket,
         @NotBlank String region,
-        Duration uploadUrlDuration,
-        Duration downloadUrlDuration
+        @NotNull Duration uploadUrlDuration,
+        @NotNull Duration downloadUrlDuration
 ) {
-    public StorageProperties {
-        uploadUrlDuration = uploadUrlDuration == null ? Duration.ofMinutes(10) : uploadUrlDuration;
-        downloadUrlDuration = downloadUrlDuration == null ? Duration.ofMinutes(5) : downloadUrlDuration;
-    }
 }
