@@ -327,7 +327,7 @@ public class ListingPublicService {
 
     // ── Mapping ─────────────────────────────────────────────────────────
 
-    private PublicListingSummaryResponse toSummary(Listing listing) {
+    public PublicListingSummaryResponse toSummary(Listing listing) {
         // All images sorted: cover first, then by sortOrder
         java.util.List<String> imageUrls = listing.getMedia().stream()
                 .filter(m -> m.getMediaType() == MediaType.IMAGE)
