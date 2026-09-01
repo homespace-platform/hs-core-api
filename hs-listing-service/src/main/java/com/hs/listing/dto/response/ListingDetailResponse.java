@@ -47,6 +47,7 @@ public record ListingDetailResponse(
         Instant createdAt,
         Instant updatedAt,
         String createdBy,
-        String updatedBy
+        String updatedBy,
+        Long viewCount
 ) {
 }

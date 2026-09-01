@@ -15,4 +15,8 @@ public interface ListingRepository extends JpaRepository<Listing, String>, JpaSp
     Optional<Listing> findByIdAndActiveTrue(String id);
     List<Listing> findAllByStatusAndActiveTrueAndExpiresAtLessThanEqual(ListingStatus status, Instant expiresAt);
     long countByOwnerIdAndStatusAndActiveTrue(String ownerId, ListingStatus status);
+
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("UPDATE Listing l SET l.viewCount = COALESCE(l.viewCount, 0) + 1 WHERE l.id = :id")
+    void incrementViewCount(@org.springframework.data.repository.query.Param("id") String id);
 }

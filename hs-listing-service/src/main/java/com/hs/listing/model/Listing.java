@@ -50,6 +50,7 @@ public class Listing extends BaseEntity {
     @Column(name = "minimum_lease_months", nullable = false) private Integer minimumLeaseMonths;
     @Column(name = "management_fee_included", nullable = false) private boolean managementFeeIncluded;
     @Column(name = "vat_included") private Boolean vatIncluded;
+    @Column(name = "view_count", nullable = false) @Builder.Default private Long viewCount = 0L;
 
     @OneToOne(mappedBy = "listing", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private ListingApartmentDetail apartmentDetail;
@@ -88,5 +89,6 @@ public class Listing extends BaseEntity {
         if (id == null) id = UUID.randomUUID().toString();
         if (status == null) status = ListingStatus.DRAFT;
         if (getActive() == null) setActive(true);
+        if (viewCount == null) viewCount = 0L;
     }
 }

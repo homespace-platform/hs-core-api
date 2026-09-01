@@ -31,11 +31,23 @@ public class PublicListingController {
 
     private final ListingPublicService listingPublicService;
     private final ListingQueryService listingQueryService;
+    private final com.hs.listing.service.ListingViewService listingViewService;
 
     @GetMapping("/{listingId}")
     public com.hs.common.dto.ApiResponse<ListingDetailResponse> getPublicListingDetail(@PathVariable String listingId) {
         return com.hs.common.dto.ApiResponse.<ListingDetailResponse>builder()
                 .result(listingQueryService.getById(null, listingId))
+                .build();
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/{listingId}/view")
+    public com.hs.common.dto.ApiResponse<com.hs.listing.service.ListingViewService.ViewRecordResult> recordView(
+            @PathVariable String listingId,
+            jakarta.servlet.http.HttpServletRequest request) {
+        String viewerId = optionalUserId();
+        String clientIp = extractClientIp(request);
+        return com.hs.common.dto.ApiResponse.<com.hs.listing.service.ListingViewService.ViewRecordResult>builder()
+                .result(listingViewService.recordView(listingId, viewerId, clientIp))
                 .build();
     }
 
@@ -82,5 +94,25 @@ public class PublicListingController {
         return com.hs.common.dto.ApiResponse.<Long>builder()
                 .result(listingPublicService.getOwnerListingCount(ownerId))
                 .build();
+    }
+
+    private String optionalUserId() {
+        try {
+            com.hs.common.context.UserContext context = com.hs.common.context.UserContextHolder.get();
+            if (context != null && context.userId() != null && !context.userId().isBlank()) {
+                return context.userId();
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private String extractClientIp(jakarta.servlet.http.HttpServletRequest request) {
+        if (request == null) return "unknown";
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 }

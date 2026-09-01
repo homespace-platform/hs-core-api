@@ -49,6 +49,7 @@ public record PublicListingSummaryResponse(
         String ownerAvatarUrl,
         Integer ownerListingCount,
         Instant publishedAt,
-        LocalDate availableFrom
+        LocalDate availableFrom,
+        Long viewCount
 ) {
 }

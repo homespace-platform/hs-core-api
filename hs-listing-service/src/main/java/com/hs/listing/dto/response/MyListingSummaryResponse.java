@@ -27,6 +27,7 @@ public record MyListingSummaryResponse(
         Instant publishedAt,
         Instant expiresAt,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        Long viewCount
 ) {
 }

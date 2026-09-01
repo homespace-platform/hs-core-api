@@ -83,7 +83,8 @@ public class ListingQueryService {
                 listing.getPriceUnit(), listing.isNegotiable(), cover == null ? null : publicUrl(cover.getStorageObject()),
                 cover == null ? null : cover.getStorageObject().getId(), listing.getMedia().size(), fullAddress,
                 listing.getStatusReason(), listing.getSubmittedAt(), listing.getPublishedAt(), listing.getExpiresAt(),
-                listing.getCreatedAt(), listing.getUpdatedAt());
+                listing.getCreatedAt(), listing.getUpdatedAt(),
+                listing.getViewCount() != null ? listing.getViewCount() : 0L);
     }
 
     public ListingDetailResponse toDetail(Listing listing) {
@@ -130,7 +131,8 @@ public class ListingQueryService {
                 Boolean.TRUE.equals(listing.getActive()), listing.getStatusReason(), listing.getSubmittedAt(),
                 listing.getPublishedAt(), listing.getExpiresAt(), listing.getStatusChangedAt(),
                 listing.getStatusChangedBy(), listing.getVersion(),
-                listing.getCreatedAt(), listing.getUpdatedAt(), listing.getCreatedBy(), listing.getUpdatedBy());
+                listing.getCreatedAt(), listing.getUpdatedAt(), listing.getCreatedBy(), listing.getUpdatedBy(),
+                listing.getViewCount() != null ? listing.getViewCount() : 0L);
     }
 
     private ListingPricingRequest toPricing(Listing listing) {
