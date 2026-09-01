@@ -56,6 +56,22 @@ public class ListingQueryService {
     }
 
     @Transactional(readOnly = true)
+    public java.util.Map<String, Long> getMyListingStatusCounts(String ownerId) {
+        requireAuthentication(ownerId);
+        List<Object[]> rows = listingRepository.countByOwnerGroupedByStatus(ownerId);
+        java.util.Map<String, Long> counts = new java.util.HashMap<>();
+        long total = 0;
+        for (Object[] row : rows) {
+            ListingStatus status = (ListingStatus) row[0];
+            Long count = ((Number) row[1]).longValue();
+            counts.put(status.name(), count);
+            total += count;
+        }
+        counts.put("ALL", total);
+        return counts;
+    }
+
+    @Transactional(readOnly = true)
     public ListingDetailResponse getById(String viewerId, String listingId) {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> new AppException(ErrorCode.ROUTE_NOT_FOUND));

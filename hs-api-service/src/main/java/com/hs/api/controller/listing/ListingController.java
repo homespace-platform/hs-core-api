@@ -49,6 +49,13 @@ public class ListingController {
         return listingQueryService.getMyListings(currentUserId(), page, status, keyword);
     }
 
+    @GetMapping("/me/counts")
+    public ApiResponse<java.util.Map<String, Long>> getMyListingCounts() {
+        return ApiResponse.<java.util.Map<String, Long>>builder()
+                .result(listingQueryService.getMyListingStatusCounts(currentUserId()))
+                .build();
+    }
+
     @GetMapping("/{listingId}")
     public ApiResponse<ListingDetailResponse> getById(@PathVariable String listingId) {
         return ApiResponse.<ListingDetailResponse>builder()
