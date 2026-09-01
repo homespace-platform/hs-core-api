@@ -41,6 +41,13 @@ public class ListingAdminController {
         return adminService.findAll(page, size, status, keyword, ownerId, category, fromDate, toDate, sort);
     }
 
+    @GetMapping("/counts")
+    public ApiResponse<java.util.Map<String, Long>> getStatusCounts() {
+        return ApiResponse.<java.util.Map<String, Long>>builder()
+                .result(adminService.getStatusCounts())
+                .build();
+    }
+
     @GetMapping("/{listingId}")
     public ApiResponse<AdminListingDetailResponse> getById(@PathVariable String listingId) {
         return ApiResponse.<AdminListingDetailResponse>builder()

@@ -89,6 +89,21 @@ public class ListingAdminService {
     }
 
     @Transactional(readOnly = true)
+    public java.util.Map<String, Long> getStatusCounts() {
+        List<Object[]> rows = listingRepository.countAllGroupedByStatus();
+        java.util.Map<String, Long> counts = new java.util.HashMap<>();
+        long total = 0;
+        for (Object[] row : rows) {
+            ListingStatus status = (ListingStatus) row[0];
+            Long count = ((Number) row[1]).longValue();
+            counts.put(status.name(), count);
+            total += count;
+        }
+        counts.put("ALL", total);
+        return counts;
+    }
+
+    @Transactional(readOnly = true)
     public AdminListingDetailResponse getById(String listingId) {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
