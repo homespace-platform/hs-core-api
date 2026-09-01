@@ -128,7 +128,7 @@ public class ListingStatusService {
         boolean allowed = switch (to) {
             case PUBLISHED -> from == ListingStatus.PENDING_REVIEW || from == ListingStatus.VIOLATION;
             case REJECTED -> from == ListingStatus.PENDING_REVIEW;
-            case RENTED -> from == ListingStatus.PUBLISHED || from == ListingStatus.RENTED_EXTERNALLY;
+            case RENTED -> false; // RENTED is reserved strictly for contract execution flow
             case RENTED_EXTERNALLY -> from == ListingStatus.PUBLISHED || from == ListingStatus.RENTED;
             case EXPIRED -> from == ListingStatus.PUBLISHED;
             case VIOLATION -> from != ListingStatus.VIOLATION;
