@@ -14,4 +14,5 @@ public interface ListingRepository extends JpaRepository<Listing, String>, JpaSp
     Page<Listing> findAllByOwnerIdAndActiveTrue(String ownerId, Pageable pageable);
     Optional<Listing> findByIdAndActiveTrue(String id);
     List<Listing> findAllByStatusAndActiveTrueAndExpiresAtLessThanEqual(ListingStatus status, Instant expiresAt);
+    long countByOwnerIdAndStatusAndActiveTrue(String ownerId, ListingStatus status);
 }

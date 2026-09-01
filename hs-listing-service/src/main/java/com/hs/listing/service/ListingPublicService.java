@@ -14,6 +14,12 @@ import com.hs.storage.model.StorageObject;
 import com.hs.storage.model.constant.StorageVisibility;
 import com.hs.user.model.Address;
 import com.hs.user.repository.AddressRepository;
+import com.hs.listing.dto.response.ListingOwnerResponse;
+import com.hs.listing.model.constant.FurnishingStatus;
+import com.hs.listing.model.constant.ListingEnums.PositionType;
+import com.hs.listing.model.constant.ListingEnums.RestroomType;
+import com.hs.user.repository.UserRepository;
+import java.math.BigDecimal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -34,6 +40,7 @@ public class ListingPublicService {
 
     private final ListingRepository listingRepository;
     private final AddressRepository addressRepository;
+    private final UserRepository userRepository;
     private final StorageProperties storageProperties;
 
     @Transactional(readOnly = true)
@@ -205,6 +212,68 @@ public class ListingPublicService {
                     cb.isTrue(root.join("houseDetail").get("hasGarage")));
         }
 
+        // Bathroom count
+        if (request.bathrooms() != null && request.bathrooms() > 0) {
+            spec = spec.and((root, query, cb) -> {
+                if (request.category() == ListingCategory.APARTMENT) {
+                    var detail = root.join("apartmentDetail");
+                    return request.bathrooms() >= 3 ? cb.greaterThanOrEqualTo(detail.get("bathroomCount"), 3)
+                            : cb.equal(detail.get("bathroomCount"), request.bathrooms());
+                } else if (request.category() == ListingCategory.HOUSE) {
+                    var detail = root.join("houseDetail");
+                    return request.bathrooms() >= 3 ? cb.greaterThanOrEqualTo(detail.get("bathroomCount"), 3)
+                            : cb.equal(detail.get("bathroomCount"), request.bathrooms());
+                } else if (request.category() == null) {
+                    var aptDetail = root.join("apartmentDetail", jakarta.persistence.criteria.JoinType.LEFT);
+                    var houseDetail = root.join("houseDetail", jakarta.persistence.criteria.JoinType.LEFT);
+                    var aptMatch = request.bathrooms() >= 3 ? cb.greaterThanOrEqualTo(aptDetail.get("bathroomCount"), 3)
+                            : cb.equal(aptDetail.get("bathroomCount"), request.bathrooms());
+                    var houseMatch = request.bathrooms() >= 3 ? cb.greaterThanOrEqualTo(houseDetail.get("bathroomCount"), 3)
+                            : cb.equal(houseDetail.get("bathroomCount"), request.bathrooms());
+                    return cb.or(aptMatch, houseMatch);
+                }
+                return cb.conjunction();
+            });
+        }
+
+        // Kitchen type (Room)
+        if (request.kitchenType() != null && !request.kitchenType().isBlank() && request.category() == ListingCategory.ROOM) {
+            spec = spec.and((root, query, cb) ->
+                    cb.equal(root.join("roomDetail").get("kitchenType"), request.kitchenType().trim()));
+        }
+
+        // Access type (House, Room, Commercial)
+        if (request.accessType() != null && !request.accessType().isBlank()) {
+            spec = spec.and((root, query, cb) -> {
+                if (request.category() == ListingCategory.HOUSE) {
+                    return cb.equal(root.join("houseDetail").get("accessType"), request.accessType().trim());
+                } else if (request.category() == ListingCategory.ROOM) {
+                    return cb.equal(root.join("roomDetail").get("accessType"), request.accessType().trim());
+                } else if (request.category() == ListingCategory.COMMERCIAL_SPACE) {
+                    return cb.equal(root.join("commercialDetail").get("accessType"), request.accessType().trim());
+                }
+                return cb.conjunction();
+            });
+        }
+
+        // Legal status (Apartment, House)
+        if (request.legalStatus() != null && !request.legalStatus().isBlank()) {
+            spec = spec.and((root, query, cb) -> {
+                if (request.category() == ListingCategory.APARTMENT) {
+                    return cb.equal(root.join("apartmentDetail").get("legalStatus"), request.legalStatus().trim());
+                } else if (request.category() == ListingCategory.HOUSE) {
+                    return cb.equal(root.join("houseDetail").get("legalStatus"), request.legalStatus().trim());
+                }
+                return cb.conjunction();
+            });
+        }
+
+        // Balcony direction (Apartment)
+        if (request.balconyDirection() != null && !request.balconyDirection().isBlank() && request.category() == ListingCategory.APARTMENT) {
+            spec = spec.and((root, query, cb) ->
+                    cb.equal(root.join("apartmentDetail").get("balconyDirection"), request.balconyDirection().trim()));
+        }
+
         return spec;
     }
 
@@ -214,6 +283,15 @@ public class ListingPublicService {
      */
     private Specification<Listing> bedroomSpec(ListingCategory category, int bedrooms) {
         return (root, query, cb) -> {
+            if (category == null) {
+                var apt = root.join("apartmentDetail", jakarta.persistence.criteria.JoinType.LEFT);
+                var house = root.join("houseDetail", jakarta.persistence.criteria.JoinType.LEFT);
+                var aptMatch = bedrooms >= 3 ? cb.greaterThanOrEqualTo(apt.get("bedroomCount"), 3)
+                        : cb.equal(apt.get("bedroomCount"), bedrooms);
+                var houseMatch = bedrooms >= 3 ? cb.greaterThanOrEqualTo(house.get("bedroomCount"), 3)
+                        : cb.equal(house.get("bedroomCount"), bedrooms);
+                return cb.or(aptMatch, houseMatch);
+            }
             // Determine which detail relationship to join
             String detailRelation;
             if (category == ListingCategory.APARTMENT) {
@@ -250,6 +328,15 @@ public class ListingPublicService {
     // ── Mapping ─────────────────────────────────────────────────────────
 
     private PublicListingSummaryResponse toSummary(Listing listing) {
+        // All images sorted: cover first, then by sortOrder
+        java.util.List<String> imageUrls = listing.getMedia().stream()
+                .filter(m -> m.getMediaType() == MediaType.IMAGE)
+                .sorted(Comparator.comparing(ListingMedia::isCover).reversed()
+                        .thenComparing(ListingMedia::getSortOrder))
+                .map(m -> publicUrl(m.getStorageObject()))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+
         // Cover image
         ListingMedia cover = listing.getMedia().stream()
                 .filter(ListingMedia::isCover)
@@ -259,6 +346,10 @@ public class ListingPublicService {
                         .filter(m -> m.getMediaType() == MediaType.IMAGE)
                         .min(Comparator.comparing(ListingMedia::getSortOrder))
                         .orElse(null));
+        String coverImageUrl = cover == null ? null : publicUrl(cover.getStorageObject());
+        if (coverImageUrl == null && !imageUrls.isEmpty()) {
+            coverImageUrl = imageUrls.get(0);
+        }
 
         // Has video
         boolean hasVideo = listing.getMedia().stream()
@@ -267,8 +358,32 @@ public class ListingPublicService {
         // Address
         Address address = addressRepository.findByListingIdAndActiveTrue(listing.getId()).orElse(null);
 
-        // Bedroom count from the correct detail table
+        // Bedroom & Bathroom counts from detail tables
         Integer bedroomCount = extractBedroomCount(listing);
+        Integer bathroomCount = extractBathroomCount(listing);
+
+        // Category-exclusive specs
+        Integer floorNumber = extractFloorNumber(listing);
+        Integer totalFloors = extractTotalFloors(listing);
+        String restroomType = extractRestroomType(listing);
+        Boolean hasMezzanine = extractHasMezzanine(listing);
+        Boolean hasBalcony = extractHasBalcony(listing);
+        Boolean hasWindow = extractHasWindow(listing);
+        Boolean hasRooftop = listing.getHouseDetail() != null ? listing.getHouseDetail().getHasRooftop() : null;
+        Boolean hasGarage = listing.getHouseDetail() != null ? listing.getHouseDetail().getHasGarage() : null;
+        Integer expectedSeats = listing.getOfficeDetail() != null ? listing.getOfficeDetail().getExpectedSeats() : null;
+        String officeGrade = listing.getOfficeDetail() != null ? listing.getOfficeDetail().getOfficeGrade() : null;
+        BigDecimal frontageWidthM = listing.getHouseDetail() != null ? listing.getHouseDetail().getFrontageWidthM()
+                : (listing.getCommercialDetail() != null ? listing.getCommercialDetail().getFrontageWidthM() : null);
+        PositionType positionType = listing.getCommercialDetail() != null ? listing.getCommercialDetail().getPositionType() : null;
+        FurnishingStatus furnishingStatus = extractFurnishingStatus(listing);
+
+        // Owner info & listing count
+        var ownerUser = listing.getOwnerId() != null ? userRepository.findById(listing.getOwnerId()).orElse(null) : null;
+        var owner = ListingOwnerResponse.from(ownerUser);
+        int ownerListingCount = listing.getOwnerId() != null
+                ? (int) listingRepository.countByOwnerIdAndStatusAndActiveTrue(listing.getOwnerId(), ListingStatus.PUBLISHED)
+                : 0;
 
         return new PublicListingSummaryResponse(
                 listing.getId(),
@@ -280,7 +395,8 @@ public class ListingPublicService {
                 listing.getCurrency(),
                 listing.getPriceUnit(),
                 listing.isNegotiable(),
-                cover == null ? null : publicUrl(cover.getStorageObject()),
+                coverImageUrl,
+                imageUrls,
                 hasVideo,
                 address == null ? null : address.getFullAddress(),
                 address == null ? null : address.getProvinceCode(),
@@ -288,6 +404,24 @@ public class ListingPublicService {
                 address == null ? null : address.getWardCode(),
                 address == null ? null : address.getWardName(),
                 bedroomCount,
+                bathroomCount,
+                floorNumber,
+                totalFloors,
+                restroomType,
+                hasMezzanine,
+                hasBalcony,
+                hasWindow,
+                hasRooftop,
+                hasGarage,
+                expectedSeats,
+                officeGrade,
+                frontageWidthM,
+                positionType,
+                furnishingStatus,
+                listing.getOwnerId(),
+                owner == null ? null : owner.displayName(),
+                owner == null ? null : owner.avatarUrl(),
+                ownerListingCount,
                 listing.getPublishedAt(),
                 listing.getAvailableFrom()
         );
@@ -303,8 +437,80 @@ public class ListingPublicService {
         return null;
     }
 
+    private Integer extractBathroomCount(Listing listing) {
+        if (listing.getApartmentDetail() != null) {
+            return listing.getApartmentDetail().getBathroomCount();
+        }
+        if (listing.getHouseDetail() != null) {
+            return listing.getHouseDetail().getBathroomCount();
+        }
+        if (listing.getOfficeDetail() != null) {
+            return listing.getOfficeDetail().getRestroomCount();
+        }
+        if (listing.getCommercialDetail() != null) {
+            return listing.getCommercialDetail().getRestroomCount();
+        }
+        if (listing.getRoomDetail() != null) {
+            return listing.getRoomDetail().getRestroomType() == RestroomType.PRIVATE ? 1 : 0;
+        }
+        return null;
+    }
+
+    private Integer extractFloorNumber(Listing listing) {
+        if (listing.getApartmentDetail() != null) return listing.getApartmentDetail().getFloorNumber();
+        if (listing.getOfficeDetail() != null) return listing.getOfficeDetail().getFloorNumber();
+        if (listing.getRoomDetail() != null) return listing.getRoomDetail().getFloorNumber();
+        return null;
+    }
+
+    private Integer extractTotalFloors(Listing listing) {
+        if (listing.getApartmentDetail() != null) return listing.getApartmentDetail().getBuildingTotalFloors();
+        if (listing.getHouseDetail() != null) return listing.getHouseDetail().getTotalFloors();
+        if (listing.getCommercialDetail() != null) return listing.getCommercialDetail().getRentedFloorCount();
+        return null;
+    }
+
+    private String extractRestroomType(Listing listing) {
+        if (listing.getRoomDetail() != null && listing.getRoomDetail().getRestroomType() != null) {
+            return listing.getRoomDetail().getRestroomType().name();
+        }
+        if (listing.getOfficeDetail() != null) {
+            return listing.getOfficeDetail().getRestroomType();
+        }
+        return null;
+    }
+
+    private Boolean extractHasMezzanine(Listing listing) {
+        if (listing.getRoomDetail() != null) return listing.getRoomDetail().getHasMezzanine();
+        if (listing.getCommercialDetail() != null) return listing.getCommercialDetail().getHasMezzanine();
+        return null;
+    }
+
+    private Boolean extractHasBalcony(Listing listing) {
+        if (listing.getRoomDetail() != null) return listing.getRoomDetail().getHasBalcony();
+        if (listing.getApartmentDetail() != null) return listing.getApartmentDetail().getBalconyDirection() != null;
+        return null;
+    }
+
+    private Boolean extractHasWindow(Listing listing) {
+        if (listing.getRoomDetail() != null) return listing.getRoomDetail().getHasWindow();
+        return null;
+    }
+
+    private FurnishingStatus extractFurnishingStatus(Listing listing) {
+        if (listing.getApartmentDetail() != null) return listing.getApartmentDetail().getFurnishingStatus();
+        if (listing.getHouseDetail() != null) return listing.getHouseDetail().getFurnishingStatus();
+        if (listing.getRoomDetail() != null) return listing.getRoomDetail().getFurnishingStatus();
+        return null;
+    }
+
+    @Transactional(readOnly = true)
+    public long getOwnerListingCount(String ownerId) {
+        return listingRepository.countByOwnerIdAndStatusAndActiveTrue(ownerId, ListingStatus.PUBLISHED);
+    }
+
     private String publicUrl(StorageObject object) {
-        if (object.getVisibility() != StorageVisibility.PUBLIC) return null;
+        if (object == null || object.getVisibility() != StorageVisibility.PUBLIC) return null;
         return "https://%s.s3.%s.amazonaws.com/%s"
                 .formatted(object.getBucketName(), storageProperties.region(), object.getObjectKey());
     }
