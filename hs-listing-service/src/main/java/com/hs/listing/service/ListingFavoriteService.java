@@ -45,6 +45,10 @@ public class ListingFavoriteService {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
 
+        if (listing.getStatus() != com.hs.listing.model.constant.ListingStatus.PUBLISHED) {
+            throw new AppException(ListingErrorCode.LISTING_NOT_FOUND);
+        }
+
         ListingFavorite favorite = ListingFavorite.builder()
                 .id(UUID.randomUUID().toString())
                 .userId(userId)

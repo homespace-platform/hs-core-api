@@ -18,9 +18,9 @@ public interface ListingFavoriteRepository extends JpaRepository<ListingFavorite
 
     void deleteByUserIdAndListing_Id(String userId, String listingId);
 
-    @Query("SELECT lf FROM ListingFavorite lf JOIN FETCH lf.listing l WHERE lf.userId = :userId AND lf.active = true AND l.active = true ORDER BY lf.createdAt DESC")
+    @Query("SELECT lf FROM ListingFavorite lf JOIN FETCH lf.listing l WHERE lf.userId = :userId AND lf.active = true AND l.active = true AND l.status = com.hs.listing.model.constant.ListingStatus.PUBLISHED ORDER BY lf.createdAt DESC")
     Page<ListingFavorite> findAllByUserIdWithListing(@Param("userId") String userId, Pageable pageable);
 
-    @Query("SELECT lf.listing.id FROM ListingFavorite lf WHERE lf.userId = :userId AND lf.active = true")
+    @Query("SELECT lf.listing.id FROM ListingFavorite lf JOIN lf.listing l WHERE lf.userId = :userId AND lf.active = true AND l.active = true AND l.status = com.hs.listing.model.constant.ListingStatus.PUBLISHED")
     List<String> findFavoriteListingIdsByUserId(@Param("userId") String userId);
 }
