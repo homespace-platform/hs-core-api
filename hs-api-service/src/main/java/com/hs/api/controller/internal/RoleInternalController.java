@@ -1,5 +1,3 @@
 package com.hs.api.controller.internal;
 
-public class RoleInternalController {
-    
-}
+public class RoleInternalController {}
