@@ -20,7 +20,18 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     LISTING_PUBLICATION_WINDOW_ENDED(
             4011,
             "Publication period has ended, submit the listing for review again",
-            HttpStatus.CONFLICT);
+            HttpStatus.CONFLICT),
+    APPOINTMENT_NOT_FOUND(4020, "Viewing appointment not found", HttpStatus.NOT_FOUND),
+    APPOINTMENT_FORBIDDEN(4021, "You do not have permission to perform this appointment action", HttpStatus.FORBIDDEN),
+    CANNOT_BOOK_OWN_LISTING(4022, "You cannot book a viewing appointment for your own listing", HttpStatus.BAD_REQUEST),
+    APPOINTMENT_ALREADY_EXISTS(4023, "You already have an active viewing appointment for this listing", HttpStatus.CONFLICT),
+    SLOT_ALREADY_BOOKED(4024, "This time slot has already been booked and confirmed", HttpStatus.CONFLICT),
+    DAY_NOT_AVAILABLE(4025, "The owner does not accept viewings on this day of the week", HttpStatus.BAD_REQUEST),
+    SLOT_NOT_AVAILABLE(4026, "The selected time is outside the owner's available viewing slots", HttpStatus.BAD_REQUEST),
+    INVALID_APPOINTMENT_TIME(4027, "Invalid appointment time. Appointments must be booked in advance", HttpStatus.BAD_REQUEST),
+    INVALID_APPOINTMENT_STATUS(4028, "Invalid appointment status for this action", HttpStatus.CONFLICT),
+    RESCHEDULE_ALREADY_REQUESTED(4029, "A reschedule request is already pending review", HttpStatus.CONFLICT),
+    LISTING_NOT_AVAILABLE_FOR_VIEWING(4030, "This listing is not currently available for viewing appointments", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

@@ -20,8 +20,9 @@ import static org.mockito.Mockito.*;
 class ListingStatusServiceTest {
     private final ListingRepository listings = mock(ListingRepository.class);
     private final ListingStatusHistoryRepository history = mock(ListingStatusHistoryRepository.class);
+    private final ViewingAppointmentService appointments = mock(ViewingAppointmentService.class);
     private final ListingStatusService service = new ListingStatusService(
-            listings, history, 30);
+            listings, history, appointments, 30);
 
     @Test
     void submittingDraftMovesItToPendingReviewAndWritesHistory() {

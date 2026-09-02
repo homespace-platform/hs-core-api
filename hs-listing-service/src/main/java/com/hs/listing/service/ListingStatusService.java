@@ -32,14 +32,17 @@ public class ListingStatusService {
 
     private final ListingRepository listingRepository;
     private final ListingStatusHistoryRepository historyRepository;
+    private final ViewingAppointmentService appointmentService;
     private final int publicationDurationDays;
 
     public ListingStatusService(
             ListingRepository listingRepository,
             ListingStatusHistoryRepository historyRepository,
-            @Value("${listing.publication-duration-days}") int publicationDurationDays) {
+            ViewingAppointmentService appointmentService,
+            @Value("${listing.publication-duration-days:30}") int publicationDurationDays) {
         this.listingRepository = listingRepository;
         this.historyRepository = historyRepository;
+        this.appointmentService = appointmentService;
         if (publicationDurationDays <= 0) {
             throw new IllegalArgumentException("listing.publication-duration-days must be positive");
         }
@@ -173,6 +176,17 @@ public class ListingStatusService {
             listing.setExpiresAt(now.plus(publicationDurationDays, ChronoUnit.DAYS));
         }
         listingRepository.save(listing);
+
+        // Nếu tin đăng rời khỏi trạng thái PUBLISHED (bị ẩn, hết hạn, đã thuê, vi phạm...)
+        // -> Tự động hủy toàn bộ lịch hẹn xem nhà đang active (PENDING hoặc CONFIRMED)
+        if (previous == ListingStatus.PUBLISHED && target != ListingStatus.PUBLISHED) {
+            try {
+                appointmentService.cancelActiveAppointmentsForListing(listing.getId(), target);
+            } catch (Exception e) {
+                // Đảm bảo không block luồng chuyển trạng thái tin đăng
+            }
+        }
+
         historyRepository.save(ListingStatusHistory.builder()
                 .listingId(listing.getId())
                 .fromStatus(previous)
