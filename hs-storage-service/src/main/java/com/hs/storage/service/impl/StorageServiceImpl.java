@@ -304,6 +304,10 @@ public class StorageServiceImpl implements StorageService {
                 typeAllowed = VIDEO_TYPES.contains(contentType);
                 maxSize = 200 * MIB;
             }
+            case NEWS_IMAGE -> {
+                typeAllowed = IMAGE_TYPES.contains(contentType);
+                maxSize = 25 * MIB;
+            }
             case GENERAL -> {
                 typeAllowed = IMAGE_TYPES.contains(contentType) || DOCUMENT_TYPES.contains(contentType);
                 maxSize = 25 * MIB;

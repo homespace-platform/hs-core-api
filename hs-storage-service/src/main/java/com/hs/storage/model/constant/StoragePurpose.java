@@ -7,5 +7,6 @@ public enum StoragePurpose {
     CHAT_ATTACHMENT,
     LISTING_IMAGE,
     LISTING_VIDEO,
+    NEWS_IMAGE,
     GENERAL
 }
