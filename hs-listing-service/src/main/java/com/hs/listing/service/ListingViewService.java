@@ -24,6 +24,7 @@ public class ListingViewService {
     private final ListingRepository listingRepository;
     private final StringRedisTemplate redisTemplate;
     private final Environment environment;
+    private final ListingViewHistoryService viewHistoryService;
 
     public record ViewRecordResult(long viewCount, boolean counted) {}
 
@@ -32,6 +33,15 @@ public class ListingViewService {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId).orElse(null);
         if (listing == null || listing.getStatus() != ListingStatus.PUBLISHED) {
             return new ViewRecordResult(0L, false);
+        }
+
+        // Tự động ghi nhận lịch sử xem tin cho người dùng đã đăng nhập
+        if (viewerId != null && !viewerId.isBlank()) {
+            try {
+                viewHistoryService.recordView(viewerId, listingId);
+            } catch (Exception e) {
+                log.warn("Failed to record view history for user {} on listing {}: {}", viewerId, listingId, e.getMessage());
+            }
         }
 
         long currentCount = listing.getViewCount() != null ? listing.getViewCount() : 0L;
