@@ -7,6 +7,7 @@ import com.hs.storage.dto.response.CreateUploadResponse;
 import com.hs.storage.dto.response.StorageObjectResponse;
 import com.hs.storage.dto.response.StorageUrlResponse;
 import com.hs.storage.model.constant.StoragePurpose;
+import com.hs.storage.model.constant.StorageStatus;
 
 public interface StorageService {
     CreateUploadResponse createUpload(CreateUploadRequest request);
@@ -22,7 +23,12 @@ public interface StorageService {
     String getOwnedPublicUrl(String storageId, StoragePurpose expectedPurpose);
 
     PageResponse<StorageObjectResponse> getCurrentUserObjects(
-            String referenceType, String referenceId, int page, int size);
+            String referenceType,
+            String referenceId,
+            StoragePurpose purpose,
+            StorageStatus status,
+            int page,
+            int size);
 
     void delete(String storageId);
 

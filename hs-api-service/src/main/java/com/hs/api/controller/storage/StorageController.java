@@ -7,6 +7,8 @@ import com.hs.storage.dto.request.CreateUploadRequest;
 import com.hs.storage.dto.response.CreateUploadResponse;
 import com.hs.storage.dto.response.StorageObjectResponse;
 import com.hs.storage.dto.response.StorageUrlResponse;
+import com.hs.storage.model.constant.StoragePurpose;
+import com.hs.storage.model.constant.StorageStatus;
 import com.hs.storage.service.StorageService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -66,9 +68,11 @@ public class StorageController {
     public PageResponse<StorageObjectResponse> getCurrentUserObjects(
             @RequestParam(required = false) String referenceType,
             @RequestParam(required = false) String referenceId,
+            @RequestParam(required = false) StoragePurpose purpose,
+            @RequestParam(defaultValue = "READY") StorageStatus status,
             @RequestParam(defaultValue = "1") @Min(1) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return storageService.getCurrentUserObjects(referenceType, referenceId, page, size);
+        return storageService.getCurrentUserObjects(referenceType, referenceId, purpose, status, page, size);
     }
 
     @DeleteMapping("/{storageId}")

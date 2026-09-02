@@ -24,9 +24,9 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -191,15 +191,34 @@ public class StorageServiceImpl implements StorageService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<StorageObjectResponse> getCurrentUserObjects(
-            String referenceType, String referenceId, int page, int size) {
+            String referenceType,
+            String referenceId,
+            StoragePurpose purpose,
+            StorageStatus status,
+            int page,
+            int size) {
         String ownerId = currentUserId();
         var pageable = PageRequest.of(page - 1, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<StorageObject> source = referenceType != null && !referenceType.isBlank()
-                && referenceId != null && !referenceId.isBlank()
-                ? repository.findAllByOwnerIdAndReferenceTypeAndReferenceIdAndActiveTrue(
-                        ownerId, referenceType.trim().toUpperCase(Locale.ROOT), referenceId.trim(), pageable)
-                : repository.findAllByOwnerIdAndActiveTrue(ownerId, pageable);
-        return new PageResponse<>(source.map(this::toResponse));
+        Specification<StorageObject> specification = (root, query, cb) -> cb.and(
+                cb.equal(root.get("ownerId"), ownerId),
+                cb.isTrue(root.get("active")));
+        if (referenceType != null && !referenceType.isBlank()
+                && referenceId != null && !referenceId.isBlank()) {
+            String normalizedReferenceType = referenceType.trim().toUpperCase(Locale.ROOT);
+            String normalizedReferenceId = referenceId.trim();
+            specification = specification.and((root, query, cb) -> cb.and(
+                    cb.equal(root.get("referenceType"), normalizedReferenceType),
+                    cb.equal(root.get("referenceId"), normalizedReferenceId)));
+        }
+        if (purpose != null) {
+            specification = specification.and(
+                    (root, query, cb) -> cb.equal(root.get("purpose"), purpose));
+        }
+        if (status != null) {
+            specification = specification.and(
+                    (root, query, cb) -> cb.equal(root.get("status"), status));
+        }
+        return new PageResponse<>(repository.findAll(specification, pageable).map(this::toResponse));
     }
 
     @Override
