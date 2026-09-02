@@ -41,6 +41,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         }
 
         if (userRepository.existsByRole_Name(RoleConstants.ADMIN)) {
+            syncBootstrapAdminPhone();
             log.info("Bootstrap admin skipped, an account with role {} already exists", RoleConstants.ADMIN);
             return;
         }
@@ -63,6 +64,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
     private String findOrCreateKeycloakAdmin() {
         String existingId = findKeycloakUserId();
         if (existingId != null) {
+            updateKeycloakPhoneIfNeeded(existingId);
             log.info("Bootstrap admin already exists in Keycloak, reusing account {}", existingId);
             return existingId;
         }
@@ -124,6 +126,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         admin.setEmail(properties.email());
         admin.setFirstName(properties.firstName());
         admin.setLastName(properties.lastName());
+        admin.setPhone(properties.phoneNumber());
         admin.setRole(adminRole);
         admin.setActive(true);
         admin.setOnBoarded(false);
@@ -134,5 +137,55 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         } finally {
             UserContextHolder.clear();
         }
+    }
+
+    private void syncBootstrapAdminPhone() {
+        if (properties.phoneNumber() == null) {
+            return;
+        }
+
+        try {
+            String userId = findKeycloakUserId();
+            if (userId == null) {
+                return;
+            }
+
+            userRepository.findById(userId).ifPresent(admin -> {
+                if (admin.getPhone() != null && !admin.getPhone().isBlank()) {
+                    return;
+                }
+
+                admin.setPhone(properties.phoneNumber());
+                UserContextHolder.set(new UserContext(userId, properties.email()));
+                try {
+                    userRepository.save(admin);
+                    log.info("Synced bootstrap admin phone to database for user {}", userId);
+                } finally {
+                    UserContextHolder.clear();
+                }
+            });
+        } catch (RuntimeException exception) {
+            log.warn("Could not sync bootstrap admin phone: {}", exception.getMessage());
+        }
+    }
+
+    private void updateKeycloakPhoneIfNeeded(String userId) {
+        if (properties.phoneNumber() == null) {
+            return;
+        }
+
+        var userResource = keycloakRealm.users().get(userId);
+        UserRepresentation user = userResource.toRepresentation();
+        String currentPhone = user.getAttributes() == null
+                ? null
+                : user.getAttributes().getOrDefault("phoneNumber", List.of()).stream()
+                        .findFirst()
+                        .orElse(null);
+        if (currentPhone != null && !currentPhone.isBlank()) {
+            return;
+        }
+
+        user.singleAttribute("phoneNumber", properties.phoneNumber());
+        userResource.update(user);
     }
 }
