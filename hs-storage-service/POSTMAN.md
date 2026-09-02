@@ -340,7 +340,7 @@ Query parameters:
 | Param | Mặc định | Mô tả |
 | --- | --- | --- |
 | `referenceType` | không lọc | Loại tham chiếu nghiệp vụ, ví dụ `USER` |
-| `referenceId` | không lọc | Id tham chiếu nghiệp vụ, ví dụ `PROFILE` |
+| `referenceId` | không lọc | Id tham chiếu nghiệp vụ; với avatar dùng **UUID user** (`profile.id`) |
 | `purpose` | không lọc | Mục đích file, ví dụ `USER_AVATAR` |
 | `status` | `READY` | Trạng thái file; chỉ file `READY` mới xem/tải được |
 | `page` | `1` | Trang hiện tại |
@@ -349,7 +349,7 @@ Query parameters:
 Ví dụ lấy lịch sử avatar đã upload xong:
 
 ```http
-GET {{baseUrl}}/storage?referenceType=USER&referenceId=PROFILE&purpose=USER_AVATAR&status=READY&page=1&size=20
+GET {{baseUrl}}/storage?referenceType=USER&referenceId={userId}&purpose=USER_AVATAR&status=READY&page=1&size=20
 ```
 
 API chỉ trả các file của user hiện tại khớp bộ lọc. Mặc định không trả file `PENDING` vì file đó chưa upload hoàn tất.
