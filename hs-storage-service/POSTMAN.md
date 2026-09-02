@@ -323,7 +323,7 @@ download-url -> ưu tiên tải file về
 Request:
 
 ```http
-GET {{baseUrl}}/storage?page=1&size=20
+GET {{baseUrl}}/storage?page=1&size=20&status=READY
 ```
 
 Collection hiện gửi thêm:
@@ -331,9 +331,28 @@ Collection hiện gửi thêm:
 ```text
 referenceType={{storageReferenceType}}
 referenceId={{storageReferenceId}}
+purpose=USER_AVATAR
+status=READY
 ```
 
-Do đó API chỉ trả các file của user hiện tại có cùng tham chiếu nghiệp vụ.
+Query parameters:
+
+| Param | Mặc định | Mô tả |
+| --- | --- | --- |
+| `referenceType` | không lọc | Loại tham chiếu nghiệp vụ, ví dụ `USER` |
+| `referenceId` | không lọc | Id tham chiếu nghiệp vụ, ví dụ `PROFILE` |
+| `purpose` | không lọc | Mục đích file, ví dụ `USER_AVATAR` |
+| `status` | `READY` | Trạng thái file; chỉ file `READY` mới xem/tải được |
+| `page` | `1` | Trang hiện tại |
+| `size` | `20` | Số phần tử mỗi trang |
+
+Ví dụ lấy lịch sử avatar đã upload xong:
+
+```http
+GET {{baseUrl}}/storage?referenceType=USER&referenceId=PROFILE&purpose=USER_AVATAR&status=READY&page=1&size=20
+```
+
+API chỉ trả các file của user hiện tại khớp bộ lọc. Mặc định không trả file `PENDING` vì file đó chưa upload hoàn tất.
 
 Response phân trang:
 
