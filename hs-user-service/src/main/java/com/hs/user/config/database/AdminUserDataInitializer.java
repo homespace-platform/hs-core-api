@@ -72,6 +72,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         user.setEmail(properties.email());
         user.setFirstName(properties.firstName());
         user.setLastName(properties.lastName());
+        user.singleAttribute("phoneNumber", properties.phoneNumber());
         user.setEnabled(true);
         user.setEmailVerified(true);
         user.setRequiredActions(new ArrayList<>());

@@ -10,6 +10,7 @@ public record BootstrapAdminProperties(
         String username,
         String email,
         String password,
+        String phoneNumber,
         String firstName,
         String lastName
 ) {
@@ -17,6 +18,7 @@ public record BootstrapAdminProperties(
     public BootstrapAdminProperties {
         username = normalize(username);
         email = normalize(email) == null ? null : normalize(email).toLowerCase(Locale.ROOT);
+        phoneNumber = normalize(phoneNumber);
         firstName = normalize(firstName);
         lastName = normalize(lastName);
     }
