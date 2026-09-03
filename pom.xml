@@ -19,7 +19,6 @@
         <module>hs-user-service</module>
         <module>hs-storage-service</module>
         <module>hs-listing-service</module>
-        <module>hs-news-service</module>
         <module>hs-notification-service</module>
         <module>hs-api-service</module>
     </modules>
