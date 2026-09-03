@@ -33,11 +33,6 @@
         </dependency>
         <dependency>
             <groupId>com.hs</groupId>
-            <artifactId>hs-news-service</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.hs</groupId>
             <artifactId>hs-notification-service</artifactId>
             <version>${project.version}</version>
         </dependency>
