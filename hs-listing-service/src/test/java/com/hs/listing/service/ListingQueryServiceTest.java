@@ -32,7 +32,7 @@ class ListingQueryServiceTest {
                 .thenReturn(new PageImpl<>(List.of(listing)));
         when(addresses.findByListingIdAndActiveTrue("listing-1")).thenReturn(Optional.empty());
         ListingQueryService service = new ListingQueryService(
-                listings, addresses, mock(UserRepository.class), properties());
+                listings, addresses, mock(UserRepository.class), properties(), mock(com.hs.listing.repository.RentalRequestRepository.class));
 
         var response = service.getMyListings("owner-1", 2, null, null);
 

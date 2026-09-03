@@ -8,6 +8,7 @@ import com.hs.listing.dto.response.*;
 import com.hs.listing.model.*;
 import com.hs.listing.model.constant.ListingStatus;
 import com.hs.listing.repository.ListingRepository;
+import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.storage.config.StorageProperties;
 import com.hs.storage.model.StorageObject;
 import com.hs.storage.model.constant.StorageVisibility;
@@ -32,6 +33,7 @@ public class ListingQueryService {
     private final AddressRepository addressRepository;
     private final UserRepository userRepository;
     private final StorageProperties storageProperties;
+    private final RentalRequestRepository rentalRequestRepository;
 
     @Transactional(readOnly = true)
     public PageResponse<MyListingSummaryResponse> getMyListings(
@@ -76,8 +78,9 @@ public class ListingQueryService {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> new AppException(ErrorCode.ROUTE_NOT_FOUND));
         boolean owner = viewerId != null && viewerId.equals(listing.getOwnerId());
-        boolean publicListing = listing.getStatus() == ListingStatus.PUBLISHED;
-        if (!owner && !publicListing) throw new AppException(ErrorCode.ROUTE_NOT_FOUND);
+        boolean visibleListing = listing.getStatus() == ListingStatus.PUBLISHED || listing.getStatus() == ListingStatus.RESERVED;
+        boolean hasRentalRequest = viewerId != null && rentalRequestRepository.existsByListingIdAndRenterId(listing.getId(), viewerId);
+        if (!owner && !visibleListing && !hasRentalRequest) throw new AppException(ErrorCode.ROUTE_NOT_FOUND);
         return toDetail(listing);
     }
 
