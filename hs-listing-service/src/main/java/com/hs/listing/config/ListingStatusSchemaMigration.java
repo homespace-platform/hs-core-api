@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class ListingStatusSchemaMigration {
     private static final String ALLOWED_STATUSES =
-            "'DRAFT','PENDING_REVIEW','PUBLISHED','RENTED','RENTED_EXTERNALLY',"
+            "'DRAFT','PENDING_REVIEW','PUBLISHED','RESERVED','RENTED','RENTED_EXTERNALLY',"
                     + "'EXPIRED','REJECTED','HIDDEN','VIOLATION'";
 
     private final JdbcTemplate jdbcTemplate;

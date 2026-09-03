@@ -31,7 +31,14 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     INVALID_APPOINTMENT_TIME(4027, "Invalid appointment time. Appointments must be booked in advance", HttpStatus.BAD_REQUEST),
     INVALID_APPOINTMENT_STATUS(4028, "Invalid appointment status for this action", HttpStatus.CONFLICT),
     RESCHEDULE_ALREADY_REQUESTED(4029, "A reschedule request is already pending review", HttpStatus.CONFLICT),
-    LISTING_NOT_AVAILABLE_FOR_VIEWING(4030, "This listing is not currently available for viewing appointments", HttpStatus.BAD_REQUEST);
+    LISTING_NOT_AVAILABLE_FOR_VIEWING(4030, "This listing is not currently available for viewing appointments", HttpStatus.BAD_REQUEST),
+    RENTAL_REQUEST_NOT_FOUND(4040, "Rental request not found", HttpStatus.NOT_FOUND),
+    RENTAL_REQUEST_FORBIDDEN(4041, "You do not have permission to access this rental request", HttpStatus.FORBIDDEN),
+    CANNOT_RENT_OWN_LISTING(4042, "You cannot submit a rental request for your own listing", HttpStatus.BAD_REQUEST),
+    RENTAL_REQUEST_ALREADY_EXISTS(4043, "You already have an active rental request for this listing", HttpStatus.CONFLICT),
+    LISTING_NOT_AVAILABLE_FOR_RENT(4044, "This listing is not currently available for rental requests", HttpStatus.CONFLICT),
+    INVALID_RENTAL_REQUEST_STATUS(4045, "Invalid rental request status for this action", HttpStatus.CONFLICT),
+    LISTING_ALREADY_RESERVED(4046, "This listing is currently reserved by another renter", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

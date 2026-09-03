@@ -16,7 +16,7 @@ public class ListingViewHistoryScheduler {
      * Tự động dọn dẹp các bản ghi lịch sử xem tin quá 30 ngày.
      * Mặc định chạy lúc 03:00 sáng hàng ngày (hoặc cấu hình qua listing.view-history-cleanup-cron).
      */
-    @Scheduled(cron = "${listing.view-history-cleanup-cron:0 0 3 * * ?}")
+    @Scheduled(cron = "${listing.view-history-cleanup-cron}")
     public void purgeExpiredViewHistory() {
         try {
             int deleted = viewHistoryService.purgeExpiredHistory(30);

@@ -39,7 +39,7 @@ public class ListingStatusService {
             ListingRepository listingRepository,
             ListingStatusHistoryRepository historyRepository,
             ViewingAppointmentService appointmentService,
-            @Value("${listing.publication-duration-days:30}") int publicationDurationDays) {
+            @Value("${listing.publication-duration-days}") int publicationDurationDays) {
         this.listingRepository = listingRepository;
         this.historyRepository = historyRepository;
         this.appointmentService = appointmentService;
@@ -129,13 +129,14 @@ public class ListingStatusService {
     private void validateAdminTransition(ListingStatus from, ListingStatus to) {
         if (from == to) throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
         boolean allowed = switch (to) {
-            case PUBLISHED -> from == ListingStatus.PENDING_REVIEW || from == ListingStatus.VIOLATION;
+            case PUBLISHED -> from == ListingStatus.PENDING_REVIEW || from == ListingStatus.VIOLATION || from == ListingStatus.RESERVED;
             case REJECTED -> from == ListingStatus.PENDING_REVIEW;
             case RENTED -> false; // RENTED is reserved strictly for contract execution flow
             case RENTED_EXTERNALLY -> from == ListingStatus.PUBLISHED || from == ListingStatus.RENTED;
             case EXPIRED -> from == ListingStatus.PUBLISHED;
             case VIOLATION -> from != ListingStatus.VIOLATION;
             case HIDDEN -> from != ListingStatus.HIDDEN;
+            case RESERVED -> from == ListingStatus.PUBLISHED;
             case PENDING_REVIEW -> Set.of(
                     ListingStatus.DRAFT, ListingStatus.REJECTED, ListingStatus.EXPIRED,
                     ListingStatus.HIDDEN, ListingStatus.RENTED, ListingStatus.RENTED_EXTERNALLY,
@@ -143,6 +144,24 @@ public class ListingStatusService {
             case DRAFT -> false;
         };
         if (!allowed) throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
+    }
+
+    @Transactional
+    public void markReserved(Listing listing, String actorId) {
+        if (listing.getStatus() != ListingStatus.PUBLISHED) {
+            throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
+        }
+        change(listing, ListingStatus.RESERVED, "Chấp thuận yêu cầu giữ chỗ thuê nhà", actorId,
+                ListingStatusActorType.USER, true);
+    }
+
+    @Transactional
+    public void releaseReserved(Listing listing, String actorId, String reason) {
+        if (listing.getStatus() != ListingStatus.RESERVED) {
+            return;
+        }
+        change(listing, ListingStatus.PUBLISHED, reason != null ? reason : "Hết hạn giữ chỗ hoặc hủy giữ chỗ", actorId,
+                ListingStatusActorType.SYSTEM, false);
     }
 
     private void change(Listing listing, ListingStatus target, String reason, String actorId,
