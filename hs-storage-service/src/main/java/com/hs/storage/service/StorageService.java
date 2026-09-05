@@ -32,4 +32,14 @@ public interface StorageService {
 
     void delete(String storageId);
 
+    StorageObjectResponse uploadDirect(
+            byte[] data,
+            String fileName,
+            String contentType,
+            StoragePurpose purpose,
+            String referenceType,
+            String referenceId,
+            com.hs.storage.model.constant.StorageVisibility visibility);
+
+    byte[] downloadDirect(String storageId);
 }

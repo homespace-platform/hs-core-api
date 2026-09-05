@@ -10,6 +10,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.dto.ApiResponse;
+import com.hs.contract.advice.ContractErrorCode;
 import com.hs.listing.advice.ListingErrorCode;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.hs.storage.advice.entity.enums.StorageErrorCode;
@@ -67,6 +68,12 @@ public class GlobalException {
             return StorageErrorCode.valueOf(key);
         } catch (IllegalArgumentException ignored) {
             // The validation message is plain text.
+        }
+
+        try {
+            return ContractErrorCode.valueOf(key);
+        } catch (IllegalArgumentException ignored) {
+            // Not a contract validation key.
         }
 
         return null;

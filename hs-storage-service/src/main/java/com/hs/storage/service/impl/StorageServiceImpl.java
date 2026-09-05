@@ -37,10 +37,12 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class StorageServiceImpl implements StorageService {
@@ -228,6 +230,77 @@ public class StorageServiceImpl implements StorageService {
         object.setStatus(StorageStatus.DELETED);
         object.setActive(false);
         repository.save(object);
+    }
+
+    @Override
+    @Transactional
+    public StorageObjectResponse uploadDirect(
+            byte[] data,
+            String fileName,
+            String contentType,
+            StoragePurpose purpose,
+            String referenceType,
+            String referenceId,
+            StorageVisibility visibility) {
+        String ownerId;
+        try {
+            ownerId = currentUserId();
+        } catch (Exception e) {
+            ownerId = "system";
+        }
+
+        String storageId = UUID.randomUUID().toString();
+        String extension = extractExtension(fileName);
+        String objectKey = buildObjectKey(purpose, ownerId, storageId, extension);
+
+        try {
+            PutObjectRequest putObject = PutObjectRequest.builder()
+                    .bucket(properties.bucket())
+                    .key(objectKey)
+                    .contentType(contentType)
+                    .contentLength((long) data.length)
+                    .build();
+
+            s3Client.putObject(putObject, software.amazon.awssdk.core.sync.RequestBody.fromBytes(data));
+        } catch (Exception e) {
+            throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
+        }
+
+        StorageObject object = StorageObject.builder()
+                .id(storageId)
+                .originalName(fileName.trim())
+                .objectKey(objectKey)
+                .bucketName(properties.bucket())
+                .contentType(contentType)
+                .sizeBytes((long) data.length)
+                .extension(extension)
+                .ownerId(ownerId)
+                .referenceType(normalizeReferenceType(referenceType))
+                .referenceId(normalizeNullable(referenceId))
+                .purpose(purpose)
+                .visibility(visibility != null ? visibility : StorageVisibility.PRIVATE)
+                .status(StorageStatus.READY)
+                .build();
+
+        return toResponse(repository.save(object));
+    }
+
+    @Override
+    public byte[] downloadDirect(String storageId) {
+        StorageObject object = findActive(storageId);
+        if (object.getStatus() != StorageStatus.READY) {
+            throw new AppException(StorageErrorCode.STORAGE_NOT_READY);
+        }
+        try {
+            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                    .bucket(object.getBucketName())
+                    .key(object.getObjectKey())
+                    .build();
+            return s3Client.getObjectAsBytes(getObjectRequest).asByteArray();
+        } catch (Exception e) {
+            log.error("Failed to download storage object id={} from S3 directly: {}", storageId, e.getMessage(), e);
+            throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
+        }
     }
 
     private StorageUrlResponse createGetUrl(StorageObject object, boolean inline) {
