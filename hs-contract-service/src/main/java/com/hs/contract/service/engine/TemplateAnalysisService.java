@@ -1,7 +1,9 @@
 package com.hs.contract.service.engine;
 
 import com.hs.contract.dto.catalog.TemplateFieldDefinition;
+import com.hs.contract.dto.response.TemplateFieldIssue;
 import com.hs.contract.dto.response.TemplateValidationResult;
+import com.hs.listing.model.constant.ListingCategory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.xwpf.usermodel.*;
@@ -19,9 +21,18 @@ public class TemplateAnalysisService {
 
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{\\{([^}]+)\\}\\}");
 
+    /** Số mã trường tối đa liệt kê trong một chuỗi cảnh báo, tránh cảnh báo quá dài. */
+    private static final int MAX_LISTED_FIELDS = 10;
+
     private final ContractFieldCatalog catalog;
 
-    public TemplateValidationResult analyzeTemplate(InputStream inputStream) {
+    /**
+     * Phân tích file Word mẫu và đối chiếu với từ điển mã trường.
+     *
+     * @param category loại hình BĐS của mẫu, quyết định bộ trường bắt buộc được áp dụng.
+     *                 Truyền null cho mẫu chưa gắn loại hình: chỉ áp bộ trường bắt buộc chung.
+     */
+    public TemplateValidationResult analyzeTemplate(InputStream inputStream, ListingCategory category) {
         Set<String> detected = new LinkedHashSet<>();
         List<String> warnings = new ArrayList<>();
 
@@ -74,19 +85,23 @@ public class TemplateAnalysisService {
             }
         }
 
-        // Kiểm tra các trường bắt buộc
-        List<String> missingRequired = new ArrayList<>();
-        for (TemplateFieldDefinition def : catalog.getAllDefinitions()) {
-            if (def.isRequired() && !detected.contains(def.getKey())) {
-                missingRequired.add(def.getKey() + " (" + def.getLabel() + ")");
+        // Kiểm tra các trường bắt buộc theo đúng loại hình BĐS của mẫu
+        List<TemplateFieldIssue> missingRequired = new ArrayList<>();
+        for (TemplateFieldDefinition def : catalog.getRequiredDefinitions(category)) {
+            if (!detected.contains(def.getKey())) {
+                missingRequired.add(new TemplateFieldIssue(def.getKey(), def.getLabel()));
             }
         }
 
         if (!invalidList.isEmpty()) {
-            warnings.add("Phát hiện " + invalidList.size() + " mã trường không hợp lệ hoặc sai chính tả.");
+            warnings.add("Phát hiện " + invalidList.size() + " mã trường không hợp lệ hoặc sai chính tả: "
+                    + joinFields(invalidList.stream().map(key -> "{{" + key + "}}").toList()));
         }
         if (!missingRequired.isEmpty()) {
-            warnings.add("Mẫu Word thiếu " + missingRequired.size() + " trường bắt buộc quan trọng.");
+            warnings.add("Mẫu Word thiếu " + missingRequired.size() + " trường bắt buộc: "
+                    + joinFields(missingRequired.stream()
+                    .map(f -> "{{" + f.key() + "}} (" + f.label() + ")")
+                    .toList()));
         }
 
         boolean isValid = invalidList.isEmpty();
@@ -96,9 +111,17 @@ public class TemplateAnalysisService {
                 .detectedPlaceholders(new ArrayList<>(detected))
                 .validPlaceholders(validList)
                 .invalidPlaceholders(invalidList)
-                .missingRequiredPlaceholders(missingRequired)
+                .missingRequiredFields(missingRequired)
                 .warnings(warnings)
                 .build();
+    }
+
+    private String joinFields(List<String> entries) {
+        if (entries.size() <= MAX_LISTED_FIELDS) {
+            return String.join(", ", entries);
+        }
+        return String.join(", ", entries.subList(0, MAX_LISTED_FIELDS))
+                + " và " + (entries.size() - MAX_LISTED_FIELDS) + " trường khác";
     }
 
     private void extractPlaceholders(String text, Set<String> detected) {

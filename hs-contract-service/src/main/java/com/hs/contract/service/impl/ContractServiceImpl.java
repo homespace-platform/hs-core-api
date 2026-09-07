@@ -32,6 +32,8 @@ import com.hs.contract.service.engine.VietnameseCurrencyTextConverter;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.ListingCharge;
 import com.hs.listing.model.RentalRequest;
+import com.hs.listing.model.constant.ListingCategory;
+import com.hs.listing.model.constant.RentalMode;
 import com.hs.listing.model.constant.RentalRequestStatus;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.RentalRequestRepository;
@@ -458,6 +460,27 @@ public class ContractServiceImpl implements ContractService {
 
     // --- Helpers xây dựng Snapshot ban đầu ---
 
+    /** Nhãn tiếng Việt của loại hình BĐS để in vào hợp đồng, không dùng tên enum thô. */
+    private static String categoryLabel(ListingCategory category) {
+        if (category == null) return "";
+        return switch (category) {
+            case APARTMENT -> "Căn hộ / Chung cư";
+            case HOUSE -> "Nhà nguyên căn";
+            case OFFICE -> "Văn phòng";
+            case COMMERCIAL_SPACE -> "Mặt bằng kinh doanh";
+            case ROOM -> "Nhà trọ / Căn hộ dịch vụ";
+        };
+    }
+
+    /** Nhãn tiếng Việt của hình thức thuê, render vào {{lease.rentalMode}}. */
+    private static String rentalModeLabel(RentalMode mode) {
+        if (mode == null) return "";
+        return switch (mode) {
+            case WHOLE_UNIT -> "Thuê nguyên căn / toàn bộ";
+            case PARTIAL -> "Thuê một phần / phòng riêng";
+        };
+    }
+
     private Map<String, Object> buildInitialLandlordSnapshot(RentalRequest r) {
         Map<String, Object> map = new HashMap<>();
         map.put("fullName", "Chủ nhà (Bên A)");
@@ -467,8 +490,6 @@ public class ContractServiceImpl implements ContractService {
         map.put("idIssueDate", "");
         map.put("idIssuePlace", "");
         map.put("permanentAddress", "");
-        map.put("bankAccount", "");
-        map.put("bankName", "");
         return map;
     }
 
@@ -498,7 +519,7 @@ public class ContractServiceImpl implements ContractService {
             }
             map.put("fullAddress", fullAddress);
             map.put("areaText", l.getAreaM2() != null ? l.getAreaM2() + " m²" : "0 m²");
-            map.put("propertyType", l.getCategory() != null ? l.getCategory().name() : "");
+            map.put("propertyType", categoryLabel(l.getCategory()));
             map.put("unitNumber", "");
             map.put("floor", "");
         }
@@ -511,6 +532,7 @@ public class ContractServiceImpl implements ContractService {
         int months = r.getLeaseMonths() != null ? r.getLeaseMonths() : 12;
         LocalDate end = start.plusMonths(months);
 
+        map.put("rentalMode", rentalModeLabel(r.getListing() != null ? r.getListing().getRentalMode() : null));
         map.put("startDateText", start.format(DATE_FORMATTER));
         map.put("endDateText", end.format(DATE_FORMATTER));
         map.put("durationMonths", months);
@@ -528,7 +550,7 @@ public class ContractServiceImpl implements ContractService {
         map.put("amountWords", VietnameseCurrencyTextConverter.toWords(rent));
         map.put("paymentCycle", "Hàng tháng");
         map.put("paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng");
-        map.put("paymentMethod", "Chuyển khoản ngân hàng");
+        map.put("paymentMethod", "Thanh toán trực tuyến qua hệ thống HomeSpace");
         map.put("depositAmountNumber", ContractRenderService.formatVND(deposit));
         map.put("depositAmountWords", VietnameseCurrencyTextConverter.toWords(deposit));
         map.put("depositDescription", "Tiền đặt cọc được bên A hoàn trả lại cho bên B sau khi hết hạn hợp đồng và bên B đã thanh toán đầy đủ các khoản chi phí liên quan.");

@@ -18,6 +18,7 @@ import com.hs.contract.dto.request.CreateTemplateVersionRequest;
 import com.hs.contract.dto.request.UpdateContractTemplateRequest;
 import com.hs.contract.dto.response.ContractTemplateResponse;
 import com.hs.contract.dto.response.ContractTemplateVersionResponse;
+import com.hs.contract.dto.response.TemplateFieldIssue;
 import com.hs.contract.dto.response.TemplateValidationResult;
 import com.hs.contract.model.ContractTemplate;
 import com.hs.contract.model.ContractTemplateVersion;
@@ -33,7 +34,6 @@ import com.hs.contract.service.engine.TemplateAnalysisService;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.model.constant.ListingCategory;
-import com.hs.listing.model.constant.RentalMode;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.storage.dto.response.StorageUrlResponse;
 import com.hs.storage.service.StorageService;
@@ -76,7 +76,6 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
                 .name(request.getName().trim())
                 .description(request.getDescription())
                 .category(request.getCategory())
-                .rentalMode(request.getRentalMode())
                 .status(ContractTemplateStatus.ACTIVE)
                 .build();
 
@@ -84,20 +83,12 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
         // Đọc và phân tích file Word từ storage
         byte[] docxBytes = downloadStorageFile(request.getStorageObjectId());
-        TemplateValidationResult validation = analysisService.analyzeTemplate(new ByteArrayInputStream(docxBytes));
+        TemplateValidationResult validation = analysisService.analyzeTemplate(
+                new ByteArrayInputStream(docxBytes), template.getCategory());
 
-        String placeholdersJson = serializeJson(validation.getDetectedPlaceholders());
-        String warningsJson = serializeJson(validation.getWarnings());
-
-        ContractTemplateVersion version = ContractTemplateVersion.builder()
-                .template(template)
-                .versionNumber(1)
-                .storageObjectId(request.getStorageObjectId())
-                .originalFileName(request.getOriginalFileName() != null ? request.getOriginalFileName() : "template_v1.docx")
-                .status(TemplateVersionStatus.DRAFT)
-                .placeholdersJson(placeholdersJson)
-                .validationErrorsJson(warningsJson)
-                .build();
+        ContractTemplateVersion version = newVersion(template, 1, request.getStorageObjectId(),
+                request.getOriginalFileName() != null ? request.getOriginalFileName() : "template_v1.docx",
+                validation);
 
         versionRepository.save(version);
 
@@ -119,7 +110,7 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<ContractTemplateResponse> listTemplates(
-            ContractTemplateStatus status, ListingCategory category, RentalMode rentalMode, int page, int size) {
+            ContractTemplateStatus status, ListingCategory category, int page, int size) {
         Specification<ContractTemplate> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.isTrue(root.get("active")));
@@ -130,12 +121,6 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
                 predicates.add(cb.or(
                         cb.isNull(root.get("category")),
                         cb.equal(root.get("category"), category)
-                ));
-            }
-            if (rentalMode != null) {
-                predicates.add(cb.or(
-                        cb.isNull(root.get("rentalMode")),
-                        cb.equal(root.get("rentalMode"), rentalMode)
                 ));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
@@ -149,8 +134,8 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ContractTemplateResponse> listTemplates(ContractTemplateStatus status, ListingCategory category, RentalMode rentalMode) {
-        return listTemplates(status, category, rentalMode, 1, 1000).getResult();
+    public List<ContractTemplateResponse> listTemplates(ContractTemplateStatus status, ListingCategory category) {
+        return listTemplates(status, category, 1, 1000).getResult();
     }
 
     @Override
@@ -161,9 +146,8 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
         Listing listing = request.getListing();
         ListingCategory category = listing != null ? listing.getCategory() : null;
-        RentalMode rentalMode = listing != null ? listing.getRentalMode() : null;
 
-        List<ContractTemplate> templates = templateRepository.findApplicablePublishedTemplates(category, rentalMode);
+        List<ContractTemplate> templates = templateRepository.findApplicablePublishedTemplates(category);
         return templates.stream()
                 .map(t -> toTemplateResponse(t, t.getVersions().size()))
                 .toList();
@@ -183,9 +167,6 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
         }
         if (request.getCategory() != null) {
             template.setCategory(request.getCategory());
-        }
-        if (request.getRentalMode() != null) {
-            template.setRentalMode(request.getRentalMode());
         }
 
         template = templateRepository.save(template);
@@ -212,17 +193,12 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
         int nextVersion = versionRepository.findMaxVersionNumberByTemplateId(templateId) + 1;
 
         byte[] docxBytes = downloadStorageFile(request.getStorageObjectId());
-        TemplateValidationResult validation = analysisService.analyzeTemplate(new ByteArrayInputStream(docxBytes));
+        TemplateValidationResult validation = analysisService.analyzeTemplate(
+                new ByteArrayInputStream(docxBytes), template.getCategory());
 
-        ContractTemplateVersion version = ContractTemplateVersion.builder()
-                .template(template)
-                .versionNumber(nextVersion)
-                .storageObjectId(request.getStorageObjectId())
-                .originalFileName(request.getOriginalFileName() != null ? request.getOriginalFileName() : "template_v" + nextVersion + ".docx")
-                .status(TemplateVersionStatus.DRAFT)
-                .placeholdersJson(serializeJson(validation.getDetectedPlaceholders()))
-                .validationErrorsJson(serializeJson(validation.getWarnings()))
-                .build();
+        ContractTemplateVersion version = newVersion(template, nextVersion, request.getStorageObjectId(),
+                request.getOriginalFileName() != null ? request.getOriginalFileName() : "template_v" + nextVersion + ".docx",
+                validation);
 
         version = versionRepository.save(version);
         log.info("Created new version {} for ContractTemplate id={}", nextVersion, templateId);
@@ -327,12 +303,26 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
                 .name(t.getName())
                 .description(t.getDescription())
                 .category(t.getCategory())
-                .rentalMode(t.getRentalMode())
                 .status(t.getStatus())
                 .latestPublishedVersionId(t.getLatestPublishedVersionId())
                 .versionsCount(versionsCount)
                 .createdAt(t.getCreatedAt())
                 .updatedAt(t.getUpdatedAt())
+                .build();
+    }
+
+    private ContractTemplateVersion newVersion(ContractTemplate template, int versionNumber, String storageObjectId,
+                                               String originalFileName, TemplateValidationResult validation) {
+        return ContractTemplateVersion.builder()
+                .template(template)
+                .versionNumber(versionNumber)
+                .storageObjectId(storageObjectId)
+                .originalFileName(originalFileName)
+                .status(TemplateVersionStatus.DRAFT)
+                .placeholdersJson(serializeJson(validation.getDetectedPlaceholders()))
+                .validationErrorsJson(serializeJson(validation.getWarnings()))
+                .invalidPlaceholdersJson(serializeJson(validation.getInvalidPlaceholders()))
+                .missingRequiredJson(serializeJson(validation.getMissingRequiredFields()))
                 .build();
     }
 
@@ -349,6 +339,8 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
                 .status(v.getStatus())
                 .placeholders(placeholders)
                 .validationWarnings(warnings)
+                .invalidPlaceholders(deserializeJsonList(v.getInvalidPlaceholdersJson()))
+                .missingRequiredFields(deserializeMissingFields(v.getMissingRequiredJson()))
                 .publishedAt(v.getPublishedAt())
                 .publishedBy(v.getPublishedBy())
                 .createdAt(v.getCreatedAt())
@@ -367,6 +359,15 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
         if (json == null || json.isBlank()) return Collections.emptyList();
         try {
             return objectMapper.readValue(json, new TypeReference<List<String>>() {});
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+    }
+
+    private List<TemplateFieldIssue> deserializeMissingFields(String json) {
+        if (json == null || json.isBlank()) return Collections.emptyList();
+        try {
+            return objectMapper.readValue(json, new TypeReference<List<TemplateFieldIssue>>() {});
         } catch (Exception e) {
             return Collections.emptyList();
         }

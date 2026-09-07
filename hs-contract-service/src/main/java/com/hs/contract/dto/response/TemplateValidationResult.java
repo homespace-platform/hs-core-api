@@ -14,19 +14,20 @@ import java.util.List;
 @AllArgsConstructor
 public class TemplateValidationResult {
     private boolean valid;
-    
+
     @Builder.Default
     private List<String> detectedPlaceholders = new ArrayList<>();
-    
+
     @Builder.Default
     private List<String> validPlaceholders = new ArrayList<>();
-    
+
     @Builder.Default
     private List<String> invalidPlaceholders = new ArrayList<>();
-    
+
+    /** Trường bắt buộc theo loại hình BĐS của mẫu nhưng chưa xuất hiện trong file Word. */
     @Builder.Default
-    private List<String> missingRequiredPlaceholders = new ArrayList<>();
-    
+    private List<TemplateFieldIssue> missingRequiredFields = new ArrayList<>();
+
     @Builder.Default
     private List<String> warnings = new ArrayList<>();
 }

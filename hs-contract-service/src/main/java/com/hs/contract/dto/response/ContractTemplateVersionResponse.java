@@ -22,6 +22,10 @@ public class ContractTemplateVersionResponse {
     private TemplateVersionStatus status;
     private List<String> placeholders;
     private List<String> validationWarnings;
+    /** Mã trường không có trong từ điển, cần sửa lại trong file Word. */
+    private List<String> invalidPlaceholders;
+    /** Trường bắt buộc theo loại hình BĐS nhưng chưa được chèn vào file Word. */
+    private List<TemplateFieldIssue> missingRequiredFields;
     private Instant publishedAt;
     private String publishedBy;
     private Instant createdAt;

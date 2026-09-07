@@ -1,7 +1,6 @@
 package com.hs.contract.dto.request;
 
 import com.hs.listing.model.constant.ListingCategory;
-import com.hs.listing.model.constant.RentalMode;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -21,6 +20,4 @@ public class UpdateContractTemplateRequest {
     private String description;
 
     private ListingCategory category;
-
-    private RentalMode rentalMode;
 }

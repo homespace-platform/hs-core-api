@@ -2,6 +2,40 @@ Dưới đây là **5 bộ Prompt hoàn chỉnh**, được bổ sung thêm ph�
 
 ---
 
+## Quy ước chung (áp dụng cho cả 5 mẫu)
+
+**Mỗi mẫu hợp đồng gắn với đúng một loại hình bất động sản.** Không còn khái niệm "hình thức thuê" ở cấp mẫu: nguyên căn hay một phần / phòng riêng được hệ thống điền động vào văn bản qua mã trường `{{lease.rentalMode}}`, nên mẫu nào cũng phải chèn thẻ này.
+
+**Thanh toán qua hệ thống.** Tiền thuê và tiền cọc được thanh toán trực tuyến qua hệ thống HomeSpace, không chuyển khoản trực tiếp vào tài khoản cá nhân của chủ nhà. Vì vậy **không được đưa số tài khoản hay tên ngân hàng vào hợp đồng**; phương thức thanh toán đã nằm trong `{{rent.paymentMethod}}`.
+
+**Thuật ngữ cư trú.** Sổ hộ khẩu giấy đã hết hiệu lực từ 01/01/2023 theo Luật Cư trú số 68/2020/QH14. Trong toàn bộ văn bản dùng cách gọi **"Nơi thường trú"**, tuyệt đối không dùng "hộ khẩu" hay "hộ khẩu thường trú".
+
+### Danh mục mã trường được hệ thống hỗ trợ (43 trường)
+
+Mã nào không có trong bảng này sẽ bị hệ thống báo lỗi khi Admin tải file Word lên.
+
+| Nhóm | Mã trường | Bắt buộc |
+| --- | --- | --- |
+| Pháp lý hợp đồng | `contract.number`, `contract.signingDate` | Cả 5 loại hình |
+| Pháp lý hợp đồng | `contract.signingCity` | Tùy chọn |
+| Bên A | `landlord.fullName`, `landlord.phone` | Cả 5 loại hình |
+| Bên A | `landlord.idNumber`, `landlord.idIssueDate`, `landlord.idIssuePlace`, `landlord.permanentAddress`, `landlord.email` | Tùy chọn |
+| Bên B | `tenant.fullName`, `tenant.phone` | Cả 5 loại hình |
+| Bên B | `tenant.occupantCount` | APARTMENT, HOUSE, ROOM |
+| Bên B | `tenant.organizationName`, `tenant.representativeName`, `tenant.representativePosition` | OFFICE, COMMERCIAL_SPACE |
+| Bên B | `tenant.idNumber`, `tenant.idIssueDate`, `tenant.idIssuePlace`, `tenant.permanentAddress`, `tenant.email` | Tùy chọn |
+| Bất động sản | `property.fullAddress`, `property.areaText`, `property.propertyType` | Cả 5 loại hình |
+| Bất động sản | `property.unitNumber`, `property.floor` | Tùy chọn |
+| Thời hạn thuê | `lease.rentalMode`, `lease.startDateText`, `lease.endDateText`, `lease.durationMonths`, `lease.durationText` | Cả 5 loại hình |
+| Thời hạn thuê | `lease.handoverDateText` | Tùy chọn |
+| Giá thuê & Cọc | `rent.amountNumber`, `rent.amountWords`, `rent.paymentCycle`, `rent.paymentDueDay`, `deposit.amountNumber`, `deposit.amountWords` | Cả 5 loại hình |
+| Giá thuê & Cọc | `rent.paymentMethod`, `deposit.description` | Tùy chọn |
+| Chỉ số bàn giao | `meters.electricityInitial`, `meters.waterInitial` | Tùy chọn |
+| Bảng động | `#chargesTable` | Cả 5 loại hình |
+| Bảng động | `#equipmentTable` | Tùy chọn |
+
+---
+
 ### Prompt 1: Hợp đồng Thuê Căn Hộ Chung Cư (`APARTMENT`)
 
 ```markdown
@@ -26,9 +60,10 @@ Hãy soạn thảo toàn bộ nội dung mẫu "HỢP ĐỒNG THUÊ CĂN HỘ CH
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
 - Pháp lý hợp đồng: Số hợp đồng: {{contract.number}}, ngày ký: {{contract.signingDate}}, nơi ký: {{contract.signingCity}}
-- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, hộ khẩu thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}, STK: {{landlord.bankAccount}} tại {{landlord.bankName}}
-- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, hộ khẩu thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số người cư trú: {{tenant.occupantCount}}
+- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
+- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số người cư trú: {{tenant.occupantCount}}
 - Căn hộ cho thuê: Tầng {{property.floor}}, Căn số {{property.unitNumber}}, thuộc tòa nhà tại {{property.fullAddress}}, diện tích: {{property.areaText}}, loại hình: {{property.propertyType}}
+- Hình thức thuê: {{lease.rentalMode}}
 - Thời hạn thuê: Từ ngày {{lease.startDateText}} đến ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao: {{lease.handoverDateText}}
 - Giá thuê & Đặt cọc: Giá thuê bằng số: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ hạn thanh toán: {{rent.paymentCycle}}, hạn đóng tiền: {{rent.paymentDueDay}}, phương thức: {{rent.paymentMethod}}. Tiền cọc: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}). Thỏa thuận cọc: {{deposit.description}}
 - Chỉ số bàn giao: Đồng hồ điện: {{meters.electricityInitial}}, Đồng hồ nước: {{meters.waterInitial}}
@@ -40,6 +75,7 @@ Hãy soạn thảo toàn bộ nội dung mẫu "HỢP ĐỒNG THUÊ CĂN HỘ CH
 - Tuân thủ nghiêm ngặt Nội quy Ban Quản lý / Ban Quản trị tòa nhà chung cư, quy định chuyển đồ, đăng ký thẻ cư dân, thẻ thang máy, thẻ gửi xe.
 - An toàn PCCC nhà cao tầng: Cấm can thiệp hoặc che chắn đầu báo khói/đầu phun cứu hỏa; cấm nướng than, đốt vàng mã ngoài ban công; cấm mang xe điện/pin xe điện lên căn hộ sạc sai quy định.
 - Trách nhiệm thanh toán: Phân định rõ Bên nào chịu phí quản lý chung cư, phí gửi xe, phí dịch vụ.
+- Thanh toán qua hệ thống: Tiền thuê và tiền cọc được nộp trực tuyến qua nền tảng HomeSpace theo phương thức {{rent.paymentMethod}}; không ghi số tài khoản hay tên ngân hàng cá nhân của Bên A vào hợp đồng.
 - Quy định kiểm tra căn hộ định kỳ và khấu trừ tiền đặt cọc nếu làm hư hại nội thất hoặc vi phạm nội quy tòa nhà.
 
 Hãy viết hoàn chỉnh văn bản từ Quốc hiệu, Tiêu ngữ, Tên hợp đồng, các Điều khoản (Điều 1 đến Điều 10) đến phần ký tên của hai bên.
@@ -71,9 +107,10 @@ Hãy soạn thảo toàn bộ nội dung mẫu "HỢP ĐỒNG THUÊ NHÀ NGUYÊN
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
 - Số hợp đồng: {{contract.number}}, ngày ký: {{contract.signingDate}}, tại: {{contract.signingCity}}
-- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, hộ khẩu: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}, tài khoản nhận tiền: {{landlord.bankAccount}} tại {{landlord.bankName}}
-- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, hộ khẩu: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số lượng người ở: {{tenant.occupantCount}} người.
+- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
+- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số lượng người ở: {{tenant.occupantCount}} người.
 - Căn nhà cho thuê: Địa chỉ: {{property.fullAddress}}, kết cấu/số tầng: {{property.floor}}, diện tích: {{property.areaText}}, loại nhà: {{property.propertyType}}
+- Hình thức thuê: {{lease.rentalMode}}
 - Thời hạn thuê: Từ ngày {{lease.startDateText}} đến ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao chìa khóa: {{lease.handoverDateText}}
 - Giá thuê & Đặt cọc: Đơn giá thuê: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn thanh toán: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền đặt cọc: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}), điều khoản hoàn trả cọc: {{deposit.description}}
 - Bàn giao kỹ thuật: Số công tơ điện: {{meters.electricityInitial}}, công tơ nước: {{meters.waterInitial}}
@@ -86,6 +123,7 @@ Hãy soạn thảo toàn bộ nội dung mẫu "HỢP ĐỒNG THUÊ NHÀ NGUYÊN
 - Nghiêm cấm Bên B tự ý khoan đục tường chịu lực, cơi nới, thay đổi kết cấu chịu lực hoặc kiến trúc của căn nhà khi chưa có sự đồng ý bằng văn bản của Bên A.
 - Trách nhiệm của Bên B về an ninh trật tự khu phố, không chứa chấp hàng cấm, không tổ chức tệ nạn xã hội.
 - Nghĩa vụ hoàn trả căn nhà đúng hiện trạng ban đầu, chịu trách nhiệm sửa chữa các hư hỏng phát sinh do quá trình sử dụng.
+- Thanh toán qua hệ thống: Tiền thuê và tiền cọc được nộp trực tuyến qua nền tảng HomeSpace theo phương thức {{rent.paymentMethod}}; không ghi số tài khoản hay tên ngân hàng cá nhân của Bên A vào hợp đồng.
 
 Hãy viết hoàn chỉnh văn bản với ngôn từ pháp lý chuẩn mực, logic và chuyên nghiệp.
 ```
@@ -116,10 +154,11 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ PHÒNG TRỌ / CĂN H�
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
 - Số hợp đồng: {{contract.number}}, ngày lập: {{contract.signingDate}}, tại: {{contract.signingCity}}
-- Bên cho thuê (Chủ trọ - Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, địa chỉ: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}, STK: {{landlord.bankAccount}} - Ngân hàng: {{landlord.bankName}}
-- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số lượng người ở: {{tenant.occupantCount}}
-- Phòng cho thuê: Phòng số {{property.unitNumber}}, Tầng {{property.floor}}, tại địa chỉ {{property.fullAddress}}, diện tích: {{property.areaText}}
-- Thời hạn thuê: Từ {{lease.startDateText}} đến {{lease.endDateText}} (thời hạn: {{lease.durationText}}). Bàn giao ngày: {{lease.handoverDateText}}
+- Bên cho thuê (Chủ trọ - Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
+- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số lượng người ở: {{tenant.occupantCount}}
+- Phòng cho thuê: Phòng số {{property.unitNumber}}, Tầng {{property.floor}}, tại địa chỉ {{property.fullAddress}}, diện tích: {{property.areaText}}, loại hình: {{property.propertyType}}
+- Hình thức thuê: {{lease.rentalMode}}
+- Thời hạn thuê: Từ {{lease.startDateText}} đến {{lease.endDateText}} (thời hạn: {{lease.durationText}} - {{lease.durationMonths}} tháng). Bàn giao ngày: {{lease.handoverDateText}}
 - Giá thuê & Đặt cọc: Tiền phòng: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn đóng: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền cọc: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}). Thỏa thuận cọc: {{deposit.description}}
 - Số đồng hồ bàn giao: Điện: {{meters.electricityInitial}}, Nước: {{meters.waterInitial}}
 - BẢNG ĐỘNG TỰ SINH (Giữ nguyên dấu #):
@@ -131,6 +170,7 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ PHÒNG TRỌ / CĂN H�
 - An toàn PCCC nghiêm ngặt: Tuyệt đối cấm sạc pin xe đạp điện/xe máy điện qua đêm không người giám sát; cấm sử dụng bếp gas mini không rõ nguồn gốc; cấm đốt nến, vàng mã trong phòng.
 - Giờ giấc đóng mở cửa chung, giữ gìn trật tự sau 22h00, không gây ồn ào ảnh hưởng phòng xung quanh.
 - Nghĩa vụ cung cấp thông tin để đăng ký tạm trú với Công an phường sở tại.
+- Thanh toán qua hệ thống: Tiền phòng và tiền cọc được nộp trực tuyến qua nền tảng HomeSpace theo phương thức {{rent.paymentMethod}}; không ghi số tài khoản hay tên ngân hàng cá nhân của Bên A vào hợp đồng.
 
 Hãy trình bày văn bản đầy đủ từ mở đầu đến kết thúc, có các điều khoản xử lý vi phạm hợp đồng và chữ ký hai bên.
 ```
@@ -161,13 +201,16 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ MẶT BẰNG KINH DOANH
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
 - Số hợp đồng: {{contract.number}}, ngày lập: {{contract.signingDate}}, tại: {{contract.signingCity}}
-- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, hộ khẩu: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}, STK: {{landlord.bankAccount}} mở tại {{landlord.bankName}}
+- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
 - Bên thuê (Bên B):
-  + Tên tổ chức/doanh nghiệp: {{tenant.organizationName}} (nếu Bên thuê là doanh nghiệp)
+  + Tên tổ chức/doanh nghiệp: {{tenant.organizationName}}
   + Người đại diện pháp luật: {{tenant.representativeName}}, Chức vụ: {{tenant.representativePosition}}
-  + Cá nhân đại diện ký kết: {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, hộ khẩu: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}
+  + Cá nhân đại diện ký kết: {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}
 - Mặt bằng kinh doanh: Địa chỉ: {{property.fullAddress}}, Mã gian/ki-ốt: {{property.unitNumber}}, Diện tích kinh doanh: {{property.areaText}}, Loại hình: {{property.propertyType}}
+- Hình thức thuê: {{lease.rentalMode}}
 - Thời hạn thuê: Từ ngày {{lease.startDateText}} đến ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao mặt bằng: {{lease.handoverDateText}}
+
+LƯU Ý: Hợp đồng thuê mặt bằng kinh doanh KHÔNG dùng mã trường {{tenant.occupantCount}} (số người vào ở) vì không phù hợp nghiệp vụ. Ba mã trường về pháp nhân bên thuê ở trên là bắt buộc.
 - Giá thuê & Đặt cọc: Đơn giá thuê: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn thanh toán: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền đặt cọc bảo đảm: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}), điều khoản cọc: {{deposit.description}}
 - Chỉ số bàn giao: Đồng hồ điện: {{meters.electricityInitial}}, Đồng hồ nước: {{meters.waterInitial}}
 - BẢNG ĐỘNG TỰ SINH (Giữ nguyên dấu #):
@@ -180,6 +223,7 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ MẶT BẰNG KINH DOANH
 - Biển hiệu & Quảng cáo: Quy định về kích thước, vị trí treo lắp bảng hiệu theo Luật Quảng cáo, không gây ảnh hưởng đến mặt tiền và cảnh quan đô thị.
 - Giấy phép con và PCCC: Bên B tự chịu trách nhiệm xin giấy phép kinh doanh, an toàn vệ sinh thực phẩm và thẩm duyệt nghiệm thu PCCC cơ sở của mình.
 - Điều khoản bồi thường phạt cọc nghiêm khắc nếu Bên A đơn phương thu hồi mặt bằng trước hạn gây thiệt hại kinh doanh cho Bên B.
+- Thanh toán qua hệ thống: Tiền thuê và tiền cọc bảo đảm được nộp trực tuyến qua nền tảng HomeSpace theo phương thức {{rent.paymentMethod}}; không ghi số tài khoản hay tên ngân hàng của Bên A vào hợp đồng.
 
 Hãy viết hoàn chỉnh văn bản pháp lý chuyên nghiệp từ mở đầu đến kết thúc.
 ```
@@ -210,13 +254,16 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ VĂN PHÒNG LÀM VIỆC
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
 - Số hợp đồng: {{contract.number}}, ngày ký: {{contract.signingDate}}, tại: {{contract.signingCity}}
-- Bên cho thuê (Bên A): {{landlord.fullName}}, Mã số thuế/CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, địa chỉ: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}, STK nhận tiền: {{landlord.bankAccount}} tại {{landlord.bankName}}
+- Bên cho thuê (Bên A): {{landlord.fullName}}, Mã số thuế/CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
 - Bên thuê (Bên B - Khách hàng Doanh nghiệp):
   + Tên công ty/tổ chức: {{tenant.organizationName}}
   + Đại diện pháp luật: {{tenant.representativeName}}, Chức vụ: {{tenant.representativePosition}}
-  + Người phụ trách liên hệ: {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, địa chỉ: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}
+  + Người phụ trách liên hệ: {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}
 - Diện tích văn phòng: Phòng/Phân khu: {{property.unitNumber}}, Tầng: {{property.floor}}, Tòa nhà tại: {{property.fullAddress}}, Diện tích thuê văn phòng: {{property.areaText}}, Loại hình: {{property.propertyType}}
+- Hình thức thuê: {{lease.rentalMode}}
 - Thời hạn thuê: Từ ngày {{lease.startDateText}} đến hết ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao văn phòng: {{lease.handoverDateText}}
+
+LƯU Ý: Hợp đồng thuê văn phòng KHÔNG dùng mã trường {{tenant.occupantCount}} (số người vào ở) vì không phù hợp nghiệp vụ B2B. Ba mã trường về pháp nhân bên thuê ở trên là bắt buộc.
 - Giá thuê & Đặt cọc: Tiền thuê văn phòng: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn nộp: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền đặt cọc bảo đảm: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}), điều kiện hoàn cọc: {{deposit.description}}
 - Chỉ số bàn giao: Đồng hồ điện: {{meters.electricityInitial}}, Đồng hồ nước: {{meters.waterInitial}}
 - BẢNG ĐỘNG TỰ SINH (Giữ nguyên dấu #):
@@ -229,6 +276,7 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ VĂN PHÒNG LÀM VIỆC
 - Giờ làm việc tiêu chuẩn và cách tính phụ phí làm thêm ngoài giờ (Overtime air-conditioning fee).
 - Nghĩa vụ phát hành hóa đơn giá trị gia tăng (Hóa đơn điện tử VAT) hợp pháp của Bên A cho Bên B theo từng đợt thanh toán.
 - Quy định về bảo hiểm tài sản, bảo hiểm trách nhiệm công cộng và bảo mật tài liệu doanh nghiệp.
+- Thanh toán qua hệ thống: Tiền thuê và tiền cọc bảo đảm được nộp trực tuyến qua nền tảng HomeSpace theo phương thức {{rent.paymentMethod}}; không ghi số tài khoản hay tên ngân hàng của Bên A vào hợp đồng.
 
 Hãy viết chi tiết và đầy đủ toàn văn hợp đồng chuẩn phong cách hợp đồng thương mại B2B cao cấp.
 ```

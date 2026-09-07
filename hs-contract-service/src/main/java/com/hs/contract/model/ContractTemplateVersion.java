@@ -48,6 +48,14 @@ public class ContractTemplateVersion extends BaseEntity {
     @Column(name = "validation_errors_json", columnDefinition = "TEXT")
     private String validationErrorsJson;
 
+    /** JSON mảng các mã trường không có trong từ điển (sai chính tả / không hỗ trợ). */
+    @Column(name = "invalid_placeholders_json", columnDefinition = "TEXT")
+    private String invalidPlaceholdersJson;
+
+    /** JSON mảng {key,label} các trường bắt buộc còn thiếu so với loại hình BĐS của mẫu. */
+    @Column(name = "missing_required_json", columnDefinition = "TEXT")
+    private String missingRequiredJson;
+
     @Column(name = "published_at")
     private Instant publishedAt;
 

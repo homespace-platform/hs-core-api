@@ -9,7 +9,6 @@ import com.hs.contract.dto.response.ContractTemplateResponse;
 import com.hs.contract.dto.response.ContractTemplateVersionResponse;
 import com.hs.contract.model.constant.ContractTemplateStatus;
 import com.hs.listing.model.constant.ListingCategory;
-import com.hs.listing.model.constant.RentalMode;
 
 import java.util.List;
 
@@ -21,9 +20,9 @@ public interface ContractTemplateService {
 
     ContractTemplateResponse getTemplate(String id);
 
-    PageResponse<ContractTemplateResponse> listTemplates(ContractTemplateStatus status, ListingCategory category, RentalMode rentalMode, int page, int size);
+    PageResponse<ContractTemplateResponse> listTemplates(ContractTemplateStatus status, ListingCategory category, int page, int size);
 
-    List<ContractTemplateResponse> listTemplates(ContractTemplateStatus status, ListingCategory category, RentalMode rentalMode);
+    List<ContractTemplateResponse> listTemplates(ContractTemplateStatus status, ListingCategory category);
 
     List<ContractTemplateResponse> getApplicableTemplates(String rentalRequestId);
 

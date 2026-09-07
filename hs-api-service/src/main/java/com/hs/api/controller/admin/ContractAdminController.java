@@ -16,7 +16,6 @@ import com.hs.contract.model.constant.ContractTemplateStatus;
 import com.hs.contract.service.ContractService;
 import com.hs.contract.service.ContractTemplateService;
 import com.hs.listing.model.constant.ListingCategory;
-import com.hs.listing.model.constant.RentalMode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -62,11 +61,10 @@ public class ContractAdminController {
     public PageResponse<ContractTemplateResponse> listTemplates(
             @RequestParam(required = false) ContractTemplateStatus status,
             @RequestParam(required = false) ListingCategory category,
-            @RequestParam(required = false) RentalMode rentalMode,
             @RequestParam(defaultValue = "1") @Min(1) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size
     ) {
-        return templateService.listTemplates(status, category, rentalMode, page, size);
+        return templateService.listTemplates(status, category, page, size);
     }
 
     /**

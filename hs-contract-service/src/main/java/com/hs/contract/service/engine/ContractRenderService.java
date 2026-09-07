@@ -97,9 +97,7 @@ public class ContractRenderService {
                 "idIssuePlace", "Cục Cảnh sát QLHC về TTXH",
                 "permanentAddress", "123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM",
                 "phone", "0901234567",
-                "email", "nguyenvanan.landlord@example.com",
-                "bankAccount", "19031234567890",
-                "bankName", "Techcombank - CN Sài Gòn"
+                "email", "nguyenvanan.landlord@example.com"
         );
 
         Map<String, Object> tenant = new LinkedHashMap<>();
@@ -124,6 +122,7 @@ public class ContractRenderService {
         );
 
         Map<String, Object> lease = Map.of(
+                "rentalMode", "Thuê nguyên căn / toàn bộ",
                 "startDateText", "15/09/2026",
                 "endDateText", "14/09/2027",
                 "durationMonths", 12,
@@ -136,7 +135,7 @@ public class ContractRenderService {
                 "amountWords", "Mười lăm triệu đồng chẵn",
                 "paymentCycle", "Hàng tháng",
                 "paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng",
-                "paymentMethod", "Chuyển khoản ngân hàng",
+                "paymentMethod", "Thanh toán trực tuyến qua hệ thống HomeSpace",
                 "depositAmountNumber", "15.000.000 VNĐ",
                 "depositAmountWords", "Mười lăm triệu đồng chẵn",
                 "depositDescription", "Tiền đặt cọc tương đương 01 tháng tiền thuê nhà. Khoản tiền cọc này được bên A hoàn trả đầy đủ cho bên B ngay sau khi chấm dứt hợp đồng sau khi đã khấu trừ các chi phí sinh hoạt phát sinh chưa thanh toán (nếu có)."
@@ -177,8 +176,6 @@ public class ContractRenderService {
         model.put("landlord.permanentAddress", getStr(l, "permanentAddress", ""));
         model.put("landlord.phone", getStr(l, "phone", ""));
         model.put("landlord.email", getStr(l, "email", ""));
-        model.put("landlord.bankAccount", getStr(l, "bankAccount", ""));
-        model.put("landlord.bankName", getStr(l, "bankName", ""));
     }
 
     private void putTenantFields(Map<String, Object> model, Map<String, Object> t) {
@@ -207,6 +204,7 @@ public class ContractRenderService {
 
     private void putLeaseFields(Map<String, Object> model, Map<String, Object> le) {
         if (le == null) return;
+        model.put("lease.rentalMode", getStr(le, "rentalMode", ""));
         model.put("lease.startDateText", getStr(le, "startDateText", ""));
         model.put("lease.endDateText", getStr(le, "endDateText", ""));
         model.put("lease.durationMonths", String.valueOf(le.getOrDefault("durationMonths", "12")));
