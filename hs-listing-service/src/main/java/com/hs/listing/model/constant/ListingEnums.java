@@ -3,6 +3,8 @@ package com.hs.listing.model.constant;
 public final class ListingEnums {
     private ListingEnums() {}
     public enum OperatingMode { ALWAYS_OPEN, CUSTOM_SCHEDULE }
+    public enum OfficeHandoverStatus { RAW, BASIC, FULL }
+    public enum CommercialHandoverStatus { RAW, BASIC, FINISHED }
     public enum PositionType { GROUND_FLOOR, UPPER_FLOOR, SHOPPING_MALL, OTHER }
     public enum ParkingType { NONE, MOTORBIKE, CAR, MOTORBIKE_AND_CAR }
     public enum RestroomType { PRIVATE, SHARED }

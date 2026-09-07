@@ -111,10 +111,7 @@ public class ListingQueryService {
                 .sorted(Comparator.comparing(Amenity::getSortOrder).thenComparing(Amenity::getCode))
                 .map(item -> new ListingOptionItemResponse(item.getCode(), item.getName(), item.getSortOrder()))
                 .toList();
-        var furnishings = listing.getFurnishings().stream()
-                .sorted(Comparator.comparing(FurnishingItem::getSortOrder).thenComparing(FurnishingItem::getCode))
-                .map(item -> new ListingOptionItemResponse(item.getCode(), item.getName(), item.getSortOrder()))
-                .toList();
+        var furnishings = toFurnishings(listing);
         var customAmenities = listing.getCustomAmenities().stream()
                 .map(ListingCustomAmenity::getName)
                 .sorted()
@@ -152,6 +149,28 @@ public class ListingQueryService {
                 listing.getStatusChangedBy(), listing.getVersion(),
                 listing.getCreatedAt(), listing.getUpdatedAt(), listing.getCreatedBy(), listing.getUpdatedBy(),
                 listing.getViewCount() != null ? listing.getViewCount() : 0L);
+    }
+
+    /**
+     * Trả về bảng thiết bị đã đánh lại STT liên tục 1..n để render thẳng vào
+     * {{#equipmentTable}} của hợp đồng.
+     */
+    private List<ListingFurnishingResponse> toFurnishings(Listing listing) {
+        var sorted = listing.getFurnishings().stream()
+                .sorted(Comparator.comparing(ListingFurnishingAsset::getSortOrder))
+                .toList();
+        var rows = new java.util.ArrayList<ListingFurnishingResponse>(sorted.size());
+        int index = 1;
+        for (ListingFurnishingAsset asset : sorted) {
+            var condition = asset.getHandoverCondition();
+            String label = condition == null ? null : condition.label();
+            String note = asset.getConditionNote();
+            String conditionText = note == null || note.isBlank() ? label : label + " — " + note;
+            rows.add(new ListingFurnishingResponse(
+                    index++, asset.getItemCode(), asset.getAssetName(), asset.getQuantity(),
+                    condition, label, note, conditionText));
+        }
+        return rows;
     }
 
     private ListingPricingRequest toPricing(Listing listing) {

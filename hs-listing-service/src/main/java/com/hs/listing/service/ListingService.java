@@ -323,25 +323,75 @@ public class ListingService {
                 }
             }
         }
+        if (request.customAmenities() != null) {
+            for (String name : request.customAmenities())
+                addCustomAmenity(listing, name);
+        }
+        attachFurnishings(listing, request);
+    }
+
+    /**
+     * Bảng kiểm kê trang thiết bị bàn giao. Mỗi dòng có thể tham chiếu catalog
+     * (itemCode) hoặc là tài sản nhập tay; assetName luôn được chốt lại trên
+     * listing để hợp đồng render đúng tên tại thời điểm đăng tin.
+     */
+    private void attachFurnishings(Listing listing, CreateListingRequest request) {
+        var rows = request.furnishings() == null ? List.<ListingFurnishingRequest>of() : request.furnishings();
+        if (rows.isEmpty()) {
+            if (requiresFurnishingInventory(request))
+                invalid("furnishings", "REQUIRED");
+            return;
+        }
         Map<String, FurnishingItem> furnishingsByKey = new HashMap<>();
         for (FurnishingItem item : furnishingItemRepository.findAllByActiveTrue()) {
             furnishingsByKey.put(catalogKey(item.getCode()), item);
             furnishingsByKey.put(catalogKey(item.getName()), item);
         }
-        if (request.furnishingCodes() != null) {
-            for (String value : request.furnishingCodes()) {
-                if (value == null || value.isBlank())
-                    continue;
-                FurnishingItem item = furnishingsByKey.get(catalogKey(value));
+        int sortOrder = 0;
+        for (ListingFurnishingRequest row : rows) {
+            FurnishingItem item = null;
+            if (row.itemCode() != null && !row.itemCode().isBlank()) {
+                item = furnishingsByKey.get(catalogKey(row.itemCode()));
                 if (item == null)
-                    throw error(404, "FURNISHING_NOT_FOUND", "Furnishing item not found: " + value);
-                listing.getFurnishings().add(item);
+                    throw error(404, "FURNISHING_NOT_FOUND", "Furnishing item not found: " + row.itemCode());
+                if (!item.getCategories().contains(request.category()))
+                    invalid("furnishings.itemCode", "INVALID_FOR_CATEGORY");
             }
+            String assetName = row.assetName() == null || row.assetName().isBlank()
+                    ? (item == null ? null : item.getName())
+                    : row.assetName().trim();
+            if (assetName == null || assetName.isBlank())
+                invalid("furnishings.assetName", "REQUIRED");
+            var asset = new ListingFurnishingAsset();
+            asset.setListing(listing);
+            asset.setFurnishingItem(item);
+            asset.setItemCode(item == null ? null : item.getCode());
+            asset.setAssetName(assetName);
+            asset.setQuantity(row.quantity());
+            asset.setHandoverCondition(row.handoverCondition());
+            asset.setConditionNote(
+                    row.conditionNote() == null || row.conditionNote().isBlank() ? null : row.conditionNote().trim());
+            asset.setSortOrder(sortOrder++);
+            listing.getFurnishings().add(asset);
         }
-        if (request.customAmenities() != null) {
-            for (String name : request.customAmenities())
-                addCustomAmenity(listing, name);
-        }
+    }
+
+    /**
+     * Tin bàn giao thô được phép để trống bảng thiết bị; mọi mức bàn giao có nội
+     * thất đều phải kê khai để làm biên bản bàn giao trong hợp đồng.
+     */
+    private boolean requiresFurnishingInventory(CreateListingRequest r) {
+        return switch (r.category()) {
+            case APARTMENT -> isFurnished(r.apartmentDetail().furnishingStatus());
+            case HOUSE -> isFurnished(r.houseDetail().furnishingStatus());
+            case ROOM -> isFurnished(r.roomDetail().furnishingStatus());
+            case OFFICE -> r.officeDetail().handoverStatus() != OfficeHandoverStatus.RAW;
+            case COMMERCIAL_SPACE -> r.commercialDetail().handoverStatus() != CommercialHandoverStatus.RAW;
+        };
+    }
+
+    private boolean isFurnished(FurnishingStatus status) {
+        return status != null && status != FurnishingStatus.UNFURNISHED;
     }
 
     private void addCustomAmenity(Listing listing, String name) {

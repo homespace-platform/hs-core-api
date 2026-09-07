@@ -11,6 +11,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
@@ -49,15 +50,67 @@ public class ListingReferenceDataInitializer implements CommandLineRunner {
         amenity("FIRE_SAFETY", "Hệ thống PCCC", order++, Set.of(ListingCategory.OFFICE));
         amenity("SIGNAGE_POSITION", "Vị trí đặt biển hiệu", order, Set.of(ListingCategory.COMMERCIAL_SPACE));
 
-        furnishing("BED", "Giường", 10);
-        furnishing("WARDROBE", "Tủ quần áo", 20);
-        furnishing("WORK_DESK", "Bàn làm việc", 30);
-        furnishing("KITCHEN_SHELF", "Kệ bếp", 40);
-        furnishing("REFRIGERATOR", "Tủ lạnh", 50);
-        furnishing("WASHING_MACHINE", "Máy giặt", 60);
-        furnishing("AIR_CONDITIONER", "Máy lạnh", 70);
-        furnishing("WATER_HEATER", "Máy nước nóng", 80);
-        furnishing("CURTAIN", "Rèm cửa", 90);
+        seedFurnishings();
+    }
+
+    private void seedFurnishings() {
+        Set<ListingCategory> apartmentHouse = Set.of(ListingCategory.APARTMENT, ListingCategory.HOUSE);
+        Set<ListingCategory> office = Set.of(ListingCategory.OFFICE);
+        Set<ListingCategory> commercial = Set.of(ListingCategory.COMMERCIAL_SPACE);
+        int order = 10;
+
+        // Dùng chung cho nhà ở
+        furnishing("BED", "Giường", order++, HOME);
+        furnishing("WARDROBE", "Tủ quần áo", order++, HOME);
+        furnishing("WORK_DESK", "Bàn làm việc", order++, HOME);
+        furnishing("KITCHEN_SHELF", "Kệ bếp", order++, HOME);
+        furnishing("REFRIGERATOR", "Tủ lạnh", order++, HOME);
+        furnishing("WASHING_MACHINE", "Máy giặt", order++, HOME);
+        furnishing("WATER_HEATER", "Máy nước nóng", order++, HOME);
+        furnishing("CURTAIN", "Rèm cửa", order++, HOME);
+        furnishing("FAN", "Quạt", order++, HOME);
+
+        // Riêng căn hộ và nhà nguyên căn
+        furnishing("SOFA_SET", "Bộ sofa + bàn trà", order++, apartmentHouse);
+        furnishing("DINING_SET", "Bàn ăn + ghế", order++, apartmentHouse);
+        furnishing("TV", "Tivi", order++, apartmentHouse);
+        furnishing("KITCHEN_CABINET", "Tủ bếp", order++, apartmentHouse);
+        furnishing("COOKTOP", "Bếp từ / bếp gas", order++, apartmentHouse);
+        furnishing("RANGE_HOOD", "Máy hút mùi", order++, apartmentHouse);
+        furnishing("MICROWAVE", "Lò vi sóng", order++, apartmentHouse);
+        furnishing("SHOE_CABINET", "Tủ giày", order++, apartmentHouse);
+        furnishing("WATER_TANK_PUMP", "Bồn nước / máy bơm", order++, Set.of(ListingCategory.HOUSE));
+
+        // Văn phòng
+        furnishing("OFFICE_DESK", "Bàn làm việc nhân viên", order++, office);
+        furnishing("OFFICE_CHAIR", "Ghế xoay văn phòng", order++, office);
+        furnishing("FILING_CABINET", "Tủ hồ sơ", order++, office);
+        furnishing("PARTITION", "Vách ngăn", order++, office);
+        furnishing("MEETING_TABLE", "Bàn họp + ghế", order++, office);
+        furnishing("RECEPTION_COUNTER", "Quầy lễ tân", order++, office);
+        furnishing("NETWORK_CABLING", "Hệ thống mạng LAN / ổ cắm", order++, office);
+        furnishing("PROJECTOR_TV", "Máy chiếu / TV phòng họp", order++, office);
+        furnishing("PANTRY_EQUIPMENT", "Thiết bị pantry", order++, office);
+        furnishing("CURTAIN_BLIND", "Rèm cửa / mành", order++, office);
+
+        // Mặt bằng kinh doanh
+        furnishing("ROLLING_DOOR", "Cửa cuốn / cửa kính", order++, commercial);
+        furnishing("DISPLAY_SHELF", "Kệ trưng bày", order++, commercial);
+        furnishing("CASHIER_COUNTER", "Quầy thu ngân", order++, commercial);
+        furnishing("SIGNAGE_FRAME", "Khung / bảng hiệu", order++, commercial);
+        furnishing("ELECTRICAL_SYSTEM", "Hệ thống điện", order++, commercial);
+        furnishing("WATER_SYSTEM", "Hệ thống cấp thoát nước", order++, commercial);
+        furnishing("RESTROOM_FIXTURE", "Thiết bị nhà vệ sinh", order++, commercial);
+        furnishing("MEZZANINE_STRUCTURE", "Kết cấu gác lửng", order++, commercial);
+        furnishing("WAREHOUSE_SHELF", "Kệ kho / khu vực kho", order++, commercial);
+
+        // Dùng chung nhiều loại hình
+        furnishing("AIR_CONDITIONER", "Máy lạnh", order++, ALL);
+        furnishing("LIGHTING", "Hệ thống đèn chiếu sáng", order++, ALL);
+        furnishing("CEILING_FLOOR_FINISH", "Trần / sàn hoàn thiện", order++,
+                Set.of(ListingCategory.OFFICE, ListingCategory.COMMERCIAL_SPACE));
+        furnishing("FIRE_EQUIPMENT", "Thiết bị PCCC", order,
+                Set.of(ListingCategory.OFFICE, ListingCategory.COMMERCIAL_SPACE));
     }
 
     private void amenity(String code, String name, int sortOrder, Set<ListingCategory> categories) {
@@ -72,13 +125,17 @@ public class ListingReferenceDataInitializer implements CommandLineRunner {
         amenityRepository.save(item);
     }
 
-    private void furnishing(String code, String name, int sortOrder) {
-        if (furnishingItemRepository.existsByCode(code)) return;
-        FurnishingItem item = new FurnishingItem();
-        item.setId(stableId("furnishing:" + code));
-        item.setCode(code);
+    /** Upsert để các item đã seed trước đây được backfill category mapping. */
+    private void furnishing(String code, String name, int sortOrder, Set<ListingCategory> categories) {
+        FurnishingItem item = furnishingItemRepository.findByCode(code).orElseGet(() -> {
+            FurnishingItem created = new FurnishingItem();
+            created.setId(stableId("furnishing:" + code));
+            created.setCode(code);
+            return created;
+        });
         item.setName(name);
         item.setSortOrder(sortOrder);
+        item.setCategories(new HashSet<>(categories));
         item.setActive(true);
         furnishingItemRepository.save(item);
     }

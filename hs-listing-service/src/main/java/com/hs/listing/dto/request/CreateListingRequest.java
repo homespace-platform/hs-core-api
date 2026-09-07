@@ -28,7 +28,7 @@ public record CreateListingRequest(
         @Valid RoomDetailRequest roomDetail,
         List<String> amenityCodes,
         List<String> customAmenities,
-        List<String> furnishingCodes,
+        List<@Valid ListingFurnishingRequest> furnishings,
         List<@Valid ListingChargeRequest> charges,
         @NotNull @Valid ListingAddressSourceRequest addressSource,
         @NotEmpty List<@Valid ListingMediaRequest> media,

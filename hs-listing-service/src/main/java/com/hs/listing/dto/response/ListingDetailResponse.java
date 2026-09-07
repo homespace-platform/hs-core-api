@@ -29,7 +29,7 @@ public record ListingDetailResponse(
         RoomDetailRequest roomDetail,
         List<ListingOptionItemResponse> amenities,
         List<String> customAmenities,
-        List<ListingOptionItemResponse> furnishings,
+        List<ListingFurnishingResponse> furnishings,
         List<ListingChargeRequest> charges,
         ListingAddressResponse address,
         ListingOwnerResponse owner,

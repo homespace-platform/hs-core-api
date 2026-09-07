@@ -72,9 +72,8 @@ public class Listing extends BaseEntity {
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "listing_amenities", joinColumns = @JoinColumn(name = "listing_id"), inverseJoinColumns = @JoinColumn(name = "amenity_id"))
     @Builder.Default private Set<Amenity> amenities = new HashSet<>();
-    @ManyToMany(fetch = FetchType.LAZY)
-    @JoinTable(name = "listing_furnishings", joinColumns = @JoinColumn(name = "listing_id"), inverseJoinColumns = @JoinColumn(name = "furnishing_item_id"))
-    @Builder.Default private Set<FurnishingItem> furnishings = new HashSet<>();
+    @OneToMany(mappedBy = "listing", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default private List<ListingFurnishingAsset> furnishings = new ArrayList<>();
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "listing_viewing_days", joinColumns = @JoinColumn(name = "listing_id"))
     @Column(name = "day_of_week", nullable = false) @Enumerated(EnumType.STRING)
