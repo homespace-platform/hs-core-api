@@ -1,6 +1,7 @@
 package com.hs.contract.model;
 
 import com.hs.common.persistence.BaseEntity;
+import com.hs.contract.model.constant.ContractTemplateSource;
 import com.hs.contract.model.constant.ContractTemplateStatus;
 import com.hs.listing.model.constant.ListingCategory;
 import com.hs.listing.model.constant.RentalMode;
@@ -14,7 +15,9 @@ import java.util.UUID;
 @Entity
 @Table(name = "contract_templates", indexes = {
         @Index(name = "idx_contract_template_status", columnList = "status"),
-        @Index(name = "idx_contract_template_category", columnList = "category")
+        @Index(name = "idx_contract_template_category", columnList = "category"),
+        @Index(name = "idx_contract_template_source", columnList = "source"),
+        @Index(name = "idx_contract_template_owner", columnList = "owner_user_id")
 })
 @Getter
 @Setter
@@ -41,6 +44,16 @@ public class ContractTemplate extends BaseEntity {
     @Column(name = "rental_mode", length = 30)
     private RentalMode rentalMode;
 
+    /** SYSTEM = mẫu admin; LANDLORD = mẫu chủ nhà tự tạo. */
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source", nullable = false, length = 20)
+    private ContractTemplateSource source = ContractTemplateSource.SYSTEM;
+
+    /** Chủ sở hữu khi source = LANDLORD; null với mẫu hệ thống. */
+    @Column(name = "owner_user_id", length = 36)
+    private String ownerUserId;
+
     @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -61,6 +74,9 @@ public class ContractTemplate extends BaseEntity {
         }
         if (status == null) {
             status = ContractTemplateStatus.ACTIVE;
+        }
+        if (source == null) {
+            source = ContractTemplateSource.SYSTEM;
         }
     }
 }

@@ -22,6 +22,7 @@ import com.hs.contract.dto.response.TemplateFieldIssue;
 import com.hs.contract.dto.response.TemplateValidationResult;
 import com.hs.contract.model.ContractTemplate;
 import com.hs.contract.model.ContractTemplateVersion;
+import com.hs.contract.model.constant.ContractTemplateSource;
 import com.hs.contract.model.constant.ContractTemplateStatus;
 import com.hs.contract.model.constant.TemplateVersionStatus;
 import com.hs.contract.repository.ContractTemplateRepository;
@@ -72,16 +73,31 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     @Override
     @Transactional
     public ContractTemplateResponse createTemplate(CreateContractTemplateRequest request) {
+        return createTemplateInternal(request, ContractTemplateSource.SYSTEM, null);
+    }
+
+    @Override
+    @Transactional
+    public ContractTemplateResponse createMyTemplate(String ownerUserId, CreateContractTemplateRequest request) {
+        if (ownerUserId == null || ownerUserId.isBlank()) {
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        }
+        return createTemplateInternal(request, ContractTemplateSource.LANDLORD, ownerUserId);
+    }
+
+    private ContractTemplateResponse createTemplateInternal(
+            CreateContractTemplateRequest request, ContractTemplateSource source, String ownerUserId) {
         ContractTemplate template = ContractTemplate.builder()
                 .name(request.getName().trim())
                 .description(request.getDescription())
                 .category(request.getCategory())
+                .source(source)
+                .ownerUserId(ownerUserId)
                 .status(ContractTemplateStatus.ACTIVE)
                 .build();
 
         template = templateRepository.save(template);
 
-        // Đọc và phân tích file Word từ storage
         byte[] docxBytes = downloadStorageFile(request.getStorageObjectId());
         TemplateValidationResult validation = analysisService.analyzeTemplate(
                 new ByteArrayInputStream(docxBytes), template.getCategory());
@@ -92,8 +108,9 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
         versionRepository.save(version);
 
-        log.info("Created new ContractTemplate id={}, version 1 with {} placeholders, valid={}",
-                template.getId(), validation.getDetectedPlaceholders().size(), validation.isValid());
+        log.info("Created ContractTemplate id={}, source={}, owner={}, placeholders={}, valid={}",
+                template.getId(), source, ownerUserId,
+                validation.getDetectedPlaceholders().size(), validation.isValid());
 
         return toTemplateResponse(template, 1);
     }
@@ -109,19 +126,29 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
     @Override
     @Transactional(readOnly = true)
+    public ContractTemplateResponse getTemplateForLandlord(String userId, String templateId) {
+        ContractTemplate template = requireReadableByLandlord(userId, templateId);
+        int count = versionRepository.findByTemplateIdOrderByVersionNumberDesc(templateId).size();
+        return toTemplateResponse(template, count);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public PageResponse<ContractTemplateResponse> listTemplates(
             ContractTemplateStatus status, ListingCategory category, int page, int size) {
+        // Admin chỉ quản lý mẫu hệ thống (kể cả bản ghi cũ chưa có source)
         Specification<ContractTemplate> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.isTrue(root.get("active")));
+            predicates.add(cb.or(
+                    cb.equal(root.get("source"), ContractTemplateSource.SYSTEM),
+                    cb.isNull(root.get("source"))
+            ));
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
             if (category != null) {
-                predicates.add(cb.or(
-                        cb.isNull(root.get("category")),
-                        cb.equal(root.get("category"), category)
-                ));
+                predicates.add(cb.equal(root.get("category"), category));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };
@@ -140,14 +167,47 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<ContractTemplateResponse> listPublishedSystemTemplates(ListingCategory category) {
+        return templateRepository.findPublishedSystemTemplates(category).stream()
+                .map(t -> toTemplateResponse(t, t.getVersions().size()))
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<ContractTemplateResponse> listMyTemplates(
+            String ownerUserId, ContractTemplateStatus status, ListingCategory category, int page, int size) {
+        Specification<ContractTemplate> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.isTrue(root.get("active")));
+            predicates.add(cb.equal(root.get("source"), ContractTemplateSource.LANDLORD));
+            predicates.add(cb.equal(root.get("ownerUserId"), ownerUserId));
+            if (status != null) {
+                predicates.add(cb.equal(root.get("status"), status));
+            }
+            if (category != null) {
+                predicates.add(cb.equal(root.get("category"), category));
+            }
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+
+        var sort = Sort.by(Sort.Order.desc("createdAt"));
+        var pageable = PageRequest.of(Math.max(page - 1, 0), Math.min(Math.max(size, 1), 100), sort);
+        Page<ContractTemplate> pageResult = templateRepository.findAll(spec, pageable);
+        return new PageResponse<>(pageResult.map(t -> toTemplateResponse(t, t.getVersions().size())));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<ContractTemplateResponse> getApplicableTemplates(String rentalRequestId) {
         RentalRequest request = rentalRequestRepository.findById(rentalRequestId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.RENTAL_REQUEST_NOT_APPROVED));
 
         Listing listing = request.getListing();
         ListingCategory category = listing != null ? listing.getCategory() : null;
+        String ownerUserId = listing != null ? listing.getOwnerId() : null;
 
-        List<ContractTemplate> templates = templateRepository.findApplicablePublishedTemplates(category);
+        List<ContractTemplate> templates = templateRepository.findApplicablePublishedTemplates(category, ownerUserId);
         return templates.stream()
                 .map(t -> toTemplateResponse(t, t.getVersions().size()))
                 .toList();
@@ -311,12 +371,85 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
         }
     }
 
+    @Override
+    @Transactional
+    public ContractTemplateResponse updateMyTemplate(String ownerUserId, String templateId, UpdateContractTemplateRequest request) {
+        requireOwnedByLandlord(ownerUserId, templateId);
+        return updateTemplate(templateId, request);
+    }
+
+    @Override
+    @Transactional
+    public void archiveMyTemplate(String ownerUserId, String templateId) {
+        requireOwnedByLandlord(ownerUserId, templateId);
+        archiveTemplate(templateId);
+    }
+
+    @Override
+    @Transactional
+    public ContractTemplateVersionResponse createMyVersion(String ownerUserId, String templateId, CreateTemplateVersionRequest request) {
+        requireOwnedByLandlord(ownerUserId, templateId);
+        return createVersion(templateId, request);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ContractTemplateVersionResponse> getVersionsForLandlord(String userId, String templateId) {
+        requireReadableByLandlord(userId, templateId);
+        return getVersions(templateId);
+    }
+
+    @Override
+    @Transactional
+    public ContractTemplateVersionResponse publishMyVersion(String ownerUserId, String templateId, String versionId) {
+        requireOwnedByLandlord(ownerUserId, templateId);
+        return publishVersion(templateId, versionId);
+    }
+
+    @Override
+    public byte[] testPreviewForLandlord(String userId, String templateId, String versionId) {
+        requireReadableByLandlord(userId, templateId);
+        return testPreviewVersion(templateId, versionId);
+    }
+
+    /** Mẫu hệ thống (hoặc bản ghi cũ) hoặc mẫu thuộc sở hữu của user. */
+    private ContractTemplate requireReadableByLandlord(String userId, String templateId) {
+        ContractTemplate template = templateRepository.findById(templateId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_NOT_FOUND));
+        if (isSystemTemplate(template)) {
+            return template;
+        }
+        if (template.getSource() == ContractTemplateSource.LANDLORD
+                && userId != null && userId.equals(template.getOwnerUserId())) {
+            return template;
+        }
+        throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+    }
+
+    /** Chỉ mẫu LANDLORD do chính user sở hữu mới được sửa / xuất bản. */
+    private ContractTemplate requireOwnedByLandlord(String ownerUserId, String templateId) {
+        ContractTemplate template = templateRepository.findById(templateId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_NOT_FOUND));
+        if (template.getSource() != ContractTemplateSource.LANDLORD
+                || ownerUserId == null
+                || !ownerUserId.equals(template.getOwnerUserId())) {
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        }
+        return template;
+    }
+
+    private boolean isSystemTemplate(ContractTemplate template) {
+        return template.getSource() == null || template.getSource() == ContractTemplateSource.SYSTEM;
+    }
+
     private ContractTemplateResponse toTemplateResponse(ContractTemplate t, int versionsCount) {
         return ContractTemplateResponse.builder()
                 .id(t.getId())
                 .name(t.getName())
                 .description(t.getDescription())
                 .category(t.getCategory())
+                .source(t.getSource() != null ? t.getSource() : ContractTemplateSource.SYSTEM)
+                .ownerUserId(t.getOwnerUserId())
                 .status(t.getStatus())
                 .latestPublishedVersionId(t.getLatestPublishedVersionId())
                 .versionsCount(versionsCount)
