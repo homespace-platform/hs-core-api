@@ -25,6 +25,8 @@ public record UserProfileResponse(
         Boolean onBoarded,
         Boolean active,
         Boolean kycVerified,
+        /** True when role is ADMIN — KYC is optional (may still verify). */
+        Boolean kycOptional,
         Instant createdAt,
         Instant updatedAt,
         AddressResponse address

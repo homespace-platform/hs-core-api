@@ -39,6 +39,7 @@ import com.hs.user.repository.RoleRepository;
 import com.hs.user.repository.UserRepository;
 import com.hs.user.service.KeycloakUserService;
 import com.hs.user.service.UserService;
+import com.hs.user.service.kyc.KycPolicy;
 import com.hs.user.utils.CurrentUserUtils;
 
 import lombok.AccessLevel;
@@ -227,7 +228,8 @@ public class UserServiceImpl implements UserService {
                 Address address = addressRepository.findByUser_IdAndActiveTrue(user.getId()).orElse(null);
                 boolean kycVerified = kycVerificationRepository.existsByUserIdAndProviderAndStatus(
                                 user.getId(), KycProvider.DIDIT, KycStatus.VERIFIED);
-                return UserMapper.mapToUserProfileResponse(user, address, kycVerified);
+                boolean kycOptional = KycPolicy.isKycOptional(user);
+                return UserMapper.mapToUserProfileResponse(user, address, kycVerified, kycOptional);
         }
 
         @Override
