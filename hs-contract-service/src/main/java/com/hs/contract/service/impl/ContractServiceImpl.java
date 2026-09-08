@@ -487,8 +487,6 @@ public class ContractServiceImpl implements ContractService {
         map.put("phone", "");
         map.put("email", "");
         map.put("idNumber", "");
-        map.put("idIssueDate", "");
-        map.put("idIssuePlace", "");
         map.put("permanentAddress", "");
         return map;
     }
@@ -500,8 +498,6 @@ public class ContractServiceImpl implements ContractService {
         map.put("email", r.getRenterEmail() != null ? r.getRenterEmail() : "");
         map.put("occupantCount", r.getOccupantCount() != null ? r.getOccupantCount() : 1);
         map.put("idNumber", "");
-        map.put("idIssueDate", "");
-        map.put("idIssuePlace", "");
         map.put("permanentAddress", "");
         map.put("organizationName", "");
         map.put("representativeName", "");

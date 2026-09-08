@@ -10,7 +10,7 @@ Dưới đây là **5 bộ Prompt hoàn chỉnh**, được bổ sung thêm ph�
 
 **Thuật ngữ cư trú.** Sổ hộ khẩu giấy đã hết hiệu lực từ 01/01/2023 theo Luật Cư trú số 68/2020/QH14. Trong toàn bộ văn bản dùng cách gọi **"Nơi thường trú"**, tuyệt đối không dùng "hộ khẩu" hay "hộ khẩu thường trú".
 
-### Danh mục mã trường được hệ thống hỗ trợ (43 trường)
+### Danh mục mã trường được hệ thống hỗ trợ (39 trường)
 
 Mã nào không có trong bảng này sẽ bị hệ thống báo lỗi khi Admin tải file Word lên.
 
@@ -19,11 +19,11 @@ Mã nào không có trong bảng này sẽ bị hệ thống báo lỗi khi Admi
 | Pháp lý hợp đồng | `contract.number`, `contract.signingDate` | Cả 5 loại hình |
 | Pháp lý hợp đồng | `contract.signingCity` | Tùy chọn |
 | Bên A | `landlord.fullName`, `landlord.phone` | Cả 5 loại hình |
-| Bên A | `landlord.idNumber`, `landlord.idIssueDate`, `landlord.idIssuePlace`, `landlord.permanentAddress`, `landlord.email` | Tùy chọn |
+| Bên A | `landlord.idNumber`, `landlord.permanentAddress`, `landlord.email` | Tùy chọn |
 | Bên B | `tenant.fullName`, `tenant.phone` | Cả 5 loại hình |
 | Bên B | `tenant.occupantCount` | APARTMENT, HOUSE, ROOM |
 | Bên B | `tenant.organizationName`, `tenant.representativeName`, `tenant.representativePosition` | OFFICE, COMMERCIAL_SPACE |
-| Bên B | `tenant.idNumber`, `tenant.idIssueDate`, `tenant.idIssuePlace`, `tenant.permanentAddress`, `tenant.email` | Tùy chọn |
+| Bên B | `tenant.idNumber`, `tenant.permanentAddress`, `tenant.email` | Tùy chọn |
 | Bất động sản | `property.fullAddress`, `property.areaText`, `property.propertyType` | Cả 5 loại hình |
 | Bất động sản | `property.unitNumber`, `property.floor` | Tùy chọn |
 | Thời hạn thuê | `lease.rentalMode`, `lease.startDateText`, `lease.endDateText`, `lease.durationMonths`, `lease.durationText` | Cả 5 loại hình |
@@ -60,8 +60,8 @@ Hãy soạn thảo toàn bộ nội dung mẫu "HỢP ĐỒNG THUÊ CĂN HỘ CH
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
 - Pháp lý hợp đồng: Số hợp đồng: {{contract.number}}, ngày ký: {{contract.signingDate}}, nơi ký: {{contract.signingCity}}
-- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
-- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số người cư trú: {{tenant.occupantCount}}
+- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
+- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số người cư trú: {{tenant.occupantCount}}
 - Căn hộ cho thuê: Tầng {{property.floor}}, Căn số {{property.unitNumber}}, thuộc tòa nhà tại {{property.fullAddress}}, diện tích: {{property.areaText}}, loại hình: {{property.propertyType}}
 - Hình thức thuê: {{lease.rentalMode}}
 - Thời hạn thuê: Từ ngày {{lease.startDateText}} đến ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao: {{lease.handoverDateText}}
@@ -107,8 +107,8 @@ Hãy soạn thảo toàn bộ nội dung mẫu "HỢP ĐỒNG THUÊ NHÀ NGUYÊN
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
 - Số hợp đồng: {{contract.number}}, ngày ký: {{contract.signingDate}}, tại: {{contract.signingCity}}
-- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
-- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số lượng người ở: {{tenant.occupantCount}} người.
+- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
+- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số lượng người ở: {{tenant.occupantCount}} người.
 - Căn nhà cho thuê: Địa chỉ: {{property.fullAddress}}, kết cấu/số tầng: {{property.floor}}, diện tích: {{property.areaText}}, loại nhà: {{property.propertyType}}
 - Hình thức thuê: {{lease.rentalMode}}
 - Thời hạn thuê: Từ ngày {{lease.startDateText}} đến ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao chìa khóa: {{lease.handoverDateText}}
@@ -154,7 +154,7 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ VĂN PHÒNG LÀM VIỆC
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
 - Số hợp đồng: {{contract.number}}, ngày ký: {{contract.signingDate}}, tại: {{contract.signingCity}}
-- Bên cho thuê (Bên A): {{landlord.fullName}}, Mã số thuế/CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
+- Bên cho thuê (Bên A): {{landlord.fullName}}, Mã số thuế/CCCD: {{landlord.idNumber}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
 - Bên thuê (Bên B - Khách hàng Doanh nghiệp):
   + Tên công ty/tổ chức: {{tenant.organizationName}}
   + Đại diện pháp luật: {{tenant.representativeName}}, Chức vụ: {{tenant.representativePosition}}
@@ -207,11 +207,11 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ MẶT BẰNG KINH DOANH
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
 - Số hợp đồng: {{contract.number}}, ngày lập: {{contract.signingDate}}, tại: {{contract.signingCity}}
-- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
+- Bên cho thuê (Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
 - Bên thuê (Bên B):
   + Tên tổ chức/doanh nghiệp: {{tenant.organizationName}}
   + Người đại diện pháp luật: {{tenant.representativeName}}, Chức vụ: {{tenant.representativePosition}}
-  + Cá nhân đại diện ký kết: {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}
+  + Cá nhân đại diện ký kết: {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}
 - Mặt bằng kinh doanh: Địa chỉ: {{property.fullAddress}}, Mã gian/ki-ốt: {{property.unitNumber}}, Diện tích kinh doanh: {{property.areaText}}, Loại hình: {{property.propertyType}}
 - Hình thức thuê: {{lease.rentalMode}}
 - Thời hạn thuê: Từ ngày {{lease.startDateText}} đến ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao mặt bằng: {{lease.handoverDateText}}
@@ -260,8 +260,8 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ PHÒNG TRỌ / CĂN H�
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
 - Số hợp đồng: {{contract.number}}, ngày lập: {{contract.signingDate}}, tại: {{contract.signingCity}}
-- Bên cho thuê (Chủ trọ - Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
-- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số lượng người ở: {{tenant.occupantCount}}
+- Bên cho thuê (Chủ trọ - Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
+- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số lượng người ở: {{tenant.occupantCount}}
 - Phòng cho thuê: Phòng số {{property.unitNumber}}, Tầng {{property.floor}}, tại địa chỉ {{property.fullAddress}}, diện tích: {{property.areaText}}, loại hình: {{property.propertyType}}
 - Hình thức thuê: {{lease.rentalMode}}
 - Thời hạn thuê: Từ {{lease.startDateText}} đến {{lease.endDateText}} (thời hạn: {{lease.durationText}} - {{lease.durationMonths}} tháng). Bàn giao ngày: {{lease.handoverDateText}}

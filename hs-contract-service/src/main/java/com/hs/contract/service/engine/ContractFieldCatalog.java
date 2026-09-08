@@ -26,8 +26,6 @@ public class ContractFieldCatalog {
         // --- Bên cho thuê (Bên A) ---
         add("landlord.fullName", "Họ và tên chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Họ và tên đầy đủ của bên cho thuê", "Nguyễn Văn A", ALL);
         add("landlord.idNumber", "Số CCCD / Hộ chiếu chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Số căn cước công dân hoặc hộ chiếu", "079090001234", OPTIONAL);
-        add("landlord.idIssueDate", "Ngày cấp CCCD chủ nhà", "Bên cho thuê (Bên A)", "DATE", "Ngày cấp căn cước công dân", "15/05/2021", OPTIONAL);
-        add("landlord.idIssuePlace", "Nơi cấp CCCD chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Nơi cấp giấy tờ tùy thân", "Cục Cảnh sát QLHC về TTXH", OPTIONAL);
         add("landlord.permanentAddress", "Nơi thường trú chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Nơi thường trú của bên A theo Luật Cư trú 2020", "123 Đường Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM", OPTIONAL);
         add("landlord.phone", "Số điện thoại chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Số điện thoại liên hệ chính", "0901234567", ALL);
         add("landlord.email", "Email chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Địa chỉ hòm thư điện tử", "chuanha@example.com", OPTIONAL);
@@ -35,8 +33,6 @@ public class ContractFieldCatalog {
         // --- Bên thuê (Bên B) ---
         add("tenant.fullName", "Họ và tên người thuê", "Bên thuê (Bên B)", "TEXT", "Họ và tên đầy đủ người thuê đại diện ký", "Trần Thị B", ALL);
         add("tenant.idNumber", "Số CCCD / Hộ chiếu người thuê", "Bên thuê (Bên B)", "TEXT", "Số căn cước công dân hoặc hộ chiếu", "079195009876", OPTIONAL);
-        add("tenant.idIssueDate", "Ngày cấp CCCD người thuê", "Bên thuê (Bên B)", "DATE", "Ngày cấp căn cước công dân", "20/08/2022", OPTIONAL);
-        add("tenant.idIssuePlace", "Nơi cấp CCCD người thuê", "Bên thuê (Bên B)", "TEXT", "Nơi cấp giấy tờ tùy thân", "Cục Cảnh sát QLHC về TTXH", OPTIONAL);
         add("tenant.permanentAddress", "Nơi thường trú người thuê", "Bên thuê (Bên B)", "TEXT", "Nơi thường trú của bên B theo Luật Cư trú 2020", "456 Lê Lợi, Phường 4, Quận 3, TP.HCM", OPTIONAL);
         add("tenant.phone", "Số điện thoại người thuê", "Bên thuê (Bên B)", "TEXT", "Số điện thoại liên hệ", "0987654321", ALL);
         add("tenant.email", "Email người thuê", "Bên thuê (Bên B)", "TEXT", "Email nhận thông báo và hợp đồng", "nguoithue@example.com", OPTIONAL);

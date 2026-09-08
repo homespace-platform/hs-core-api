@@ -93,8 +93,6 @@ public class ContractRenderService {
         Map<String, Object> landlord = Map.of(
                 "fullName", "Nguyễn Văn An (Chủ nhà)",
                 "idNumber", "079090001234",
-                "idIssueDate", "15/05/2021",
-                "idIssuePlace", "Cục Cảnh sát QLHC về TTXH",
                 "permanentAddress", "123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM",
                 "phone", "0901234567",
                 "email", "nguyenvanan.landlord@example.com"
@@ -103,8 +101,6 @@ public class ContractRenderService {
         Map<String, Object> tenant = new LinkedHashMap<>();
         tenant.put("fullName", "Trần Thị Bình (Người thuê)");
         tenant.put("idNumber", "079195009876");
-        tenant.put("idIssueDate", "20/08/2022");
-        tenant.put("idIssuePlace", "Cục Cảnh sát QLHC về TTXH");
         tenant.put("permanentAddress", "456 Lê Lợi, Phường Bến Thành, Quận 1, TP.HCM");
         tenant.put("phone", "0987654321");
         tenant.put("email", "tranthibinh.tenant@example.com");
@@ -171,8 +167,6 @@ public class ContractRenderService {
         if (l == null) return;
         model.put("landlord.fullName", getStr(l, "fullName", ""));
         model.put("landlord.idNumber", getStr(l, "idNumber", ""));
-        model.put("landlord.idIssueDate", getStr(l, "idIssueDate", ""));
-        model.put("landlord.idIssuePlace", getStr(l, "idIssuePlace", ""));
         model.put("landlord.permanentAddress", getStr(l, "permanentAddress", ""));
         model.put("landlord.phone", getStr(l, "phone", ""));
         model.put("landlord.email", getStr(l, "email", ""));
@@ -182,8 +176,6 @@ public class ContractRenderService {
         if (t == null) return;
         model.put("tenant.fullName", getStr(t, "fullName", ""));
         model.put("tenant.idNumber", getStr(t, "idNumber", ""));
-        model.put("tenant.idIssueDate", getStr(t, "idIssueDate", ""));
-        model.put("tenant.idIssuePlace", getStr(t, "idIssuePlace", ""));
         model.put("tenant.permanentAddress", getStr(t, "permanentAddress", ""));
         model.put("tenant.phone", getStr(t, "phone", ""));
         model.put("tenant.email", getStr(t, "email", ""));
