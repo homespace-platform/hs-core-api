@@ -38,4 +38,13 @@ public class KycController {
                 .result(kycService.createOrReuseSession(userId))
                 .build();
     }
+
+    @PostMapping("/session/cancel")
+    public ApiResponse<KycStatusResponse> cancelSession() {
+        String userId = currentUserUtils.getCurrentUserId();
+        return ApiResponse.<KycStatusResponse>builder()
+                .message("KYC session cancelled")
+                .result(kycService.cancelPendingSession(userId))
+                .build();
+    }
 }

@@ -9,6 +9,9 @@ public interface KycService {
 
     KycSessionResponse createOrReuseSession(String userId);
 
+    /** Cancel PENDING / REVIEW_REQUIRED session so user can start fresh. */
+    KycStatusResponse cancelPendingSession(String userId);
+
     void handleDiditWebhook(
             String rawBody,
             String signatureV2,

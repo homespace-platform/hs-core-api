@@ -53,7 +53,8 @@ public enum UserErrorCode implements AppException.ErrorCode {
     KYC_PROVIDER_ERROR(2503, "KYC provider request failed", HttpStatus.BAD_GATEWAY),
     KYC_WEBHOOK_INVALID(2504, "Invalid KYC webhook signature", HttpStatus.UNAUTHORIZED),
     KYC_WEBHOOK_STALE(2505, "KYC webhook timestamp is outside the allowed window", HttpStatus.UNAUTHORIZED),
-    KYC_SESSION_NOT_FOUND(2506, "KYC session not found", HttpStatus.NOT_FOUND);
+    KYC_SESSION_NOT_FOUND(2506, "KYC session not found", HttpStatus.NOT_FOUND),
+    KYC_CANCEL_NOT_ALLOWED(2507, "No cancellable KYC session", HttpStatus.CONFLICT);
 
     UserErrorCode(int code, String message, HttpStatusCode statusCode) {
         this.code = code;

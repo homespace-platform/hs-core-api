@@ -6,6 +6,7 @@ import com.hs.common.advice.entity.AppException;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.response.KycSessionResponse;
 import com.hs.user.dto.response.KycStatusResponse;
+import com.hs.user.integration.didit.DiditDecisionQuality;
 import com.hs.user.integration.didit.DiditSessionClient;
 import com.hs.user.integration.didit.DiditStatusMapper;
 import com.hs.user.integration.didit.DiditWebhookSignatureVerifier;
@@ -37,11 +38,19 @@ public class KycServiceImpl implements KycService {
             KycStatus.REVIEW_REQUIRED
     );
 
+    private static final String REASON_DUPLICATE_CCCD =
+            "CCCD này đã được xác minh trên tài khoản khác. Vui lòng dùng CCCD của bạn hoặc liên hệ hỗ trợ.";
+    private static final String REASON_MISSING_CCCD =
+            "Không đọc được số CCCD (personal number) từ giấy tờ. Vui lòng thử lại.";
+    private static final String REASON_USER_CANCELLED =
+            "Bạn đã hủy phiên xác minh. Nhấn Xác minh lại khi sẵn sàng.";
+
     private final UserRepository userRepository;
     private final KycVerificationRepository kycVerificationRepository;
     private final KycWebhookEventRepository kycWebhookEventRepository;
     private final DiditSessionClient diditSessionClient;
     private final DiditWebhookSignatureVerifier signatureVerifier;
+    private final CccdClaimService cccdClaimService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -53,16 +62,19 @@ public class KycServiceImpl implements KycService {
                         userId, KycProvider.DIDIT);
 
         if (latest.isEmpty()) {
-            return new KycStatusResponse(KycStatus.NOT_VERIFIED, null, KycProvider.DIDIT, null, null);
+            return new KycStatusResponse(
+                    KycStatus.NOT_VERIFIED, null, KycProvider.DIDIT, null, null, null);
         }
 
         KycVerification v = latest.get();
+        boolean terminalFail = v.getStatus() == KycStatus.REJECTED || v.getStatus() == KycStatus.EXPIRED;
         return new KycStatusResponse(
                 v.getStatus(),
                 v.getVerifiedAt(),
                 v.getProvider(),
                 v.getProviderSessionId(),
-                v.getStatus() == KycStatus.VERIFIED ? null : v.getSessionUrl()
+                (v.getStatus() == KycStatus.VERIFIED || terminalFail) ? null : v.getSessionUrl(),
+                v.getRejectionReason()
         );
     }
 
@@ -108,6 +120,36 @@ public class KycServiceImpl implements KycService {
 
     @Override
     @Transactional
+    public KycStatusResponse cancelPendingSession(String userId) {
+        requireUser(userId);
+
+        if (kycVerificationRepository.existsByUserIdAndProviderAndStatus(
+                userId, KycProvider.DIDIT, KycStatus.VERIFIED)) {
+            throw new AppException(UserErrorCode.KYC_ALREADY_VERIFIED);
+        }
+
+        List<KycVerification> active = kycVerificationRepository
+                .findByUserIdAndProviderAndStatusInOrderByCreatedAtDesc(
+                        userId, KycProvider.DIDIT, REUSABLE);
+
+        if (active.isEmpty()) {
+            throw new AppException(UserErrorCode.KYC_CANCEL_NOT_ALLOWED);
+        }
+
+        for (KycVerification verification : active) {
+            verification.setStatus(KycStatus.EXPIRED);
+            verification.setSessionUrl(null);
+            verification.setVerifiedAt(null);
+            verification.setRejectionReason(REASON_USER_CANCELLED);
+            kycVerificationRepository.save(verification);
+        }
+
+        log.info("Cancelled {} pending KYC session(s) for user={}", active.size(), userId);
+        return getCurrentStatus(userId);
+    }
+
+    @Override
+    @Transactional
     public void handleDiditWebhook(
             String rawBody,
             String signatureV2,
@@ -137,14 +179,7 @@ public class KycServiceImpl implements KycService {
         }
 
         if (!"status.updated".equals(webhookType)) {
-            if (eventId != null) {
-                kycWebhookEventRepository.save(KycWebhookEvent.builder()
-                        .eventId(eventId)
-                        .sessionId(sessionId)
-                        .webhookType(webhookType)
-                        .processedAt(Instant.now())
-                        .build());
-            }
+            markEventProcessed(eventId, sessionId, webhookType);
             return;
         }
 
@@ -170,34 +205,93 @@ public class KycServiceImpl implements KycService {
             throw new AppException(UserErrorCode.KYC_WEBHOOK_INVALID);
         }
 
+        // Already terminal on our side — ack event, do not flip VERIFIED → something else lightly
+        if (verification.getStatus() == KycStatus.VERIFIED
+                && verification.getVerifiedAt() != null
+                && !"Approved".equalsIgnoreCase(status)) {
+            markEventProcessed(eventId, sessionId, webhookType);
+            log.info("Ignoring non-Approved webhook for already VERIFIED sessionId={}", sessionId);
+            return;
+        }
+
         KycStatus mapped = DiditStatusMapper.toHomeSpaceStatus(status);
         verification.setProviderStatus(status);
-        verification.setStatus(mapped);
         verification.setLastEventId(eventId);
         if (workflowId != null && !workflowId.isBlank()) {
             verification.setWorkflowId(workflowId);
         }
+
         if (mapped == KycStatus.VERIFIED) {
-            verification.setVerifiedAt(Instant.now());
-            verification.setRejectionReason(null);
-            applyCitizenIdFromDecision(verification.getUserId(), payload);
+            applyApprovedDecision(verification, payload);
         } else if (mapped == KycStatus.REJECTED) {
-            verification.setRejectionReason(extractRejectionHint(payload));
+            reject(verification, firstNonBlank(extractRejectionHint(payload), "Didit từ chối xác minh"));
+        } else if (mapped == KycStatus.EXPIRED) {
+            verification.setStatus(KycStatus.EXPIRED);
+            verification.setVerifiedAt(null);
+            verification.setSessionUrl(null);
+            verification.setRejectionReason(null);
+        } else {
+            verification.setStatus(mapped);
         }
 
         kycVerificationRepository.save(verification);
-
-        if (eventId != null && !eventId.isBlank()) {
-            kycWebhookEventRepository.save(KycWebhookEvent.builder()
-                    .eventId(eventId)
-                    .sessionId(sessionId)
-                    .webhookType(webhookType)
-                    .processedAt(Instant.now())
-                    .build());
-        }
+        markEventProcessed(eventId, sessionId, webhookType);
 
         log.info("Applied Didit webhook sessionId={} providerStatus={} homespaceStatus={}",
-                sessionId, status, mapped);
+                sessionId, status, verification.getStatus());
+    }
+
+    /**
+     * Didit Approved → HomeSpace VERIFIED only if quality + unique CCCD pass.
+     * Failures become REJECTED and still ack webhook (2xx) so Didit does not retry forever.
+     */
+    private void applyApprovedDecision(KycVerification verification, JsonNode payload) {
+        String qualityReason = DiditDecisionQuality.findRejectionReason(payload);
+        if (qualityReason != null) {
+            reject(verification, qualityReason);
+            return;
+        }
+
+        String citizenId = extractPersonalNumber(payload);
+        if (citizenId == null || citizenId.isBlank()) {
+            reject(verification, REASON_MISSING_CCCD);
+            return;
+        }
+
+        String normalized = citizenId.trim();
+        String userId = verification.getUserId();
+
+        if (!cccdClaimService.tryClaim(userId, normalized)) {
+            reject(verification, REASON_DUPLICATE_CCCD);
+            return;
+        }
+
+        verification.setStatus(KycStatus.VERIFIED);
+        verification.setVerifiedAt(Instant.now());
+        verification.setRejectionReason(null);
+        log.info("Synced CCCD (personal_number) from Didit KYC for user={}", userId);
+    }
+
+    private static void reject(KycVerification verification, String reason) {
+        verification.setStatus(KycStatus.REJECTED);
+        verification.setVerifiedAt(null);
+        verification.setSessionUrl(null);
+        verification.setRejectionReason(reason);
+    }
+
+    private void markEventProcessed(String eventId, String sessionId, String webhookType) {
+        if (eventId == null || eventId.isBlank()) {
+            return;
+        }
+        if (kycWebhookEventRepository.existsById(eventId)) {
+            return;
+        }
+        kycWebhookEventRepository.save(KycWebhookEvent.builder()
+                .eventId(eventId)
+                .sessionId(sessionId)
+                .webhookType(webhookType)
+                .processedAt(Instant.now())
+                .build());
     }
 
     private void requireUser(String userId) {
@@ -206,28 +300,6 @@ public class KycServiceImpl implements KycService {
         }
     }
 
-    private void applyCitizenIdFromDecision(String userId, JsonNode payload) {
-        String citizenId = extractPersonalNumber(payload);
-        if (citizenId == null || citizenId.isBlank()) {
-            log.info("Didit Approved without personal_number for user={}", userId);
-            return;
-        }
-
-        userRepository.findById(userId).ifPresent(user -> {
-            String normalized = citizenId.trim();
-            if (normalized.equals(user.getCccd())) {
-                return;
-            }
-            user.setCccd(normalized);
-            userRepository.save(user);
-            log.info("Synced CCCD (personal_number) from Didit KYC for user={}", userId);
-        });
-    }
-
-    /**
-     * Vietnamese CCCD is Didit {@code personal_number} (12 digits), not {@code document_number}
-     * (often the shorter ID card serial / old CMND).
-     */
     private static String extractPersonalNumber(JsonNode payload) {
         JsonNode decision = payload.get("decision");
         if (decision == null || decision.isNull()) {
@@ -256,12 +328,15 @@ public class KycServiceImpl implements KycService {
         return value == null || value.isNull() ? null : value.asText();
     }
 
+    private static String firstNonBlank(String primary, String fallback) {
+        return primary != null && !primary.isBlank() ? primary : fallback;
+    }
+
     private static String extractRejectionHint(JsonNode payload) {
         JsonNode decision = payload.get("decision");
         if (decision == null || decision.isNull()) {
             return null;
         }
-        // Prefer first warning short_description without storing PII document numbers.
         for (String arrayName : List.of("id_verifications", "face_matches", "liveness_checks")) {
             JsonNode arr = decision.get(arrayName);
             if (arr == null || !arr.isArray()) continue;

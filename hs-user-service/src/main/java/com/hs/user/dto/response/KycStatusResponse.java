@@ -9,5 +9,6 @@ public record KycStatusResponse(
         Instant verifiedAt,
         KycProvider provider,
         String sessionId,
-        String sessionUrl
+        String sessionUrl,
+        String rejectionReason
 ) {}
