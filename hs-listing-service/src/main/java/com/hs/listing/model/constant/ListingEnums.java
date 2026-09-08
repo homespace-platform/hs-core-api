@@ -9,6 +9,8 @@ public final class ListingEnums {
     public enum ParkingType { NONE, MOTORBIKE, CAR, MOTORBIKE_AND_CAR }
     public enum RestroomType { PRIVATE, SHARED }
     public enum KitchenType { PRIVATE, SHARED, NONE }
+    /** Ban công phòng trọ — khớp form PRIVATE / SHARED / NONE. */
+    public enum BalconyType { PRIVATE, SHARED, NONE }
     public enum AccessType { PRIVATE, SHARED }
     public enum AccessHoursType { FLEXIBLE, CURFEW }
     public enum MeterType { PRIVATE, SHARED }

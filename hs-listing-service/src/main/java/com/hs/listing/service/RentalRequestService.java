@@ -55,25 +55,13 @@ public class RentalRequestService {
             ListingStatusService listingStatusService,
             AddressRepository addressRepository,
             StorageProperties storageProperties,
-            @Value("${rental.hold-duration-hours}") double holdDurationHours) {
+            @Value("${rental.hold-duration-minutes:15}") long holdDurationMinutes) {
         this.rentalRequestRepository = rentalRequestRepository;
         this.listingRepository = listingRepository;
         this.listingStatusService = listingStatusService;
         this.addressRepository = addressRepository;
         this.storageProperties = storageProperties;
-
-        long millis = Math.round(holdDurationHours * 3600.0 * 1000.0);
-        this.holdDuration = Duration.ofMillis(Math.max(millis, 1000L));
-    }
-
-    public RentalRequestService(
-            RentalRequestRepository rentalRequestRepository,
-            ListingRepository listingRepository,
-            ListingStatusService listingStatusService,
-            AddressRepository addressRepository,
-            StorageProperties storageProperties,
-            int holdDurationHours) {
-        this(rentalRequestRepository, listingRepository, listingStatusService, addressRepository, storageProperties, (double) holdDurationHours);
+        this.holdDuration = Duration.ofMinutes(Math.max(holdDurationMinutes, 1L));
     }
 
     // 1. TẠO YÊU CẦU THUÊ NHÀ (RENTER)
@@ -342,9 +330,12 @@ public class RentalRequestService {
         return req.map(this::toResponse).orElse(null);
     }
 
-    // 9. CRON JOB: HẾT HẠN GIỮ CHỖ 24H -> TỰ ĐỘNG EXPIRE & TRẢ VỀ PUBLISHED
+    // 9. CRON JOB: HẾT HẠN GIỮ CHỖ -> TỰ ĐỘNG EXPIRE & TRẢ VỀ PUBLISHED
     @Transactional
     public int expirePendingHoldRequests(Instant now) {
+        // Đồng bộ lại holdExpiresAt nếu config rút ngắn (vd. 24h -> 15 phút)
+        clampActiveHoldExpiriesToConfig(now);
+
         List<RentalRequest> expiredList = rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(
                 RentalRequestStatus.ACCEPTED, now);
 
@@ -358,13 +349,33 @@ public class RentalRequestService {
 
             Listing listing = req.getListing();
             if (listing != null && listing.getStatus() == ListingStatus.RESERVED) {
-                listingStatusService.releaseReserved(listing, "SYSTEM", "Hết hạn giữ chỗ 24 giờ mà không hoàn tất thủ tục thuê");
+                listingStatusService.releaseReserved(listing, "SYSTEM", "Hết hạn giữ chỗ mà không hoàn tất thủ tục thuê");
                 log.info("[RENTAL_HOLD_EXPIRED] Rental request [{}] expired. Listing [{}] returned to PUBLISHED.",
                         req.getId(), listing.getId());
             }
         }
 
         return expiredList.size();
+    }
+
+    /**
+     * Nếu thời hạn giữ chỗ cấu hình ngắn hơn mốc đã lưu (sau khi đổi config),
+     * cắt holdExpiresAt về acceptedAt + holdDuration (hoặc now nếu đã quá hạn theo config mới).
+     */
+    private void clampActiveHoldExpiriesToConfig(Instant now) {
+        List<RentalRequest> activeHolds =
+                rentalRequestRepository.findAllByStatusAndHoldExpiresAtIsNotNull(RentalRequestStatus.ACCEPTED);
+        for (RentalRequest req : activeHolds) {
+            Instant acceptedAt = req.getAcceptedAt() != null ? req.getAcceptedAt() : now;
+            Instant maxExpiry = acceptedAt.plus(holdDuration);
+            Instant currentExpiry = req.getHoldExpiresAt();
+            if (currentExpiry != null && currentExpiry.isAfter(maxExpiry)) {
+                req.setHoldExpiresAt(maxExpiry);
+                rentalRequestRepository.save(req);
+                log.info("[RENTAL_HOLD_CLAMP] Request [{}] holdExpiresAt {} -> {} (config={})",
+                        req.getId(), currentExpiry, maxExpiry, holdDuration);
+            }
+        }
     }
 
     // MAPPER

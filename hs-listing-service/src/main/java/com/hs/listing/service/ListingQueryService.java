@@ -224,7 +224,7 @@ public class ListingQueryService {
     private RoomDetailRequest toRoom(ListingRoomDetail d) {
         return d == null ? null : new RoomDetailRequest(
                 d.getRoomCode(), d.getFloorNumber(), d.getRestroomType(), d.getKitchenType(), d.getHasWindow(),
-                d.getHasBalcony(), d.getHasMezzanine(), d.getFurnishingStatus(), d.getAccessType(),
+                d.resolvedBalconyType(), d.getHasMezzanine(), d.getFurnishingStatus(), d.getAccessType(),
                 d.getAccessHoursType(), d.getElectricMeterType(), d.getWaterMeterType(), d.getMaxOccupants(),
                 d.getMaxVehicles(), d.getParkingPolicy());
     }

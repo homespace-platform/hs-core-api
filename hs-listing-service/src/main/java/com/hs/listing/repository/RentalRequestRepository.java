@@ -23,6 +23,8 @@ public interface RentalRequestRepository extends JpaRepository<RentalRequest, St
 
     List<RentalRequest> findAllByStatusAndHoldExpiresAtLessThanEqual(RentalRequestStatus status, Instant now);
 
+    List<RentalRequest> findAllByStatusAndHoldExpiresAtIsNotNull(RentalRequestStatus status);
+
     long countByListingIdAndStatusIn(String listingId, Collection<RentalRequestStatus> statuses);
 
     boolean existsByListingIdAndRenterId(String listingId, String renterId);

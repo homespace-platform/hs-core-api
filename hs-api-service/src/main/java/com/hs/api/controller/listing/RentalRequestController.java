@@ -94,7 +94,7 @@ public class RentalRequestController {
     public ApiResponse<RentalRequestResponse> acceptRentalRequest(@PathVariable String id) {
         String ownerId = requireUserId();
         return ApiResponse.<RentalRequestResponse>builder()
-                .message("Chấp thuận yêu cầu thuê thành công. Bất động sản chuyển sang trạng thái giữ chỗ trong 24 giờ.")
+                .message("Chấp thuận yêu cầu thuê thành công. Bất động sản chuyển sang trạng thái giữ chỗ trong 15 phút.")
                 .result(rentalRequestService.acceptRentalRequest(ownerId, id))
                 .build();
     }

@@ -295,8 +295,26 @@ public class ListingService {
                 l.setCommercialDetail(d);
             }
             case ROOM -> {
+                var src = Objects.requireNonNull(r.roomDetail(), "roomDetail");
                 var d = new ListingRoomDetail();
-                BeanUtils.copyProperties(r.roomDetail(), d);
+                d.setRoomCode(src.roomCode());
+                d.setFloorNumber(src.floorNumber());
+                d.setRestroomType(src.restroomType());
+                d.setKitchenType(src.kitchenType());
+                d.setHasWindow(src.hasWindow());
+                // Map tường minh — tránh BeanUtils bỏ sót field record (balconyType)
+                BalconyType balcony = src.balconyType() != null ? src.balconyType() : BalconyType.NONE;
+                d.setBalconyType(balcony);
+                d.setHasBalcony(balcony != BalconyType.NONE);
+                d.setHasMezzanine(src.hasMezzanine());
+                d.setFurnishingStatus(src.furnishingStatus());
+                d.setAccessType(src.accessType());
+                d.setAccessHoursType(src.accessHoursType());
+                d.setElectricMeterType(src.electricMeterType());
+                d.setWaterMeterType(src.waterMeterType());
+                d.setMaxOccupants(src.maxOccupants());
+                d.setMaxVehicles(src.maxVehicles());
+                d.setParkingPolicy(src.parkingPolicy());
                 d.setListing(l);
                 l.setRoomDetail(d);
             }

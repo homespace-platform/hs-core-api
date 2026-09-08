@@ -6,6 +6,7 @@ import com.hs.listing.dto.response.PublicListingSummaryResponse;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.ListingMedia;
 import com.hs.listing.model.constant.ListingCategory;
+import com.hs.listing.model.constant.ListingEnums;
 import com.hs.listing.model.constant.ListingEnums.MediaType;
 import com.hs.listing.model.constant.ListingStatus;
 import com.hs.listing.repository.ListingRepository;
@@ -488,7 +489,9 @@ public class ListingPublicService {
     }
 
     private Boolean extractHasBalcony(Listing listing) {
-        if (listing.getRoomDetail() != null) return listing.getRoomDetail().getHasBalcony();
+        if (listing.getRoomDetail() != null) {
+            return listing.getRoomDetail().resolvedBalconyType() != ListingEnums.BalconyType.NONE;
+        }
         if (listing.getApartmentDetail() != null) return listing.getApartmentDetail().getBalconyDirection() != null;
         return null;
     }

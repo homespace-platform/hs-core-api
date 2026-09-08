@@ -453,11 +453,11 @@ Dropdown Cửa sổ:
 
 Dropdown Ban công:
 
-- `PRIVATE` — Ban công riêng.
+- `PRIVATE` — Ban công riêng phơi đồ / ngắm cảnh.
 - `SHARED` — Ban công/Sân phơi chung.
 - `NONE` — Không có ban công.
 
-Backend chỉ lưu `hasBalcony: boolean`, do đó `PRIVATE` và `SHARED` hiện cùng lưu `true` và không thể phân biệt khi đọc lại.
+Backend lưu `balconyType` (`BalconyType`), không còn boolean `hasBalcony`.
 
 Dropdown Lối đi:
 

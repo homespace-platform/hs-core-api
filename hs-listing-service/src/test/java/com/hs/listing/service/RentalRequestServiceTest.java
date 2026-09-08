@@ -50,7 +50,7 @@ class RentalRequestServiceTest {
                 listingStatusService,
                 addressRepository,
                 storageProperties,
-                24
+                15
         );
     }
 
