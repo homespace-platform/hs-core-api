@@ -45,7 +45,15 @@ public enum UserErrorCode implements AppException.ErrorCode {
     KEYCLOAK_PASSWORD_UPDATE_FAILED(2302, "Keycloak password update failed", HttpStatus.BAD_GATEWAY),
     KEYCLOAK_CREDENTIAL_READ_FAILED(2303, "Could not read Keycloak credentials", HttpStatus.BAD_GATEWAY),
     KEYCLOAK_USER_CREATE_FAILED(2304, "Keycloak user creation failed", HttpStatus.BAD_GATEWAY),
-    KEYCLOAK_INVITATION_SEND_FAILED(2305, "Failed to send invitation email", HttpStatus.BAD_GATEWAY);
+    KEYCLOAK_INVITATION_SEND_FAILED(2305, "Failed to send invitation email", HttpStatus.BAD_GATEWAY),
+
+    // 25xx KYC / Didit
+    KYC_NOT_CONFIGURED(2501, "KYC provider is not configured", HttpStatus.SERVICE_UNAVAILABLE),
+    KYC_ALREADY_VERIFIED(2502, "Identity is already verified", HttpStatus.CONFLICT),
+    KYC_PROVIDER_ERROR(2503, "KYC provider request failed", HttpStatus.BAD_GATEWAY),
+    KYC_WEBHOOK_INVALID(2504, "Invalid KYC webhook signature", HttpStatus.UNAUTHORIZED),
+    KYC_WEBHOOK_STALE(2505, "KYC webhook timestamp is outside the allowed window", HttpStatus.UNAUTHORIZED),
+    KYC_SESSION_NOT_FOUND(2506, "KYC session not found", HttpStatus.NOT_FOUND);
 
     UserErrorCode(int code, String message, HttpStatusCode statusCode) {
         this.code = code;
