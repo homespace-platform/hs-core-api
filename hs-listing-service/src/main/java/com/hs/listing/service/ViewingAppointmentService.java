@@ -213,8 +213,8 @@ public class ViewingAppointmentService {
         if (req.appointmentDate().isBefore(today)) {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_TIME);
         }
-        // Đặt trước tối thiểu 2 tiếng nếu chọn lịch trong ngày hôm nay
-        if (req.appointmentDate().equals(today) && req.startTime().isBefore(LocalTime.now().plusHours(2))) {
+        // Đặt trước tối thiểu 1 tiếng nếu chọn lịch trong ngày hôm nay (khớp rule availability UI)
+        if (req.appointmentDate().equals(today) && req.startTime().isBefore(LocalTime.now().plusHours(1))) {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_TIME);
         }
 
@@ -352,7 +352,7 @@ public class ViewingAppointmentService {
         if (req.proposedDate().isBefore(today)) {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_TIME);
         }
-        if (req.proposedDate().equals(today) && req.proposedStartTime().isBefore(LocalTime.now().plusHours(2))) {
+        if (req.proposedDate().equals(today) && req.proposedStartTime().isBefore(LocalTime.now().plusHours(1))) {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_TIME);
         }
         if (listing.getViewingDays() == null || !listing.getViewingDays().contains(req.proposedDate().getDayOfWeek())) {
@@ -680,14 +680,31 @@ public class ViewingAppointmentService {
         return apt;
     }
 
+    /**
+     * Map khung giờ đặt lịch về buổi tiếp khách.
+     * Phải khớp đúng các TimeSlotDef dùng khi build availability — tránh lệch biên
+     * (vd. 17:00 thuộc EVENING, không phải AFTERNOON).
+     */
     private ViewingSlot resolveSlotType(LocalTime start, LocalTime end) {
-        if (start.isBefore(LocalTime.of(12, 1))) {
-            return ViewingSlot.MORNING;
-        } else if (start.isBefore(LocalTime.of(17, 1))) {
-            return ViewingSlot.AFTERNOON;
-        } else {
-            return ViewingSlot.EVENING;
+        if (start == null || end == null) {
+            return null;
         }
+        for (TimeSlotDef def : MORNING_SLOTS) {
+            if (def.start().equals(start) && def.end().equals(end)) {
+                return ViewingSlot.MORNING;
+            }
+        }
+        for (TimeSlotDef def : AFTERNOON_SLOTS) {
+            if (def.start().equals(start) && def.end().equals(end)) {
+                return ViewingSlot.AFTERNOON;
+            }
+        }
+        for (TimeSlotDef def : EVENING_SLOTS) {
+            if (def.start().equals(start) && def.end().equals(end)) {
+                return ViewingSlot.EVENING;
+            }
+        }
+        return null;
     }
 
     private AppointmentResponse toResponse(ViewingAppointment va) {
