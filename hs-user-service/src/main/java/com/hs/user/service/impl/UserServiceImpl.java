@@ -31,7 +31,10 @@ import com.hs.user.mapper.UserMapper;
 import com.hs.user.model.Address;
 import com.hs.user.model.Role;
 import com.hs.user.model.User;
+import com.hs.user.model.constant.KycProvider;
+import com.hs.user.model.constant.KycStatus;
 import com.hs.user.repository.AddressRepository;
+import com.hs.user.repository.KycVerificationRepository;
 import com.hs.user.repository.RoleRepository;
 import com.hs.user.repository.UserRepository;
 import com.hs.user.service.KeycloakUserService;
@@ -53,6 +56,7 @@ public class UserServiceImpl implements UserService {
         UserRepository userRepository;
         RoleRepository roleRepository;
         AddressRepository addressRepository;
+        KycVerificationRepository kycVerificationRepository;
         KeycloakUserService keycloakUserService;
         CurrentUserUtils currentUserUtils;
 
@@ -221,7 +225,9 @@ public class UserServiceImpl implements UserService {
         public UserProfileResponse getUserProfile() {
                 User user = currentUserUtils.getCurrentUser();
                 Address address = addressRepository.findByUser_IdAndActiveTrue(user.getId()).orElse(null);
-                return UserMapper.mapToUserProfileResponse(user, address);
+                boolean kycVerified = kycVerificationRepository.existsByUserIdAndProviderAndStatus(
+                                user.getId(), KycProvider.DIDIT, KycStatus.VERIFIED);
+                return UserMapper.mapToUserProfileResponse(user, address, kycVerified);
         }
 
         @Override

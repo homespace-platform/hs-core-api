@@ -180,6 +180,7 @@ public class KycServiceImpl implements KycService {
         if (mapped == KycStatus.VERIFIED) {
             verification.setVerifiedAt(Instant.now());
             verification.setRejectionReason(null);
+            applyCitizenIdFromDecision(verification.getUserId(), payload);
         } else if (mapped == KycStatus.REJECTED) {
             verification.setRejectionReason(extractRejectionHint(payload));
         }
@@ -203,6 +204,51 @@ public class KycServiceImpl implements KycService {
         if (userId == null || userId.isBlank() || !userRepository.existsById(userId)) {
             throw new AppException(UserErrorCode.USER_NOT_EXISTED);
         }
+    }
+
+    private void applyCitizenIdFromDecision(String userId, JsonNode payload) {
+        String citizenId = extractPersonalNumber(payload);
+        if (citizenId == null || citizenId.isBlank()) {
+            log.info("Didit Approved without personal_number for user={}", userId);
+            return;
+        }
+
+        userRepository.findById(userId).ifPresent(user -> {
+            String normalized = citizenId.trim();
+            if (normalized.equals(user.getCccd())) {
+                return;
+            }
+            user.setCccd(normalized);
+            userRepository.save(user);
+            log.info("Synced CCCD (personal_number) from Didit KYC for user={}", userId);
+        });
+    }
+
+    /**
+     * Vietnamese CCCD is Didit {@code personal_number} (12 digits), not {@code document_number}
+     * (often the shorter ID card serial / old CMND).
+     */
+    private static String extractPersonalNumber(JsonNode payload) {
+        JsonNode decision = payload.get("decision");
+        if (decision == null || decision.isNull()) {
+            return null;
+        }
+        JsonNode idVerifications = decision.get("id_verifications");
+        if (idVerifications == null || !idVerifications.isArray()) {
+            return null;
+        }
+        for (JsonNode item : idVerifications) {
+            if (item == null) {
+                continue;
+            }
+            if (item.hasNonNull("personal_number")) {
+                String value = item.get("personal_number").asText();
+                if (value != null && !value.isBlank()) {
+                    return value.trim();
+                }
+            }
+        }
+        return null;
     }
 
     private static String text(JsonNode node, String field) {

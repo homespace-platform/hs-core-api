@@ -57,6 +57,10 @@ public class User extends BaseEntity {
     @Column(length = 15, unique = true)
     String phone;
 
+    /** Citizen ID (CCCD) filled from Didit KYC when Approved. */
+    @Column(name = "cccd", length = 20, unique = true)
+    String cccd;
+
     LocalDate dob;
 
     @Enumerated(EnumType.STRING)

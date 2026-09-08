@@ -13,10 +13,15 @@ import com.hs.user.model.User;
 public class UserMapper {
 
     public static UserProfileResponse mapToUserProfileResponse(User user) {
-        return mapToUserProfileResponse(user, null);
+        return mapToUserProfileResponse(user, null, false);
     }
 
     public static UserProfileResponse mapToUserProfileResponse(User user, Address address) {
+        return mapToUserProfileResponse(user, address, false);
+    }
+
+    public static UserProfileResponse mapToUserProfileResponse(
+            User user, Address address, boolean kycVerified) {
         return UserProfileResponse.builder()
                 .id(user.getId())
                 .username(user.getUsername())
@@ -26,12 +31,14 @@ public class UserMapper {
                 .avatarUrl(user.getAvatarUrl())
                 .avatarStorageId(user.getAvatarStorageId())
                 .phone(user.getPhone())
+                .cccd(user.getCccd())
                 .dob(user.getDob())
                 .gender(user.getGender())
                 .roleId(user.getRole() != null ? user.getRole().getId() : null)
                 .role(user.getRole() != null ? user.getRole().getName() : null)
                 .onBoarded(user.getOnBoarded())
                 .active(user.getActive())
+                .kycVerified(kycVerified)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .address(AddressMapper.mapToAddressResponse(address))
