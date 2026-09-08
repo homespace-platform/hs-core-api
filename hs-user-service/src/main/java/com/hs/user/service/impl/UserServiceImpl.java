@@ -226,9 +226,11 @@ public class UserServiceImpl implements UserService {
         public UserProfileResponse getUserProfile() {
                 User user = currentUserUtils.getCurrentUser();
                 Address address = addressRepository.findByUser_IdAndActiveTrue(user.getId()).orElse(null);
-                boolean kycVerified = kycVerificationRepository.existsByUserIdAndProviderAndStatus(
+                boolean diditVerified = kycVerificationRepository.existsByUserIdAndProviderAndStatus(
                                 user.getId(), KycProvider.DIDIT, KycStatus.VERIFIED);
-                boolean kycOptional = KycPolicy.isKycOptional(user);
+                boolean kycOptional = KycPolicy.isAdminTrusted(user);
+                // Admin is trusted as verified for business rules (no Didit required).
+                boolean kycVerified = KycPolicy.isIdentitySatisfied(user, diditVerified);
                 return UserMapper.mapToUserProfileResponse(user, address, kycVerified, kycOptional);
         }
 

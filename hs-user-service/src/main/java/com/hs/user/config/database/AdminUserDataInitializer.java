@@ -29,6 +29,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class AdminUserDataInitializer implements CommandLineRunner {
 
+    /** Fallback CCCD when env does not set {@code cccd} for the account. */
+    public static final String DEFAULT_BOOTSTRAP_ADMIN_CCCD = "075999999999";
+    public static final String DEFAULT_BOOTSTRAP_ADMIN_CCCD_2 = "075999999998";
+
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final RealmResource keycloakRealm;
@@ -36,13 +40,8 @@ public class AdminUserDataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        if (!properties.enabled()) {
-            return;
-        }
-
-        if (userRepository.existsByRole_Name(RoleConstants.ADMIN)) {
-            syncBootstrapAdminPhone();
-            log.info("Bootstrap admin skipped, an account with role {} already exists", RoleConstants.ADMIN);
+        List<BootstrapAdminAccount> accounts = properties.enabledAdmins();
+        if (accounts.isEmpty()) {
             return;
         }
 
@@ -50,35 +49,64 @@ public class AdminUserDataInitializer implements CommandLineRunner {
                 .findByName(RoleConstants.ADMIN)
                 .orElseThrow(() -> new IllegalStateException("Missing default role: " + RoleConstants.ADMIN));
 
-        try {
-            String userId = findOrCreateKeycloakAdmin();
-            persistAdmin(userId, adminRole);
-            log.warn("Bootstrap admin '{}' is ready with the configured password. Change it after the first login.",
-                    properties.username());
-        } catch (RuntimeException exception) {
-            // Startup must not fail when Keycloak is unreachable, the seed retries on the next boot.
-            log.error("Failed to seed the bootstrap admin account: {}", exception.getMessage());
+        for (int i = 0; i < accounts.size(); i++) {
+            BootstrapAdminAccount account = accounts.get(i);
+            String cccd = resolveCccd(account, i);
+            try {
+                seedOrSyncAdmin(account, adminRole, cccd);
+            } catch (RuntimeException exception) {
+                log.error("Failed to seed bootstrap admin '{}': {}", account.username(), exception.getMessage());
+            }
         }
     }
 
-    private String findOrCreateKeycloakAdmin() {
-        String existingId = findKeycloakUserId();
+    private void seedOrSyncAdmin(BootstrapAdminAccount account, Role adminRole, String cccd) {
+        if (account.username() == null || account.email() == null || account.password() == null) {
+            log.warn("Skipping bootstrap admin — username/email/password required");
+            return;
+        }
+
+        String userId = findOrCreateKeycloakAdmin(account);
+        if (userRepository.existsById(userId)) {
+            syncPhone(userId, account);
+            syncCccd(userId, account.email(), cccd);
+            ensureAdminRole(userId, adminRole, account.email());
+            log.info("Bootstrap admin '{}' already present — synced role/phone/cccd", account.username());
+            return;
+        }
+
+        persistAdmin(userId, account, adminRole, cccd);
+        log.warn("Bootstrap admin '{}' is ready with the configured password. Change it after the first login.",
+                account.username());
+    }
+
+    private static String resolveCccd(BootstrapAdminAccount account, int index) {
+        if (account.cccd() != null && !account.cccd().isBlank()) {
+            return account.cccd().trim();
+        }
+        return index == 0 ? DEFAULT_BOOTSTRAP_ADMIN_CCCD : DEFAULT_BOOTSTRAP_ADMIN_CCCD_2;
+    }
+
+    private String findOrCreateKeycloakAdmin(BootstrapAdminAccount account) {
+        String existingId = findKeycloakUserId(account.username(), account.email());
         if (existingId != null) {
-            updateKeycloakPhoneIfNeeded(existingId);
+            updateKeycloakPhoneIfNeeded(existingId, account.phoneNumber());
             log.info("Bootstrap admin already exists in Keycloak, reusing account {}", existingId);
             return existingId;
         }
 
         UserRepresentation user = new UserRepresentation();
-        user.setUsername(properties.username());
-        user.setEmail(properties.email());
-        user.setFirstName(properties.firstName());
-        user.setLastName(properties.lastName());
-        user.singleAttribute("phoneNumber", properties.phoneNumber());
+        user.setUsername(account.username());
+        user.setEmail(account.email());
+        user.setFirstName(account.firstName());
+        user.setLastName(account.lastName());
+        if (account.phoneNumber() != null) {
+            user.singleAttribute("phoneNumber", account.phoneNumber());
+        }
         user.setEnabled(true);
         user.setEmailVerified(true);
         user.setRequiredActions(new ArrayList<>());
-        user.setCredentials(List.of(buildPasswordCredential()));
+        user.setCredentials(List.of(buildPasswordCredential(account.password())));
 
         try (Response response = keycloakRealm.users().create(user)) {
             if (response.getStatusInfo().getFamily() != Response.Status.Family.SUCCESSFUL
@@ -92,46 +120,44 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         }
     }
 
-    private String findKeycloakUserId() {
-        List<UserRepresentation> byUsername = keycloakRealm.users().searchByUsername(properties.username(), true);
+    private String findKeycloakUserId(String username, String email) {
+        List<UserRepresentation> byUsername = keycloakRealm.users().searchByUsername(username, true);
         if (!byUsername.isEmpty()) {
             return byUsername.getFirst().getId();
         }
 
-        List<UserRepresentation> byEmail = keycloakRealm.users().searchByEmail(properties.email(), true);
+        List<UserRepresentation> byEmail = keycloakRealm.users().searchByEmail(email, true);
         return byEmail.isEmpty() ? null : byEmail.getFirst().getId();
     }
 
-    private CredentialRepresentation buildPasswordCredential() {
+    private static CredentialRepresentation buildPasswordCredential(String password) {
         CredentialRepresentation credential = new CredentialRepresentation();
         credential.setType(CredentialRepresentation.PASSWORD);
-        credential.setValue(properties.password());
+        credential.setValue(password);
         credential.setTemporary(false);
         return credential;
     }
 
-    /**
-     * Writes the row directly instead of waiting for the Keycloak event, so the seed does not
-     * depend on Kafka timing. Both paths converge: the consumer skips an existing row, and this
-     * method promotes a row the consumer may have already created with the default role.
-     */
-    private void persistAdmin(String userId, Role adminRole) {
+    private void persistAdmin(String userId, BootstrapAdminAccount account, Role adminRole, String cccd) {
         User admin = userRepository.findById(userId).orElseGet(() -> {
             User created = new User();
             created.setId(userId);
             return created;
         });
 
-        admin.setUsername(properties.username());
-        admin.setEmail(properties.email());
-        admin.setFirstName(properties.firstName());
-        admin.setLastName(properties.lastName());
-        admin.setPhone(properties.phoneNumber());
+        admin.setUsername(account.username());
+        admin.setEmail(account.email());
+        admin.setFirstName(account.firstName());
+        admin.setLastName(account.lastName());
+        admin.setPhone(account.phoneNumber());
+        if (cccd != null && !userRepository.existsByCccdAndIdNot(cccd, userId)) {
+            admin.setCccd(cccd);
+        }
         admin.setRole(adminRole);
         admin.setActive(true);
         admin.setOnBoarded(false);
 
-        UserContextHolder.set(new UserContext(userId, properties.email()));
+        UserContextHolder.set(new UserContext(userId, account.email()));
         try {
             userRepository.save(admin);
         } finally {
@@ -139,27 +165,37 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         }
     }
 
-    private void syncBootstrapAdminPhone() {
-        if (properties.phoneNumber() == null) {
+    private void ensureAdminRole(String userId, Role adminRole, String email) {
+        userRepository.findById(userId).ifPresent(admin -> {
+            if (admin.getRole() != null && RoleConstants.ADMIN.equals(admin.getRole().getName())) {
+                return;
+            }
+            admin.setRole(adminRole);
+            UserContextHolder.set(new UserContext(userId, email));
+            try {
+                userRepository.save(admin);
+            } finally {
+                UserContextHolder.clear();
+            }
+        });
+    }
+
+    private void syncPhone(String userId, BootstrapAdminAccount account) {
+        if (account.phoneNumber() == null) {
             return;
         }
 
         try {
-            String userId = findKeycloakUserId();
-            if (userId == null) {
-                return;
-            }
-
             userRepository.findById(userId).ifPresent(admin -> {
                 if (admin.getPhone() != null && !admin.getPhone().isBlank()) {
                     return;
                 }
 
-                admin.setPhone(properties.phoneNumber());
-                UserContextHolder.set(new UserContext(userId, properties.email()));
+                admin.setPhone(account.phoneNumber());
+                UserContextHolder.set(new UserContext(userId, account.email()));
                 try {
                     userRepository.save(admin);
-                    log.info("Synced bootstrap admin phone to database for user {}", userId);
+                    log.info("Synced bootstrap admin phone for user {}", userId);
                 } finally {
                     UserContextHolder.clear();
                 }
@@ -169,8 +205,40 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         }
     }
 
-    private void updateKeycloakPhoneIfNeeded(String userId) {
-        if (properties.phoneNumber() == null) {
+    private void syncCccd(String userId, String email, String cccd) {
+        if (cccd == null || cccd.isBlank()) {
+            return;
+        }
+
+        try {
+            userRepository.findById(userId).ifPresent(admin -> {
+                if (cccd.equals(admin.getCccd())) {
+                    return;
+                }
+                if (admin.getCccd() != null && !admin.getCccd().isBlank()) {
+                    return;
+                }
+                if (userRepository.existsByCccdAndIdNot(cccd, userId)) {
+                    log.warn("Cannot seed bootstrap admin CCCD {} — already used", cccd);
+                    return;
+                }
+
+                admin.setCccd(cccd);
+                UserContextHolder.set(new UserContext(userId, email));
+                try {
+                    userRepository.save(admin);
+                    log.info("Synced bootstrap admin CCCD for user {}", userId);
+                } finally {
+                    UserContextHolder.clear();
+                }
+            });
+        } catch (RuntimeException exception) {
+            log.warn("Could not sync bootstrap admin CCCD: {}", exception.getMessage());
+        }
+    }
+
+    private void updateKeycloakPhoneIfNeeded(String userId, String phoneNumber) {
+        if (phoneNumber == null) {
             return;
         }
 
@@ -185,7 +253,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
             return;
         }
 
-        user.singleAttribute("phoneNumber", properties.phoneNumber());
+        user.singleAttribute("phoneNumber", phoneNumber);
         userResource.update(user);
     }
 }

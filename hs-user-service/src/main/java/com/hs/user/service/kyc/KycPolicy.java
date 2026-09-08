@@ -6,27 +6,38 @@ import com.hs.user.model.User;
 
 /**
  * KYC policy derived from role — no extra DB column.
- * ADMIN (by role name, regardless of how role_id was assigned) may skip KYC;
- * USER must verify when a business gate requires it.
+ * ADMIN is treated as identity-verified by default (bypass Didit for business gates).
+ * USER must complete Didit KYC when a feature requires it.
  */
 public final class KycPolicy {
 
     private KycPolicy() {
     }
 
-    public static boolean isKycOptional(User user) {
-        return isKycOptional(user != null ? user.getRole() : null);
+    /** Admin role — KYC not required; profile reports {@code kycVerified=true}. */
+    public static boolean isAdminTrusted(User user) {
+        return isAdminTrusted(user != null ? user.getRole() : null);
     }
 
-    public static boolean isKycOptional(Role role) {
+    public static boolean isAdminTrusted(Role role) {
         return role != null && RoleConstants.ADMIN.equals(role.getName());
+    }
+
+    /** @deprecated prefer {@link #isAdminTrusted(User)} */
+    public static boolean isKycOptional(User user) {
+        return isAdminTrusted(user);
+    }
+
+    /** @deprecated prefer {@link #isAdminTrusted(Role)} */
+    public static boolean isKycOptional(Role role) {
+        return isAdminTrusted(role);
     }
 
     /**
      * Use when a feature requires identity verification.
-     * Admins pass without Didit; others need {@code kycVerified == true}.
+     * Admins always pass; others need Didit {@code VERIFIED}.
      */
-    public static boolean isIdentitySatisfied(User user, boolean kycVerified) {
-        return isKycOptional(user) || kycVerified;
+    public static boolean isIdentitySatisfied(User user, boolean diditVerified) {
+        return isAdminTrusted(user) || diditVerified;
     }
 }

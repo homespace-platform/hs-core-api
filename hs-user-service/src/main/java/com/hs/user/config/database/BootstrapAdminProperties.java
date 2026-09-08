@@ -1,33 +1,17 @@
 package com.hs.user.config.database;
 
-import java.util.Locale;
+import java.util.List;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties(prefix = "homespace.bootstrap.admin")
-public record BootstrapAdminProperties(
-        boolean enabled,
-        String username,
-        String email,
-        String password,
-        String phoneNumber,
-        String firstName,
-        String lastName
-) {
+@ConfigurationProperties(prefix = "homespace.bootstrap")
+public record BootstrapAdminProperties(List<BootstrapAdminAccount> admins) {
 
     public BootstrapAdminProperties {
-        username = normalize(username);
-        email = normalize(email) == null ? null : normalize(email).toLowerCase(Locale.ROOT);
-        phoneNumber = normalize(phoneNumber);
-        firstName = normalize(firstName);
-        lastName = normalize(lastName);
+        admins = admins == null ? List.of() : List.copyOf(admins);
     }
 
-    private static String normalize(String value) {
-        if (value == null) {
-            return null;
-        }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+    public List<BootstrapAdminAccount> enabledAdmins() {
+        return admins.stream().filter(account -> account != null && account.enabled()).toList();
     }
 }
