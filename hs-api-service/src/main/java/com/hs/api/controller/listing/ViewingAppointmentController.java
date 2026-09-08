@@ -11,6 +11,7 @@ import com.hs.listing.dto.response.AppointmentResponse;
 import com.hs.listing.dto.response.ListingAvailabilityResponse;
 import com.hs.listing.model.constant.AppointmentStatus;
 import com.hs.listing.service.ViewingAppointmentService;
+import com.hs.user.service.kyc.KycGateService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -29,6 +30,7 @@ import java.util.Map;
 public class ViewingAppointmentController {
 
     private final ViewingAppointmentService appointmentService;
+    private final KycGateService kycGateService;
 
     // =========================================================================
     // 1. DÀNH CHO KHÁCH HÀNG (RENTER) & XEM LỊCH KHẢ DỤNG (AVAILABILITY)
@@ -47,6 +49,7 @@ public class ViewingAppointmentController {
     @PostMapping
     public ApiResponse<AppointmentResponse> createAppointment(@RequestBody @Valid CreateAppointmentRequest req) {
         UserContext context = requireUserContext();
+        kycGateService.requireVerifiedIdentity(context.userId());
         return ApiResponse.<AppointmentResponse>builder()
                 .message("Gửi yêu cầu đặt lịch xem nhà thành công. Vui lòng chờ chủ nhà xác nhận.")
                 .result(appointmentService.createAppointment(context.userId(), context.email(), req))

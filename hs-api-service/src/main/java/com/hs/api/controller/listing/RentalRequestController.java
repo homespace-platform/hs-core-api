@@ -11,6 +11,7 @@ import com.hs.listing.dto.request.RejectRentalRequest;
 import com.hs.listing.dto.response.RentalRequestResponse;
 import com.hs.listing.model.constant.RentalRequestStatus;
 import com.hs.listing.service.RentalRequestService;
+import com.hs.user.service.kyc.KycGateService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 public class RentalRequestController {
 
     private final RentalRequestService rentalRequestService;
+    private final KycGateService kycGateService;
 
     // =========================================================================
     // 1. DÀNH CHO KHÁCH HÀNG (RENTER)
@@ -33,6 +35,7 @@ public class RentalRequestController {
     @PostMapping
     public ApiResponse<RentalRequestResponse> createRentalRequest(@RequestBody @Valid CreateRentalRequest req) {
         UserContext context = requireUserContext();
+        kycGateService.requireVerifiedIdentity(context.userId());
         return ApiResponse.<RentalRequestResponse>builder()
                 .message("Gửi yêu cầu thuê nhà thành công. Vui lòng chờ chủ nhà phản hồi.")
                 .result(rentalRequestService.createRentalRequest(context.userId(), context.email(), req))

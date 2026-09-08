@@ -12,6 +12,7 @@ import com.hs.listing.service.ListingQueryService;
 import com.hs.listing.service.ListingService;
 import com.hs.listing.service.ListingStatusService;
 import com.hs.listing.model.constant.ListingStatus;
+import com.hs.user.service.kyc.KycGateService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
@@ -28,15 +29,18 @@ public class ListingController {
     private final ListingService listingService;
     private final ListingQueryService listingQueryService;
     private final ListingStatusService listingStatusService;
+    private final KycGateService kycGateService;
 
     @PostMapping({"", "/upsert"})
     public ResponseEntity<ApiResponse<CreateListingResponse>> upsert(
             @RequestBody @Valid CreateListingRequest request) {
+        String userId = currentUserId();
+        kycGateService.requireVerifiedIdentity(userId);
         boolean updating = request.id() != null && !request.id().isBlank();
         var body = ApiResponse.<CreateListingResponse>builder()
                 .message(request.submissionAction() == com.hs.listing.model.constant.ListingSubmissionAction.SAVE_DRAFT
                         ? "Listing saved as draft" : "Listing submitted for review")
-                .result(listingService.upsert(currentUserId(), request))
+                .result(listingService.upsert(userId, request))
                 .build();
         return ResponseEntity.status(updating ? HttpStatus.OK : HttpStatus.CREATED).body(body);
     }
