@@ -130,49 +130,55 @@ Hãy viết hoàn chỉnh văn bản với ngôn từ pháp lý chuẩn mực, l
 
 ---
 
-### Prompt 3: Hợp đồng Thuê Phòng Trọ / Căn Hộ Dịch Vụ (`ROOM`)
+### Prompt 3: Hợp đồng Thuê Văn Phòng Làm Việc (`OFFICE`)
 
 ```markdown
 BỐI CẢNH DỰ ÁN & VAI TRÒ CỦA BẠN:
-Bạn đang đóng vai trò là Chuyên gia Pháp lý kiêm Kỹ sư Thiết kế Mẫu Hợp đồng cho nền tảng công nghệ bất động sản HomeSpace (Việt Nam).
+Bạn đang đóng vai trò là Chuyên gia Pháp chế Doanh nghiệp kiêm Kỹ sư Thiết kế Mẫu Hợp đồng cho nền tảng công nghệ bất động sản HomeSpace (Việt Nam).
 Hệ thống HomeSpace có tính năng tạo hợp đồng thuê điện tử tự động:
 - Quản trị viên (Admin) tải file mẫu Word (.docx) lên hệ thống.
 - Backend (sử dụng thư viện Java poi-tl) sẽ tự động quét và phân tích các mã trường dạng {{object.field}} trong văn bản.
 - Khi chủ nhà duyệt yêu cầu thuê, hệ thống sẽ tự động lấy dữ liệu từ cơ sở dữ liệu và điền vào các thẻ {{...}}, đồng thời vẽ tự động 2 bảng động {{#chargesTable}} và {{#equipmentTable}}, sau đó xuất ra file PDF/Word cho các bên ký kết.
-- YÊU CẦU CỐT LÕI: Không dùng dấu chấm (.......) thủ công. Sử dụng chuẩn xác các thẻ {{...}} theo danh mục bên dưới.
+- YÊU CẦU CỐT LÕI: Phải dùng chuẩn xác 100% các biến {{...}} để hệ thống tự động điền dữ liệu, không dùng dấu chấm (.......) thủ công.
 
 ---
 
 NHIỆM VỤ CỦA BẠN:
-Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ PHÒNG TRỌ / CĂN HỘ DỊCH VỤ" ngắn gọn, rõ ràng, tập trung vào an toàn PCCC, an ninh trật tự và quy chế phòng trọ.
+Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ VĂN PHÒNG LÀM VIỆC" chuẩn mực giao dịch B2B chuyên nghiệp giữa doanh nghiệp và chủ tòa nhà.
 
 1. CĂN CỨ PHÁP LÝ (Hãy tra cứu và viện dẫn chính xác):
 - Bộ luật Dân sự số 91/2015/QH13.
-- Luật Nhà ở số 27/2023/QH15 (Điều 57 về quy định PCCC và điều kiện phát triển nhà ở nhiều tầng có nhiều căn hộ, nhà trọ cho thuê).
-- Chỉ thị của Thủ tướng Chính phủ và Bộ Công an về kiểm tra, chấn chỉnh an toàn PCCC tại các loại hình nhà trọ, phòng trọ.
-- Luật Cư trú số 68/2020/QH14 (thủ tục đăng ký tạm trú).
+- Luật Doanh nghiệp số 59/2020/QH14 (quy định về đặt trụ sở chính, chi nhánh, văn phòng đại diện).
+- Luật Kinh doanh Bất động sản số 29/2023/QH15 (Điều 44, 45, 46 về cho thuê phần diện tích sàn xây dựng văn phòng).
+- Luật Thuế Giá trị gia tăng và quy định xuất hóa đơn tài chính (VAT).
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
-- Số hợp đồng: {{contract.number}}, ngày lập: {{contract.signingDate}}, tại: {{contract.signingCity}}
-- Bên cho thuê (Chủ trọ - Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
-- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số lượng người ở: {{tenant.occupantCount}}
-- Phòng cho thuê: Phòng số {{property.unitNumber}}, Tầng {{property.floor}}, tại địa chỉ {{property.fullAddress}}, diện tích: {{property.areaText}}, loại hình: {{property.propertyType}}
+- Số hợp đồng: {{contract.number}}, ngày ký: {{contract.signingDate}}, tại: {{contract.signingCity}}
+- Bên cho thuê (Bên A): {{landlord.fullName}}, Mã số thuế/CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
+- Bên thuê (Bên B - Khách hàng Doanh nghiệp):
+  + Tên công ty/tổ chức: {{tenant.organizationName}}
+  + Đại diện pháp luật: {{tenant.representativeName}}, Chức vụ: {{tenant.representativePosition}}
+  + Người phụ trách liên hệ: {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}
+- Diện tích văn phòng: Phòng/Phân khu: {{property.unitNumber}}, Tầng: {{property.floor}}, Tòa nhà tại: {{property.fullAddress}}, Diện tích thuê văn phòng: {{property.areaText}}, Loại hình: {{property.propertyType}}
 - Hình thức thuê: {{lease.rentalMode}}
-- Thời hạn thuê: Từ {{lease.startDateText}} đến {{lease.endDateText}} (thời hạn: {{lease.durationText}} - {{lease.durationMonths}} tháng). Bàn giao ngày: {{lease.handoverDateText}}
-- Giá thuê & Đặt cọc: Tiền phòng: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn đóng: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền cọc: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}). Thỏa thuận cọc: {{deposit.description}}
-- Số đồng hồ bàn giao: Điện: {{meters.electricityInitial}}, Nước: {{meters.waterInitial}}
+- Thời hạn thuê: Từ ngày {{lease.startDateText}} đến hết ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao văn phòng: {{lease.handoverDateText}}
+
+LƯU Ý: Hợp đồng thuê văn phòng KHÔNG dùng mã trường {{tenant.occupantCount}} (số người vào ở) vì không phù hợp nghiệp vụ B2B. Ba mã trường về pháp nhân bên thuê ở trên là bắt buộc.
+- Giá thuê & Đặt cọc: Tiền thuê văn phòng: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn nộp: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền đặt cọc bảo đảm: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}), điều kiện hoàn cọc: {{deposit.description}}
+- Chỉ số bàn giao: Đồng hồ điện: {{meters.electricityInitial}}, Đồng hồ nước: {{meters.waterInitial}}
 - BẢNG ĐỘNG TỰ SINH (Giữ nguyên dấu #):
-  + Bảng đơn giá điện, nước, internet, rác, máy giặt, gửi xe: {{#chargesTable}}
-  + Bảng trang thiết bị bàn giao trong phòng (máy lạnh, quạt, giường nệm, tủ áo...): {{#equipmentTable}}
+  + Bảng chi tiết phí dịch vụ văn phòng (phí quản lý tòa nhà, phí điều hòa ngoài giờ, phí đỗ xe ô tô/xe máy): {{#chargesTable}}
+  + Bảng biên bản kiểm kê bàn giao trang thiết bị văn phòng: {{#equipmentTable}}
 
-3. ĐIỀU KHOẢN ĐẶC THÙ CHO PHÒNG TRỌ / CĂN HỘ DỊCH VỤ:
-- Giới hạn người ở: Nghiêm cấm ở quá số lượng {{tenant.occupantCount}} người đã đăng ký; khách bên ngoài ở lại qua đêm phải báo trước với Bên A và xuất trình giấy tờ tùy thân.
-- An toàn PCCC nghiêm ngặt: Tuyệt đối cấm sạc pin xe đạp điện/xe máy điện qua đêm không người giám sát; cấm sử dụng bếp gas mini không rõ nguồn gốc; cấm đốt nến, vàng mã trong phòng.
-- Giờ giấc đóng mở cửa chung, giữ gìn trật tự sau 22h00, không gây ồn ào ảnh hưởng phòng xung quanh.
-- Nghĩa vụ cung cấp thông tin để đăng ký tạm trú với Công an phường sở tại.
-- Thanh toán qua hệ thống: Tiền phòng và tiền cọc được nộp trực tuyến qua nền tảng HomeSpace theo phương thức {{rent.paymentMethod}}; không ghi số tài khoản hay tên ngân hàng cá nhân của Bên A vào hợp đồng.
+3. ĐIỀU KHOẢN ĐẶC THÙ CHO VĂN PHÒNG LÀM VIỆC:
+- Quyền đăng ký địa chỉ trụ sở doanh nghiệp / văn phòng đại diện tại Sở Kế hoạch & Đầu tư.
+- Quyền đặt biển tên công ty tại sảnh tòa nhà hoặc trước cửa văn phòng.
+- Giờ làm việc tiêu chuẩn và cách tính phụ phí làm thêm ngoài giờ (Overtime air-conditioning fee).
+- Nghĩa vụ phát hành hóa đơn giá trị gia tăng (Hóa đơn điện tử VAT) hợp pháp của Bên A cho Bên B theo từng đợt thanh toán.
+- Quy định về bảo hiểm tài sản, bảo hiểm trách nhiệm công cộng và bảo mật tài liệu doanh nghiệp.
+- Thanh toán qua hệ thống: Tiền thuê và tiền cọc bảo đảm được nộp trực tuyến qua nền tảng HomeSpace theo phương thức {{rent.paymentMethod}}; không ghi số tài khoản hay tên ngân hàng của Bên A vào hợp đồng.
 
-Hãy trình bày văn bản đầy đủ từ mở đầu đến kết thúc, có các điều khoản xử lý vi phạm hợp đồng và chữ ký hai bên.
+Hãy viết chi tiết và đầy đủ toàn văn hợp đồng chuẩn phong cách hợp đồng thương mại B2B cao cấp.
 ```
 
 ---
@@ -230,55 +236,49 @@ Hãy viết hoàn chỉnh văn bản pháp lý chuyên nghiệp từ mở đầu
 
 ---
 
-### Prompt 5: Hợp đồng Thuê Văn Phòng Làm Việc (`OFFICE`)
+### Prompt 5: Hợp đồng Thuê Phòng Trọ / Căn Hộ Dịch Vụ (`ROOM`)
 
 ```markdown
 BỐI CẢNH DỰ ÁN & VAI TRÒ CỦA BẠN:
-Bạn đang đóng vai trò là Chuyên gia Pháp chế Doanh nghiệp kiêm Kỹ sư Thiết kế Mẫu Hợp đồng cho nền tảng công nghệ bất động sản HomeSpace (Việt Nam).
+Bạn đang đóng vai trò là Chuyên gia Pháp lý kiêm Kỹ sư Thiết kế Mẫu Hợp đồng cho nền tảng công nghệ bất động sản HomeSpace (Việt Nam).
 Hệ thống HomeSpace có tính năng tạo hợp đồng thuê điện tử tự động:
 - Quản trị viên (Admin) tải file mẫu Word (.docx) lên hệ thống.
 - Backend (sử dụng thư viện Java poi-tl) sẽ tự động quét và phân tích các mã trường dạng {{object.field}} trong văn bản.
 - Khi chủ nhà duyệt yêu cầu thuê, hệ thống sẽ tự động lấy dữ liệu từ cơ sở dữ liệu và điền vào các thẻ {{...}}, đồng thời vẽ tự động 2 bảng động {{#chargesTable}} và {{#equipmentTable}}, sau đó xuất ra file PDF/Word cho các bên ký kết.
-- YÊU CẦU CỐT LÕI: Phải dùng chuẩn xác 100% các biến {{...}} để hệ thống tự động điền dữ liệu, không dùng dấu chấm (.......) thủ công.
+- YÊU CẦU CỐT LÕI: Không dùng dấu chấm (.......) thủ công. Sử dụng chuẩn xác các thẻ {{...}} theo danh mục bên dưới.
 
 ---
 
 NHIỆM VỤ CỦA BẠN:
-Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ VĂN PHÒNG LÀM VIỆC" chuẩn mực giao dịch B2B chuyên nghiệp giữa doanh nghiệp và chủ tòa nhà.
+Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ PHÒNG TRỌ / CĂN HỘ DỊCH VỤ" ngắn gọn, rõ ràng, tập trung vào an toàn PCCC, an ninh trật tự và quy chế phòng trọ.
 
 1. CĂN CỨ PHÁP LÝ (Hãy tra cứu và viện dẫn chính xác):
 - Bộ luật Dân sự số 91/2015/QH13.
-- Luật Doanh nghiệp số 59/2020/QH14 (quy định về đặt trụ sở chính, chi nhánh, văn phòng đại diện).
-- Luật Kinh doanh Bất động sản số 29/2023/QH15 (Điều 44, 45, 46 về cho thuê phần diện tích sàn xây dựng văn phòng).
-- Luật Thuế Giá trị gia tăng và quy định xuất hóa đơn tài chính (VAT).
+- Luật Nhà ở số 27/2023/QH15 (Điều 57 về quy định PCCC và điều kiện phát triển nhà ở nhiều tầng có nhiều căn hộ, nhà trọ cho thuê).
+- Chỉ thị của Thủ tướng Chính phủ và Bộ Công an về kiểm tra, chấn chỉnh an toàn PCCC tại các loại hình nhà trọ, phòng trọ.
+- Luật Cư trú số 68/2020/QH14 (thủ tục đăng ký tạm trú).
 
 2. CÁC MÃ TRƯỜNG BẮT BUỘC ĐẶT VÀO HỢP ĐỒNG:
-- Số hợp đồng: {{contract.number}}, ngày ký: {{contract.signingDate}}, tại: {{contract.signingCity}}
-- Bên cho thuê (Bên A): {{landlord.fullName}}, Mã số thuế/CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
-- Bên thuê (Bên B - Khách hàng Doanh nghiệp):
-  + Tên công ty/tổ chức: {{tenant.organizationName}}
-  + Đại diện pháp luật: {{tenant.representativeName}}, Chức vụ: {{tenant.representativePosition}}
-  + Người phụ trách liên hệ: {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}
-- Diện tích văn phòng: Phòng/Phân khu: {{property.unitNumber}}, Tầng: {{property.floor}}, Tòa nhà tại: {{property.fullAddress}}, Diện tích thuê văn phòng: {{property.areaText}}, Loại hình: {{property.propertyType}}
+- Số hợp đồng: {{contract.number}}, ngày lập: {{contract.signingDate}}, tại: {{contract.signingCity}}
+- Bên cho thuê (Chủ trọ - Bên A): {{landlord.fullName}}, CCCD: {{landlord.idNumber}}, ngày cấp: {{landlord.idIssueDate}}, nơi cấp: {{landlord.idIssuePlace}}, nơi thường trú: {{landlord.permanentAddress}}, SĐT: {{landlord.phone}}, email: {{landlord.email}}
+- Bên thuê (Bên B): {{tenant.fullName}}, CCCD: {{tenant.idNumber}}, ngày cấp: {{tenant.idIssueDate}}, nơi cấp: {{tenant.idIssuePlace}}, nơi thường trú: {{tenant.permanentAddress}}, SĐT: {{tenant.phone}}, email: {{tenant.email}}, số lượng người ở: {{tenant.occupantCount}}
+- Phòng cho thuê: Phòng số {{property.unitNumber}}, Tầng {{property.floor}}, tại địa chỉ {{property.fullAddress}}, diện tích: {{property.areaText}}, loại hình: {{property.propertyType}}
 - Hình thức thuê: {{lease.rentalMode}}
-- Thời hạn thuê: Từ ngày {{lease.startDateText}} đến hết ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao văn phòng: {{lease.handoverDateText}}
-
-LƯU Ý: Hợp đồng thuê văn phòng KHÔNG dùng mã trường {{tenant.occupantCount}} (số người vào ở) vì không phù hợp nghiệp vụ B2B. Ba mã trường về pháp nhân bên thuê ở trên là bắt buộc.
-- Giá thuê & Đặt cọc: Tiền thuê văn phòng: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn nộp: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền đặt cọc bảo đảm: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}), điều kiện hoàn cọc: {{deposit.description}}
-- Chỉ số bàn giao: Đồng hồ điện: {{meters.electricityInitial}}, Đồng hồ nước: {{meters.waterInitial}}
+- Thời hạn thuê: Từ {{lease.startDateText}} đến {{lease.endDateText}} (thời hạn: {{lease.durationText}} - {{lease.durationMonths}} tháng). Bàn giao ngày: {{lease.handoverDateText}}
+- Giá thuê & Đặt cọc: Tiền phòng: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn đóng: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền cọc: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}). Thỏa thuận cọc: {{deposit.description}}
+- Số đồng hồ bàn giao: Điện: {{meters.electricityInitial}}, Nước: {{meters.waterInitial}}
 - BẢNG ĐỘNG TỰ SINH (Giữ nguyên dấu #):
-  + Bảng chi tiết phí dịch vụ văn phòng (phí quản lý tòa nhà, phí điều hòa ngoài giờ, phí đỗ xe ô tô/xe máy): {{#chargesTable}}
-  + Bảng biên bản kiểm kê bàn giao trang thiết bị văn phòng: {{#equipmentTable}}
+  + Bảng đơn giá điện, nước, internet, rác, máy giặt, gửi xe: {{#chargesTable}}
+  + Bảng trang thiết bị bàn giao trong phòng (máy lạnh, quạt, giường nệm, tủ áo...): {{#equipmentTable}}
 
-3. ĐIỀU KHOẢN ĐẶC THÙ CHO VĂN PHÒNG LÀM VIỆC:
-- Quyền đăng ký địa chỉ trụ sở doanh nghiệp / văn phòng đại diện tại Sở Kế hoạch & Đầu tư.
-- Quyền đặt biển tên công ty tại sảnh tòa nhà hoặc trước cửa văn phòng.
-- Giờ làm việc tiêu chuẩn và cách tính phụ phí làm thêm ngoài giờ (Overtime air-conditioning fee).
-- Nghĩa vụ phát hành hóa đơn giá trị gia tăng (Hóa đơn điện tử VAT) hợp pháp của Bên A cho Bên B theo từng đợt thanh toán.
-- Quy định về bảo hiểm tài sản, bảo hiểm trách nhiệm công cộng và bảo mật tài liệu doanh nghiệp.
-- Thanh toán qua hệ thống: Tiền thuê và tiền cọc bảo đảm được nộp trực tuyến qua nền tảng HomeSpace theo phương thức {{rent.paymentMethod}}; không ghi số tài khoản hay tên ngân hàng của Bên A vào hợp đồng.
+3. ĐIỀU KHOẢN ĐẶC THÙ CHO PHÒNG TRỌ / CĂN HỘ DỊCH VỤ:
+- Giới hạn người ở: Nghiêm cấm ở quá số lượng {{tenant.occupantCount}} người đã đăng ký; khách bên ngoài ở lại qua đêm phải báo trước với Bên A và xuất trình giấy tờ tùy thân.
+- An toàn PCCC nghiêm ngặt: Tuyệt đối cấm sạc pin xe đạp điện/xe máy điện qua đêm không người giám sát; cấm sử dụng bếp gas mini không rõ nguồn gốc; cấm đốt nến, vàng mã trong phòng.
+- Giờ giấc đóng mở cửa chung, giữ gìn trật tự sau 22h00, không gây ồn ào ảnh hưởng phòng xung quanh.
+- Nghĩa vụ cung cấp thông tin để đăng ký tạm trú với Công an phường sở tại.
+- Thanh toán qua hệ thống: Tiền phòng và tiền cọc được nộp trực tuyến qua nền tảng HomeSpace theo phương thức {{rent.paymentMethod}}; không ghi số tài khoản hay tên ngân hàng cá nhân của Bên A vào hợp đồng.
 
-Hãy viết chi tiết và đầy đủ toàn văn hợp đồng chuẩn phong cách hợp đồng thương mại B2B cao cấp.
+Hãy trình bày văn bản đầy đủ từ mở đầu đến kết thúc, có các điều khoản xử lý vi phạm hợp đồng và chữ ký hai bên.
 ```
 
 ---
