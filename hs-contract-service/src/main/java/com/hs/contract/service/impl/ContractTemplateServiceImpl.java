@@ -238,6 +238,20 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
             throw new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND);
         }
 
+        // Chỉ cho xuất bản khi file Word đã hợp lệ: không còn mã sai và không thiếu trường bắt buộc
+        List<String> invalidPlaceholders = deserializeJsonList(targetVersion.getInvalidPlaceholdersJson());
+        List<TemplateFieldIssue> missingRequired = deserializeMissingFields(targetVersion.getMissingRequiredJson());
+        List<String> legacyWarnings = deserializeJsonList(targetVersion.getValidationErrorsJson());
+        boolean hasBlockingIssues = !invalidPlaceholders.isEmpty()
+                || !missingRequired.isEmpty()
+                || !legacyWarnings.isEmpty();
+        if (hasBlockingIssues) {
+            log.warn("Blocked publish of template {} version {}: invalid={}, missingRequired={}, warnings={}",
+                    templateId, targetVersion.getVersionNumber(),
+                    invalidPlaceholders.size(), missingRequired.size(), legacyWarnings.size());
+            throw new AppException(ContractErrorCode.CONTRACT_TEMPLATE_INVALID);
+        }
+
         // Cập nhật tất cả các version đã PUBLISHED trước đó thành DEPRECATED
         List<ContractTemplateVersion> versions = versionRepository.findByTemplateIdOrderByVersionNumberDesc(templateId);
         for (ContractTemplateVersion v : versions) {

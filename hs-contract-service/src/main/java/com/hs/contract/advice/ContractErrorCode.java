@@ -15,7 +15,7 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     INVALID_CONTRACT_STATUS(6006, "Trạng thái hợp đồng không hợp lệ cho thao tác này", HttpStatus.BAD_REQUEST),
     CONTRACT_RENDER_FAILED(6007, "Không thể điền dữ liệu vào mẫu hợp đồng Word", HttpStatus.INTERNAL_SERVER_ERROR),
     CONTRACT_CONVERT_FAILED(6008, "Lỗi khi chuyển đổi hợp đồng sang tài liệu PDF", HttpStatus.INTERNAL_SERVER_ERROR),
-    CONTRACT_TEMPLATE_INVALID(6009, "Mẫu hợp đồng chứa các mã trường không hợp lệ", HttpStatus.BAD_REQUEST),
+    CONTRACT_TEMPLATE_INVALID(6009, "Không thể xuất bản: mẫu Word còn mã trường không hợp lệ hoặc thiếu trường bắt buộc. Vui lòng tải lên phiên bản đã sửa lỗi.", HttpStatus.BAD_REQUEST),
     RENTAL_REQUEST_NOT_APPROVED(6010, "Yêu cầu thuê chưa được chủ nhà chấp thuận", HttpStatus.BAD_REQUEST),
     CONTRACT_DOCUMENT_NOT_FOUND(6011, "Tài liệu hợp đồng không tồn tại", HttpStatus.NOT_FOUND),
     RENTAL_REQUEST_ALREADY_HAS_CONTRACT(6012, "Yêu cầu thuê này đã có hợp đồng được tạo", HttpStatus.CONFLICT),
