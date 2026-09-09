@@ -164,6 +164,17 @@ public class ListingStatusService {
                 ListingStatusActorType.SYSTEM, false);
     }
 
+    @Transactional
+    public void markRentedByContract(String listingId, String actorId) {
+        Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
+                .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
+        if (listing.getStatus() != ListingStatus.RESERVED) {
+            throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
+        }
+        change(listing, ListingStatus.RENTED, "Hợp đồng thuê đã được thanh toán và ký", actorId,
+                ListingStatusActorType.USER, true);
+    }
+
     private void change(Listing listing, ListingStatus target, String reason, String actorId,
                         ListingStatusActorType actorType, boolean validateExisting) {
         ListingStatus previous = listing.getStatus();

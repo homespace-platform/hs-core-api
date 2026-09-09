@@ -9,6 +9,7 @@ import com.hs.contract.model.ContractDocument;
 import com.hs.contract.model.ContractRevision;
 import com.hs.contract.model.ContractTemplateVersion;
 import com.hs.contract.model.constant.ContractDocumentType;
+import com.hs.contract.model.constant.ContractPaymentStatus;
 import com.hs.contract.model.constant.ContractStatus;
 import com.hs.contract.model.constant.DocumentGenerationStatus;
 import com.hs.contract.model.constant.DocumentPurpose;
@@ -21,12 +22,18 @@ import com.hs.contract.service.engine.ContractDataBuilder;
 import com.hs.contract.service.engine.ContractFieldCatalog;
 import com.hs.contract.service.engine.ContractRenderService;
 import com.hs.listing.repository.RentalRequestRepository;
+import com.hs.listing.model.Listing;
+import com.hs.listing.model.RentalRequest;
+import com.hs.listing.model.constant.ListingStatus;
+import com.hs.listing.model.constant.RentalRequestStatus;
+import com.hs.listing.service.ListingStatusService;
 import com.hs.storage.service.StorageService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
+import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -124,18 +131,152 @@ class ContractServiceImplTest {
         assertThrows(AppException.class, () -> service.getContract("contract-1"));
     }
 
+    @Test
+    void mockPaymentIncludesEstimatedChargesAndExcludesMeterCharges() {
+        ContractRepository contractRepository = mock(ContractRepository.class);
+        ContractRevisionRepository revisionRepository = mock(ContractRevisionRepository.class);
+        ContractServiceImpl service = createService(
+                contractRepository,
+                revisionRepository,
+                mock(ContractDocumentRepository.class),
+                mock(ContractTemplateVersionRepository.class)
+        );
+        Contract contract = Contract.builder()
+                .id("contract-1")
+                .landlordId("landlord-1")
+                .tenantId("tenant-1")
+                .currentRevisionId("revision-1")
+                .status(ContractStatus.PENDING_REVIEW)
+                .paymentStatus(ContractPaymentStatus.UNPAID)
+                .build();
+        ContractRevision revision = ContractRevision.builder()
+                .id("revision-1")
+                .contract(contract)
+                .financialSnapshot("{\"amountValue\":\"5050000\",\"depositAmountValue\":\"5050000\"}")
+                .chargesSnapshot("["
+                        + "{\"name\":\"Nước\",\"billingMethod\":\"PER_PERSON_MONTH\",\"estimatedMonthlyAmount\":\"300000\"},"
+                        + "{\"name\":\"Điện\",\"billingMethod\":\"PER_KWH\",\"estimatedMonthlyAmount\":null}"
+                        + "]")
+                .build();
+
+        UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
+        when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
+        when(revisionRepository.findById("revision-1")).thenReturn(Optional.of(revision));
+
+        var response = service.payMock("contract-1");
+
+        assertEquals(new BigDecimal("10400000"), response.getTotalAmount());
+        assertEquals(new BigDecimal("300000"), response.getChargesTotal());
+        assertEquals(List.of("Điện"), response.getExcludedMeterCharges());
+        assertEquals(ContractPaymentStatus.PAID_MOCK, response.getPaymentStatus());
+        assertEquals(ContractPaymentStatus.PAID_MOCK, contract.getPaymentStatus());
+    }
+
+    @Test
+    void paidTenantCanSignAndCompleteRentalLifecycle() {
+        ContractRepository contractRepository = mock(ContractRepository.class);
+        RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
+        ListingStatusService listingStatusService = mock(ListingStatusService.class);
+        ContractServiceImpl service = createService(
+                contractRepository,
+                mock(ContractRevisionRepository.class),
+                mock(ContractDocumentRepository.class),
+                mock(ContractTemplateVersionRepository.class),
+                rentalRequestRepository,
+                listingStatusService
+        );
+        Listing listing = Listing.builder().id("listing-1").status(ListingStatus.RESERVED).build();
+        RentalRequest rentalRequest = RentalRequest.builder()
+                .id("request-1")
+                .listing(listing)
+                .renterId("tenant-1")
+                .status(RentalRequestStatus.ACCEPTED)
+                .build();
+        Contract contract = Contract.builder()
+                .id("contract-1")
+                .rentalRequestId("request-1")
+                .listingId("listing-1")
+                .landlordId("landlord-1")
+                .tenantId("tenant-1")
+                .status(ContractStatus.PENDING_REVIEW)
+                .paymentStatus(ContractPaymentStatus.PAID_MOCK)
+                .build();
+
+        UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
+        when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
+        when(rentalRequestRepository.findById("request-1")).thenReturn(Optional.of(rentalRequest));
+        when(contractRepository.save(contract)).thenReturn(contract);
+
+        var response = service.sign("contract-1");
+
+        assertEquals(ContractStatus.ACTIVE, response.getStatus());
+        assertEquals(RentalRequestStatus.COMPLETED, rentalRequest.getStatus());
+        verify(listingStatusService).markRentedByContract("listing-1", "tenant-1");
+        verify(rentalRequestRepository).save(rentalRequest);
+        verify(contractRepository).save(contract);
+    }
+
+    @Test
+    void unpaidTenantCannotSignContract() {
+        ContractRepository contractRepository = mock(ContractRepository.class);
+        RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
+        ListingStatusService listingStatusService = mock(ListingStatusService.class);
+        ContractServiceImpl service = createService(
+                contractRepository,
+                mock(ContractRevisionRepository.class),
+                mock(ContractDocumentRepository.class),
+                mock(ContractTemplateVersionRepository.class),
+                rentalRequestRepository,
+                listingStatusService
+        );
+        Contract contract = Contract.builder()
+                .id("contract-1")
+                .landlordId("landlord-1")
+                .tenantId("tenant-1")
+                .status(ContractStatus.PENDING_REVIEW)
+                .paymentStatus(ContractPaymentStatus.UNPAID)
+                .build();
+
+        UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
+        when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
+
+        assertThrows(AppException.class, () -> service.sign("contract-1"));
+        verify(rentalRequestRepository, org.mockito.Mockito.never()).findById(org.mockito.ArgumentMatchers.anyString());
+        verify(listingStatusService, org.mockito.Mockito.never())
+                .markRentedByContract(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+    }
+
     private ContractServiceImpl createService(
             ContractRepository contractRepository,
             ContractRevisionRepository revisionRepository,
             ContractDocumentRepository documentRepository,
             ContractTemplateVersionRepository templateVersionRepository
     ) {
-        return new ContractServiceImpl(
+        return createService(
                 contractRepository,
                 revisionRepository,
                 documentRepository,
                 templateVersionRepository,
                 mock(RentalRequestRepository.class),
+                mock(ListingStatusService.class)
+        );
+    }
+
+    private ContractServiceImpl createService(
+            ContractRepository contractRepository,
+            ContractRevisionRepository revisionRepository,
+            ContractDocumentRepository documentRepository,
+            ContractTemplateVersionRepository templateVersionRepository,
+            RentalRequestRepository rentalRequestRepository,
+            ListingStatusService listingStatusService
+    ) {
+        return new ContractServiceImpl(
+                contractRepository,
+                revisionRepository,
+                documentRepository,
+                templateVersionRepository,
+                rentalRequestRepository,
+                listingStatusService,
                 mock(ContractDataBuilder.class),
                 new ContractFieldCatalog(),
                 mock(ContractRenderService.class),

@@ -5,6 +5,7 @@ import com.hs.contract.dto.request.CreateContractDraftRequest;
 import com.hs.contract.dto.request.UpdateContractRevisionRequest;
 import com.hs.contract.dto.response.ContractCompletenessResponse;
 import com.hs.contract.dto.response.ContractDocumentResponse;
+import com.hs.contract.dto.response.ContractPaymentBreakdownResponse;
 import com.hs.contract.dto.response.ContractResponse;
 import com.hs.contract.dto.response.ContractRevisionResponse;
 import com.hs.contract.model.constant.ContractStatus;
@@ -35,6 +36,12 @@ public interface ContractService {
 
     /** Chốt tài liệu hiện tại và gửi bản hợp đồng hoàn chỉnh cho người thuê xem. */
     ContractResponse sendToTenant(String contractId);
+
+    ContractPaymentBreakdownResponse getPaymentBreakdown(String contractId);
+
+    ContractPaymentBreakdownResponse payMock(String contractId);
+
+    ContractResponse sign(String contractId);
 
     ContractDocumentResponse getDocument(String documentId);
 

@@ -1,6 +1,7 @@
 package com.hs.contract.dto.response;
 
 import com.hs.contract.model.constant.ContractStatus;
+import com.hs.contract.model.constant.ContractPaymentStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -23,6 +24,9 @@ public class ContractResponse {
     private String templateVersionId;
     private String currentRevisionId;
     private ContractStatus status;
+    private ContractPaymentStatus paymentStatus;
+    private Instant paidAt;
+    private Instant signedAt;
     private Instant createdAt;
     private Instant updatedAt;
 }

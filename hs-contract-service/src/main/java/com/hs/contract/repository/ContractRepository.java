@@ -5,12 +5,14 @@ import com.hs.contract.model.constant.ContractStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import jakarta.persistence.LockModeType;
 
 @Repository
 public interface ContractRepository extends JpaRepository<Contract, String>, JpaSpecificationExecutor<Contract> {
@@ -36,4 +38,8 @@ public interface ContractRepository extends JpaRepository<Contract, String>, Jpa
     boolean existsByRentalRequestId(String rentalRequestId);
 
     boolean existsByRentalRequestIdAndStatusIn(String rentalRequestId, Set<ContractStatus> statuses);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT c FROM Contract c WHERE c.id = :id")
+    Optional<Contract> findByIdForUpdate(@Param("id") String id);
 }

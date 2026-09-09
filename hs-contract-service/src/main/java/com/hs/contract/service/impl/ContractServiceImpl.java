@@ -12,6 +12,7 @@ import com.hs.contract.dto.request.CreateContractDraftRequest;
 import com.hs.contract.dto.request.UpdateContractRevisionRequest;
 import com.hs.contract.dto.response.ContractCompletenessResponse;
 import com.hs.contract.dto.response.ContractDocumentResponse;
+import com.hs.contract.dto.response.ContractPaymentBreakdownResponse;
 import com.hs.contract.dto.response.ContractResponse;
 import com.hs.contract.dto.response.ContractRevisionResponse;
 import com.hs.contract.model.Contract;
@@ -19,6 +20,7 @@ import com.hs.contract.model.ContractDocument;
 import com.hs.contract.model.ContractRevision;
 import com.hs.contract.model.ContractTemplateVersion;
 import com.hs.contract.model.constant.ContractDocumentType;
+import com.hs.contract.model.constant.ContractPaymentStatus;
 import com.hs.contract.model.constant.ContractStatus;
 import com.hs.contract.model.constant.DocumentGenerationStatus;
 import com.hs.contract.model.constant.DocumentPurpose;
@@ -35,6 +37,7 @@ import com.hs.listing.model.Listing;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.model.constant.RentalRequestStatus;
 import com.hs.listing.repository.RentalRequestRepository;
+import com.hs.listing.service.ListingStatusService;
 import com.hs.storage.dto.response.StorageObjectResponse;
 import com.hs.storage.dto.response.StorageUrlResponse;
 import com.hs.storage.model.constant.StoragePurpose;
@@ -52,6 +55,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.ByteArrayInputStream;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -66,6 +71,7 @@ public class ContractServiceImpl implements ContractService {
     private final ContractDocumentRepository documentRepository;
     private final ContractTemplateVersionRepository templateVersionRepository;
     private final RentalRequestRepository rentalRequestRepository;
+    private final ListingStatusService listingStatusService;
     private final ContractDataBuilder dataBuilder;
     private final ContractFieldCatalog fieldCatalog;
     private final ContractRenderService renderService;
@@ -577,6 +583,158 @@ public class ContractServiceImpl implements ContractService {
         return toContractResponse(contract);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public ContractPaymentBreakdownResponse getPaymentBreakdown(String contractId) {
+        Contract contract = findContractAndCheckAccess(contractId);
+        return buildPaymentBreakdown(contract, requireCurrentRevision(contract));
+    }
+
+    @Override
+    @Transactional
+    public ContractPaymentBreakdownResponse payMock(String contractId) {
+        Contract contract = findContractForUpdateAndCheckAccess(contractId);
+        requireTenant(contract);
+        if (contract.getStatus() != ContractStatus.PENDING_REVIEW
+                || paymentStatusOf(contract) != ContractPaymentStatus.UNPAID) {
+            throw new AppException(ContractErrorCode.CONTRACT_PAYMENT_NOT_ALLOWED);
+        }
+
+        ContractPaymentBreakdownResponse breakdown =
+                buildPaymentBreakdown(contract, requireCurrentRevision(contract));
+        Instant paidAt = Instant.now();
+        contract.setPaymentStatus(ContractPaymentStatus.PAID_MOCK);
+        contract.setPaidAt(paidAt);
+        contractRepository.save(contract);
+
+        breakdown.setPaymentStatus(ContractPaymentStatus.PAID_MOCK);
+        breakdown.setPaidAt(paidAt);
+        log.info("Mock payment completed for contract id={} tenant id={} amount={}",
+                contractId, contract.getTenantId(), breakdown.getTotalAmount());
+        return breakdown;
+    }
+
+    @Override
+    @Transactional
+    public ContractResponse sign(String contractId) {
+        Contract contract = findContractForUpdateAndCheckAccess(contractId);
+        requireTenant(contract);
+        if (contract.getStatus() != ContractStatus.PENDING_REVIEW
+                || paymentStatusOf(contract) != ContractPaymentStatus.PAID_MOCK) {
+            throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
+        }
+
+        RentalRequest rentalRequest = rentalRequestRepository.findById(contract.getRentalRequestId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.RENTAL_REQUEST_NOT_APPROVED));
+        if (rentalRequest.getStatus() != RentalRequestStatus.ACCEPTED
+                || !contract.getTenantId().equals(rentalRequest.getRenterId())
+                || !contract.getListingId().equals(rentalRequest.getListing().getId())) {
+            throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
+        }
+
+        listingStatusService.markRentedByContract(contract.getListingId(), contract.getTenantId());
+        rentalRequest.setStatus(RentalRequestStatus.COMPLETED);
+        rentalRequest.setHoldExpiresAt(null);
+        rentalRequestRepository.save(rentalRequest);
+
+        contract.setStatus(ContractStatus.ACTIVE);
+        contract.setSignedAt(Instant.now());
+        contract = contractRepository.save(contract);
+        log.info("Contract id={} signed by tenant id={}; listing id={} is now rented",
+                contractId, contract.getTenantId(), contract.getListingId());
+        return toContractResponse(contract);
+    }
+
+    private ContractPaymentBreakdownResponse buildPaymentBreakdown(
+            Contract contract,
+            ContractRevision revision
+    ) {
+        Map<String, Object> financial = fromJson(revision.getFinancialSnapshot(), MAP_TYPE);
+        if (financial == null) {
+            throw new AppException(ContractErrorCode.CONTRACT_PAYMENT_DATA_INVALID);
+        }
+
+        BigDecimal monthlyRent = requiredMoney(financial, "amountValue", "amountNumber");
+        BigDecimal deposit = requiredMoney(financial, "depositAmountValue", "depositAmountNumber");
+        List<Map<String, Object>> snapshotCharges = fromJson(revision.getChargesSnapshot(), CHARGE_LIST_TYPE);
+        List<ContractPaymentBreakdownResponse.ChargeItem> includedCharges = new ArrayList<>();
+        List<String> excludedMeterCharges = new ArrayList<>();
+        BigDecimal chargesTotal = BigDecimal.ZERO;
+
+        for (Map<String, Object> charge : snapshotCharges != null ? snapshotCharges : List.<Map<String, Object>>of()) {
+            String name = Optional.ofNullable(charge.get("name"))
+                    .map(String::valueOf)
+                    .filter(value -> !value.isBlank())
+                    .orElse("Phí dịch vụ");
+            String billingMethod = String.valueOf(charge.get("billingMethod"));
+            if ("PER_KWH".equals(billingMethod) || "PER_M3".equals(billingMethod)) {
+                excludedMeterCharges.add(name);
+                continue;
+            }
+
+            Object estimated = charge.get("estimatedMonthlyAmount");
+            if (estimated == null || String.valueOf(estimated).isBlank()) {
+                continue;
+            }
+            BigDecimal amount = parseDecimal(estimated);
+            if (amount.signum() == 0) {
+                continue;
+            }
+            includedCharges.add(ContractPaymentBreakdownResponse.ChargeItem.builder()
+                    .name(name)
+                    .amount(amount)
+                    .build());
+            chargesTotal = chargesTotal.add(amount);
+        }
+
+        return ContractPaymentBreakdownResponse.builder()
+                .contractId(contract.getId())
+                .monthlyRent(monthlyRent)
+                .deposit(deposit)
+                .charges(includedCharges)
+                .chargesTotal(chargesTotal)
+                .totalAmount(monthlyRent.add(deposit).add(chargesTotal))
+                .excludedMeterCharges(excludedMeterCharges)
+                .paymentStatus(paymentStatusOf(contract))
+                .paidAt(contract.getPaidAt())
+                .build();
+    }
+
+    private BigDecimal requiredMoney(Map<String, Object> financial, String rawKey, String displayKey) {
+        Object rawValue = financial.get(rawKey);
+        if (rawValue != null && !String.valueOf(rawValue).isBlank()) {
+            return parseDecimal(rawValue);
+        }
+
+        Object displayValue = financial.get(displayKey);
+        if (displayValue == null) {
+            throw new AppException(ContractErrorCode.CONTRACT_PAYMENT_DATA_INVALID);
+        }
+        String digits = String.valueOf(displayValue).replaceAll("[^0-9-]", "");
+        if (digits.isBlank() || "-".equals(digits)) {
+            throw new AppException(ContractErrorCode.CONTRACT_PAYMENT_DATA_INVALID);
+        }
+        return parseDecimal(digits);
+    }
+
+    private BigDecimal parseDecimal(Object value) {
+        try {
+            BigDecimal amount = new BigDecimal(String.valueOf(value).trim());
+            if (amount.signum() < 0) {
+                throw new NumberFormatException("negative amount");
+            }
+            return amount;
+        } catch (NumberFormatException exception) {
+            throw new AppException(ContractErrorCode.CONTRACT_PAYMENT_DATA_INVALID);
+        }
+    }
+
+    private ContractPaymentStatus paymentStatusOf(Contract contract) {
+        return contract.getPaymentStatus() != null
+                ? contract.getPaymentStatus()
+                : ContractPaymentStatus.UNPAID;
+    }
+
     private List<ContractDocument> readyDocumentsForRevision(String contractId, String revisionId) {
         return documentRepository.findByContractIdAndRevisionId(contractId, revisionId).stream()
                 .filter(document -> document.getStatus() == DocumentGenerationStatus.READY)
@@ -633,7 +791,18 @@ public class ContractServiceImpl implements ContractService {
     private Contract findContractAndCheckAccess(String contractId) {
         Contract contract = contractRepository.findById(contractId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        checkContractAccess(contract);
+        return contract;
+    }
 
+    private Contract findContractForUpdateAndCheckAccess(String contractId) {
+        Contract contract = contractRepository.findByIdForUpdate(contractId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        checkContractAccess(contract);
+        return contract;
+    }
+
+    private void checkContractAccess(Contract contract) {
         String userId = getCurrentUserId();
         boolean landlord = contract.getLandlordId().equals(userId);
         boolean tenant = contract.getTenantId().equals(userId);
@@ -643,12 +812,17 @@ public class ContractServiceImpl implements ContractService {
         if (tenant && contract.getStatus() == ContractStatus.DRAFT) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
-        return contract;
     }
 
     private void requireLandlord(Contract contract) {
         String userId = getCurrentUserId();
         if (!contract.getLandlordId().equals(userId) && !"system".equals(userId)) {
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        }
+    }
+
+    private void requireTenant(Contract contract) {
+        if (!contract.getTenantId().equals(getCurrentUserId())) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
     }
@@ -688,6 +862,9 @@ public class ContractServiceImpl implements ContractService {
                 .templateVersionId(c.getTemplateVersionId())
                 .currentRevisionId(c.getCurrentRevisionId())
                 .status(c.getStatus())
+                .paymentStatus(paymentStatusOf(c))
+                .paidAt(c.getPaidAt())
+                .signedAt(c.getSignedAt())
                 .createdAt(c.getCreatedAt())
                 .updatedAt(c.getUpdatedAt())
                 .build();

@@ -153,6 +153,21 @@ class ListingStatusServiceTest {
     }
 
     @Test
+    void contractFlowCanMarkReservedListingAsRented() {
+        Listing listing = listing(ListingStatus.RESERVED);
+        when(listings.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+
+        service.markRentedByContract("listing-1", "tenant-1");
+
+        assertEquals(ListingStatus.RENTED, listing.getStatus());
+        ArgumentCaptor<ListingStatusHistory> event = ArgumentCaptor.forClass(ListingStatusHistory.class);
+        verify(history).save(event.capture());
+        assertEquals(ListingStatus.RESERVED, event.getValue().getFromStatus());
+        assertEquals(ListingStatus.RENTED, event.getValue().getToStatus());
+        assertEquals("tenant-1", event.getValue().getChangedBy());
+    }
+
+    @Test
     void hiddenListingWithOpenWindowCannotBeResubmittedForReview() {
         Listing listing = publishedListingWithWindow(Duration.ofDays(10));
         listing.setStatus(ListingStatus.HIDDEN);

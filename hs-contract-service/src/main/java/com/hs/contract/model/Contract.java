@@ -2,10 +2,12 @@ package com.hs.contract.model;
 
 import com.hs.common.persistence.BaseEntity;
 import com.hs.contract.model.constant.ContractStatus;
+import com.hs.contract.model.constant.ContractPaymentStatus;
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.util.ArrayList;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -57,6 +59,17 @@ public class Contract extends BaseEntity {
     private ContractStatus status = ContractStatus.DRAFT;
 
     @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_status", length = 20)
+    private ContractPaymentStatus paymentStatus = ContractPaymentStatus.UNPAID;
+
+    @Column(name = "paid_at")
+    private Instant paidAt;
+
+    @Column(name = "signed_at")
+    private Instant signedAt;
+
+    @Builder.Default
     @OneToMany(mappedBy = "contract", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("revisionNumber DESC")
     private List<ContractRevision> revisions = new ArrayList<>();
@@ -68,6 +81,9 @@ public class Contract extends BaseEntity {
         }
         if (status == null) {
             status = ContractStatus.DRAFT;
+        }
+        if (paymentStatus == null) {
+            paymentStatus = ContractPaymentStatus.UNPAID;
         }
     }
 }

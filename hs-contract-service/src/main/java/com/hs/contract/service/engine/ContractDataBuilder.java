@@ -191,11 +191,13 @@ public class ContractDataBuilder {
         BigDecimal rent = request.getMonthlyRentPrice() != null ? request.getMonthlyRentPrice() : BigDecimal.ZERO;
         BigDecimal deposit = request.getDepositAmount() != null ? request.getDepositAmount() : rent;
 
+        map.put("amountValue", rent.toPlainString());
         map.put("amountNumber", ContractRenderService.formatVND(rent) + "/tháng");
         map.put("amountWords", VietnameseCurrencyTextConverter.toWords(rent));
         map.put("paymentCycle", paymentCycleLabel(listing == null ? null : listing.getPaymentCycle()));
         map.put("paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng");
         map.put("paymentMethod", "Thanh toán trực tuyến qua hệ thống HomeSpace");
+        map.put("depositAmountValue", deposit.toPlainString());
         map.put("depositAmountNumber", ContractRenderService.formatVND(deposit));
         map.put("depositAmountWords", VietnameseCurrencyTextConverter.toWords(deposit));
         map.put("depositDescription", "Tiền đặt cọc được Bên A hoàn trả cho Bên B sau khi hết hạn hợp đồng, "

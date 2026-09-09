@@ -15,6 +15,7 @@ import com.hs.contract.dto.request.UpdateContractTemplateRequest;
 import com.hs.user.service.kyc.KycGateService;
 import com.hs.contract.dto.response.ContractCompletenessResponse;
 import com.hs.contract.dto.response.ContractDocumentResponse;
+import com.hs.contract.dto.response.ContractPaymentBreakdownResponse;
 import com.hs.contract.dto.response.ContractResponse;
 import com.hs.contract.dto.response.ContractRevisionResponse;
 import com.hs.contract.dto.response.ContractTemplateResponse;
@@ -254,6 +255,29 @@ public class ContractController {
         return ApiResponse.<ContractResponse>builder()
                 .message("Đã gửi hợp đồng cho người thuê")
                 .result(contractService.sendToTenant(contractId))
+                .build();
+    }
+
+    @GetMapping("/{contractId}/payment-breakdown")
+    public ApiResponse<ContractPaymentBreakdownResponse> getPaymentBreakdown(@PathVariable String contractId) {
+        return ApiResponse.<ContractPaymentBreakdownResponse>builder()
+                .result(contractService.getPaymentBreakdown(contractId))
+                .build();
+    }
+
+    @PostMapping("/{contractId}/pay-mock")
+    public ApiResponse<ContractPaymentBreakdownResponse> payMock(@PathVariable String contractId) {
+        return ApiResponse.<ContractPaymentBreakdownResponse>builder()
+                .message("Thanh toán giả lập thành công")
+                .result(contractService.payMock(contractId))
+                .build();
+    }
+
+    @PostMapping("/{contractId}/sign")
+    public ApiResponse<ContractResponse> sign(@PathVariable String contractId) {
+        return ApiResponse.<ContractResponse>builder()
+                .message("Ký hợp đồng thành công")
+                .result(contractService.sign(contractId))
                 .build();
     }
 
