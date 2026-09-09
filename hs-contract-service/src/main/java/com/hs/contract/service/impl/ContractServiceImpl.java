@@ -10,6 +10,7 @@ import com.hs.common.context.UserContextHolder;
 import com.hs.contract.advice.ContractErrorCode;
 import com.hs.contract.dto.request.CreateContractDraftRequest;
 import com.hs.contract.dto.request.UpdateContractRevisionRequest;
+import com.hs.contract.dto.response.ContractCompletenessResponse;
 import com.hs.contract.dto.response.ContractDocumentResponse;
 import com.hs.contract.dto.response.ContractResponse;
 import com.hs.contract.dto.response.ContractRevisionResponse;
@@ -27,23 +28,18 @@ import com.hs.contract.repository.ContractRevisionRepository;
 import com.hs.contract.repository.ContractTemplateVersionRepository;
 import com.hs.contract.service.ContractService;
 import com.hs.contract.service.converter.DocumentConversionService;
+import com.hs.contract.service.engine.ContractDataBuilder;
+import com.hs.contract.service.engine.ContractFieldCatalog;
 import com.hs.contract.service.engine.ContractRenderService;
-import com.hs.contract.service.engine.VietnameseCurrencyTextConverter;
 import com.hs.listing.model.Listing;
-import com.hs.listing.model.ListingCharge;
 import com.hs.listing.model.RentalRequest;
-import com.hs.listing.model.constant.ListingCategory;
-import com.hs.listing.model.constant.RentalMode;
 import com.hs.listing.model.constant.RentalRequestStatus;
-import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.storage.dto.response.StorageObjectResponse;
 import com.hs.storage.dto.response.StorageUrlResponse;
 import com.hs.storage.model.constant.StoragePurpose;
 import com.hs.storage.model.constant.StorageVisibility;
 import com.hs.storage.service.StorageService;
-import com.hs.user.model.Address;
-import com.hs.user.repository.AddressRepository;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -56,8 +52,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.ByteArrayInputStream;
-import java.math.BigDecimal;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -72,15 +66,16 @@ public class ContractServiceImpl implements ContractService {
     private final ContractDocumentRepository documentRepository;
     private final ContractTemplateVersionRepository templateVersionRepository;
     private final RentalRequestRepository rentalRequestRepository;
-    private final ListingRepository listingRepository;
-    private final AddressRepository addressRepository;
+    private final ContractDataBuilder dataBuilder;
+    private final ContractFieldCatalog fieldCatalog;
     private final ContractRenderService renderService;
     private final DocumentConversionService conversionService;
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate = new RestTemplate();
 
-    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+    private static final TypeReference<List<Map<String, Object>>> CHARGE_LIST_TYPE = new TypeReference<>() {};
 
     @Override
     @Transactional
@@ -130,29 +125,22 @@ public class ContractServiceImpl implements ContractService {
 
         contract = contractRepository.save(contract);
 
-        // 6. Tạo Snapshot ban đầu cho Revision 1
-        Map<String, Object> landlordSnap = buildInitialLandlordSnapshot(rentalRequest);
-        Map<String, Object> tenantSnap = buildInitialTenantSnapshot(rentalRequest);
-        Map<String, Object> propertySnap = buildInitialPropertySnapshot(listing);
-        Map<String, Object> leaseSnap = buildInitialLeaseSnapshot(rentalRequest);
-        Map<String, Object> financialSnap = buildInitialFinancialSnapshot(rentalRequest);
-        List<Map<String, Object>> chargesSnap = buildInitialChargesSnapshot(listing);
-        List<Map<String, Object>> equipmentSnap = buildInitialEquipmentSnapshot(listing);
-        Map<String, Object> metersSnap = Map.of("electricityInitial", "0", "waterInitial", "0");
+        // 6. Chụp dữ liệu thật của hai bên, tin đăng và yêu cầu thuê vào Revision 1
+        ContractDataBuilder.ContractSnapshots snapshots = dataBuilder.build(rentalRequest, listing);
 
         ContractRevision revision = ContractRevision.builder()
                 .contract(contract)
                 .revisionNumber(1)
                 .templateVersionId(templateVersion.getId())
-                .landlordSnapshot(toJson(landlordSnap))
-                .tenantSnapshot(toJson(tenantSnap))
-                .propertySnapshot(toJson(propertySnap))
-                .leaseSnapshot(toJson(leaseSnap))
-                .financialSnapshot(toJson(financialSnap))
-                .chargesSnapshot(toJson(chargesSnap))
-                .equipmentSnapshot(toJson(equipmentSnap))
-                .initialMetersSnapshot(toJson(metersSnap))
-                .revisionNote("Bản chụp dữ liệu khởi tạo từ yêu cầu thuê và bài đăng.")
+                .landlordSnapshot(toJson(snapshots.getLandlord()))
+                .tenantSnapshot(toJson(snapshots.getTenant()))
+                .propertySnapshot(toJson(snapshots.getProperty()))
+                .leaseSnapshot(toJson(snapshots.getLease()))
+                .financialSnapshot(toJson(snapshots.getFinancial()))
+                .chargesSnapshot(toJson(snapshots.getCharges()))
+                .equipmentSnapshot(toJson(snapshots.getEquipments()))
+                .initialMetersSnapshot(toJson(snapshots.getMeters()))
+                .revisionNote("Bản chụp dữ liệu khởi tạo từ hồ sơ hai bên, tin đăng và yêu cầu thuê.")
                 .build();
 
         revision = revisionRepository.save(revision);
@@ -168,6 +156,24 @@ public class ContractServiceImpl implements ContractService {
     @Transactional(readOnly = true)
     public ContractResponse getContract(String contractId) {
         Contract contract = findContractAndCheckAccess(contractId);
+        return toContractResponse(contract);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ContractResponse findByRentalRequestId(String rentalRequestId) {
+        if (rentalRequestId == null || rentalRequestId.isBlank()) {
+            throw new AppException(ErrorCode.INVALID_REQUEST);
+        }
+        Optional<Contract> existing = contractRepository.findByRentalRequestId(rentalRequestId);
+        if (existing.isEmpty()) {
+            return null;
+        }
+        Contract contract = existing.get();
+        String currentUserId = getCurrentUserId();
+        if (!currentUserId.equals(contract.getLandlordId()) && !currentUserId.equals(contract.getTenantId())) {
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        }
         return toContractResponse(contract);
     }
 
@@ -336,16 +342,110 @@ public class ContractServiceImpl implements ContractService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public ContractCompletenessResponse getCompleteness(String contractId) {
+        Contract contract = findContractAndCheckAccess(contractId);
+        ContractRevision revision = requireCurrentRevision(contract);
+
+        return assessCompleteness(contract, revision);
+    }
+
+    private ContractCompletenessResponse assessCompleteness(Contract contract, ContractRevision revision) {
+
+        ContractTemplateVersion templateVersion = templateVersionRepository.findById(contract.getTemplateVersionId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
+
+        List<String> placeholders = fromJson(templateVersion.getPlaceholdersJson(), new TypeReference<List<String>>() {});
+        if (placeholders == null) {
+            placeholders = List.of();
+        }
+
+        Map<String, Object> dataModel = buildDataModel(contract, revision);
+
+        List<ContractCompletenessResponse.MissingField> missing = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        Set<String> dynamicTables = new HashSet<>();
+        Set<String> seen = new HashSet<>();
+        int total = 0;
+        int filled = 0;
+
+        for (String raw : placeholders) {
+            String key = ContractFieldCatalog.normalizeKey(raw);
+            if (key.isBlank() || !seen.add(key)) {
+                continue;
+            }
+            if (key.startsWith("#")) {
+                dynamicTables.add(key);
+                continue;
+            }
+
+            total++;
+            Object value = ContractRenderService.resolvePath(dataModel, key);
+            // Legacy template tags (ngày cấp / nơi cấp) — treat blank as filled so they don't block.
+            if (("landlord.idIssueDate".equals(key) || "landlord.idIssuePlace".equals(key)
+                    || "tenant.idIssueDate".equals(key) || "tenant.idIssuePlace".equals(key))) {
+                filled++;
+                continue;
+            }
+            if (value == null || String.valueOf(value).isBlank()) {
+                missing.add(toMissingField(key));
+            } else {
+                filled++;
+            }
+        }
+
+        if (dynamicTables.contains("#chargesTable")
+                && isEmptyList(fromJson(revision.getChargesSnapshot(), CHARGE_LIST_TYPE))) {
+            warnings.add("Tin đăng chưa khai báo khoản phí dịch vụ nào nên bảng biểu phí trong hợp đồng sẽ để trống.");
+        }
+        if (dynamicTables.contains("#equipmentTable")
+                && isEmptyList(fromJson(revision.getEquipmentSnapshot(), CHARGE_LIST_TYPE))) {
+            warnings.add("Tin đăng chưa khai báo nội thất bàn giao nên biên bản trang thiết bị sẽ để trống.");
+        }
+
+        return ContractCompletenessResponse.builder()
+                .contractId(contract.getId())
+                .revisionId(revision.getId())
+                .complete(missing.isEmpty())
+                .totalFields(total)
+                .filledFields(filled)
+                .missingFields(missing)
+                .warnings(warnings)
+                .build();
+    }
+
+    private ContractCompletenessResponse.MissingField toMissingField(String key) {
+        var definition = fieldCatalog.getDefinition(key).orElse(null);
+        return ContractCompletenessResponse.MissingField.builder()
+                .key(key)
+                .label(definition != null ? definition.getLabel() : key)
+                .group(definition != null ? definition.getGroup() : "Khác")
+                .section(sectionOf(key))
+                .build();
+    }
+
+    /** Ánh xạ mã trường về đúng nhóm snapshot mà frontend cần mở ra để sửa. */
+    private static String sectionOf(String key) {
+        if (key.startsWith("landlord.")) return "landlord";
+        if (key.startsWith("tenant.")) return "tenant";
+        if (key.startsWith("property.")) return "property";
+        if (key.startsWith("lease.")) return "lease";
+        if (key.startsWith("rent.") || key.startsWith("deposit.")) return "financial";
+        if (key.startsWith("meters.")) return "meters";
+        // contract.number / signingDate / signingCity do hệ thống tự sinh lúc render.
+        return "system";
+    }
+
+    @Override
     @Transactional
     public ContractDocumentResponse triggerPreview(String contractId) {
         Contract contract = findContractAndCheckAccess(contractId);
+        ContractRevision revision = requireCurrentRevision(contract);
 
-        if (contract.getCurrentRevisionId() == null) {
-            throw new AppException(ContractErrorCode.CONTRACT_REVISION_NOT_FOUND);
+        ContractCompletenessResponse completeness = assessCompleteness(contract, revision);
+        if (!completeness.isComplete()) {
+            throw new AppException(ContractErrorCode.CONTRACT_DATA_INCOMPLETE);
         }
-
-        ContractRevision revision = revisionRepository.findById(contract.getCurrentRevisionId())
-                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_REVISION_NOT_FOUND));
 
         ContractTemplateVersion templateVersion = templateVersionRepository.findById(contract.getTemplateVersionId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
@@ -353,20 +453,7 @@ public class ContractServiceImpl implements ContractService {
         // Tải template Word từ storage
         byte[] templateBytes = downloadStorageFile(templateVersion.getStorageObjectId());
 
-        // Chuẩn bị Data Model
-        Map<String, Object> landlord = fromJson(revision.getLandlordSnapshot(), new TypeReference<Map<String, Object>>() {});
-        Map<String, Object> tenant = fromJson(revision.getTenantSnapshot(), new TypeReference<Map<String, Object>>() {});
-        Map<String, Object> property = fromJson(revision.getPropertySnapshot(), new TypeReference<Map<String, Object>>() {});
-        Map<String, Object> lease = fromJson(revision.getLeaseSnapshot(), new TypeReference<Map<String, Object>>() {});
-        Map<String, Object> financial = fromJson(revision.getFinancialSnapshot(), new TypeReference<Map<String, Object>>() {});
-        List<Map<String, Object>> charges = fromJson(revision.getChargesSnapshot(), new TypeReference<List<Map<String, Object>>>() {});
-        List<Map<String, Object>> equipments = fromJson(revision.getEquipmentSnapshot(), new TypeReference<List<Map<String, Object>>>() {});
-        Map<String, Object> meters = fromJson(revision.getInitialMetersSnapshot(), new TypeReference<Map<String, Object>>() {});
-
-        Map<String, Object> dataModel = renderService.buildDataModelFromSnapshots(
-                landlord, tenant, property, lease, financial, charges, equipments, meters,
-                contract.getContractNumber(), LocalDate.now(), "Thành phố Hồ Chí Minh"
-        );
+        Map<String, Object> dataModel = buildDataModel(contract, revision);
 
         byte[] renderedDocx;
         try {
@@ -458,135 +545,31 @@ public class ContractServiceImpl implements ContractService {
                 .toList();
     }
 
-    // --- Helpers xây dựng Snapshot ban đầu ---
-
-    /** Nhãn tiếng Việt của loại hình BĐS để in vào hợp đồng, không dùng tên enum thô. */
-    private static String categoryLabel(ListingCategory category) {
-        if (category == null) return "";
-        return switch (category) {
-            case APARTMENT -> "Căn hộ / Chung cư";
-            case HOUSE -> "Nhà nguyên căn";
-            case OFFICE -> "Văn phòng";
-            case COMMERCIAL_SPACE -> "Mặt bằng kinh doanh";
-            case ROOM -> "Nhà trọ / Căn hộ dịch vụ";
-        };
-    }
-
-    /** Nhãn tiếng Việt của hình thức thuê, render vào {{lease.rentalMode}}. */
-    private static String rentalModeLabel(RentalMode mode) {
-        if (mode == null) return "";
-        return switch (mode) {
-            case WHOLE_UNIT -> "Thuê nguyên căn / toàn bộ";
-            case PARTIAL -> "Thuê một phần / phòng riêng";
-        };
-    }
-
-    private Map<String, Object> buildInitialLandlordSnapshot(RentalRequest r) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("fullName", "Chủ nhà (Bên A)");
-        map.put("phone", "");
-        map.put("email", "");
-        map.put("idNumber", "");
-        map.put("permanentAddress", "");
-        return map;
-    }
-
-    private Map<String, Object> buildInitialTenantSnapshot(RentalRequest r) {
-        Map<String, Object> map = new HashMap<>();
-        map.put("fullName", r.getRenterName() != null ? r.getRenterName() : "Người thuê (Bên B)");
-        map.put("phone", r.getRenterPhone() != null ? r.getRenterPhone() : "");
-        map.put("email", r.getRenterEmail() != null ? r.getRenterEmail() : "");
-        map.put("occupantCount", r.getOccupantCount() != null ? r.getOccupantCount() : 1);
-        map.put("idNumber", "");
-        map.put("permanentAddress", "");
-        map.put("organizationName", "");
-        map.put("representativeName", "");
-        map.put("representativePosition", "");
-        return map;
-    }
-
-    private Map<String, Object> buildInitialPropertySnapshot(Listing l) {
-        Map<String, Object> map = new HashMap<>();
-        if (l != null) {
-            String fullAddress = "";
-            Address addr = addressRepository.findByListingIdAndActiveTrue(l.getId()).orElse(null);
-            if (addr != null && addr.getFullAddress() != null) {
-                fullAddress = addr.getFullAddress();
-            }
-            map.put("fullAddress", fullAddress);
-            map.put("areaText", l.getAreaM2() != null ? l.getAreaM2() + " m²" : "0 m²");
-            map.put("propertyType", categoryLabel(l.getCategory()));
-            map.put("unitNumber", "");
-            map.put("floor", "");
+    private ContractRevision requireCurrentRevision(Contract contract) {
+        if (contract.getCurrentRevisionId() == null) {
+            throw new AppException(ContractErrorCode.CONTRACT_REVISION_NOT_FOUND);
         }
-        return map;
+        return revisionRepository.findById(contract.getCurrentRevisionId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_REVISION_NOT_FOUND));
     }
 
-    private Map<String, Object> buildInitialLeaseSnapshot(RentalRequest r) {
-        Map<String, Object> map = new HashMap<>();
-        LocalDate start = r.getMoveInDate() != null ? r.getMoveInDate() : LocalDate.now();
-        int months = r.getLeaseMonths() != null ? r.getLeaseMonths() : 12;
-        LocalDate end = start.plusMonths(months);
-
-        map.put("rentalMode", rentalModeLabel(r.getListing() != null ? r.getListing().getRentalMode() : null));
-        map.put("startDateText", start.format(DATE_FORMATTER));
-        map.put("endDateText", end.format(DATE_FORMATTER));
-        map.put("durationMonths", months);
-        map.put("durationText", formatDurationText(months));
-        map.put("handoverDateText", start.format(DATE_FORMATTER));
-        return map;
-    }
-
-    private Map<String, Object> buildInitialFinancialSnapshot(RentalRequest r) {
-        Map<String, Object> map = new HashMap<>();
-        BigDecimal rent = r.getMonthlyRentPrice() != null ? r.getMonthlyRentPrice() : BigDecimal.ZERO;
-        BigDecimal deposit = r.getDepositAmount() != null ? r.getDepositAmount() : rent;
-
-        map.put("amountNumber", ContractRenderService.formatVND(rent) + "/tháng");
-        map.put("amountWords", VietnameseCurrencyTextConverter.toWords(rent));
-        map.put("paymentCycle", "Hàng tháng");
-        map.put("paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng");
-        map.put("paymentMethod", "Thanh toán trực tuyến qua hệ thống HomeSpace");
-        map.put("depositAmountNumber", ContractRenderService.formatVND(deposit));
-        map.put("depositAmountWords", VietnameseCurrencyTextConverter.toWords(deposit));
-        map.put("depositDescription", "Tiền đặt cọc được bên A hoàn trả lại cho bên B sau khi hết hạn hợp đồng và bên B đã thanh toán đầy đủ các khoản chi phí liên quan.");
-        return map;
-    }
-
-    private List<Map<String, Object>> buildInitialChargesSnapshot(Listing l) {
-        List<Map<String, Object>> list = new ArrayList<>();
-        if (l != null && l.getCharges() != null && !l.getCharges().isEmpty()) {
-            for (ListingCharge c : l.getCharges()) {
-                String name = c.getCustomName() != null ? c.getCustomName() : c.getChargeType().name();
-                String method;
-                if (c.isIncludedInRent()) {
-                    method = "Đã bao gồm trong giá thuê";
-                } else if (c.getAmount() != null) {
-                    method = ContractRenderService.formatVND(c.getAmount()) + (c.getUnit() != null ? " / " + c.getUnit() : "");
-                } else {
-                    method = c.getBillingMethod() != null ? c.getBillingMethod().name() : "Thỏa thuận";
-                }
-                list.add(Map.of("name", name, "amountAndMethod", method, "note", c.getDescription() != null ? c.getDescription() : "-"));
-            }
-        } else {
-            list.add(Map.of("name", "Điện", "amountAndMethod", "Theo giá nhà nước / công tơ", "note", "Tính theo thực tế"));
-            list.add(Map.of("name", "Nước", "amountAndMethod", "Theo giá nhà nước / khối", "note", "Tính theo thực tế"));
-        }
-        return list;
-    }
-
-    private List<Map<String, Object>> buildInitialEquipmentSnapshot(Listing l) {
-        return List.of(
-                Map.of("index", 1, "name", "Bàn giao nhà nguyên trạng", "quantity", "1", "condition", "Tốt, sạch sẽ")
+    /** Trải các snapshot của revision thành data model phẳng mà poi-tl dùng để render. */
+    private Map<String, Object> buildDataModel(Contract contract, ContractRevision revision) {
+        return renderService.buildDataModelFromSnapshots(
+                fromJson(revision.getLandlordSnapshot(), MAP_TYPE),
+                fromJson(revision.getTenantSnapshot(), MAP_TYPE),
+                fromJson(revision.getPropertySnapshot(), MAP_TYPE),
+                fromJson(revision.getLeaseSnapshot(), MAP_TYPE),
+                fromJson(revision.getFinancialSnapshot(), MAP_TYPE),
+                fromJson(revision.getChargesSnapshot(), CHARGE_LIST_TYPE),
+                fromJson(revision.getEquipmentSnapshot(), CHARGE_LIST_TYPE),
+                fromJson(revision.getInitialMetersSnapshot(), MAP_TYPE),
+                contract.getContractNumber(), LocalDate.now(), "Thành phố Hồ Chí Minh"
         );
     }
 
-    private String formatDurationText(int months) {
-        if (months < 12) return months + " tháng";
-        int y = months / 12;
-        int m = months % 12;
-        if (m == 0) return y + " năm (" + months + " tháng)";
-        return y + " năm " + m + " tháng (" + months + " tháng)";
+    private static boolean isEmptyList(List<?> list) {
+        return list == null || list.isEmpty();
     }
 
     private Contract findContractAndCheckAccess(String contractId) {

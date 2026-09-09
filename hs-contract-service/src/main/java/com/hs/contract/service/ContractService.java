@@ -3,6 +3,7 @@ package com.hs.contract.service;
 import com.hs.common.dto.PageResponse;
 import com.hs.contract.dto.request.CreateContractDraftRequest;
 import com.hs.contract.dto.request.UpdateContractRevisionRequest;
+import com.hs.contract.dto.response.ContractCompletenessResponse;
 import com.hs.contract.dto.response.ContractDocumentResponse;
 import com.hs.contract.dto.response.ContractResponse;
 import com.hs.contract.dto.response.ContractRevisionResponse;
@@ -16,6 +17,9 @@ public interface ContractService {
 
     ContractResponse getContract(String contractId);
 
+    /** Trả về hợp đồng gắn với yêu cầu thuê (nếu có), null nếu chưa tạo. */
+    ContractResponse findByRentalRequestId(String rentalRequestId);
+
     PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, int page, int size);
 
     List<ContractResponse> getContractsForCurrentUser(ContractStatus status);
@@ -23,6 +27,9 @@ public interface ContractService {
     ContractRevisionResponse getLatestRevision(String contractId);
 
     ContractRevisionResponse updateRevision(String contractId, UpdateContractRevisionRequest request);
+
+    /** Đối chiếu dữ liệu bản nháp với mã trường mà file mẫu Word thực sự dùng. */
+    ContractCompletenessResponse getCompleteness(String contractId);
 
     ContractDocumentResponse triggerPreview(String contractId);
 

@@ -16,6 +16,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,6 +28,9 @@ public class RentalRequestController {
 
     private final RentalRequestService rentalRequestService;
     private final KycGateService kycGateService;
+
+    @Value("${rental.hold-duration-minutes:60}")
+    private long holdDurationMinutes;
 
     // =========================================================================
     // 1. DÀNH CHO KHÁCH HÀNG (RENTER)
@@ -97,7 +101,8 @@ public class RentalRequestController {
     public ApiResponse<RentalRequestResponse> acceptRentalRequest(@PathVariable String id) {
         String ownerId = requireUserId();
         return ApiResponse.<RentalRequestResponse>builder()
-                .message("Chấp thuận yêu cầu thuê thành công. Bất động sản chuyển sang trạng thái giữ chỗ trong 15 phút.")
+                .message("Chấp thuận yêu cầu thuê thành công. Bất động sản chuyển sang trạng thái giữ chỗ trong "
+                        + Math.max(holdDurationMinutes, 1L) + " phút.")
                 .result(rentalRequestService.acceptRentalRequest(ownerId, id))
                 .build();
     }

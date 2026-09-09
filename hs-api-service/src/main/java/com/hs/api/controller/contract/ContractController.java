@@ -12,6 +12,8 @@ import com.hs.contract.dto.request.CreateContractTemplateRequest;
 import com.hs.contract.dto.request.CreateTemplateVersionRequest;
 import com.hs.contract.dto.request.UpdateContractRevisionRequest;
 import com.hs.contract.dto.request.UpdateContractTemplateRequest;
+import com.hs.user.service.kyc.KycGateService;
+import com.hs.contract.dto.response.ContractCompletenessResponse;
 import com.hs.contract.dto.response.ContractDocumentResponse;
 import com.hs.contract.dto.response.ContractResponse;
 import com.hs.contract.dto.response.ContractRevisionResponse;
@@ -43,6 +45,7 @@ public class ContractController {
 
     private final ContractService contractService;
     private final ContractTemplateService templateService;
+    private final KycGateService kycGateService;
 
     // =========================================================================
     // TỪ ĐIỂN MÃ TRƯỜNG & MẪU HỢP ĐỒNG (CHỦ NHÀ)
@@ -176,11 +179,20 @@ public class ContractController {
                 .build();
     }
 
+    @GetMapping("/by-rental-request/{rentalRequestId}")
+    public ApiResponse<ContractResponse> getByRentalRequest(@PathVariable String rentalRequestId) {
+        return ApiResponse.<ContractResponse>builder()
+                .result(contractService.findByRentalRequestId(rentalRequestId))
+                .build();
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ContractResponse> createDraft(
             @Valid @RequestBody CreateContractDraftRequest request
     ) {
+        // Hợp đồng phải in được số CCCD của Bên A, mà CCCD chỉ có sau khi KYC thành công.
+        kycGateService.requireVerifiedIdentity(requireUserContext().userId());
         return ApiResponse.<ContractResponse>builder()
                 .message("Tạo bản nháp hợp đồng thành công")
                 .result(contractService.createDraft(request))
@@ -218,6 +230,13 @@ public class ContractController {
         return ApiResponse.<ContractRevisionResponse>builder()
                 .message("Cập nhật thỏa thuận hợp đồng thành công")
                 .result(contractService.updateRevision(contractId, request))
+                .build();
+    }
+
+    @GetMapping("/{contractId}/completeness")
+    public ApiResponse<ContractCompletenessResponse> getCompleteness(@PathVariable String contractId) {
+        return ApiResponse.<ContractCompletenessResponse>builder()
+                .result(contractService.getCompleteness(contractId))
                 .build();
     }
 

@@ -15,10 +15,13 @@ class ContractRenderServiceTest {
     void testBuildDummyDataModel() {
         Map<String, Object> dummy = renderService.buildDummyDataModel();
         assertNotNull(dummy);
-        assertTrue(dummy.containsKey("landlord.fullName"));
-        assertTrue(dummy.containsKey("tenant.fullName"));
-        assertTrue(dummy.containsKey("property.fullAddress"));
+        assertTrue(dummy.containsKey("landlord"));
+        assertTrue(dummy.containsKey("tenant"));
+        assertTrue(dummy.containsKey("property"));
         assertTrue(dummy.containsKey("chargesTable"));
         assertTrue(dummy.containsKey("equipmentTable"));
+        assertEquals("Nguyễn Văn An (Chủ nhà)", ContractRenderService.resolvePath(dummy, "landlord.fullName"));
+        assertEquals("HD-20260905-DEMO", ContractRenderService.resolvePath(dummy, "contract.number"));
+        assertNotNull(ContractRenderService.resolvePath(dummy, "rent.amountNumber"));
     }
 }
