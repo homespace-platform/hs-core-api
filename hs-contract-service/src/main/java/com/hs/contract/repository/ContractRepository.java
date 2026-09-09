@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 public interface ContractRepository extends JpaRepository<Contract, String>, JpaSpecificationExecutor<Contract> {
@@ -33,4 +34,6 @@ public interface ContractRepository extends JpaRepository<Contract, String>, Jpa
     List<Contract> findByStatusOrderByCreatedAtDesc(ContractStatus status);
 
     boolean existsByRentalRequestId(String rentalRequestId);
+
+    boolean existsByRentalRequestIdAndStatusIn(String rentalRequestId, Set<ContractStatus> statuses);
 }

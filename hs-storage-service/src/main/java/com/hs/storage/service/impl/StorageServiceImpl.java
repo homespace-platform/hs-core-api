@@ -16,10 +16,12 @@ import com.hs.storage.model.constant.StoragePurpose;
 import com.hs.storage.model.constant.StorageStatus;
 import com.hs.storage.model.constant.StorageVisibility;
 import com.hs.storage.repository.StorageObjectRepository;
+import com.hs.storage.service.StorageAccessChecker;
 import com.hs.storage.service.StorageService;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -38,6 +40,7 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
@@ -58,6 +61,12 @@ public class StorageServiceImpl implements StorageService {
     private final StorageProperties properties;
     private final S3Client s3Client;
     private final S3Presigner presigner;
+    private List<StorageAccessChecker> accessCheckers = List.of();
+
+    @Autowired(required = false)
+    void setAccessCheckers(List<StorageAccessChecker> accessCheckers) {
+        this.accessCheckers = accessCheckers != null ? List.copyOf(accessCheckers) : List.of();
+    }
 
     @Override
     @Transactional
@@ -158,13 +167,13 @@ public class StorageServiceImpl implements StorageService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = AppException.class)
     public StorageUrlResponse createViewUrl(String storageId) {
         return createGetUrl(getAccessibleReadyObject(storageId), true);
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = AppException.class)
     public StorageUrlResponse createDownloadUrl(String storageId) {
         return createGetUrl(getAccessibleReadyObject(storageId), false);
     }
@@ -336,7 +345,8 @@ public class StorageServiceImpl implements StorageService {
         String userId = currentUserId();
         if (object.getVisibility() == StorageVisibility.AUTHENTICATED
                 || object.getOwnerId().equals(userId)
-                || isAdmin()) {
+                || isAdmin()
+                || accessCheckers.stream().anyMatch(checker -> checker.canAccess(userId, object))) {
             return object;
         }
         throw new AppException(StorageErrorCode.STORAGE_ACCESS_DENIED);

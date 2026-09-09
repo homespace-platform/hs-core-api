@@ -47,6 +47,7 @@ public class RentalRequestService {
     private final AddressRepository addressRepository;
     private final StorageProperties storageProperties;
     private final Duration holdDuration;
+    private List<RentalHoldProtectionChecker> holdProtectionCheckers = List.of();
 
     @Autowired
     public RentalRequestService(
@@ -62,6 +63,11 @@ public class RentalRequestService {
         this.addressRepository = addressRepository;
         this.storageProperties = storageProperties;
         this.holdDuration = Duration.ofMinutes(Math.max(holdDurationMinutes, 1L));
+    }
+
+    @Autowired(required = false)
+    void setHoldProtectionCheckers(List<RentalHoldProtectionChecker> holdProtectionCheckers) {
+        this.holdProtectionCheckers = holdProtectionCheckers != null ? List.copyOf(holdProtectionCheckers) : List.of();
     }
 
     // 1. TẠO YÊU CẦU THUÊ NHÀ (RENTER)
@@ -343,9 +349,16 @@ public class RentalRequestService {
             return 0;
         }
 
+        int expiredCount = 0;
         for (RentalRequest req : expiredList) {
+            if (isHoldProtected(req.getId())) {
+                log.info("[RENTAL_HOLD_PROTECTED] Request [{}] has a sent/active contract; skip expiration.", req.getId());
+                continue;
+            }
+
             req.setStatus(RentalRequestStatus.EXPIRED);
             rentalRequestRepository.save(req);
+            expiredCount++;
 
             Listing listing = req.getListing();
             if (listing != null && listing.getStatus() == ListingStatus.RESERVED) {
@@ -355,7 +368,12 @@ public class RentalRequestService {
             }
         }
 
-        return expiredList.size();
+        return expiredCount;
+    }
+
+    private boolean isHoldProtected(String rentalRequestId) {
+        return holdProtectionCheckers.stream()
+                .anyMatch(checker -> checker.isProtected(rentalRequestId));
     }
 
     /**

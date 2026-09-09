@@ -20,7 +20,8 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     CONTRACT_DOCUMENT_NOT_FOUND(6011, "Tài liệu hợp đồng không tồn tại", HttpStatus.NOT_FOUND),
     RENTAL_REQUEST_ALREADY_HAS_CONTRACT(6012, "Yêu cầu thuê này đã có hợp đồng được tạo", HttpStatus.CONFLICT),
     STORAGE_FILE_READ_FAILED(6013, "Không thể đọc tệp tài liệu mẫu từ kho lưu trữ", HttpStatus.INTERNAL_SERVER_ERROR),
-    CONTRACT_DATA_INCOMPLETE(6014, "Không thể kết xuất: hợp đồng vẫn còn trường bắt buộc chưa được điền", HttpStatus.BAD_REQUEST);
+    CONTRACT_DATA_INCOMPLETE(6014, "Không thể kết xuất: hợp đồng vẫn còn trường bắt buộc chưa được điền", HttpStatus.BAD_REQUEST),
+    CONTRACT_DOCUMENT_REQUIRED(6015, "Không thể gửi: hợp đồng chưa có tài liệu hoàn chỉnh", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

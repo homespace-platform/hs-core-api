@@ -248,6 +248,15 @@ public class ContractController {
                 .build();
     }
 
+    @PostMapping("/{contractId}/send")
+    public ApiResponse<ContractResponse> sendToTenant(@PathVariable String contractId) {
+        kycGateService.requireVerifiedIdentity(requireUserContext().userId());
+        return ApiResponse.<ContractResponse>builder()
+                .message("Đã gửi hợp đồng cho người thuê")
+                .result(contractService.sendToTenant(contractId))
+                .build();
+    }
+
     @GetMapping("/{contractId}/documents")
     public ApiResponse<List<ContractDocumentResponse>> getDocuments(@PathVariable String contractId) {
         return ApiResponse.<List<ContractDocumentResponse>>builder()

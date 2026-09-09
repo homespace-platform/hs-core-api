@@ -33,6 +33,9 @@ public interface ContractService {
 
     ContractDocumentResponse triggerPreview(String contractId);
 
+    /** Chốt tài liệu hiện tại và gửi bản hợp đồng hoàn chỉnh cho người thuê xem. */
+    ContractResponse sendToTenant(String contractId);
+
     ContractDocumentResponse getDocument(String documentId);
 
     List<ContractDocumentResponse> getDocumentsByContract(String contractId);

@@ -171,8 +171,13 @@ public class ContractServiceImpl implements ContractService {
         }
         Contract contract = existing.get();
         String currentUserId = getCurrentUserId();
-        if (!currentUserId.equals(contract.getLandlordId()) && !currentUserId.equals(contract.getTenantId())) {
+        if (!currentUserId.equals(contract.getLandlordId())
+                && !currentUserId.equals(contract.getTenantId())
+                && !"system".equals(currentUserId)) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        }
+        if (currentUserId.equals(contract.getTenantId()) && contract.getStatus() == ContractStatus.DRAFT) {
+            return null;
         }
         return toContractResponse(contract);
     }
@@ -189,7 +194,10 @@ public class ContractServiceImpl implements ContractService {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.or(
                     cb.equal(root.get("landlordId"), currentUserId),
-                    cb.equal(root.get("tenantId"), currentUserId)
+                    cb.and(
+                            cb.equal(root.get("tenantId"), currentUserId),
+                            cb.notEqual(root.get("status"), ContractStatus.DRAFT)
+                    )
             ));
             predicates.add(cb.isTrue(root.get("active")));
             if (status != null) {
@@ -212,7 +220,11 @@ public class ContractServiceImpl implements ContractService {
                 ? contractRepository.findByUserInvolvedAndStatus(userId, status)
                 : contractRepository.findByUserInvolved(userId);
 
-        return list.stream().map(this::toContractResponse).toList();
+        return list.stream()
+                .filter(contract -> userId.equals(contract.getLandlordId())
+                        || contract.getStatus() != ContractStatus.DRAFT)
+                .map(this::toContractResponse)
+                .toList();
     }
 
     @Override
@@ -301,7 +313,7 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
 
-        if (contract.getStatus() != ContractStatus.DRAFT && contract.getStatus() != ContractStatus.PENDING_REVIEW) {
+        if (contract.getStatus() != ContractStatus.DRAFT) {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
         }
 
@@ -440,6 +452,10 @@ public class ContractServiceImpl implements ContractService {
     @Transactional
     public ContractDocumentResponse triggerPreview(String contractId) {
         Contract contract = findContractAndCheckAccess(contractId);
+        requireLandlord(contract);
+        if (contract.getStatus() != ContractStatus.DRAFT) {
+            throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
+        }
         ContractRevision revision = requireCurrentRevision(contract);
 
         ContractCompletenessResponse completeness = assessCompleteness(contract, revision);
@@ -485,6 +501,7 @@ public class ContractServiceImpl implements ContractService {
                 .fileName(docxName)
                 .fileSize((long) renderedDocx.length)
                 .status(DocumentGenerationStatus.READY)
+                .generatedAt(java.time.Instant.now())
                 .build();
         documentRepository.save(docxDoc);
 
@@ -515,6 +532,7 @@ public class ContractServiceImpl implements ContractService {
                     .fileName(pdfName)
                     .fileSize((long) pdfBytes.length)
                     .status(DocumentGenerationStatus.READY)
+                    .generatedAt(java.time.Instant.now())
                     .build();
 
             pdfDoc = documentRepository.save(pdfDoc);
@@ -524,6 +542,46 @@ public class ContractServiceImpl implements ContractService {
             log.info("PDF conversion was skipped or failed. Returning DOCX document id={}", docxDoc.getId());
             return toDocumentResponse(docxDoc);
         }
+    }
+
+    @Override
+    @Transactional
+    public ContractResponse sendToTenant(String contractId) {
+        Contract contract = findContractAndCheckAccess(contractId);
+        requireLandlord(contract);
+        if (contract.getStatus() != ContractStatus.DRAFT) {
+            throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
+        }
+
+        ContractRevision revision = requireCurrentRevision(contract);
+        ContractCompletenessResponse completeness = assessCompleteness(contract, revision);
+        if (!completeness.isComplete()) {
+            throw new AppException(ContractErrorCode.CONTRACT_DATA_INCOMPLETE);
+        }
+
+        List<ContractDocument> readyDocuments = readyDocumentsForRevision(contractId, revision.getId());
+        if (readyDocuments.isEmpty()) {
+            triggerPreview(contractId);
+            readyDocuments = readyDocumentsForRevision(contractId, revision.getId());
+        }
+        if (readyDocuments.isEmpty()) {
+            throw new AppException(ContractErrorCode.CONTRACT_DOCUMENT_REQUIRED);
+        }
+
+        readyDocuments.forEach(document -> document.setPurpose(DocumentPurpose.OFFICIAL));
+        documentRepository.saveAll(readyDocuments);
+
+        contract.setStatus(ContractStatus.PENDING_REVIEW);
+        contract = contractRepository.save(contract);
+        log.info("Sent contract id={} revision={} to tenant id={}", contractId, revision.getRevisionNumber(), contract.getTenantId());
+        return toContractResponse(contract);
+    }
+
+    private List<ContractDocument> readyDocumentsForRevision(String contractId, String revisionId) {
+        return documentRepository.findByContractIdAndRevisionId(contractId, revisionId).stream()
+                .filter(document -> document.getStatus() == DocumentGenerationStatus.READY)
+                .filter(document -> document.getStorageObjectId() != null && !document.getStorageObjectId().isBlank())
+                .toList();
     }
 
     @Override
@@ -577,11 +635,22 @@ public class ContractServiceImpl implements ContractService {
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
 
         String userId = getCurrentUserId();
-        // Cho phép landlord, tenant hoặc system
-        if (!contract.getLandlordId().equals(userId) && !contract.getTenantId().equals(userId) && !"system".equals(userId)) {
+        boolean landlord = contract.getLandlordId().equals(userId);
+        boolean tenant = contract.getTenantId().equals(userId);
+        if (!landlord && !tenant && !"system".equals(userId)) {
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        }
+        if (tenant && contract.getStatus() == ContractStatus.DRAFT) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
         return contract;
+    }
+
+    private void requireLandlord(Contract contract) {
+        String userId = getCurrentUserId();
+        if (!contract.getLandlordId().equals(userId) && !"system".equals(userId)) {
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        }
     }
 
     private String getCurrentUserId() {

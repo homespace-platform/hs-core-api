@@ -235,4 +235,33 @@ class RentalRequestServiceTest {
         assertEquals(RentalRequestStatus.EXPIRED, expiredReq.getStatus());
         verify(listingStatusService, times(1)).releaseReserved(eq(listing), eq("SYSTEM"), anyString());
     }
+
+    @Test
+    void expirePendingHoldRequests_keepsRequestWhenContractIsProtected() {
+        RentalHoldProtectionChecker checker = mock(RentalHoldProtectionChecker.class);
+        rentalRequestService.setHoldProtectionCheckers(List.of(checker));
+
+        Listing listing = Listing.builder()
+                .id("listing-1")
+                .status(ListingStatus.RESERVED)
+                .build();
+        RentalRequest request = RentalRequest.builder()
+                .id("req-1")
+                .listing(listing)
+                .status(RentalRequestStatus.ACCEPTED)
+                .holdExpiresAt(Instant.now().minusSeconds(60))
+                .build();
+
+        when(checker.isProtected("req-1")).thenReturn(true);
+        when(rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(
+                eq(RentalRequestStatus.ACCEPTED), any(Instant.class)))
+                .thenReturn(List.of(request));
+
+        int expiredCount = rentalRequestService.expirePendingHoldRequests(Instant.now());
+
+        assertEquals(0, expiredCount);
+        assertEquals(RentalRequestStatus.ACCEPTED, request.getStatus());
+        verify(rentalRequestRepository, never()).save(request);
+        verify(listingStatusService, never()).releaseReserved(any(), anyString(), anyString());
+    }
 }
