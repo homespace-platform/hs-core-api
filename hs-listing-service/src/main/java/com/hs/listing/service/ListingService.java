@@ -18,6 +18,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.*;
 
@@ -30,6 +31,7 @@ public class ListingService {
     private final AmenityRepository amenityRepository;
     private final FurnishingItemRepository furnishingItemRepository;
     private final ListingStatusService listingStatusService;
+    private final PropertyBranchRepository branchRepository;
 
     @Transactional
     public CreateListingResponse upsert(String ownerId, CreateListingRequest r) {
@@ -124,11 +126,16 @@ public class ListingService {
     private void applyCommonFields(Listing l, String ownerId, CreateListingRequest r) {
         ListingPricingRequest p = r.pricing();
         l.setOwnerId(ownerId);
+        if (r.branchId() != null && !r.branchId().isBlank()) {
+            PropertyBranch branch = branchRepository.findByIdAndOwnerIdAndActiveTrue(r.branchId(), ownerId)
+                    .orElseThrow(() -> error(400, "INVALID_BRANCH", "Chi nhánh không tồn tại hoặc không thuộc sở hữu của bạn"));
+            l.setBranchId(branch.getId());
+        } else {
+            l.setBranchId(null);
+        }
         l.setTitle(r.title().trim());
         l.setDescription(r.description().trim());
         l.setCategory(r.category());
-        l.setSubtype(r.subtype());
-        l.setRentalMode(r.rentalMode());
         l.setAvailableFrom(r.availableFrom());
         l.setAreaM2(r.areaM2());
         l.setPriceAmount(p.amount());
@@ -177,8 +184,6 @@ public class ListingService {
     }
 
     private void validate(CreateListingRequest r) {
-        if (r.subtype().category() != r.category())
-            throw error(409, "DETAIL_CATEGORY_CONFLICT", "subtype does not belong to category");
         int details = (r.apartmentDetail() != null ? 1 : 0) + (r.houseDetail() != null ? 1 : 0)
                 + (r.officeDetail() != null ? 1 : 0) + (r.commercialDetail() != null ? 1 : 0)
                 + (r.roomDetail() != null ? 1 : 0);
@@ -197,7 +202,11 @@ public class ListingService {
             case COMMERCIAL_SPACE -> Set.of(PriceUnit.MONTH, PriceUnit.M2_MONTH);
         };
         if (!units.contains(r.pricing().unit()))
-            invalid("pricing.unit", "INVALID_FOR_CATEGORY");
+            invalid("pricing.unit", "INVALID_PRICE_UNIT");
+        if (r.pricing().amount() == null)
+            invalid("pricing.amount", "REQUIRED");
+        if (r.pricing().amount() != null && r.pricing().amount().compareTo(BigDecimal.ZERO) <= 0)
+            invalid("pricing.amount", "MUST_BE_POSITIVE");
         var p = r.pricing();
         boolean depositOk = switch (p.depositType()) {
             case FIXED_AMOUNT -> p.depositAmount() != null && p.depositMonths() == null;
@@ -206,19 +215,6 @@ public class ListingService {
         };
         if (!depositOk)
             invalid("pricing.depositType", "INVALID_DEPOSIT");
-        if (r.category() == ListingCategory.APARTMENT && r.subtype() != ListingSubtype.APARTMENT_STUDIO
-                && r.apartmentDetail().bedroomCount() == 0)
-            invalid("apartmentDetail.bedroomCount", "MUST_BE_POSITIVE");
-        if (r.category() == ListingCategory.OFFICE && r.subtype() == ListingSubtype.OFFICE_TRADITIONAL
-                && (r.officeDetail().buildingName() == null || r.officeDetail().buildingName().isBlank()))
-            invalid("officeDetail.buildingName", "REQUIRED");
-        if ((r.category() == ListingCategory.APARTMENT || r.category() == ListingCategory.ROOM)
-                && r.rentalMode() != RentalMode.WHOLE_UNIT)
-            invalid("rentalMode", "INVALID_FOR_CATEGORY");
-        if (r.category() == ListingCategory.HOUSE && r.rentalMode() == RentalMode.WHOLE_UNIT
-                && (r.houseDetail().rentedFloorFrom() != null || r.houseDetail().rentedFloorTo() != null
-                        || r.houseDetail().rentalScopeDescription() != null))
-            invalid("houseDetail.rentedFloorFrom", "INVALID_FOR_RENTAL_MODE");
         if (r.category() == ListingCategory.OFFICE) {
             var o = r.officeDetail();
             var hours = o.operatingHours() == null ? List.<OfficeOperatingHourRequest>of() : o.operatingHours();
@@ -234,11 +230,6 @@ public class ListingService {
                     invalid("officeDetail.operatingHours.closeTime", "MUST_BE_AFTER_OPEN_TIME");
             }
         }
-        if (r.category() == ListingCategory.COMMERCIAL_SPACE
-                && Set.of(ListingSubtype.COMMERCIAL_STORE, ListingSubtype.COMMERCIAL_SHOWROOM,
-                        ListingSubtype.COMMERCIAL_SHOPHOUSE).contains(r.subtype())
-                && r.commercialDetail().frontageWidthM() == null)
-            invalid("commercialDetail.frontageWidthM", "REQUIRED");
         if (r.charges() != null)
             for (var c : r.charges()) {
                 if (c.chargeType() == ChargeType.OTHER && (c.customName() == null || c.customName().isBlank()))

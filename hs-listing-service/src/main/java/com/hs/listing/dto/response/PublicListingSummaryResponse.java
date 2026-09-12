@@ -4,7 +4,6 @@ import com.hs.listing.model.constant.FurnishingStatus;
 import com.hs.listing.model.constant.ListingCategory;
 import com.hs.listing.model.constant.ListingEnums.PositionType;
 import com.hs.listing.model.constant.ListingEnums.RestroomType;
-import com.hs.listing.model.constant.ListingSubtype;
 import com.hs.listing.model.constant.PriceUnit;
 
 import java.math.BigDecimal;
@@ -15,7 +14,6 @@ public record PublicListingSummaryResponse(
         String id,
         String title,
         ListingCategory category,
-        ListingSubtype subtype,
         BigDecimal areaM2,
         BigDecimal priceAmount,
         String currency,

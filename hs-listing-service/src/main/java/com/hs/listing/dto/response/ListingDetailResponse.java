@@ -13,11 +13,11 @@ import java.util.List;
 public record ListingDetailResponse(
         String id,
         String ownerId,
+        String branchId,
+        String branchName,
         String title,
         String description,
         ListingCategory category,
-        ListingSubtype subtype,
-        RentalMode rentalMode,
         ListingStatus status,
         LocalDate availableFrom,
         BigDecimal areaM2,

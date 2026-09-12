@@ -9,7 +9,6 @@ public record AdminListingSummaryResponse(
         String id,
         String title,
         ListingCategory category,
-        ListingSubtype subtype,
         ListingStatus status,
         String statusReason,
         BigDecimal priceAmount,

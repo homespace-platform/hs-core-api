@@ -8,6 +8,7 @@ import com.hs.listing.dto.response.*;
 import com.hs.listing.model.*;
 import com.hs.listing.model.constant.ListingStatus;
 import com.hs.listing.repository.ListingRepository;
+import com.hs.listing.repository.PropertyBranchRepository;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.storage.config.StorageProperties;
 import com.hs.storage.model.StorageObject;
@@ -34,19 +35,30 @@ public class ListingQueryService {
     private final UserRepository userRepository;
     private final StorageProperties storageProperties;
     private final RentalRequestRepository rentalRequestRepository;
+    private final PropertyBranchRepository branchRepository;
 
     @Transactional(readOnly = true)
     public PageResponse<MyListingSummaryResponse> getMyListings(
             String ownerId, int page, ListingStatus status, String keyword) {
+        return getMyListings(ownerId, page, MY_LISTING_PAGE_SIZE, status, null, keyword);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<MyListingSummaryResponse> getMyListings(
+            String ownerId, int page, int size, ListingStatus status, String branchId, String keyword) {
         requireAuthentication(ownerId);
+        int pageSize = size > 0 ? Math.min(size, 100) : MY_LISTING_PAGE_SIZE;
         var pageable = PageRequest.of(
                 page - 1,
-                MY_LISTING_PAGE_SIZE,
+                pageSize,
                 Sort.by(Sort.Direction.DESC, "updatedAt").and(Sort.by(Sort.Direction.DESC, "createdAt")));
         Specification<Listing> specification = (root, query, cb) -> cb.and(
                 cb.equal(root.get("ownerId"), ownerId), cb.isTrue(root.get("active")));
         if (status != null) {
             specification = specification.and((root, query, cb) -> cb.equal(root.get("status"), status));
+        }
+        if (branchId != null && !branchId.isBlank()) {
+            specification = specification.and((root, query, cb) -> cb.equal(root.get("branchId"), branchId));
         }
         if (keyword != null && !keyword.isBlank()) {
             String pattern = "%" + keyword.trim().toLowerCase() + "%";
@@ -96,8 +108,11 @@ public class ListingQueryService {
         String fullAddress = addressRepository.findByListingIdAndActiveTrue(listing.getId())
                 .map(address -> address.getFullAddress())
                 .orElse(null);
+        String branchName = listing.getBranchId() != null
+                ? branchRepository.findByIdAndActiveTrue(listing.getBranchId()).map(PropertyBranch::getName).orElse(null)
+                : null;
         return new MyListingSummaryResponse(
-                listing.getId(), listing.getTitle(), listing.getCategory(), listing.getSubtype(), listing.getStatus(),
+                listing.getId(), listing.getBranchId(), branchName, listing.getTitle(), listing.getCategory(), listing.getStatus(),
                 listing.getAvailableFrom(), listing.getAreaM2(), listing.getPriceAmount(), listing.getCurrency(),
                 listing.getPriceUnit(), listing.isNegotiable(), cover == null ? null : publicUrl(cover.getStorageObject()),
                 cover == null ? null : cover.getStorageObject().getId(), listing.getMedia().size(), fullAddress,
@@ -136,9 +151,12 @@ public class ListingQueryService {
         var owner = userRepository.findById(listing.getOwnerId())
                 .map(ListingOwnerResponse::from)
                 .orElse(null);
+        String branchName = listing.getBranchId() != null
+                ? branchRepository.findByIdAndActiveTrue(listing.getBranchId()).map(PropertyBranch::getName).orElse(null)
+                : null;
         return new ListingDetailResponse(
-                listing.getId(), listing.getOwnerId(), listing.getTitle(), listing.getDescription(),
-                listing.getCategory(), listing.getSubtype(), listing.getRentalMode(), listing.getStatus(),
+                listing.getId(), listing.getOwnerId(), listing.getBranchId(), branchName, listing.getTitle(), listing.getDescription(),
+                listing.getCategory(), listing.getStatus(),
                 listing.getAvailableFrom(), listing.getAreaM2(), toPricing(listing),
                 toApartment(listing.getApartmentDetail()), toHouse(listing.getHouseDetail()),
                 toOffice(listing.getOfficeDetail()), toCommercial(listing.getCommercialDetail()),

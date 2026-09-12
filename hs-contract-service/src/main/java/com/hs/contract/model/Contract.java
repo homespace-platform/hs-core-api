@@ -16,7 +16,8 @@ import java.util.UUID;
         @Index(name = "idx_contract_number", columnList = "contract_number", unique = true),
         @Index(name = "idx_contract_rental_request", columnList = "rental_request_id"),
         @Index(name = "idx_contract_landlord_status", columnList = "landlord_id, status"),
-        @Index(name = "idx_contract_tenant_status", columnList = "tenant_id, status")
+        @Index(name = "idx_contract_tenant_status", columnList = "tenant_id, status"),
+        @Index(name = "idx_contract_branch", columnList = "branch_id")
 })
 @Getter
 @Setter
@@ -37,6 +38,9 @@ public class Contract extends BaseEntity {
 
     @Column(name = "listing_id", nullable = false, length = 36)
     private String listingId;
+
+    @Column(name = "branch_id", length = 36)
+    private String branchId;
 
     @Column(name = "landlord_id", nullable = false, length = 36)
     private String landlordId;

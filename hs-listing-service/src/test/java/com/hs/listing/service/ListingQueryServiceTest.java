@@ -32,7 +32,7 @@ class ListingQueryServiceTest {
                 .thenReturn(new PageImpl<>(List.of(listing)));
         when(addresses.findByListingIdAndActiveTrue("listing-1")).thenReturn(Optional.empty());
         ListingQueryService service = new ListingQueryService(
-                listings, addresses, mock(UserRepository.class), properties(), mock(com.hs.listing.repository.RentalRequestRepository.class));
+                listings, addresses, mock(UserRepository.class), properties(), mock(com.hs.listing.repository.RentalRequestRepository.class), mock(com.hs.listing.repository.PropertyBranchRepository.class));
 
         var response = service.getMyListings("owner-1", 2, null, null);
 
@@ -47,7 +47,6 @@ class ListingQueryServiceTest {
         Listing listing = Listing.builder()
                 .id("listing-1").ownerId("owner-1").title("Listing")
                 .description("Description").category(ListingCategory.ROOM)
-                .subtype(ListingSubtype.ROOM_BOARDING).rentalMode(RentalMode.WHOLE_UNIT)
                 .status(ListingStatus.PUBLISHED).availableFrom(LocalDate.now())
                 .areaM2(BigDecimal.TEN).priceAmount(BigDecimal.TEN).currency("VND")
                 .priceUnit(PriceUnit.ROOM_MONTH).depositType(DepositType.NONE)

@@ -8,9 +8,10 @@ import java.time.LocalDate;
 
 public record MyListingSummaryResponse(
         String id,
+        String branchId,
+        String branchName,
         String title,
         ListingCategory category,
-        ListingSubtype subtype,
         ListingStatus status,
         LocalDate availableFrom,
         BigDecimal areaM2,

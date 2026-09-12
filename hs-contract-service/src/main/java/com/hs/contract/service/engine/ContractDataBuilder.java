@@ -175,7 +175,7 @@ public class ContractDataBuilder {
         // Hợp đồng hết hiệu lực vào ngày liền trước mốc tròn kỳ hạn.
         LocalDate end = start.plusMonths(months).minusDays(1);
 
-        map.put("rentalMode", rentalModeLabel(listing == null ? null : listing.getRentalMode()));
+        map.put("rentalMode", "");
         map.put("startDateText", start.format(DATE_FORMATTER));
         map.put("endDateText", end.format(DATE_FORMATTER));
         map.put("durationMonths", months);

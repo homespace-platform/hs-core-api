@@ -12,12 +12,11 @@ import java.util.List;
 
 public record CreateListingRequest(
         @Size(max = 36) String id,
+        @Size(max = 36) String branchId,
         @NotNull ListingSubmissionAction submissionAction,
         @NotBlank @Size(max = 255) String title,
         @NotBlank @Size(max = 5000) String description,
         @NotNull ListingCategory category,
-        @NotNull ListingSubtype subtype,
-        @NotNull RentalMode rentalMode,
         @NotNull LocalDate availableFrom,
         @NotNull @DecimalMin("0.01") BigDecimal areaM2,
         @NotNull @Valid ListingPricingRequest pricing,

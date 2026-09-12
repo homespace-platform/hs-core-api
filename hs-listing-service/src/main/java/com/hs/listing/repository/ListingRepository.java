@@ -15,6 +15,8 @@ public interface ListingRepository extends JpaRepository<Listing, String>, JpaSp
     Optional<Listing> findByIdAndActiveTrue(String id);
     List<Listing> findAllByStatusAndActiveTrueAndExpiresAtLessThanEqual(ListingStatus status, Instant expiresAt);
     long countByOwnerIdAndStatusAndActiveTrue(String ownerId, ListingStatus status);
+    @org.springframework.data.jpa.repository.Query("SELECT COUNT(l) FROM Listing l WHERE l.branchId = :branchId AND l.active = true")
+    long countByBranchIdAndActiveTrue(@org.springframework.data.repository.query.Param("branchId") String branchId);
 
     @org.springframework.data.jpa.repository.Query("SELECT l.status, COUNT(l) FROM Listing l WHERE l.ownerId = :ownerId AND l.active = true GROUP BY l.status")
     List<Object[]> countByOwnerGroupedByStatus(@org.springframework.data.repository.query.Param("ownerId") String ownerId);

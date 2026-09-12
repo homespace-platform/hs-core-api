@@ -39,6 +39,9 @@ public class Address extends BaseEntity {
     @Column(name = "listing_id", unique = true, length = 36)
     String listingId;
 
+    @Column(name = "branch_id", unique = true, length = 36)
+    String branchId;
+
     @Column(name = "province_code", nullable = false, length = 20)
     String provinceCode;
 

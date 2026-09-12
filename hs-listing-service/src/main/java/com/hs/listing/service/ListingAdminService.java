@@ -142,7 +142,7 @@ public class ListingAdminService {
         ListingOwnerResponse owner = userRepository.findById(listing.getOwnerId())
                 .map(ListingOwnerResponse::from).orElse(null);
         return new AdminListingSummaryResponse(
-                listing.getId(), listing.getTitle(), listing.getCategory(), listing.getSubtype(),
+                listing.getId(), listing.getTitle(), listing.getCategory(),
                 listing.getStatus(), listing.getStatusReason(), listing.getPriceAmount(), listing.getCurrency(),
                 listing.getPriceUnit(), cover == null ? null : publicUrl(cover.getStorageObject()), address, owner,
                 listing.getSubmittedAt(), listing.getPublishedAt(), listing.getExpiresAt(),

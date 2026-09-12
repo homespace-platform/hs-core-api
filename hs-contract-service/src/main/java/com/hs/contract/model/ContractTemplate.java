@@ -4,7 +4,6 @@ import com.hs.common.persistence.BaseEntity;
 import com.hs.contract.model.constant.ContractTemplateSource;
 import com.hs.contract.model.constant.ContractTemplateStatus;
 import com.hs.listing.model.constant.ListingCategory;
-import com.hs.listing.model.constant.RentalMode;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -39,10 +38,6 @@ public class ContractTemplate extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "category", length = 30)
     private ListingCategory category;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "rental_mode", length = 30)
-    private RentalMode rentalMode;
 
     /** SYSTEM = mẫu admin; LANDLORD = mẫu chủ nhà tự tạo. */
     @Builder.Default

@@ -24,11 +24,13 @@ import java.util.*;
 public class Listing extends BaseEntity {
     @Id @Column(length = 36, updatable = false) private String id;
     @Column(name = "owner_id", nullable = false, length = 36) private String ownerId;
+    @Column(name = "branch_id", length = 36) private String branchId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "branch_id", insertable = false, updatable = false)
+    private PropertyBranch branch;
     @Column(nullable = false) private String title;
     @Column(nullable = false, columnDefinition = "text") private String description;
     @Enumerated(EnumType.STRING) @Column(nullable = false) private ListingCategory category;
-    @Enumerated(EnumType.STRING) @Column(nullable = false) private ListingSubtype subtype;
-    @Enumerated(EnumType.STRING) @Column(name = "rental_mode", nullable = false) private RentalMode rentalMode;
     @Enumerated(EnumType.STRING) @Column(nullable = false) private ListingStatus status;
     @Column(name = "status_reason", columnDefinition = "text") private String statusReason;
     @Column(name = "status_changed_at") private Instant statusChangedAt;

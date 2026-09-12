@@ -7,7 +7,6 @@ import com.hs.listing.model.constant.FurnishingStatus;
 import com.hs.listing.model.constant.ListingEnums.PositionType;
 import com.hs.listing.model.constant.ListingEnums.RestroomType;
 import com.hs.listing.model.constant.ListingCategory;
-import com.hs.listing.model.constant.ListingSubtype;
 import com.hs.listing.dto.response.ListingDetailResponse;
 import com.hs.listing.service.ListingPublicService;
 import com.hs.listing.service.ListingQueryService;
@@ -56,7 +55,6 @@ public class PublicListingController {
             @RequestParam(defaultValue = "1") @Min(1) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size,
             @RequestParam(required = false) ListingCategory category,
-            @RequestParam(required = false) ListingSubtype subtype,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String provinceCode,
             @RequestParam(required = false) String wardCode,
@@ -82,7 +80,7 @@ public class PublicListingController {
             @RequestParam(defaultValue = "newest") String sort) {
 
         return listingPublicService.search(new PublicListingSearchRequest(
-                page, size, category, subtype, keyword, provinceCode, wardCode,
+                page, size, category, keyword, provinceCode, wardCode,
                 priceMin, priceMax, areaMin, areaMax, bedrooms, bathrooms, hasVideo,
                 furnishingStatus, direction, balconyDirection, officeGrade, positionType, restroomType,
                 kitchenType, accessType, legalStatus,

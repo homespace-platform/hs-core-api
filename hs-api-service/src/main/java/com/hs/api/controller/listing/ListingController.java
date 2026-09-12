@@ -48,9 +48,11 @@ public class ListingController {
     @GetMapping("/me")
     public PageResponse<MyListingSummaryResponse> getMyListings(
             @RequestParam(defaultValue = "1") @Min(1) int page,
+            @RequestParam(defaultValue = "10") @Min(1) int size,
             @RequestParam(required = false) ListingStatus status,
+            @RequestParam(required = false) String branchId,
             @RequestParam(required = false) String keyword) {
-        return listingQueryService.getMyListings(currentUserId(), page, status, keyword);
+        return listingQueryService.getMyListings(currentUserId(), page, size, status, branchId, keyword);
     }
 
     @GetMapping("/me/counts")

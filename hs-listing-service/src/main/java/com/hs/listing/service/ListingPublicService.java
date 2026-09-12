@@ -65,11 +65,6 @@ public class ListingPublicService {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("category"), request.category()));
         }
 
-        // Subtype (only meaningful when category is also set or subtype itself implies category)
-        if (request.subtype() != null) {
-            spec = spec.and((root, query, cb) -> cb.equal(root.get("subtype"), request.subtype()));
-        }
-
         // Price range
         if (request.priceMin() != null) {
             spec = spec.and((root, query, cb) ->
@@ -390,7 +385,6 @@ public class ListingPublicService {
                 listing.getId(),
                 listing.getTitle(),
                 listing.getCategory(),
-                listing.getSubtype(),
                 listing.getAreaM2(),
                 listing.getPriceAmount(),
                 listing.getCurrency(),
