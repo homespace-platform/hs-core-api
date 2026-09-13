@@ -14,4 +14,5 @@ public interface PropertyBranchRepository extends JpaRepository<PropertyBranch, 
     Page<PropertyBranch> findAllByOwnerIdAndActiveTrue(String ownerId, Pageable pageable);
     Optional<PropertyBranch> findByIdAndOwnerIdAndActiveTrue(String id, String ownerId);
     Optional<PropertyBranch> findByIdAndActiveTrue(String id);
+    boolean existsByCode(String code);
 }

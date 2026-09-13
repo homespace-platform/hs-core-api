@@ -28,6 +28,23 @@ public class PropertyBranchService {
     private final AmenityRepository amenityRepository;
     private final ListingRepository listingRepository;
 
+    private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    private static final java.security.SecureRandom SECURE_RANDOM = new java.security.SecureRandom();
+
+    private String generateBranchCode() {
+        for (int i = 0; i < 20; i++) {
+            StringBuilder sb = new StringBuilder("CN-");
+            for (int j = 0; j < 5; j++) {
+                sb.append(CODE_ALPHABET.charAt(SECURE_RANDOM.nextInt(CODE_ALPHABET.length())));
+            }
+            String candidate = sb.toString();
+            if (!branchRepository.existsByCode(candidate)) {
+                return candidate;
+            }
+        }
+        return "CN-" + (System.currentTimeMillis() % 1000000);
+    }
+
     @Transactional
     public PropertyBranchResponse createBranch(String ownerId, CreatePropertyBranchRequest request) {
         if (ownerId == null || ownerId.isBlank()) {
@@ -42,11 +59,15 @@ public class PropertyBranchService {
         address.setProvinceName(request.getProvinceName() != null ? request.getProvinceName() : "");
         address.setFullAddress(request.getFullAddress().trim());
 
+        String code = (request.getCode() != null && !request.getCode().trim().isBlank())
+                ? request.getCode().trim().toUpperCase()
+                : generateBranchCode();
+
         PropertyBranch branch = PropertyBranch.builder()
                 .id(UUID.randomUUID().toString())
                 .ownerId(ownerId)
                 .name(request.getName().trim())
-                .code(request.getCode() != null ? request.getCode().trim() : null)
+                .code(code)
                 .category(request.getCategory())
                 .address(address)
                 .description(request.getDescription())
@@ -81,7 +102,11 @@ public class PropertyBranchService {
                 .orElseThrow(() -> new AppException(404, "Không tìm thấy chi nhánh", HttpStatus.NOT_FOUND));
 
         branch.setName(request.getName().trim());
-        branch.setCode(request.getCode() != null ? request.getCode().trim() : null);
+        if (request.getCode() != null && !request.getCode().trim().isBlank()) {
+            branch.setCode(request.getCode().trim().toUpperCase());
+        } else if (branch.getCode() == null || branch.getCode().isBlank()) {
+            branch.setCode(generateBranchCode());
+        }
         branch.setCategory(request.getCategory());
         branch.setDescription(request.getDescription());
         branch.setBuildingRules(request.getBuildingRules());
@@ -112,6 +137,11 @@ public class PropertyBranchService {
     public void deleteBranch(String id, String ownerId) {
         PropertyBranch branch = branchRepository.findByIdAndOwnerIdAndActiveTrue(id, ownerId)
                 .orElseThrow(() -> new AppException(404, "Không tìm thấy chi nhánh", HttpStatus.NOT_FOUND));
+
+        long activeRooms = listingRepository.countByBranchIdAndActiveTrue(id);
+        if (activeRooms > 0) {
+            throw new AppException(400, "Chi nhánh đang có " + activeRooms + " phòng/căn hộ. Vui lòng chuyển hoặc xóa hết các phòng trước khi xóa chi nhánh!", HttpStatus.BAD_REQUEST);
+        }
 
         branch.setActive(false);
         branchRepository.save(branch);
