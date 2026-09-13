@@ -61,5 +61,22 @@ class ContractDataBuilderTest {
                 "12 Nguyễn Huệ, Phường Sài Gòn, TP. Hồ Chí Minh",
                 snapshots.getLandlord().get("permanentAddress")
         );
+
+        // Verify rentalMode and B2B tenant fields are absent
+        org.junit.jupiter.api.Assertions.assertFalse(snapshots.getLease().containsKey("rentalMode"),
+                "Lease snapshot must not contain rentalMode");
+        org.junit.jupiter.api.Assertions.assertFalse(snapshots.getTenant().containsKey("organizationName"),
+                "Tenant snapshot must not contain organizationName");
+        org.junit.jupiter.api.Assertions.assertFalse(snapshots.getTenant().containsKey("representativeName"),
+                "Tenant snapshot must not contain representativeName");
+        org.junit.jupiter.api.Assertions.assertFalse(snapshots.getTenant().containsKey("representativePosition"),
+                "Tenant snapshot must not contain representativePosition");
+    }
+
+    @Test
+    void categoryLabelsMatchStandards() {
+        assertEquals("Nhà nguyên căn", ContractDataBuilder.categoryLabel(com.hs.listing.model.constant.ListingCategory.HOUSE));
+        assertEquals("Căn hộ chung cư", ContractDataBuilder.categoryLabel(com.hs.listing.model.constant.ListingCategory.APARTMENT));
+        assertEquals("Phòng trọ", ContractDataBuilder.categoryLabel(com.hs.listing.model.constant.ListingCategory.ROOM));
     }
 }

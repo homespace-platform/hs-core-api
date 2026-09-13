@@ -166,17 +166,7 @@ public class ListingPublicService {
                     cb.equal(root.join("apartmentDetail").get("mainDoorDirection"), request.direction().trim()));
         }
 
-        // Office Grade (Office)
-        if (request.officeGrade() != null && !request.officeGrade().isBlank() && request.category() == ListingCategory.OFFICE) {
-            spec = spec.and((root, query, cb) ->
-                    cb.equal(root.join("officeDetail").get("officeGrade"), request.officeGrade().trim()));
-        }
 
-        // Position Type (Commercial)
-        if (request.positionType() != null && request.category() == ListingCategory.COMMERCIAL_SPACE) {
-            spec = spec.and((root, query, cb) ->
-                    cb.equal(root.join("commercialDetail").get("positionType"), request.positionType()));
-        }
 
         // Restroom Type (Room)
         if (request.restroomType() != null && request.category() == ListingCategory.ROOM) {

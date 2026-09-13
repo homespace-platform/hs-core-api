@@ -5,7 +5,9 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 public enum ListingCategory {
     APARTMENT,
     HOUSE,
+    @Deprecated // Legacy only: retained for reading historical DB records; rejected in active flows
     OFFICE,
+    @Deprecated // Legacy only: retained for reading historical DB records; rejected in active flows
     COMMERCIAL_SPACE,
     ROOM;
 

@@ -9,7 +9,6 @@ import com.hs.listing.model.constant.ListingCategory;
 import com.hs.listing.model.constant.ListingEnums.BillingMethod;
 import com.hs.listing.model.constant.ListingEnums.ChargeType;
 import com.hs.listing.model.constant.PaymentCycle;
-import com.hs.listing.model.constant.RentalMode;
 import com.hs.user.model.Address;
 import com.hs.user.model.User;
 import com.hs.user.repository.AddressRepository;
@@ -99,11 +98,6 @@ public class ContractDataBuilder {
         map.put("phone", firstNonBlank(request.getRenterPhone(), user == null ? null : user.getPhone()));
         map.put("email", firstNonBlank(request.getRenterEmail(), user == null ? null : user.getEmail()));
         map.put("occupantCount", resolveOccupantCount(request));
-
-        // Chỉ có ý nghĩa với hợp đồng thuê văn phòng / mặt bằng, chủ nhà tự điền sau.
-        map.put("organizationName", "");
-        map.put("representativeName", "");
-        map.put("representativePosition", "");
         return map;
     }
 
@@ -146,8 +140,6 @@ public class ContractDataBuilder {
             floor = listing.getApartmentDetail().getFloorNumber();
         } else if (listing.getRoomDetail() != null) {
             floor = listing.getRoomDetail().getFloorNumber();
-        } else if (listing.getOfficeDetail() != null) {
-            floor = listing.getOfficeDetail().getFloorNumber();
         } else if (listing.getHouseDetail() != null && listing.getHouseDetail().getTotalFloors() != null) {
             return "Nhà " + listing.getHouseDetail().getTotalFloors() + " tầng";
         }
@@ -159,9 +151,6 @@ public class ContractDataBuilder {
             return joinNonBlank(" ",
                     nullToEmpty(listing.getApartmentDetail().getProjectName()),
                     nullToEmpty(listing.getApartmentDetail().getBuildingBlock()));
-        }
-        if (listing.getOfficeDetail() != null) {
-            return nullToEmpty(listing.getOfficeDetail().getBuildingName());
         }
         return "";
     }
@@ -175,7 +164,6 @@ public class ContractDataBuilder {
         // Hợp đồng hết hiệu lực vào ngày liền trước mốc tròn kỳ hạn.
         LocalDate end = start.plusMonths(months).minusDays(1);
 
-        map.put("rentalMode", "");
         map.put("startDateText", start.format(DATE_FORMATTER));
         map.put("endDateText", end.format(DATE_FORMATTER));
         map.put("durationMonths", months);
@@ -417,19 +405,11 @@ public class ContractDataBuilder {
     static String categoryLabel(ListingCategory category) {
         if (category == null) return "";
         return switch (category) {
-            case APARTMENT -> "Căn hộ / Chung cư";
             case HOUSE -> "Nhà nguyên căn";
+            case APARTMENT -> "Căn hộ chung cư";
+            case ROOM -> "Phòng trọ";
             case OFFICE -> "Văn phòng";
             case COMMERCIAL_SPACE -> "Mặt bằng kinh doanh";
-            case ROOM -> "Nhà trọ / Căn hộ dịch vụ";
-        };
-    }
-
-    static String rentalModeLabel(RentalMode mode) {
-        if (mode == null) return "";
-        return switch (mode) {
-            case WHOLE_UNIT -> "Thuê nguyên căn / toàn bộ";
-            case PARTIAL -> "Thuê một phần / phòng riêng";
         };
     }
 

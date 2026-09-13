@@ -22,6 +22,13 @@ class ContractRenderServiceTest {
         assertTrue(dummy.containsKey("equipmentTable"));
         assertEquals("Nguyễn Văn An (Chủ nhà)", ContractRenderService.resolvePath(dummy, "landlord.fullName"));
         assertEquals("HD-20260905-DEMO", ContractRenderService.resolvePath(dummy, "contract.number"));
+        assertEquals("Căn hộ chung cư", ContractRenderService.resolvePath(dummy, "property.propertyType"));
         assertNotNull(ContractRenderService.resolvePath(dummy, "rent.amountNumber"));
+
+        // Must not contain rentalMode or B2B tenant fields
+        assertNull(ContractRenderService.resolvePath(dummy, "lease.rentalMode"));
+        assertNull(ContractRenderService.resolvePath(dummy, "tenant.organizationName"));
+        assertNull(ContractRenderService.resolvePath(dummy, "tenant.representativeName"));
+        assertNull(ContractRenderService.resolvePath(dummy, "tenant.representativePosition"));
     }
 }

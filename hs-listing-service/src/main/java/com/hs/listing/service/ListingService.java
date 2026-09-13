@@ -184,22 +184,22 @@ public class ListingService {
     }
 
     private void validate(CreateListingRequest r) {
+        if (r.category() != ListingCategory.HOUSE && r.category() != ListingCategory.APARTMENT && r.category() != ListingCategory.ROOM) {
+            throw error(400, "UNSUPPORTED_CATEGORY", "Only HOUSE, APARTMENT, and ROOM are supported");
+        }
         int details = (r.apartmentDetail() != null ? 1 : 0) + (r.houseDetail() != null ? 1 : 0)
-                + (r.officeDetail() != null ? 1 : 0) + (r.commercialDetail() != null ? 1 : 0)
                 + (r.roomDetail() != null ? 1 : 0);
-        if (details != 1 || switch (r.category()) {
+        if (r.officeDetail() != null || r.commercialDetail() != null || details != 1 || switch (r.category()) {
             case APARTMENT -> r.apartmentDetail() == null;
             case HOUSE -> r.houseDetail() == null;
-            case OFFICE -> r.officeDetail() == null;
-            case COMMERCIAL_SPACE -> r.commercialDetail() == null;
             case ROOM -> r.roomDetail() == null;
+            default -> true;
         })
             throw error(409, "DETAIL_CATEGORY_CONFLICT", "Exactly one matching detail is required");
         Set<PriceUnit> units = switch (r.category()) {
             case APARTMENT, HOUSE -> Set.of(PriceUnit.MONTH);
             case ROOM -> Set.of(PriceUnit.ROOM_MONTH, PriceUnit.PERSON_MONTH);
-            case OFFICE -> Set.of(PriceUnit.MONTH, PriceUnit.M2_MONTH, PriceUnit.SEAT_MONTH);
-            case COMMERCIAL_SPACE -> Set.of(PriceUnit.MONTH, PriceUnit.M2_MONTH);
+            default -> throw error(400, "UNSUPPORTED_CATEGORY", "Unsupported category: " + r.category());
         };
         if (!units.contains(r.pricing().unit()))
             invalid("pricing.unit", "INVALID_PRICE_UNIT");
@@ -220,26 +220,11 @@ public class ListingService {
         };
         if (!depositOk)
             invalid("pricing.depositType", "INVALID_DEPOSIT");
-        if (r.category() == ListingCategory.OFFICE) {
-            var o = r.officeDetail();
-            var hours = o.operatingHours() == null ? List.<OfficeOperatingHourRequest>of() : o.operatingHours();
-            if (o.operatingMode() == OperatingMode.CUSTOM_SCHEDULE && hours.isEmpty())
-                invalid("officeDetail.operatingHours", "REQUIRED");
-            if (o.operatingMode() != OperatingMode.CUSTOM_SCHEDULE && !hours.isEmpty())
-                invalid("officeDetail.operatingHours", "INVALID_FOR_OPERATING_MODE");
-            Set<java.time.DayOfWeek> days = new HashSet<>();
-            for (var h : hours) {
-                if (!days.add(h.dayOfWeek()))
-                    invalid("officeDetail.operatingHours.dayOfWeek", "DUPLICATE");
-                if (!h.openTime().isBefore(h.closeTime()))
-                    invalid("officeDetail.operatingHours.closeTime", "MUST_BE_AFTER_OPEN_TIME");
-            }
-        }
         if (r.charges() != null)
             for (var c : r.charges()) {
                 if (c.chargeType() == ChargeType.OTHER && (c.customName() == null || c.customName().isBlank()))
                     invalid("charges.customName", "REQUIRED");
-                if (c.chargeType() == ChargeType.OVERTIME_AIR_CONDITIONING && r.category() != ListingCategory.OFFICE)
+                if (c.chargeType() == ChargeType.OVERTIME_AIR_CONDITIONING)
                     invalid("charges.chargeType", "INVALID_FOR_CATEGORY");
             }
         long images = r.media().stream().filter(m -> m.mediaType() == MediaType.IMAGE).count(),
@@ -271,25 +256,7 @@ public class ListingService {
                 d.setListing(l);
                 l.setHouseDetail(d);
             }
-            case OFFICE -> {
-                var d = new ListingOfficeDetail();
-                BeanUtils.copyProperties(r.officeDetail(), d, "operatingHours");
-                d.setListing(l);
-                if (r.officeDetail().operatingHours() != null)
-                    for (var q : r.officeDetail().operatingHours()) {
-                        var h = new ListingOfficeOperatingHour();
-                        BeanUtils.copyProperties(q, h);
-                        h.setListing(d);
-                        d.getOperatingHours().add(h);
-                    }
-                l.setOfficeDetail(d);
-            }
-            case COMMERCIAL_SPACE -> {
-                var d = new ListingCommercialDetail();
-                BeanUtils.copyProperties(r.commercialDetail(), d);
-                d.setListing(l);
-                l.setCommercialDetail(d);
-            }
+
             case ROOM -> {
                 var src = Objects.requireNonNull(r.roomDetail(), "roomDetail");
                 var d = new ListingRoomDetail();
@@ -399,8 +366,7 @@ public class ListingService {
             case APARTMENT -> isFurnished(r.apartmentDetail().furnishingStatus());
             case HOUSE -> isFurnished(r.houseDetail().furnishingStatus());
             case ROOM -> isFurnished(r.roomDetail().furnishingStatus());
-            case OFFICE -> r.officeDetail().handoverStatus() != OfficeHandoverStatus.RAW;
-            case COMMERCIAL_SPACE -> r.commercialDetail().handoverStatus() != CommercialHandoverStatus.RAW;
+            default -> false;
         };
     }
 

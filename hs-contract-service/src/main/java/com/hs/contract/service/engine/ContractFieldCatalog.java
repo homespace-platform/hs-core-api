@@ -9,16 +9,16 @@ import java.util.*;
 @Component
 public class ContractFieldCatalog {
 
-    /** Bắt buộc với mọi loại hình bất động sản. */
-    private static final Set<ListingCategory> ALL = Collections.unmodifiableSet(EnumSet.allOf(ListingCategory.class));
+    /** Ba loại hình bất động sản được hỗ trợ trên hệ thống HomeSpace. */
+    public static final Set<ListingCategory> SUPPORTED_CATEGORIES = Collections.unmodifiableSet(
+            EnumSet.of(ListingCategory.APARTMENT, ListingCategory.HOUSE, ListingCategory.ROOM));
+    /** Bắt buộc với cả ba loại hình bất động sản được hỗ trợ. */
+    private static final Set<ListingCategory> ALL = SUPPORTED_CATEGORIES;
     /** Luôn tùy chọn. */
     private static final Set<ListingCategory> OPTIONAL = Collections.unmodifiableSet(EnumSet.noneOf(ListingCategory.class));
-    /** Hợp đồng thuê để ở: có người vào ở thực tế. */
-    private static final Set<ListingCategory> RESIDENTIAL = Collections.unmodifiableSet(
-            EnumSet.of(ListingCategory.APARTMENT, ListingCategory.HOUSE, ListingCategory.ROOM));
-    /** Hợp đồng thuê kinh doanh: bên thuê thường là pháp nhân. */
-    private static final Set<ListingCategory> BUSINESS = Collections.unmodifiableSet(
-            EnumSet.of(ListingCategory.OFFICE, ListingCategory.COMMERCIAL_SPACE));
+    /** Bắt buộc đối với căn hộ chung cư và phòng trọ (nhà nguyên căn không bắt buộc số phòng/căn). */
+    private static final Set<ListingCategory> APARTMENT_AND_ROOM = Collections.unmodifiableSet(
+            EnumSet.of(ListingCategory.APARTMENT, ListingCategory.ROOM));
 
     private static final Map<String, TemplateFieldDefinition> DEFINITIONS = new LinkedHashMap<>();
 
@@ -36,20 +36,16 @@ public class ContractFieldCatalog {
         add("tenant.permanentAddress", "Nơi thường trú người thuê", "Bên thuê (Bên B)", "TEXT", "Nơi thường trú của bên B theo Luật Cư trú 2020", "456 Lê Lợi, Phường 4, Quận 3, TP.HCM", OPTIONAL);
         add("tenant.phone", "Số điện thoại người thuê", "Bên thuê (Bên B)", "TEXT", "Số điện thoại liên hệ", "0987654321", ALL);
         add("tenant.email", "Email người thuê", "Bên thuê (Bên B)", "TEXT", "Email nhận thông báo và hợp đồng", "nguoithue@example.com", OPTIONAL);
-        add("tenant.occupantCount", "Số người vào ở", "Bên thuê (Bên B)", "NUMBER", "Số lượng người dọn vào ở thực tế", "2", RESIDENTIAL);
-        add("tenant.organizationName", "Tên công ty / tổ chức", "Bên thuê (Bên B)", "TEXT", "Tên pháp nhân thuê mặt bằng hoặc văn phòng", "Công ty TNHH Giải Pháp Công Nghệ Mới", BUSINESS);
-        add("tenant.representativeName", "Người đại diện theo PL", "Bên thuê (Bên B)", "TEXT", "Họ tên người đại diện pháp nhân", "Trần Văn C", BUSINESS);
-        add("tenant.representativePosition", "Chức vụ người đại diện", "Bên thuê (Bên B)", "TEXT", "Chức vụ của người đại diện ký kết", "Giám Đốc", BUSINESS);
+        add("tenant.occupantCount", "Số người vào ở", "Bên thuê (Bên B)", "NUMBER", "Số lượng người dọn vào ở thực tế", "2", ALL);
 
         // --- Tài sản & Bất động sản ---
         add("property.fullAddress", "Địa chỉ BĐS cho thuê", "Bất động sản", "TEXT", "Địa chỉ chi tiết nơi cho thuê", "Tầng 5, Căn hộ A-05, Tòa Landmark 81, 720A Điện Biên Phủ, P.22, Q.Bình Thạnh, TP.HCM", ALL);
         add("property.areaText", "Diện tích thuê", "Bất động sản", "TEXT", "Diện tích sử dụng cho thuê", "65 m²", ALL);
-        add("property.propertyType", "Loại hình bất động sản", "Bất động sản", "TEXT", "Loại hình căn hộ, nhà nguyên căn, phòng trọ...", "Căn hộ chung cư", ALL);
-        add("property.unitNumber", "Số căn hộ / số phòng", "Bất động sản", "TEXT", "Mã căn hộ hoặc số phòng cụ thể", "Phòng 502", OPTIONAL);
+        add("property.propertyType", "Loại hình bất động sản", "Bất động sản", "TEXT", "Loại hình căn hộ chung cư, nhà nguyên căn, phòng trọ", "Căn hộ chung cư", ALL);
+        add("property.unitNumber", "Số căn hộ / số phòng", "Bất động sản", "TEXT", "Mã căn hộ hoặc số phòng cụ thể", "Phòng 502", APARTMENT_AND_ROOM);
         add("property.floor", "Tầng", "Bất động sản", "TEXT", "Số tầng của bất động sản", "Tầng 5", OPTIONAL);
 
         // --- Thời hạn thuê ---
-        add("lease.rentalMode", "Hình thức thuê", "Thời hạn thuê", "TEXT", "Thuê nguyên căn / toàn bộ hay thuê một phần / phòng riêng, lấy từ tin đăng", "Thuê nguyên căn / toàn bộ", ALL);
         add("lease.startDateText", "Ngày bắt đầu thuê", "Thời hạn thuê", "DATE", "Ngày bắt đầu có hiệu lực và bàn giao", "15/09/2026", ALL);
         add("lease.endDateText", "Ngày kết thúc thuê", "Thời hạn thuê", "DATE", "Ngày hết hạn hợp đồng thuê", "14/09/2027", ALL);
         add("lease.durationMonths", "Số tháng thuê", "Thời hạn thuê", "NUMBER", "Tổng thời gian thuê tính theo tháng", "12", ALL);
@@ -100,7 +96,7 @@ public class ContractFieldCatalog {
 
     /**
      * Danh sách trường bắt buộc cho một loại hình bất động sản.
-     * Với mẫu chưa gắn loại hình (dữ liệu cũ), chỉ áp bộ trường bắt buộc chung cho cả 5 loại hình.
+     * Với mẫu chưa gắn loại hình (dữ liệu cũ), chỉ áp bộ trường bắt buộc chung cho cả 3 loại hình.
      */
     public List<TemplateFieldDefinition> getRequiredDefinitions(ListingCategory category) {
         return DEFINITIONS.values().stream()
@@ -113,7 +109,7 @@ public class ContractFieldCatalog {
         if (scope == null || scope.isEmpty()) {
             return false;
         }
-        return category == null ? scope.size() == ListingCategory.values().length : scope.contains(category);
+        return category == null ? scope.containsAll(SUPPORTED_CATEGORIES) : scope.contains(category);
     }
 
     public Optional<TemplateFieldDefinition> getDefinition(String rawKey) {

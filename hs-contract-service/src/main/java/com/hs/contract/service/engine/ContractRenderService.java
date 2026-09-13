@@ -114,20 +114,16 @@ public class ContractRenderService {
         tenant.put("phone", "0987654321");
         tenant.put("email", "tranthibinh.tenant@example.com");
         tenant.put("occupantCount", 2);
-        tenant.put("organizationName", "Công ty TNHH Sáng Tạo Trẻ");
-        tenant.put("representativeName", "Trần Thị Bình");
-        tenant.put("representativePosition", "Giám Đốc");
 
         Map<String, Object> property = Map.of(
                 "fullAddress", "Tầng 12, Căn hộ A12-08, Tòa tháp Landmark, 720A Điện Biên Phủ, Phường 22, Quận Bình Thạnh, TP.HCM",
                 "areaText", "75 m²",
-                "propertyType", "Căn hộ chung cư cao cấp",
+                "propertyType", "Căn hộ chung cư",
                 "unitNumber", "A12-08",
                 "floor", "Tầng 12"
         );
 
         Map<String, Object> lease = Map.of(
-                "rentalMode", "Thuê nguyên căn / toàn bộ",
                 "startDateText", "15/09/2026",
                 "endDateText", "14/09/2027",
                 "durationMonths", 12,
@@ -197,9 +193,6 @@ public class ContractRenderService {
         tenant.put("phone", getStr(src, "phone", ""));
         tenant.put("email", getStr(src, "email", ""));
         tenant.put("occupantCount", String.valueOf(src.getOrDefault("occupantCount", "1")));
-        tenant.put("organizationName", getStr(src, "organizationName", ""));
-        tenant.put("representativeName", getStr(src, "representativeName", ""));
-        tenant.put("representativePosition", getStr(src, "representativePosition", ""));
         model.put("tenant", tenant);
     }
 
@@ -217,7 +210,6 @@ public class ContractRenderService {
     private void putLeaseFields(Map<String, Object> model, Map<String, Object> le) {
         Map<String, Object> src = le != null ? le : Map.of();
         Map<String, Object> lease = new LinkedHashMap<>();
-        lease.put("rentalMode", getStr(src, "rentalMode", ""));
         lease.put("startDateText", getStr(src, "startDateText", ""));
         lease.put("endDateText", getStr(src, "endDateText", ""));
         lease.put("durationMonths", String.valueOf(src.getOrDefault("durationMonths", "12")));

@@ -298,6 +298,18 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
             throw new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND);
         }
 
+        // Phân tích lại file bằng catalog hiện hành và cập nhật metadata DRAFT trước khi kiểm tra
+        if (targetVersion.getStatus() == TemplateVersionStatus.DRAFT) {
+            byte[] docxBytes = downloadStorageFile(targetVersion.getStorageObjectId());
+            TemplateValidationResult validation = analysisService.analyzeTemplate(
+                    new ByteArrayInputStream(docxBytes), template.getCategory());
+            targetVersion.setPlaceholdersJson(serializeJson(validation.getDetectedPlaceholders()));
+            targetVersion.setValidationErrorsJson(serializeJson(validation.getWarnings()));
+            targetVersion.setInvalidPlaceholdersJson(serializeJson(validation.getInvalidPlaceholders()));
+            targetVersion.setMissingRequiredJson(serializeJson(validation.getMissingRequiredFields()));
+            targetVersion = versionRepository.save(targetVersion);
+        }
+
         // Chỉ cho xuất bản khi file Word đã hợp lệ: không còn mã sai và không thiếu trường bắt buộc
         List<String> invalidPlaceholders = deserializeJsonList(targetVersion.getInvalidPlaceholdersJson());
         List<TemplateFieldIssue> missingRequired = deserializeMissingFields(targetVersion.getMissingRequiredJson());

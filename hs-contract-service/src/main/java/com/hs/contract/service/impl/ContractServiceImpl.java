@@ -399,9 +399,12 @@ public class ContractServiceImpl implements ContractService {
 
             total++;
             Object value = ContractRenderService.resolvePath(dataModel, key);
-            // Legacy template tags (ngày cấp / nơi cấp) — treat blank as filled so they don't block.
+            // Legacy template tags — treat blank as filled so they don't block.
             if (("landlord.idIssueDate".equals(key) || "landlord.idIssuePlace".equals(key)
-                    || "tenant.idIssueDate".equals(key) || "tenant.idIssuePlace".equals(key))) {
+                    || "tenant.idIssueDate".equals(key) || "tenant.idIssuePlace".equals(key)
+                    || "lease.rentalMode".equals(key)
+                    || "tenant.organizationName".equals(key) || "tenant.representativeName".equals(key)
+                    || "tenant.representativePosition".equals(key))) {
                 filled++;
                 continue;
             }
