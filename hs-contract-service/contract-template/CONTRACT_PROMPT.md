@@ -10,6 +10,8 @@ Dưới đây là **5 bộ Prompt hoàn chỉnh**, được bổ sung thêm ph�
 
 **Thuật ngữ cư trú.** Sổ hộ khẩu giấy đã hết hiệu lực từ 01/01/2023 theo Luật Cư trú số 68/2020/QH14. Trong toàn bộ văn bản dùng cách gọi **"Nơi thường trú"**, tuyệt đối không dùng "hộ khẩu" hay "hộ khẩu thường trú".
 
+**Chu kỳ thanh toán & Tiền cọc.** Nền tảng HomeSpace chuẩn hóa chu kỳ thanh toán là hàng tháng (mã trường `{{rent.paymentCycle}}` được hệ thống điền tự động giá trị "Hàng tháng"). Quy định tiền đặt cọc áp dụng theo số tháng thuê, số tiền cố định hoặc không cọc; hệ thống không áp dụng hình thức cọc thỏa thuận.
+
 ### Danh mục mã trường được hệ thống hỗ trợ (39 trường)
 
 Mã nào không có trong bảng này sẽ bị hệ thống báo lỗi khi Admin tải file Word lên.
@@ -112,7 +114,7 @@ Hãy soạn thảo toàn bộ nội dung mẫu "HỢP ĐỒNG THUÊ CĂN HỘ CH
 - Căn hộ cho thuê: Tầng {{property.floor}}, Căn số {{property.unitNumber}}, thuộc tòa nhà tại {{property.fullAddress}}, diện tích: {{property.areaText}}, loại hình: {{property.propertyType}}
 - Hình thức thuê: {{lease.rentalMode}}
 - Thời hạn thuê: Từ ngày {{lease.startDateText}} đến ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao: {{lease.handoverDateText}}
-- Giá thuê & Đặt cọc: Giá thuê bằng số: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ hạn thanh toán: {{rent.paymentCycle}}, hạn đóng tiền: {{rent.paymentDueDay}}, phương thức: {{rent.paymentMethod}}. Tiền cọc: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}). Thỏa thuận cọc: {{deposit.description}}
+- Giá thuê & Đặt cọc: Giá thuê bằng số: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ hạn thanh toán: {{rent.paymentCycle}}, hạn đóng tiền: {{rent.paymentDueDay}}, phương thức: {{rent.paymentMethod}}. Tiền cọc: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}), điều khoản hoàn trả cọc: {{deposit.description}}
 - Chỉ số bàn giao: Đồng hồ điện: {{meters.electricityInitial}}, Đồng hồ nước: {{meters.waterInitial}}
 - BẢNG ĐỘNG TỰ SINH BỞI HỆ THỐNG (Giữ nguyên dấu #):
   + Bảng biểu phí dịch vụ tòa nhà, gửi xe, điện nước: đặt tag {{#chargesTable}}
@@ -159,7 +161,7 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ PHÒNG TRỌ / CĂN H�
 - Phòng cho thuê: Phòng số {{property.unitNumber}}, Tầng {{property.floor}}, tại địa chỉ {{property.fullAddress}}, diện tích: {{property.areaText}}, loại hình: {{property.propertyType}}
 - Hình thức thuê: {{lease.rentalMode}}
 - Thời hạn thuê: Từ {{lease.startDateText}} đến {{lease.endDateText}} (thời hạn: {{lease.durationText}} - {{lease.durationMonths}} tháng). Bàn giao ngày: {{lease.handoverDateText}}
-- Giá thuê & Đặt cọc: Tiền phòng: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn đóng: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền cọc: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}). Thỏa thuận cọc: {{deposit.description}}
+- Giá thuê & Đặt cọc: Tiền phòng: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn đóng: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền cọc: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}), điều khoản hoàn trả cọc: {{deposit.description}}
 - Số đồng hồ bàn giao: Điện: {{meters.electricityInitial}}, Nước: {{meters.waterInitial}}
 - BẢNG ĐỘNG TỰ SINH (Giữ nguyên dấu #):
   + Bảng đơn giá điện, nước, internet, rác, máy giặt, gửi xe: {{#chargesTable}}
@@ -264,7 +266,7 @@ Hãy soạn thảo toàn văn mẫu "HỢP ĐỒNG THUÊ MẶT BẰNG KINH DOANH
 - Thời hạn thuê: Từ ngày {{lease.startDateText}} đến ngày {{lease.endDateText}} (thời hạn {{lease.durationText}} - {{lease.durationMonths}} tháng). Ngày bàn giao mặt bằng: {{lease.handoverDateText}}
 
 LƯU Ý: Hợp đồng thuê mặt bằng kinh doanh KHÔNG dùng mã trường {{tenant.occupantCount}} (số người vào ở) vì không phù hợp nghiệp vụ. Ba mã trường về pháp nhân bên thuê ở trên là bắt buộc.
-- Giá thuê & Đặt cọc: Đơn giá thuê: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn thanh toán: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền đặt cọc bảo đảm: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}), điều khoản cọc: {{deposit.description}}
+- Giá thuê & Đặt cọc: Đơn giá thuê: {{rent.amountNumber}} (bằng chữ: {{rent.amountWords}}). Kỳ thanh toán: {{rent.paymentCycle}}, hạn thanh toán: {{rent.paymentDueDay}}, hình thức: {{rent.paymentMethod}}. Tiền đặt cọc bảo đảm: {{deposit.amountNumber}} (bằng chữ: {{deposit.amountWords}}), điều khoản hoàn trả cọc: {{deposit.description}}
 - Chỉ số bàn giao: Đồng hồ điện: {{meters.electricityInitial}}, Đồng hồ nước: {{meters.waterInitial}}
 - BẢNG ĐỘNG TỰ SINH (Giữ nguyên dấu #):
   + Bảng biểu phí dịch vụ chung, chi phí hạ tầng (nếu có): {{#chargesTable}}

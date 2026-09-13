@@ -208,10 +208,15 @@ public class ListingService {
         if (r.pricing().amount() != null && r.pricing().amount().compareTo(BigDecimal.ZERO) <= 0)
             invalid("pricing.amount", "MUST_BE_POSITIVE");
         var p = r.pricing();
+        if (p.paymentCycle() != PaymentCycle.MONTHLY)
+            invalid("pricing.paymentCycle", "ONLY_MONTHLY_ALLOWED");
+        if (p.depositType() == DepositType.NEGOTIABLE)
+            invalid("pricing.depositType", "NEGOTIABLE_NOT_ALLOWED");
         boolean depositOk = switch (p.depositType()) {
             case FIXED_AMOUNT -> p.depositAmount() != null && p.depositMonths() == null;
             case MONTH_COUNT -> p.depositMonths() != null && p.depositAmount() == null;
-            case NONE, NEGOTIABLE -> p.depositAmount() == null && p.depositMonths() == null;
+            case NONE -> p.depositAmount() == null && p.depositMonths() == null;
+            case NEGOTIABLE -> false;
         };
         if (!depositOk)
             invalid("pricing.depositType", "INVALID_DEPOSIT");

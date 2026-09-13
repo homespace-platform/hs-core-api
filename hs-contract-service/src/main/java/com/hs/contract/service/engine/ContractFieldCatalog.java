@@ -59,12 +59,12 @@ public class ContractFieldCatalog {
         // --- Giá thuê & Đặt cọc ---
         add("rent.amountNumber", "Giá thuê bằng số", "Giá thuê & Cọc", "NUMBER", "Số tiền thuê mỗi kỳ (định dạng dấu chấm)", "10.000.000 VNĐ/tháng", ALL);
         add("rent.amountWords", "Giá thuê bằng chữ", "Giá thuê & Cọc", "TEXT", "Số tiền thuê viết bằng chữ tiếng Việt", "Mười triệu đồng chẵn", ALL);
-        add("rent.paymentCycle", "Chu kỳ thanh toán", "Giá thuê & Cọc", "TEXT", "Kỳ hạn trả tiền thuê (tháng, quý, năm)", "Hàng tháng", ALL);
+        add("rent.paymentCycle", "Chu kỳ thanh toán", "Giá thuê & Cọc", "TEXT", "Kỳ hạn trả tiền thuê (Hàng tháng)", "Hàng tháng", ALL);
         add("rent.paymentDueDay", "Hạn đóng tiền hàng tháng", "Giá thuê & Cọc", "TEXT", "Ngày thanh toán cố định trong tháng", "Từ ngày 01 đến ngày 05 hàng tháng", ALL);
         add("rent.paymentMethod", "Phương thức thanh toán", "Giá thuê & Cọc", "TEXT", "Kênh thanh toán tiền thuê, mặc định qua hệ thống HomeSpace", "Thanh toán trực tuyến qua hệ thống HomeSpace", OPTIONAL);
         add("deposit.amountNumber", "Tiền cọc bằng số", "Giá thuê & Cọc", "NUMBER", "Số tiền đặt cọc", "10.000.000 VNĐ", ALL);
         add("deposit.amountWords", "Tiền cọc bằng chữ", "Giá thuê & Cọc", "TEXT", "Số tiền đặt cọc viết bằng chữ tiếng Việt", "Mười triệu đồng chẵn", ALL);
-        add("deposit.description", "Nội dung thỏa thuận cọc", "Giá thuê & Cọc", "TEXT", "Chi tiết điều khoản hoàn trả tiền cọc", "Tiền cọc được hoàn lại sau khi hết hạn hợp đồng và trừ các chi phí chưa thanh toán (nếu có).", OPTIONAL);
+        add("deposit.description", "Nội dung quy định cọc", "Giá thuê & Cọc", "TEXT", "Chi tiết điều khoản cọc và hoàn trả tiền cọc", "Tiền cọc được hoàn lại sau khi hết hạn hợp đồng và trừ các chi phí chưa thanh toán (nếu có).", OPTIONAL);
 
         // --- Chỉ số điện nước ban đầu ---
         add("meters.electricityInitial", "Chỉ số điện ban đầu", "Chỉ số bàn giao", "NUMBER", "Chỉ số công tơ điện lúc giao nhận nhà", "1250 kWh", OPTIONAL);
