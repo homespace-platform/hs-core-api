@@ -198,7 +198,7 @@ public class ListingService {
             throw error(409, "DETAIL_CATEGORY_CONFLICT", "Exactly one matching detail is required");
         Set<PriceUnit> units = switch (r.category()) {
             case APARTMENT, HOUSE -> Set.of(PriceUnit.MONTH);
-            case ROOM -> Set.of(PriceUnit.ROOM_MONTH, PriceUnit.PERSON_MONTH);
+            case ROOM -> Set.of(PriceUnit.ROOM_MONTH, PriceUnit.PERSON_MONTH, PriceUnit.MONTH);
             default -> throw error(400, "UNSUPPORTED_CATEGORY", "Unsupported category: " + r.category());
         };
         if (!units.contains(r.pricing().unit()))
