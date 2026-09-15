@@ -60,6 +60,10 @@ public class ListingPublicService {
                 cb.isTrue(root.get("active")),
                 cb.equal(root.get("status"), ListingStatus.PUBLISHED));
 
+        if (request.ownerId() != null && !request.ownerId().isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("ownerId"), request.ownerId().trim()));
+        }
+
         // Category
         if (request.category() != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("category"), request.category()));

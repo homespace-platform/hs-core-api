@@ -27,6 +27,7 @@ import com.hs.user.dto.response.AdminCreateUserResponse;
 import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
 import com.hs.user.dto.response.UserResponse;
+import com.hs.user.dto.response.PublicUserProfileResponse;
 import com.hs.user.mapper.UserMapper;
 import com.hs.user.model.Address;
 import com.hs.user.model.Role;
@@ -232,6 +233,26 @@ public class UserServiceImpl implements UserService {
                 // Admin is trusted as verified for business rules (no Didit required).
                 boolean kycVerified = KycPolicy.isIdentitySatisfied(user, diditVerified);
                 return UserMapper.mapToUserProfileResponse(user, address, kycVerified, kycOptional);
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public PublicUserProfileResponse getPublicUserProfile(String userId) {
+                User user = userRepository.findById(userId)
+                                .filter(candidate -> Boolean.TRUE.equals(candidate.getActive()))
+                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
+                boolean diditVerified = kycVerificationRepository.existsByUserIdAndProviderAndStatus(
+                                user.getId(), KycProvider.DIDIT, KycStatus.VERIFIED);
+
+                return PublicUserProfileResponse.builder()
+                                .id(user.getId())
+                                .username(user.getUsername())
+                                .firstName(user.getFirstName())
+                                .lastName(user.getLastName())
+                                .avatarUrl(user.getAvatarUrl())
+                                .kycVerified(KycPolicy.isIdentitySatisfied(user, diditVerified))
+                                .createdAt(user.getCreatedAt())
+                                .build();
         }
 
         @Override

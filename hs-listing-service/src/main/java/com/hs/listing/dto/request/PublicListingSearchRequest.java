@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 public record PublicListingSearchRequest(
         int page,
         int size,
+        String ownerId,
         ListingCategory category,
         String keyword,
         String provinceCode,
