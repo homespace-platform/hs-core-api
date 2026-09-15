@@ -10,6 +10,7 @@ import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
 import com.hs.user.dto.response.UserResponse;
 import com.hs.user.dto.response.AdminCreateUserResponse;
+import com.hs.user.dto.response.PublicUserProfileResponse;
 
 import org.springframework.transaction.annotation.Transactional;
 import org.jspecify.annotations.NonNull;
@@ -41,6 +42,9 @@ public interface UserService {
     boolean hasPassword();
 
     UserProfileResponse getUserProfile();
+
+    @Transactional(readOnly = true)
+    PublicUserProfileResponse getPublicUserProfile(String userId);
 
     void updateUserProfile(UpdateProfileRequest request);
 

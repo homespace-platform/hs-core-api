@@ -2,6 +2,7 @@ package com.hs.api.controller.user;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,6 +16,7 @@ import com.hs.user.dto.request.UpdatePasswordRequest;
 import com.hs.user.dto.request.UpdateProfileRequest;
 import com.hs.user.dto.request.SetInitialPasswordRequest;
 import com.hs.user.dto.response.UserProfileResponse;
+import com.hs.user.dto.response.PublicUserProfileResponse;
 import com.hs.user.service.UserService;
 
 import jakarta.validation.Valid;
@@ -66,6 +68,13 @@ public class UserController {
     public ApiResponse<UserProfileResponse> getUserProfile() {
         return ApiResponse.<UserProfileResponse>builder()
                 .result(userService.getUserProfile())
+                .build();
+    }
+
+    @GetMapping("/{userId}/profile")
+    public ApiResponse<PublicUserProfileResponse> getPublicUserProfile(@PathVariable String userId) {
+        return ApiResponse.<PublicUserProfileResponse>builder()
+                .result(userService.getPublicUserProfile(userId))
                 .build();
     }
 

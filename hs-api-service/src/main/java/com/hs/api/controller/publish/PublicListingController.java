@@ -54,6 +54,7 @@ public class PublicListingController {
     public PageResponse<PublicListingSummaryResponse> search(
             @RequestParam(defaultValue = "1") @Min(1) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size,
+            @RequestParam(required = false) String ownerId,
             @RequestParam(required = false) ListingCategory category,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String provinceCode,
@@ -80,7 +81,7 @@ public class PublicListingController {
             @RequestParam(defaultValue = "newest") String sort) {
 
         return listingPublicService.search(new PublicListingSearchRequest(
-                page, size, category, keyword, provinceCode, wardCode,
+                page, size, ownerId, category, keyword, provinceCode, wardCode,
                 priceMin, priceMax, areaMin, areaMax, bedrooms, bathrooms, hasVideo,
                 furnishingStatus, direction, balconyDirection, officeGrade, positionType, restroomType,
                 kitchenType, accessType, legalStatus,
