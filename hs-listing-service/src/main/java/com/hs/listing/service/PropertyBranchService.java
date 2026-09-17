@@ -1,6 +1,7 @@
 package com.hs.listing.service;
 
 import com.hs.common.advice.entity.AppException;
+import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.dto.request.CreateBranchChargeRequest;
 import com.hs.listing.dto.request.CreatePropertyBranchRequest;
 import com.hs.listing.dto.response.BranchChargeResponse;
@@ -27,6 +28,7 @@ public class PropertyBranchService {
     private final PropertyBranchRepository branchRepository;
     private final AmenityRepository amenityRepository;
     private final ListingRepository listingRepository;
+    private final ParkingReservationService parkingReservationService;
 
     private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final java.security.SecureRandom SECURE_RANDOM = new java.security.SecureRandom();
@@ -72,6 +74,8 @@ public class PropertyBranchService {
                 .address(address)
                 .description(request.getDescription())
                 .buildingRules(request.getBuildingRules())
+                .motorbikeParkingCapacity(request.getMotorbikeParkingCapacity() != null ? Math.max(0, request.getMotorbikeParkingCapacity()) : 0)
+                .carParkingCapacity(request.getCarParkingCapacity() != null ? Math.max(0, request.getCarParkingCapacity()) : 0)
                 .totalUnits(0)
                 .build();
 
@@ -101,6 +105,33 @@ public class PropertyBranchService {
         PropertyBranch branch = branchRepository.findByIdAndOwnerIdAndActiveTrue(id, ownerId)
                 .orElseThrow(() -> new AppException(404, "Không tìm thấy chi nhánh", HttpStatus.NOT_FOUND));
 
+        int newMotorbikeCap = request.getMotorbikeParkingCapacity() != null ? Math.max(0, request.getMotorbikeParkingCapacity()) : 0;
+        int newCarCap = request.getCarParkingCapacity() != null ? Math.max(0, request.getCarParkingCapacity()) : 0;
+
+        int currentMotorbikeCap = branch.getMotorbikeParkingCapacity() != null ? branch.getMotorbikeParkingCapacity() : 0;
+        if (newMotorbikeCap < currentMotorbikeCap) {
+            int maxUsage = parkingReservationService.getMaxConcurrentUsage(branch.getId(), com.hs.listing.model.constant.VehicleType.MOTORBIKE);
+            if (newMotorbikeCap < maxUsage) {
+                throw new AppException(
+                        ListingErrorCode.PARKING_CAPACITY_CHANGED,
+                        String.format("Không thể giảm sức chứa xe máy xuống %d vì đang có %d chỗ được giữ/hoạt động đồng thời.",
+                                newMotorbikeCap, maxUsage)
+                );
+            }
+        }
+
+        int currentCarCap = branch.getCarParkingCapacity() != null ? branch.getCarParkingCapacity() : 0;
+        if (newCarCap < currentCarCap) {
+            int maxUsage = parkingReservationService.getMaxConcurrentUsage(branch.getId(), com.hs.listing.model.constant.VehicleType.CAR);
+            if (newCarCap < maxUsage) {
+                throw new AppException(
+                        ListingErrorCode.PARKING_CAPACITY_CHANGED,
+                        String.format("Không thể giảm sức chứa ô tô xuống %d vì đang có %d chỗ được giữ/hoạt động đồng thời.",
+                                newCarCap, maxUsage)
+                );
+            }
+        }
+
         branch.setName(request.getName().trim());
         if (request.getCode() != null && !request.getCode().trim().isBlank()) {
             branch.setCode(request.getCode().trim().toUpperCase());
@@ -110,6 +141,8 @@ public class PropertyBranchService {
         branch.setCategory(request.getCategory());
         branch.setDescription(request.getDescription());
         branch.setBuildingRules(request.getBuildingRules());
+        branch.setMotorbikeParkingCapacity(newMotorbikeCap);
+        branch.setCarParkingCapacity(newCarCap);
 
         Address address = branch.getAddress();
         if (address == null) {
@@ -150,7 +183,33 @@ public class PropertyBranchService {
     private void attachCharges(PropertyBranch branch, List<CreateBranchChargeRequest> charges) {
         if (charges == null || charges.isEmpty()) return;
         int order = 1;
+        int motorbikeCap = branch.getMotorbikeParkingCapacity() != null ? branch.getMotorbikeParkingCapacity() : 0;
+        int carCap = branch.getCarParkingCapacity() != null ? branch.getCarParkingCapacity() : 0;
+
         for (CreateBranchChargeRequest c : charges) {
+            if (c.getChargeType() == com.hs.listing.model.constant.ListingEnums.ChargeType.MOTORBIKE_PARKING && motorbikeCap == 0) {
+                if (c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.FREE
+                        || c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.INCLUDED
+                        || c.isIncludedInRent()
+                        || c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.PER_VEHICLE_MONTH) {
+                    throw new AppException(
+                            ListingErrorCode.MOTORBIKE_PARKING_NOT_ALLOWED,
+                            "Không thể cấu hình phí gửi xe máy khi tổng số chỗ xe máy của chi nhánh bằng 0."
+                    );
+                }
+            }
+            if (c.getChargeType() == com.hs.listing.model.constant.ListingEnums.ChargeType.CAR_PARKING && carCap == 0) {
+                if (c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.FREE
+                        || c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.INCLUDED
+                        || c.isIncludedInRent()
+                        || c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.PER_VEHICLE_MONTH) {
+                    throw new AppException(
+                            ListingErrorCode.CAR_PARKING_NOT_ALLOWED,
+                            "Không thể cấu hình phí gửi ô tô khi tổng số chỗ ô tô của chi nhánh bằng 0."
+                    );
+                }
+            }
+
             BranchCharge bc = BranchCharge.builder()
                     .id(UUID.randomUUID().toString())
                     .branch(branch)
@@ -215,6 +274,8 @@ public class PropertyBranchService {
                 .description(b.getDescription())
                 .buildingRules(b.getBuildingRules())
                 .totalUnits(totalUnits)
+                .motorbikeParkingCapacity(b.getMotorbikeParkingCapacity() != null ? b.getMotorbikeParkingCapacity() : 0)
+                .carParkingCapacity(b.getCarParkingCapacity() != null ? b.getCarParkingCapacity() : 0)
                 .defaultCharges(chargeResponses)
                 .buildingAmenityCodes(amenityCodes)
                 .createdAt(b.getCreatedAt())

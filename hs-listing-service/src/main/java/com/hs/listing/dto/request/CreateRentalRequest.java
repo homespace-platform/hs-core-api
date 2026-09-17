@@ -18,8 +18,14 @@ public record CreateRentalRequest(
         Integer leaseMonths,
 
         @Min(value = 1, message = "occupantCount must be at least 1")
-        @Max(value = 20, message = "occupantCount cannot exceed 20")
+        @Max(value = 100, message = "occupantCount cannot exceed 100")
         Integer occupantCount,
+
+        @Min(value = 0, message = "motorbikeCount cannot be negative")
+        Integer motorbikeCount,
+
+        @Min(value = 0, message = "carCount cannot be negative")
+        Integer carCount,
 
         @NotBlank(message = "renterName is required")
         @Size(max = 100, message = "renterName cannot exceed 100 characters")

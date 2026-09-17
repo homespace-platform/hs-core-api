@@ -85,6 +85,10 @@ public class Listing extends BaseEntity {
     private boolean managementFeeIncluded;
     @Column(name = "vat_included")
     private Boolean vatIncluded;
+    @Column(name = "max_motorbike_count")
+    private Integer maxMotorbikeCount;
+    @Column(name = "max_car_count")
+    private Integer maxCarCount;
     @Column(name = "view_count", nullable = false)
     @Builder.Default
     private Long viewCount = 0L;

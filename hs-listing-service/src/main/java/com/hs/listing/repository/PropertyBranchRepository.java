@@ -15,4 +15,8 @@ public interface PropertyBranchRepository extends JpaRepository<PropertyBranch, 
     Optional<PropertyBranch> findByIdAndOwnerIdAndActiveTrue(String id, String ownerId);
     Optional<PropertyBranch> findByIdAndActiveTrue(String id);
     boolean existsByCode(String code);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("SELECT b FROM PropertyBranch b WHERE b.id = :id AND b.active = true")
+    Optional<PropertyBranch> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") String id);
 }

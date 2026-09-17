@@ -19,6 +19,8 @@ public record CreateListingRequest(
                 @NotNull ListingCategory category,
                 @NotNull LocalDate availableFrom,
                 @NotNull @DecimalMin("0.01") BigDecimal areaM2,
+                Integer maxMotorbikeCount,
+                Integer maxCarCount,
                 @NotNull @Valid ListingPricingRequest pricing,
                 @Valid ApartmentDetailRequest apartmentDetail,
                 @Valid HouseDetailRequest houseDetail,

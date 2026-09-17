@@ -50,6 +50,22 @@ public class PropertyBranch extends BaseEntity {
     @Builder.Default
     private Integer totalUnits = 0;
 
+    @Column(name = "motorbike_parking_capacity")
+    @Builder.Default
+    private Integer motorbikeParkingCapacity = 0;
+
+    @Column(name = "car_parking_capacity")
+    @Builder.Default
+    private Integer carParkingCapacity = 0;
+
+    public Integer getMotorbikeParkingCapacity() {
+        return motorbikeParkingCapacity != null ? motorbikeParkingCapacity : 0;
+    }
+
+    public Integer getCarParkingCapacity() {
+        return carParkingCapacity != null ? carParkingCapacity : 0;
+    }
+
     @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @JoinColumn(name = "address_id")
     private Address address;

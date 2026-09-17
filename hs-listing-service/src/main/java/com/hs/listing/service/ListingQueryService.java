@@ -157,7 +157,9 @@ public class ListingQueryService {
         return new ListingDetailResponse(
                 listing.getId(), listing.getOwnerId(), listing.getBranchId(), branchName, listing.getTitle(), listing.getDescription(),
                 listing.getCategory(), listing.getStatus(),
-                listing.getAvailableFrom(), listing.getAreaM2(), toPricing(listing),
+                listing.getAvailableFrom(), listing.getAreaM2(),
+                listing.getMaxMotorbikeCount(), listing.getMaxCarCount(),
+                toPricing(listing),
                 toApartment(listing.getApartmentDetail()), toHouse(listing.getHouseDetail()),
                 toOffice(listing.getOfficeDetail()), toCommercial(listing.getCommercialDetail()),
                 toRoom(listing.getRoomDetail()), amenities, customAmenities, furnishings, charges,

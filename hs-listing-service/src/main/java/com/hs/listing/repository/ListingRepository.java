@@ -27,4 +27,8 @@ public interface ListingRepository extends JpaRepository<Listing, String>, JpaSp
     @org.springframework.data.jpa.repository.Modifying
     @org.springframework.data.jpa.repository.Query("UPDATE Listing l SET l.viewCount = COALESCE(l.viewCount, 0) + 1 WHERE l.id = :id")
     void incrementViewCount(@org.springframework.data.repository.query.Param("id") String id);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("SELECT l FROM Listing l WHERE l.id = :id AND l.active = true")
+    Optional<Listing> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") String id);
 }

@@ -21,6 +21,8 @@ public record ListingDetailResponse(
                 ListingStatus status,
                 LocalDate availableFrom,
                 BigDecimal areaM2,
+                Integer maxMotorbikeCount,
+                Integer maxCarCount,
                 ListingPricingRequest pricing,
                 ApartmentDetailRequest apartmentDetail,
                 HouseDetailRequest houseDetail,

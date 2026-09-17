@@ -30,6 +30,7 @@ class ListingServiceTest {
                 "Office test", "Office test description",
                 com.hs.listing.model.constant.ListingCategory.OFFICE,
                 java.time.LocalDate.now(), java.math.BigDecimal.valueOf(50),
+                null, null,
                 pricing, null, null, null, null, null, null, null, null, null,
                 addressSource, java.util.List.of(), java.util.List.of(), java.util.List.of());
 
@@ -42,6 +43,7 @@ class ListingServiceTest {
                 "Commercial test", "Commercial test description",
                 com.hs.listing.model.constant.ListingCategory.COMMERCIAL_SPACE,
                 java.time.LocalDate.now(), java.math.BigDecimal.valueOf(50),
+                null, null,
                 pricing, null, null, null, null, null, null, null, null, null,
                 addressSource, java.util.List.of(), java.util.List.of(), java.util.List.of());
 

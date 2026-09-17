@@ -61,9 +61,11 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
+import com.hs.listing.service.ParkingReservationService;
+import org.springframework.beans.factory.annotation.Autowired;
+
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ContractServiceImpl implements ContractService {
 
     private final ContractRepository contractRepository;
@@ -78,7 +80,56 @@ public class ContractServiceImpl implements ContractService {
     private final DocumentConversionService conversionService;
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
+    private final ParkingReservationService parkingReservationService;
     private final RestTemplate restTemplate = new RestTemplate();
+
+    @Autowired
+    public ContractServiceImpl(
+            ContractRepository contractRepository,
+            ContractRevisionRepository revisionRepository,
+            ContractDocumentRepository documentRepository,
+            ContractTemplateVersionRepository templateVersionRepository,
+            RentalRequestRepository rentalRequestRepository,
+            ListingStatusService listingStatusService,
+            ContractDataBuilder dataBuilder,
+            ContractFieldCatalog fieldCatalog,
+            ContractRenderService renderService,
+            DocumentConversionService conversionService,
+            StorageService storageService,
+            ObjectMapper objectMapper,
+            ParkingReservationService parkingReservationService) {
+        this.contractRepository = contractRepository;
+        this.revisionRepository = revisionRepository;
+        this.documentRepository = documentRepository;
+        this.templateVersionRepository = templateVersionRepository;
+        this.rentalRequestRepository = rentalRequestRepository;
+        this.listingStatusService = listingStatusService;
+        this.dataBuilder = dataBuilder;
+        this.fieldCatalog = fieldCatalog;
+        this.renderService = renderService;
+        this.conversionService = conversionService;
+        this.storageService = storageService;
+        this.objectMapper = objectMapper;
+        this.parkingReservationService = parkingReservationService;
+    }
+
+    public ContractServiceImpl(
+            ContractRepository contractRepository,
+            ContractRevisionRepository revisionRepository,
+            ContractDocumentRepository documentRepository,
+            ContractTemplateVersionRepository templateVersionRepository,
+            RentalRequestRepository rentalRequestRepository,
+            ListingStatusService listingStatusService,
+            ContractDataBuilder dataBuilder,
+            ContractFieldCatalog fieldCatalog,
+            ContractRenderService renderService,
+            DocumentConversionService conversionService,
+            StorageService storageService,
+            ObjectMapper objectMapper) {
+        this(contractRepository, revisionRepository, documentRepository, templateVersionRepository,
+                rentalRequestRepository, listingStatusService, dataBuilder, fieldCatalog, renderService,
+                conversionService, storageService, objectMapper, null);
+    }
 
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
     private static final TypeReference<List<Map<String, Object>>> CHARGE_LIST_TYPE = new TypeReference<>() {};
@@ -643,6 +694,11 @@ public class ContractServiceImpl implements ContractService {
         contract.setStatus(ContractStatus.ACTIVE);
         contract.setSignedAt(Instant.now());
         contract = contractRepository.save(contract);
+
+        if (parkingReservationService != null) {
+            parkingReservationService.activateReservationsForRequest(rentalRequest.getId(), contract.getId());
+        }
+
         log.info("Contract id={} signed by tenant id={}; listing id={} is now rented",
                 contractId, contract.getTenantId(), contract.getListingId());
         return toContractResponse(contract);
@@ -670,7 +726,10 @@ public class ContractServiceImpl implements ContractService {
                     .filter(value -> !value.isBlank())
                     .orElse("Phí dịch vụ");
             String billingMethod = String.valueOf(charge.get("billingMethod"));
-            if ("PER_KWH".equals(billingMethod) || "PER_M3".equals(billingMethod)) {
+            if ("PER_KWH".equals(billingMethod) || "PER_M3".equals(billingMethod)
+                    || "STATE_WATER_RATE".equals(billingMethod) || "PER_HOUR".equals(billingMethod)
+                    || "NEGOTIABLE".equals(billingMethod) || "CUSTOM".equals(billingMethod)
+                    || "NOT_APPLICABLE".equals(billingMethod) || "PER_M2_MONTH".equals(billingMethod)) {
                 excludedMeterCharges.add(name);
                 continue;
             }

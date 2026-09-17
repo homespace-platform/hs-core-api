@@ -38,7 +38,14 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     RENTAL_REQUEST_ALREADY_EXISTS(4043, "You already have an active rental request for this listing", HttpStatus.CONFLICT),
     LISTING_NOT_AVAILABLE_FOR_RENT(4044, "This listing is not currently available for rental requests", HttpStatus.CONFLICT),
     INVALID_RENTAL_REQUEST_STATUS(4045, "Invalid rental request status for this action", HttpStatus.CONFLICT),
-    LISTING_ALREADY_RESERVED(4046, "This listing is currently reserved by another renter", HttpStatus.CONFLICT);
+    LISTING_ALREADY_RESERVED(4046, "This listing is currently reserved by another renter", HttpStatus.CONFLICT),
+    OCCUPANT_LIMIT_EXCEEDED(4047, "Occupant count exceeds maximum allowed for this listing", HttpStatus.BAD_REQUEST),
+    MOTORBIKE_PARKING_NOT_ALLOWED(4048, "Motorbike parking is not allowed for this listing", HttpStatus.BAD_REQUEST),
+    CAR_PARKING_NOT_ALLOWED(4049, "Car parking is not allowed for this listing", HttpStatus.BAD_REQUEST),
+    MOTORBIKE_CAPACITY_EXCEEDED(4050, "Motorbike parking capacity exceeded for the selected period", HttpStatus.CONFLICT),
+    CAR_CAPACITY_EXCEEDED(4051, "Car parking capacity exceeded for the selected period", HttpStatus.CONFLICT),
+    PARKING_CAPACITY_CHANGED(4052, "Parking capacity cannot be reduced below current active reservations", HttpStatus.BAD_REQUEST),
+    RENTAL_ESTIMATE_INVALID(4053, "Rental estimate parameters are invalid", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

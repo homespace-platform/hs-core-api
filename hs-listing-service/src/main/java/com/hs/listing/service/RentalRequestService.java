@@ -37,6 +37,11 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import lombok.extern.slf4j.Slf4j;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hs.listing.dto.estimate.RentalEstimateRequest;
+import com.hs.listing.dto.estimate.RentalEstimateResponse;
+import com.hs.listing.repository.PropertyBranchRepository;
+
 @Slf4j
 @Service
 public class RentalRequestService {
@@ -47,6 +52,10 @@ public class RentalRequestService {
     private final AddressRepository addressRepository;
     private final StorageProperties storageProperties;
     private final Duration holdDuration;
+    private final RentalCostCalculator rentalCostCalculator;
+    private final ParkingReservationService parkingReservationService;
+    private final PropertyBranchRepository propertyBranchRepository;
+    private final ObjectMapper objectMapper;
     private List<RentalHoldProtectionChecker> holdProtectionCheckers = List.of();
 
     @Autowired
@@ -56,18 +65,52 @@ public class RentalRequestService {
             ListingStatusService listingStatusService,
             AddressRepository addressRepository,
             StorageProperties storageProperties,
+            RentalCostCalculator rentalCostCalculator,
+            ParkingReservationService parkingReservationService,
+            PropertyBranchRepository propertyBranchRepository,
+            ObjectMapper objectMapper,
             @Value("${rental.hold-duration-minutes:15}") long holdDurationMinutes) {
         this.rentalRequestRepository = rentalRequestRepository;
         this.listingRepository = listingRepository;
         this.listingStatusService = listingStatusService;
         this.addressRepository = addressRepository;
         this.storageProperties = storageProperties;
+        this.rentalCostCalculator = rentalCostCalculator;
+        this.parkingReservationService = parkingReservationService;
+        this.propertyBranchRepository = propertyBranchRepository;
+        this.objectMapper = objectMapper;
         this.holdDuration = Duration.ofMinutes(Math.max(holdDurationMinutes, 1L));
     }
 
     @Autowired(required = false)
     void setHoldProtectionCheckers(List<RentalHoldProtectionChecker> holdProtectionCheckers) {
         this.holdProtectionCheckers = holdProtectionCheckers != null ? List.copyOf(holdProtectionCheckers) : List.of();
+    }
+
+    // 0. TÍNH TOÁN VÀ ƯỚC TÍNH CHI PHÍ THUÊ (ESTIMATE)
+    @Transactional(readOnly = true)
+    public RentalEstimateResponse estimateRentalCost(RentalEstimateRequest req) {
+        if (req == null || req.listingId() == null || req.listingId().isBlank()) {
+            throw new AppException(ListingErrorCode.RENTAL_ESTIMATE_INVALID, "listingId is required");
+        }
+
+        Listing listing = listingRepository.findByIdAndActiveTrue(req.listingId())
+                .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
+
+        int leaseMonths = req.leaseMonths() != null ? req.leaseMonths() : 1;
+        int occupants = req.occupantCount() != null ? req.occupantCount() : 1;
+        int motorbikes = req.motorbikeCount() != null ? req.motorbikeCount() : 0;
+        int cars = req.carCount() != null ? req.carCount() : 0;
+
+        return rentalCostCalculator.calculate(
+                listing,
+                req.moveInDate(),
+                leaseMonths,
+                occupants,
+                motorbikes,
+                cars,
+                req.negotiatedDepositAmount()
+        );
     }
 
     // 1. TẠO YÊU CẦU THUÊ NHÀ (RENTER)
@@ -100,25 +143,29 @@ public class RentalRequestService {
             throw new AppException(ListingErrorCode.RENTAL_REQUEST_ALREADY_EXISTS);
         }
 
-        // Tính toán tiền cọc hợp lệ theo DepositType của bài đăng
-        BigDecimal effectiveDepositAmount;
-        if (listing.getDepositType() == DepositType.NONE) {
-            effectiveDepositAmount = BigDecimal.ZERO;
-        } else if (listing.getDepositType() == DepositType.MONTH_COUNT) {
-            int months = listing.getDepositMonths() != null && listing.getDepositMonths() > 0
-                    ? listing.getDepositMonths() : 1;
-            effectiveDepositAmount = listing.getPriceAmount() != null
-                    ? listing.getPriceAmount().multiply(BigDecimal.valueOf(months))
-                    : BigDecimal.ZERO;
-        } else if (listing.getDepositType() == DepositType.FIXED_AMOUNT) {
-            effectiveDepositAmount = listing.getDepositAmount() != null
-                    ? listing.getDepositAmount() : BigDecimal.ZERO;
-        } else if (listing.getDepositType() == DepositType.NEGOTIABLE) {
-            // Thỏa thuận: nhận mức cọc do người thuê đề xuất (nếu có)
-            effectiveDepositAmount = req.depositAmount();
-        } else {
-            effectiveDepositAmount = listing.getDepositAmount() != null
-                    ? listing.getDepositAmount() : listing.getPriceAmount();
+        int leaseMonths = req.leaseMonths() != null ? req.leaseMonths() : 1;
+        int occupants = req.occupantCount() != null ? req.occupantCount() : 1;
+        int motorbikes = req.motorbikeCount() != null ? req.motorbikeCount() : 0;
+        int cars = req.carCount() != null ? req.carCount() : 0;
+
+        // Tính toán toàn bộ chi phí và validate backend bằng RentalCostCalculator
+        RentalEstimateResponse estimate = rentalCostCalculator.calculate(
+                listing,
+                req.moveInDate(),
+                leaseMonths,
+                occupants,
+                motorbikes,
+                cars,
+                req.depositAmount()
+        );
+
+        String costBreakdownJson = null;
+        String excludedChargesJson = null;
+        try {
+            costBreakdownJson = objectMapper.writeValueAsString(estimate.predictableCharges());
+            excludedChargesJson = objectMapper.writeValueAsString(estimate.excludedCharges());
+        } catch (Exception e) {
+            log.error("Failed to serialize charge snapshots for rental request", e);
         }
 
         RentalRequest rentalRequest = RentalRequest.builder()
@@ -130,10 +177,19 @@ public class RentalRequestService {
                 .renterPhone(req.renterPhone().trim())
                 .renterEmail(req.renterEmail() != null && !req.renterEmail().isBlank() ? req.renterEmail().trim() : renterEmail)
                 .moveInDate(req.moveInDate())
-                .leaseMonths(req.leaseMonths())
-                .occupantCount(req.occupantCount() != null ? req.occupantCount() : 1)
-                .monthlyRentPrice(listing.getPriceAmount())
-                .depositAmount(effectiveDepositAmount)
+                .leaseMonths(leaseMonths)
+                .occupantCount(occupants)
+                .motorbikeCount(motorbikes)
+                .carCount(cars)
+                .monthlyRentPrice(estimate.effectiveMonthlyRent())
+                .effectiveMonthlyRent(estimate.effectiveMonthlyRent())
+                .estimatedMonthlyCharges(estimate.predictableMonthlyChargesTotal())
+                .estimatedMonthlyTotal(estimate.estimatedMonthlyTotal())
+                .depositAmount(estimate.depositAmount())
+                .estimatedInitialTotal(estimate.estimatedInitialTotal())
+                .estimatedLeaseTotal(estimate.estimatedLeaseTotal())
+                .costBreakdownSnapshot(costBreakdownJson)
+                .excludedChargesSnapshot(excludedChargesJson)
                 .renterNote(req.renterNote() != null && !req.renterNote().isBlank() ? req.renterNote().trim() : null)
                 .status(RentalRequestStatus.PENDING)
                 .build();
@@ -166,6 +222,26 @@ public class RentalRequestService {
             throw new AppException(ListingErrorCode.LISTING_ALREADY_RESERVED);
         }
 
+        // PESSIMISTIC LOCK: Khóa bãi xe của chi nhánh hoặc của listing để ngăn chặn race condition overbooking
+        if (listing.getBranchId() != null) {
+            propertyBranchRepository.findByIdForUpdate(listing.getBranchId())
+                    .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
+        } else {
+            listingRepository.findByIdForUpdate(listing.getId())
+                    .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
+        }
+
+        // Kiểm tra lại slot khả dụng trong khoảng thời gian thuê
+        rentalCostCalculator.calculate(
+                listing,
+                req.getMoveInDate(),
+                req.getLeaseMonths(),
+                req.getOccupantCount(),
+                req.getMotorbikeCount() != null ? req.getMotorbikeCount() : 0,
+                req.getCarCount() != null ? req.getCarCount() : 0,
+                req.getDepositAmount()
+        );
+
         Instant now = Instant.now();
         Instant holdExpiresAt = now.plus(holdDuration);
 
@@ -173,6 +249,9 @@ public class RentalRequestService {
         req.setAcceptedAt(now);
         req.setHoldExpiresAt(holdExpiresAt);
         RentalRequest saved = rentalRequestRepository.save(req);
+
+        // Tạo HELD reservation cho xe máy và ô tô (nếu có số lượng > 0)
+        parkingReservationService.createHeldReservations(req, listing, holdExpiresAt);
 
         // Chuyển bài đăng sang trạng thái RESERVED
         listingStatusService.markReserved(listing, ownerId);
@@ -220,6 +299,9 @@ public class RentalRequestService {
                 ? rejectReq.rejectReason().trim() : "Chủ nhà từ chối yêu cầu thuê");
         RentalRequest saved = rentalRequestRepository.save(req);
 
+        // Giải phóng slot xe (nếu có)
+        parkingReservationService.releaseReservationsForRequest(requestId);
+
         log.info("Owner [{}] REJECTED rental request [{}]", ownerId, requestId);
         return toResponse(saved);
     }
@@ -244,6 +326,9 @@ public class RentalRequestService {
 
         req.setStatus(RentalRequestStatus.CANCELLED_BY_RENTER);
         RentalRequest saved = rentalRequestRepository.save(req);
+
+        // Giải phóng slot xe (nếu có)
+        parkingReservationService.releaseReservationsForRequest(requestId);
 
         log.info("Renter [{}] CANCELLED rental request [{}]", renterId, requestId);
         return toResponse(saved);
@@ -360,6 +445,9 @@ public class RentalRequestService {
             rentalRequestRepository.save(req);
             expiredCount++;
 
+            // Giải phóng/hết hạn reservation
+            parkingReservationService.expireReservationsForRequest(req.getId());
+
             Listing listing = req.getListing();
             if (listing != null && listing.getStatus() == ListingStatus.RESERVED) {
                 listingStatusService.releaseReserved(listing, "SYSTEM", "Hết hạn giữ chỗ mà không hoàn tất thủ tục thuê");
@@ -443,8 +531,17 @@ public class RentalRequestService {
                 .moveInDate(r.getMoveInDate())
                 .leaseMonths(r.getLeaseMonths())
                 .occupantCount(r.getOccupantCount())
+                .motorbikeCount(r.getMotorbikeCount() != null ? r.getMotorbikeCount() : 0)
+                .carCount(r.getCarCount() != null ? r.getCarCount() : 0)
                 .monthlyRentPrice(r.getMonthlyRentPrice())
+                .effectiveMonthlyRent(r.getEffectiveMonthlyRent() != null ? r.getEffectiveMonthlyRent() : r.getMonthlyRentPrice())
+                .estimatedMonthlyCharges(r.getEstimatedMonthlyCharges())
+                .estimatedMonthlyTotal(r.getEstimatedMonthlyTotal())
                 .depositAmount(r.getDepositAmount())
+                .estimatedInitialTotal(r.getEstimatedInitialTotal())
+                .estimatedLeaseTotal(r.getEstimatedLeaseTotal())
+                .costBreakdownSnapshot(r.getCostBreakdownSnapshot())
+                .excludedChargesSnapshot(r.getExcludedChargesSnapshot())
                 .renterNote(r.getRenterNote())
                 .status(r.getStatus())
                 .rejectReason(r.getRejectReason())

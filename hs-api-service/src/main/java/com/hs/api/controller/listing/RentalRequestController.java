@@ -6,6 +6,8 @@ import com.hs.common.context.UserContext;
 import com.hs.common.context.UserContextHolder;
 import com.hs.common.dto.ApiResponse;
 import com.hs.common.dto.PageResponse;
+import com.hs.listing.dto.estimate.RentalEstimateRequest;
+import com.hs.listing.dto.estimate.RentalEstimateResponse;
 import com.hs.listing.dto.request.CreateRentalRequest;
 import com.hs.listing.dto.request.RejectRentalRequest;
 import com.hs.listing.dto.response.RentalRequestResponse;
@@ -35,6 +37,13 @@ public class RentalRequestController {
     // =========================================================================
     // 1. DÀNH CHO KHÁCH HÀNG (RENTER)
     // =========================================================================
+
+    @PostMapping("/estimate")
+    public ApiResponse<RentalEstimateResponse> estimateRentalCost(@RequestBody @Valid RentalEstimateRequest req) {
+        return ApiResponse.<RentalEstimateResponse>builder()
+                .result(rentalRequestService.estimateRentalCost(req))
+                .build();
+    }
 
     @PostMapping
     public ApiResponse<RentalRequestResponse> createRentalRequest(@RequestBody @Valid CreateRentalRequest req) {

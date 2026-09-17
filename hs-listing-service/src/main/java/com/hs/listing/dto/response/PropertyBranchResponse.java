@@ -25,6 +25,8 @@ public class PropertyBranchResponse {
     private String description;
     private String buildingRules;
     private Integer totalUnits;
+    private Integer motorbikeParkingCapacity;
+    private Integer carParkingCapacity;
     private List<BranchChargeResponse> defaultCharges;
     private List<String> buildingAmenityCodes;
     private Instant createdAt;

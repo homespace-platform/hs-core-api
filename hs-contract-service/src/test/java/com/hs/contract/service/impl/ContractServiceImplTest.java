@@ -282,7 +282,8 @@ class ContractServiceImplTest {
                 mock(ContractRenderService.class),
                 mock(DocumentConversionService.class),
                 mock(StorageService.class),
-                new ObjectMapper()
+                new ObjectMapper(),
+                mock(com.hs.listing.service.ParkingReservationService.class)
         );
     }
 }

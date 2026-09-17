@@ -806,6 +806,64 @@ Các mục dưới đây là lỗi/gap hiện có, không phải contract mong m
 
 Khi xử lý các sai lệch này phải sửa đồng bộ option value, mapping tạo payload, mapping load edit, type frontend, enum/validation backend và test; không chỉ đổi nhãn.
 
+
+## 16. Cập nhật Luồng Thuê, Quản lý Bãi xe & Snapshot Chi phí (2026-09-17)
+
+### 16.1. Cấu hình bãi xe (PropertyBranch & Listing)
+- `PropertyBranch`:
+  - `motorbikeParkingCapacity` (Integer, >= 0): Tổng số chỗ xe máy của chi nhánh/tòa nhà.
+  - `carParkingCapacity` (Integer, >= 0): Tổng số chỗ ô tô của chi nhánh/tòa nhà.
+  - Sức chứa khả dụng (`available`) được tính động theo khoảng thời gian thuê: `available = capacity - concurrent_reserved_held_active`. Không lưu cột available tĩnh trong DB.
+- `Listing` (áp dụng cho tin không thuộc branch, hoặc giới hạn cục bộ của tin trong branch):
+  - `maxMotorbikeCount` (Integer, >= 0): Giới hạn chỗ xe máy cho listing riêng lẻ.
+  - `maxCarCount` (Integer, >= 0): Giới hạn chỗ ô tô cho listing riêng lẻ.
+  - Giữ lại `maxVehicles` cũ nhằm tương thích ngược dữ liệu cũ nhưng không làm nguồn chính cho logic mới.
+
+### 16.2. Mô hình ParkingReservation & Lifecycle
+- Entity `ParkingReservation`:
+  - `id`, `branchId` (nullable), `listingId`, `rentalRequestId`, `contractId` (nullable).
+  - `vehicleType`: `MOTORBIKE` | `CAR`.
+  - `quantity`: Số lượng xe đặt chỗ.
+  - `startDate`: Ngày bắt đầu (`moveInDate`).
+  - `endDateExclusive`: Ngày kết thúc không bao gồm (`moveInDate.plusMonths(leaseMonths)`).
+  - `status`: `HELD` | `ACTIVE` | `RELEASED` | `EXPIRED`.
+  - `holdExpiresAt`: Thời điểm hết hạn giữ chỗ (đồng bộ với hold của RentalRequest).
+- Lifecycle:
+  1. `RentalRequest` ở trạng thái `PENDING`: Chỉ kiểm tra tính khả dụng của slot trong khoảng thời gian `[startDate, endDateExclusive)`, **chưa tạo reservation** để chống spam chiếm chỗ.
+  2. Chủ nhà `ACCEPT` yêu cầu thuê:
+     - Khóa bản ghi `PropertyBranch` hoặc `Listing` bằng **Pessimistic Write Lock** (`findByIdForUpdate`).
+     - Tính toán lại đỉnh sử dụng đồng thời (Peak Concurrent Usage) bằng thuật toán Sweep-line.
+     - Nếu còn đủ chỗ: tạo reservation với trạng thái `HELD` và gán `holdExpiresAt`.
+     - Nếu không đủ chỗ: từ chối giao dịch với mã lỗi `MOTORBIKE_CAPACITY_EXCEEDED` / `CAR_CAPACITY_EXCEEDED`.
+  3. Hợp đồng ký kết / `ACTIVE`: Chuyển reservation sang trạng thái `ACTIVE`.
+  4. RentalRequest bị từ chối (`REJECTED`), hủy (`CANCELLED`), hoặc hết hạn (`EXPIRED`): Giải phóng reservation (`RELEASED` / `EXPIRED`).
+
+### 16.3. API Ước tính Chi phí & Động cơ Tính toán (`RentalCostCalculator`)
+- Endpoint: `POST /api/v1/rental-requests/estimate`
+  - Payload: `listingId`, `moveInDate`, `leaseMonths`, `occupantCount`, `motorbikeCount`, `carCount`, `negotiatedDepositAmount`.
+  - Trả về chi tiết:
+    - Giá thuê hiệu lực (`effectiveMonthlyRent`): PERSON_MONTH nhân số người, MONTH/ROOM_MONTH giữ nguyên, không tính giá theo m² cho Nhà/Căn hộ/Phòng.
+    - Slot và phí xe máy, ô tô theo từng loại (`VehicleSlotEstimate`).
+    - Khoản phí cố định hàng tháng (`predictableCharges` & `predictableMonthlyChargesTotal`).
+    - Tiền cọc (`depositAmount`): hỗ trợ `NONE`, `FIXED_AMOUNT`, `MONTH_COUNT` (nhân với `effectiveMonthlyRent`), `NEGOTIABLE`.
+    - Tổng dự kiến hàng tháng (`estimatedMonthlyTotal`), ban đầu (`estimatedInitialTotal`), toàn thời hạn (`estimatedLeaseTotal`).
+    - Các khoản phí chưa bao gồm (`excludedCharges`): điện (kWh), nước (m³/nhà nước), theo giờ, theo thỏa thuận, tự túc, custom.
+- Khi tạo yêu cầu thuê (`POST /api/v1/rental-requests`), backend tính toán lại toàn bộ qua calculator độc lập với dữ liệu client gửi và lưu snapshot bất biến:
+  - `costBreakdownSnapshot` (TEXT/JSON)
+  - `excludedChargesSnapshot` (TEXT/JSON)
+
+### 16.4. Tích hợp Hợp đồng (`ContractDataBuilder`)
+- `ContractDataBuilder` tái sử dụng dữ liệu snapshot từ `RentalRequest` thay vì đọc lại các charge hiện tại của listing, bảo đảm tính bất biến của thỏa thuận tài chính khi tạo hợp đồng.
+
+### 16.5. Domain Error Codes mới
+- `4047 OCCUPANT_LIMIT_EXCEEDED`: Số người ở vượt quá giới hạn của phòng/nhà/căn hộ.
+- `4048 MOTORBIKE_PARKING_NOT_ALLOWED`: Tin đăng/chi nhánh không nhận giữ xe máy.
+- `4049 CAR_PARKING_NOT_ALLOWED`: Tin đăng/chi nhánh không nhận giữ ô tô.
+- `4050 MOTORBIKE_CAPACITY_EXCEEDED`: Số xe máy yêu cầu vượt quá số slot còn trống trong thời gian thuê.
+- `4051 CAR_CAPACITY_EXCEEDED`: Số ô tô yêu cầu vượt quá số slot còn trống trong thời gian thuê.
+- `4052 PARKING_CAPACITY_CHANGED`: Sức chứa bãi xe không thể giảm xuống dưới mức đỉnh đang được giữ/hoạt động.
+- `4053 RENTAL_ESTIMATE_INVALID`: Dữ liệu ước tính chi phí thuê không hợp lệ.
+
 ---
 
 # Prompt bảo trì baseline
@@ -828,3 +886,4 @@ Quy tắc:
 Yêu cầu thay đổi mới:
 
 `[DÁN YÊU CẦU CẦN SỬA TẠI ĐÂY]`
+

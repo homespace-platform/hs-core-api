@@ -23,10 +23,15 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hs.listing.dto.estimate.ExcludedChargeItem;
+import com.hs.listing.dto.estimate.PredictableChargeItem;
 
 /**
  * Gom dữ liệu thật từ hồ sơ hai bên, tin đăng và yêu cầu thuê thành các snapshot của hợp đồng.
@@ -36,11 +41,22 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class ContractDataBuilder {
 
     private final UserRepository userRepository;
     private final AddressRepository addressRepository;
+    private final ObjectMapper objectMapper;
+
+    public ContractDataBuilder(UserRepository userRepository, AddressRepository addressRepository) {
+        this(userRepository, addressRepository, new ObjectMapper());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public ContractDataBuilder(UserRepository userRepository, AddressRepository addressRepository, ObjectMapper objectMapper) {
+        this.userRepository = userRepository;
+        this.addressRepository = addressRepository;
+        this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
+    }
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
@@ -66,7 +82,7 @@ public class ContractDataBuilder {
                 .property(buildProperty(listing))
                 .lease(buildLease(request, listing))
                 .financial(buildFinancial(request, listing))
-                .charges(buildCharges(listing, occupants))
+                .charges(buildCharges(request, listing, occupants))
                 .equipments(buildEquipments(listing))
                 .meters(buildMeters(listing, occupants))
                 .build();
@@ -176,7 +192,9 @@ public class ContractDataBuilder {
 
     private Map<String, Object> buildFinancial(RentalRequest request, Listing listing) {
         Map<String, Object> map = new LinkedHashMap<>();
-        BigDecimal rent = request.getMonthlyRentPrice() != null ? request.getMonthlyRentPrice() : BigDecimal.ZERO;
+        BigDecimal rent = request.getEffectiveMonthlyRent() != null
+                ? request.getEffectiveMonthlyRent()
+                : (request.getMonthlyRentPrice() != null ? request.getMonthlyRentPrice() : BigDecimal.ZERO);
         BigDecimal deposit = request.getDepositAmount() != null ? request.getDepositAmount() : rent;
 
         map.put("amountValue", rent.toPlainString());
@@ -195,16 +213,76 @@ public class ContractDataBuilder {
 
     // --- Bảng phí dịch vụ ---
 
-    /**
-     * Mỗi dòng gồm 3 cột hiển thị trong Word, kèm {@code estimatedMonthlyAmount} phục vụ bước
-     * tính tiền thanh toán đợt đầu. Phí theo công tơ (điện kWh, nước m³) không ước tính trước
-     * được nên để {@code null} và sẽ chốt vào hóa đơn cuối tháng.
-     */
-    private List<Map<String, Object>> buildCharges(Listing listing, int occupants) {
+    private List<Map<String, Object>> buildCharges(RentalRequest request, Listing listing, int occupants) {
+        if (request != null && isNotBlank(request.getCostBreakdownSnapshot())) {
+            try {
+                List<PredictableChargeItem> predictable = objectMapper.readValue(
+                        request.getCostBreakdownSnapshot(),
+                        new TypeReference<List<PredictableChargeItem>>() {}
+                );
+                List<ExcludedChargeItem> excluded = Collections.emptyList();
+                if (isNotBlank(request.getExcludedChargesSnapshot())) {
+                    excluded = objectMapper.readValue(
+                            request.getExcludedChargesSnapshot(),
+                            new TypeReference<List<ExcludedChargeItem>>() {}
+                    );
+                }
+
+                List<Map<String, Object>> rows = new ArrayList<>();
+                for (PredictableChargeItem item : predictable) {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("name", item.displayName());
+                    String amountAndMethod;
+                    if (item.includedInRent()) {
+                        amountAndMethod = "Đã bao gồm trong giá thuê";
+                    } else if ("FREE".equals(item.billingMethod())) {
+                        amountAndMethod = "Miễn phí";
+                    } else if ("PER_PERSON_MONTH".equals(item.billingMethod())) {
+                        amountAndMethod = ContractRenderService.formatVND(item.unitAmount()) + " / người / tháng × "
+                                + occupants + " người = " + ContractRenderService.formatVND(item.amount()) + " / tháng";
+                    } else if ("PER_VEHICLE_MONTH".equals(item.billingMethod())) {
+                        amountAndMethod = ContractRenderService.formatVND(item.unitAmount()) + " / xe / tháng × "
+                                + item.quantity() + " xe = " + ContractRenderService.formatVND(item.amount()) + " / tháng";
+                    } else if ("PER_MONTH".equals(item.billingMethod())) {
+                        amountAndMethod = ContractRenderService.formatVND(item.amount()) + " / tháng";
+                    } else {
+                        amountAndMethod = firstNonBlank(item.note(), ContractRenderService.formatVND(item.amount()) + " / tháng");
+                    }
+                    row.put("amountAndMethod", amountAndMethod);
+                    row.put("note", firstNonBlank(item.note(), "-"));
+                    row.put("estimatedMonthlyAmount", item.amount() != null ? item.amount().toPlainString() : null);
+                    row.put("chargeType", item.chargeType());
+                    row.put("billingMethod", item.billingMethod());
+                    rows.add(row);
+                }
+
+                for (ExcludedChargeItem item : excluded) {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("name", item.displayName());
+                    row.put("amountAndMethod", firstNonBlank(item.reason(), "Chưa bao gồm trong giá thuê"));
+                    row.put("note", "Chưa bao gồm");
+                    row.put("estimatedMonthlyAmount", null);
+                    row.put("chargeType", item.chargeType());
+                    row.put("billingMethod", item.billingMethod());
+                    rows.add(row);
+                }
+                return rows;
+            } catch (Exception e) {
+                log.warn("Failed to parse charge snapshots from RentalRequest, falling back to listing charges", e);
+            }
+        }
+
+        return buildChargesFromListing(request, listing, occupants);
+    }
+
+    private List<Map<String, Object>> buildChargesFromListing(RentalRequest request, Listing listing, int occupants) {
         List<Map<String, Object>> rows = new ArrayList<>();
         if (listing == null || listing.getCharges() == null || listing.getCharges().isEmpty()) {
             return rows;
         }
+
+        int motorbikes = request != null && request.getMotorbikeCount() != null ? request.getMotorbikeCount() : 0;
+        int cars = request != null && request.getCarCount() != null ? request.getCarCount() : 0;
 
         List<ListingCharge> sorted = new ArrayList<>(listing.getCharges());
         sorted.sort(Comparator.comparing(c -> c.getSortOrder() == null ? Integer.MAX_VALUE : c.getSortOrder()));
@@ -212,10 +290,10 @@ public class ContractDataBuilder {
         for (ListingCharge charge : sorted) {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("name", chargeName(charge));
-            row.put("amountAndMethod", chargeAmountAndMethod(charge, occupants, listing.getAreaM2()));
+            row.put("amountAndMethod", chargeAmountAndMethod(charge, occupants, motorbikes, cars, listing.getAreaM2()));
             row.put("note", firstNonBlank(charge.getDescription(), "-"));
 
-            BigDecimal estimated = estimateMonthlyAmount(charge, occupants, listing.getAreaM2());
+            BigDecimal estimated = estimateMonthlyAmount(charge, occupants, motorbikes, cars, listing.getAreaM2());
             row.put("estimatedMonthlyAmount", estimated == null ? null : estimated.toPlainString());
             row.put("chargeType", charge.getChargeType() == null ? null : charge.getChargeType().name());
             row.put("billingMethod", charge.getBillingMethod() == null ? null : charge.getBillingMethod().name());
@@ -246,7 +324,7 @@ public class ContractDataBuilder {
         };
     }
 
-    private static String chargeAmountAndMethod(ListingCharge charge, int occupants, BigDecimal areaM2) {
+    private static String chargeAmountAndMethod(ListingCharge charge, int occupants, int motorbikes, int cars, BigDecimal areaM2) {
         if (charge.isIncludedInRent() || charge.getBillingMethod() == BillingMethod.INCLUDED) {
             return "Đã bao gồm trong giá thuê";
         }
@@ -267,7 +345,13 @@ public class ContractDataBuilder {
             case PER_KWH -> price == null ? "Theo chỉ số công tơ" : price + " / kWh (theo chỉ số công tơ)";
             case PER_M3 -> price == null ? "Theo chỉ số đồng hồ" : price + " / m³ (theo chỉ số đồng hồ)";
             case PER_HOUR -> price == null ? "Theo giờ sử dụng" : price + " / giờ";
-            case PER_VEHICLE_MONTH -> price == null ? "Theo số xe đăng ký" : price + " / xe / tháng";
+            case PER_VEHICLE_MONTH -> {
+                int count = charge.getChargeType() == ChargeType.MOTORBIKE_PARKING ? motorbikes : cars;
+                if (price == null) yield "Theo số xe đăng ký";
+                BigDecimal total = amount.multiply(BigDecimal.valueOf(count));
+                yield price + " / xe / tháng × " + count + " xe = "
+                        + ContractRenderService.formatVND(total) + " / tháng";
+            }
             case PER_MONTH -> price == null ? "Theo tháng" : price + " / tháng";
             case PER_PERSON_MONTH -> {
                 if (amount == null) yield "Theo số người ở";
@@ -288,11 +372,11 @@ public class ContractDataBuilder {
         };
     }
 
-    /**
-     * Số tiền cố định ước tính được mỗi tháng. Trả về {@code null} khi khoản phí đo bằng công tơ
-     * hoặc do bên thuê tự chi trả, vì không thể chốt trước khi vào ở.
-     */
     public static BigDecimal estimateMonthlyAmount(ListingCharge charge, int occupants, BigDecimal areaM2) {
+        return estimateMonthlyAmount(charge, occupants, 0, 0, areaM2);
+    }
+
+    public static BigDecimal estimateMonthlyAmount(ListingCharge charge, int occupants, int motorbikes, int cars, BigDecimal areaM2) {
         if (charge.isIncludedInRent() || charge.getAmount() == null) {
             return BigDecimal.ZERO;
         }
@@ -305,8 +389,17 @@ public class ContractDataBuilder {
             case PER_MONTH -> charge.getAmount();
             case PER_PERSON_MONTH -> charge.getAmount().multiply(BigDecimal.valueOf(occupants));
             case PER_M2_MONTH -> areaM2 == null ? null : charge.getAmount().multiply(areaM2);
-            // Điện/nước theo công tơ, phí theo giờ, theo xe, thỏa thuận: chốt ở hóa đơn cuối tháng.
-            case PER_KWH, PER_M3, STATE_WATER_RATE, PER_HOUR, PER_VEHICLE_MONTH,
+            case PER_VEHICLE_MONTH -> {
+                if (charge.getChargeType() == ChargeType.MOTORBIKE_PARKING) {
+                    yield charge.getAmount().multiply(BigDecimal.valueOf(motorbikes));
+                }
+                if (charge.getChargeType() == ChargeType.CAR_PARKING) {
+                    yield charge.getAmount().multiply(BigDecimal.valueOf(cars));
+                }
+                yield null;
+            }
+            // Điện/nước theo công tơ, phí theo giờ, thỏa thuận: chốt ở hóa đơn cuối tháng.
+            case PER_KWH, PER_M3, STATE_WATER_RATE, PER_HOUR,
                  NOT_APPLICABLE, NEGOTIABLE, CUSTOM -> null;
         };
     }

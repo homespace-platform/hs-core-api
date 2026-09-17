@@ -138,6 +138,8 @@ public class ListingService {
         l.setCategory(r.category());
         l.setAvailableFrom(r.availableFrom());
         l.setAreaM2(r.areaM2());
+        l.setMaxMotorbikeCount(r.maxMotorbikeCount());
+        l.setMaxCarCount(r.maxCarCount());
         l.setPriceAmount(p.amount());
         l.setCurrency(
                 p.currency() == null || p.currency().isBlank() ? "VND" : p.currency().trim().toUpperCase(Locale.ROOT));
