@@ -30,6 +30,12 @@ public class UpdateContractRevisionRequest {
 
     private Map<String, Object> meters;
 
+    private Map<String, Object> initialPayment;
+
+    private List<Map<String, Object>> amenities;
+
+    private Map<String, Object> policies;
+
     private String specialTerms;
 
     private String revisionNote;

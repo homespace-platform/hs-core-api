@@ -58,6 +58,18 @@ public class ContractRevision extends BaseEntity {
     @Column(name = "special_terms", columnDefinition = "TEXT")
     private String specialTerms;
 
+    @Column(name = "initial_payment_snapshot", columnDefinition = "TEXT")
+    private String initialPaymentSnapshot;
+
+    @Column(name = "amenities_snapshot", columnDefinition = "TEXT")
+    private String amenitiesSnapshot;
+
+    @Column(name = "policies_snapshot", columnDefinition = "TEXT")
+    private String policiesSnapshot;
+
+    @Column(name = "schema_version")
+    private Integer schemaVersion;
+
     @Column(name = "revision_note", length = 500)
     private String revisionNote;
 

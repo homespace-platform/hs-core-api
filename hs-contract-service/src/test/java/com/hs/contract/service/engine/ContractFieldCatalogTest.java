@@ -16,7 +16,7 @@ class ContractFieldCatalogTest {
 
     @Test
     void testCatalogDefinitionsCountAndFields() {
-        assertEquals(38, catalog.getAllDefinitions().size(), "Catalog must have exactly 38 field definitions");
+        assertEquals(52, catalog.getAllDefinitions().size(), "Catalog must have exactly 52 field definitions");
 
         // Valid fields from CONTRACT_PROMPT.md
         assertTrue(catalog.isValidPlaceholder("contract.number"));
@@ -57,6 +57,21 @@ class ContractFieldCatalogTest {
         assertTrue(catalog.isValidPlaceholder("meters.waterInitial"));
         assertTrue(catalog.isValidPlaceholder("#chargesTable"));
         assertTrue(catalog.isValidPlaceholder("#equipmentTable"));
+        // V2 placeholders
+        assertTrue(catalog.isValidPlaceholder("contract.schemaVersion"));
+        assertTrue(catalog.isValidPlaceholder("contract.revisionNumber"));
+        assertTrue(catalog.isValidPlaceholder("contract.specialTerms"));
+        assertTrue(catalog.isValidPlaceholder("property.listingCode"));
+        assertTrue(catalog.isValidPlaceholder("property.rentalScope"));
+        assertTrue(catalog.isValidPlaceholder("property.maxOccupants"));
+        assertTrue(catalog.isValidPlaceholder("property.maxVehicles"));
+        assertTrue(catalog.isValidPlaceholder("payment.initial.status"));
+        assertTrue(catalog.isValidPlaceholder("payment.initial.paidAt"));
+        assertTrue(catalog.isValidPlaceholder("payment.initial.transactionCode"));
+        assertTrue(catalog.isValidPlaceholder("payment.initial.totalAmount"));
+        assertTrue(catalog.isValidPlaceholder("#propertyFeaturesTable"));
+        assertTrue(catalog.isValidPlaceholder("#amenitiesTable"));
+        assertTrue(catalog.isValidPlaceholder("#initialPaymentTable"));
 
         // Invalid / removed fields
         assertFalse(catalog.isValidPlaceholder("lease.rentalMode"), "lease.rentalMode must not be valid");

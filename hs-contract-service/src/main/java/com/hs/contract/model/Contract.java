@@ -73,6 +73,9 @@ public class Contract extends BaseEntity {
     @Column(name = "paid_at")
     private Instant paidAt;
 
+    @Column(name = "landlord_confirmed_at")
+    private Instant landlordConfirmedAt;
+
     @Column(name = "signed_at")
     private Instant signedAt;
 

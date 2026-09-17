@@ -27,6 +27,7 @@ public class ContractResponse {
     private ContractPaymentStatus paymentStatus;
     private String rentalPaymentId;
     private Instant paidAt;
+    private Instant landlordConfirmedAt;
     private Instant signedAt;
     private Instant createdAt;
     private Instant updatedAt;

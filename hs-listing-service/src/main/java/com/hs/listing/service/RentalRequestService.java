@@ -46,6 +46,9 @@ import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.listing.dto.estimate.RentalEstimateRequest;
 import com.hs.listing.dto.estimate.RentalEstimateResponse;
+import com.hs.listing.dto.snapshot.ListingSnapshotDto;
+import com.hs.listing.model.constant.ListingCategory;
+import com.hs.listing.model.*;
 import com.hs.listing.repository.PropertyBranchRepository;
 
 @Slf4j
@@ -276,6 +279,7 @@ public class RentalRequestService {
         req.setStatus(RentalRequestStatus.ACCEPTED);
         req.setAcceptedAt(now);
         req.setHoldExpiresAt(holdExpiresAt);
+        req.setListingSnapshot(buildListingSnapshotJson(listing));
         RentalRequest saved = rentalRequestRepository.save(req);
 
         // Tạo HELD reservation cho xe máy và ô tô (nếu có số lượng > 0)
@@ -648,6 +652,7 @@ public class RentalRequestService {
                 .estimatedLeaseTotal(r.getEstimatedLeaseTotal())
                 .costBreakdownSnapshot(r.getCostBreakdownSnapshot())
                 .excludedChargesSnapshot(r.getExcludedChargesSnapshot())
+                .listingSnapshot(r.getListingSnapshot())
                 .renterNote(r.getRenterNote())
                 .status(r.getStatus())
                 .rejectReason(r.getRejectReason())
@@ -657,5 +662,294 @@ public class RentalRequestService {
                 .createdAt(r.getCreatedAt())
                 .updatedAt(r.getUpdatedAt())
                 .build();
+    }
+
+    public String buildListingSnapshotJson(Listing listing) {
+        if (listing == null) return null;
+        try {
+            ListingSnapshotDto dto = buildListingSnapshotDto(listing);
+            return objectMapper.writeValueAsString(dto);
+        } catch (Exception e) {
+            log.error("Failed to build listing snapshot for listingId={}", listing.getId(), e);
+            return null;
+        }
+    }
+
+    public ListingSnapshotDto buildListingSnapshotDto(Listing listing) {
+        if (listing == null) return null;
+
+        PropertyBranch branch = null;
+        if (listing.getBranchId() != null) {
+            branch = propertyBranchRepository.findById(listing.getBranchId()).orElse(null);
+        }
+
+        String unitNumber = resolveUnitNumber(listing);
+        String floor = resolveFloor(listing);
+        String buildingName = resolveBuildingName(listing);
+        String baseAddress = addressRepository.findByListingIdAndActiveTrue(listing.getId())
+                .map(Address::getFullAddress)
+                .orElse("");
+        if (baseAddress.isBlank() && branch != null && branch.getAddress() != null) {
+            baseAddress = branch.getAddress().getFullAddress() != null ? branch.getAddress().getFullAddress() : "";
+        }
+        String fullAddress = joinNonBlank(", ", unitNumber, floor, buildingName, baseAddress);
+
+        String buildingRules = null;
+        if (branch != null && branch.getBuildingRules() != null && !branch.getBuildingRules().isBlank()) {
+            buildingRules = branch.getBuildingRules().trim();
+        }
+
+        List<ListingSnapshotDto.AmenityItemSnapshot> amenitySnapshots = new ArrayList<>();
+        Set<String> seenAmenityCodes = new HashSet<>();
+        if (listing.getAmenities() != null) {
+            for (Amenity a : listing.getAmenities()) {
+                if (a != null && a.getCode() != null && seenAmenityCodes.add(a.getCode().toUpperCase())) {
+                    amenitySnapshots.add(ListingSnapshotDto.AmenityItemSnapshot.builder()
+                            .code(a.getCode())
+                            .name(a.getName())
+                            .scope("Riêng trong căn/phòng/nhà")
+                            .sourceType("LISTING")
+                            .build());
+                }
+            }
+        }
+        if (branch != null && branch.getBuildingAmenities() != null) {
+            for (Amenity a : branch.getBuildingAmenities()) {
+                if (a != null && a.getCode() != null && seenAmenityCodes.add(a.getCode().toUpperCase())) {
+                    amenitySnapshots.add(ListingSnapshotDto.AmenityItemSnapshot.builder()
+                            .code(a.getCode())
+                            .name(a.getName())
+                            .scope("Dùng chung")
+                            .sourceType("SHARED_PROPERTY")
+                            .build());
+                }
+            }
+        }
+
+        List<String> customAmenities = new ArrayList<>();
+        if (listing.getCustomAmenities() != null) {
+            for (ListingCustomAmenity ca : listing.getCustomAmenities()) {
+                if (ca != null && ca.getName() != null && !ca.getName().isBlank()) {
+                    customAmenities.add(ca.getName().trim());
+                }
+            }
+        }
+
+        List<ListingSnapshotDto.FurnishingItemSnapshot> furnishingSnapshots = new ArrayList<>();
+        if (listing.getFurnishings() != null) {
+            List<ListingFurnishingAsset> sorted = new ArrayList<>(listing.getFurnishings());
+            sorted.sort(Comparator.comparing(f -> f.getSortOrder() != null ? f.getSortOrder() : Integer.MAX_VALUE));
+            for (ListingFurnishingAsset f : sorted) {
+                furnishingSnapshots.add(ListingSnapshotDto.FurnishingItemSnapshot.builder()
+                        .itemCode(f.getItemCode())
+                        .assetName(f.getAssetName())
+                        .quantity(f.getQuantity() != null ? f.getQuantity() : 1)
+                        .handoverCondition(f.getHandoverCondition() != null ? f.getHandoverCondition().name() : "GOOD")
+                        .conditionNote(f.getConditionNote())
+                        .sortOrder(f.getSortOrder())
+                        .build());
+            }
+        }
+
+        List<ListingSnapshotDto.ChargeItemSnapshot> chargeSnapshots = new ArrayList<>();
+        if (listing.getCharges() != null) {
+            List<ListingCharge> sorted = new ArrayList<>(listing.getCharges());
+            sorted.sort(Comparator.comparing(c -> c.getSortOrder() != null ? c.getSortOrder() : Integer.MAX_VALUE));
+            for (ListingCharge c : sorted) {
+                chargeSnapshots.add(ListingSnapshotDto.ChargeItemSnapshot.builder()
+                        .chargeType(c.getChargeType() != null ? c.getChargeType().name() : null)
+                        .billingMethod(c.getBillingMethod() != null ? c.getBillingMethod().name() : null)
+                        .amount(c.getAmount())
+                        .currency(c.getCurrency())
+                        .unit(c.getUnit())
+                        .includedInRent(c.isIncludedInRent())
+                        .customName(c.getCustomName())
+                        .description(c.getDescription())
+                        .sortOrder(c.getSortOrder())
+                        .build());
+            }
+        }
+
+        ListingSnapshotDto.ApartmentDetailSnapshot aptSnapshot = null;
+        if (listing.getApartmentDetail() != null) {
+            ListingApartmentDetail apt = listing.getApartmentDetail();
+            aptSnapshot = ListingSnapshotDto.ApartmentDetailSnapshot.builder()
+                    .projectName(apt.getProjectName())
+                    .buildingBlock(apt.getBuildingBlock())
+                    .unitCode(apt.getUnitCode())
+                    .floorNumber(apt.getFloorNumber())
+                    .buildingTotalFloors(apt.getBuildingTotalFloors())
+                    .bedroomCount(apt.getBedroomCount())
+                    .bathroomCount(apt.getBathroomCount())
+                    .livingRoomCount(apt.getLivingRoomCount())
+                    .kitchenCount(apt.getKitchenCount())
+                    .furnishingStatus(apt.getFurnishingStatus() != null ? apt.getFurnishingStatus().name() : null)
+                    .mainDoorDirection(apt.getMainDoorDirection())
+                    .balconyDirection(apt.getBalconyDirection())
+                    .viewDescription(apt.getViewDescription())
+                    .maxOccupants(apt.getMaxOccupants())
+                    .legalStatus(apt.getLegalStatus())
+                    .build();
+        }
+
+        ListingSnapshotDto.HouseDetailSnapshot houseSnapshot = null;
+        if (listing.getHouseDetail() != null) {
+            ListingHouseDetail h = listing.getHouseDetail();
+            houseSnapshot = ListingSnapshotDto.HouseDetailSnapshot.builder()
+                    .landAreaM2(h.getLandAreaM2())
+                    .frontageWidthM(h.getFrontageWidthM())
+                    .lengthM(h.getLengthM())
+                    .accessRoadWidthM(h.getAccessRoadWidthM())
+                    .frontageCount(h.getFrontageCount())
+                    .totalFloors(h.getTotalFloors())
+                    .bedroomCount(h.getBedroomCount())
+                    .bathroomCount(h.getBathroomCount())
+                    .livingRoomCount(h.getLivingRoomCount())
+                    .kitchenCount(h.getKitchenCount())
+                    .hasRooftop(h.getHasRooftop())
+                    .hasGarage(h.getHasGarage())
+                    .accessType(h.getAccessType())
+                    .maxOccupants(h.getMaxOccupants())
+                    .maxVehicles(h.getMaxVehicles())
+                    .furnishingStatus(h.getFurnishingStatus() != null ? h.getFurnishingStatus().name() : null)
+                    .legalStatus(h.getLegalStatus())
+                    .rentalScopeDescription(h.getRentalScopeDescription())
+                    .rentedFloorFrom(h.getRentedFloorFrom())
+                    .rentedFloorTo(h.getRentedFloorTo())
+                    .build();
+        }
+
+        ListingSnapshotDto.RoomDetailSnapshot roomSnapshot = null;
+        if (listing.getRoomDetail() != null) {
+            ListingRoomDetail r = listing.getRoomDetail();
+            roomSnapshot = ListingSnapshotDto.RoomDetailSnapshot.builder()
+                    .roomCode(r.getRoomCode())
+                    .floorNumber(r.getFloorNumber())
+                    .restroomType(r.getRestroomType() != null ? r.getRestroomType().name() : null)
+                    .kitchenType(r.getKitchenType() != null ? r.getKitchenType().name() : null)
+                    .hasWindow(r.getHasWindow())
+                    .balconyType(r.resolvedBalconyType() != null ? r.resolvedBalconyType().name() : null)
+                    .hasMezzanine(r.getHasMezzanine())
+                    .furnishingStatus(r.getFurnishingStatus() != null ? r.getFurnishingStatus().name() : null)
+                    .accessType(r.getAccessType() != null ? r.getAccessType().name() : null)
+                    .accessHoursType(r.getAccessHoursType() != null ? r.getAccessHoursType().name() : null)
+                    .electricMeterType(r.getElectricMeterType() != null ? r.getElectricMeterType().name() : null)
+                    .waterMeterType(r.getWaterMeterType() != null ? r.getWaterMeterType().name() : null)
+                    .maxOccupants(r.getMaxOccupants())
+                    .maxVehicles(r.getMaxVehicles())
+                    .parkingPolicy(r.getParkingPolicy() != null ? r.getParkingPolicy().name() : null)
+                    .build();
+        }
+
+        String scopeDesc = null;
+        if (listing.getHouseDetail() != null && listing.getHouseDetail().getRentalScopeDescription() != null) {
+            scopeDesc = listing.getHouseDetail().getRentalScopeDescription();
+        } else if (listing.getCategory() == ListingCategory.ROOM) {
+            scopeDesc = "Thuê phòng trọ khép kín / dùng chung";
+        } else if (listing.getCategory() == ListingCategory.APARTMENT) {
+            scopeDesc = "Thuê toàn bộ căn hộ chung cư";
+        } else if (listing.getCategory() == ListingCategory.HOUSE) {
+            scopeDesc = "Thuê toàn bộ nhà nguyên căn";
+        }
+
+        Integer maxVehicles = null;
+        if (listing.getRoomDetail() != null && listing.getRoomDetail().getMaxVehicles() != null) {
+            maxVehicles = listing.getRoomDetail().getMaxVehicles();
+        } else if (listing.getHouseDetail() != null && listing.getHouseDetail().getMaxVehicles() != null) {
+            maxVehicles = listing.getHouseDetail().getMaxVehicles();
+        } else if (listing.getMaxMotorbikeCount() != null || listing.getMaxCarCount() != null) {
+            int total = (listing.getMaxMotorbikeCount() != null ? listing.getMaxMotorbikeCount() : 0)
+                      + (listing.getMaxCarCount() != null ? listing.getMaxCarCount() : 0);
+            if (total > 0) maxVehicles = total;
+        }
+
+        return ListingSnapshotDto.builder()
+                .schemaVersion(1)
+                .listingId(listing.getId())
+                .listingCode(listing.getId() != null && listing.getId().length() >= 8 ? listing.getId().substring(0, 8).toUpperCase() : listing.getId())
+                .category(listing.getCategory())
+                .categoryLabel(listing.getCategory() != null ? listing.getCategory().name() : "")
+                .title(listing.getTitle())
+                .fullAddress(fullAddress)
+                .unitNumber(unitNumber)
+                .floor(floor)
+                .buildingName(buildingName)
+                .areaM2(listing.getAreaM2())
+                .priceAmount(listing.getPriceAmount())
+                .currency(listing.getCurrency())
+                .priceUnit(listing.getPriceUnit() != null ? listing.getPriceUnit().name() : "MONTH")
+                .paymentCycle(listing.getPaymentCycle() != null ? listing.getPaymentCycle().name() : "MONTHLY")
+                .depositType(listing.getDepositType() != null ? listing.getDepositType().name() : "ONE_MONTH")
+                .depositAmount(listing.getDepositAmount())
+                .depositMonths(listing.getDepositMonths())
+                .minimumLeaseMonths(listing.getMinimumLeaseMonths())
+                .vatIncluded(listing.getVatIncluded())
+                .managementFeeIncluded(listing.isManagementFeeIncluded())
+                .maxOccupants(listing.getApartmentDetail() != null ? listing.getApartmentDetail().getMaxOccupants() :
+                        (listing.getRoomDetail() != null ? listing.getRoomDetail().getMaxOccupants() :
+                                (listing.getHouseDetail() != null ? listing.getHouseDetail().getMaxOccupants() : null)))
+                .maxVehicles(maxVehicles)
+                .maxMotorbikeCount(listing.getMaxMotorbikeCount())
+                .maxCarCount(listing.getMaxCarCount())
+                .rentalScopeDescription(scopeDesc)
+                .apartmentDetail(aptSnapshot)
+                .houseDetail(houseSnapshot)
+                .roomDetail(roomSnapshot)
+                .buildingRules(buildingRules)
+                .amenities(amenitySnapshots)
+                .customAmenities(customAmenities)
+                .furnishings(furnishingSnapshots)
+                .charges(chargeSnapshots)
+                .capturedAt(Instant.now())
+                .build();
+    }
+
+    private static String resolveUnitNumber(Listing listing) {
+        if (listing.getApartmentDetail() != null && isNotBlank(listing.getApartmentDetail().getUnitCode())) {
+            return "Căn hộ " + listing.getApartmentDetail().getUnitCode().trim();
+        }
+        if (listing.getRoomDetail() != null && isNotBlank(listing.getRoomDetail().getRoomCode())) {
+            return "Phòng " + listing.getRoomDetail().getRoomCode().trim();
+        }
+        return "";
+    }
+
+    private static String resolveFloor(Listing listing) {
+        Integer floor = null;
+        if (listing.getApartmentDetail() != null) {
+            floor = listing.getApartmentDetail().getFloorNumber();
+        } else if (listing.getRoomDetail() != null) {
+            floor = listing.getRoomDetail().getFloorNumber();
+        } else if (listing.getHouseDetail() != null && listing.getHouseDetail().getTotalFloors() != null) {
+            return "Nhà " + listing.getHouseDetail().getTotalFloors() + " tầng";
+        }
+        return floor != null ? "Tầng " + floor : "";
+    }
+
+    private static String resolveBuildingName(Listing listing) {
+        if (listing.getApartmentDetail() != null) {
+            return joinNonBlank(" ",
+                    nullToEmpty(listing.getApartmentDetail().getProjectName()),
+                    nullToEmpty(listing.getApartmentDetail().getBuildingBlock()));
+        }
+        return "";
+    }
+
+    private static String joinNonBlank(String separator, String... parts) {
+        List<String> kept = new ArrayList<>();
+        for (String part : parts) {
+            if (isNotBlank(part)) {
+                kept.add(part.trim());
+            }
+        }
+        return String.join(separator, kept);
+    }
+
+    private static boolean isNotBlank(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 }

@@ -36,6 +36,7 @@ import com.hs.contract.service.engine.ContractRenderService;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.RentalPayment;
 import com.hs.listing.model.RentalRequest;
+import com.hs.listing.model.constant.ListingCategory;
 import com.hs.listing.model.constant.RentalPaymentStatus;
 import com.hs.listing.model.constant.RentalPaymentType;
 import com.hs.listing.model.constant.RentalRequestStatus;
@@ -195,19 +196,20 @@ public class ContractServiceImpl implements ContractService {
                 .templateVersionId(templateVersion.getId())
                 .status(ContractStatus.DRAFT)
                 .rentalPaymentId(payment.getId())
-                .paymentStatus(ContractPaymentStatus.PAID_MOCK)
+                .paymentStatus(payment.getStatus() == RentalPaymentStatus.PAID ? ContractPaymentStatus.PAID : ContractPaymentStatus.PAID_MOCK)
                 .paidAt(payment.getPaidAt())
                 .build();
 
         contract = contractRepository.save(contract);
 
-        // 6. Chụp dữ liệu thật của hai bên, tin đăng và yêu cầu thuê vào Revision 1
-        ContractDataBuilder.ContractSnapshots snapshots = dataBuilder.build(rentalRequest, listing);
+        // 6. Chụp dữ liệu thật của hai bên, tin đăng, yêu cầu thuê và khoản thanh toán ban đầu vào Revision 1
+        ContractDataBuilder.ContractSnapshots snapshots = dataBuilder.build(rentalRequest, listing, payment);
 
         ContractRevision revision = ContractRevision.builder()
                 .contract(contract)
                 .revisionNumber(1)
                 .templateVersionId(templateVersion.getId())
+                .schemaVersion(2)
                 .landlordSnapshot(toJson(snapshots.getLandlord()))
                 .tenantSnapshot(toJson(snapshots.getTenant()))
                 .propertySnapshot(toJson(snapshots.getProperty()))
@@ -216,7 +218,10 @@ public class ContractServiceImpl implements ContractService {
                 .chargesSnapshot(toJson(snapshots.getCharges()))
                 .equipmentSnapshot(toJson(snapshots.getEquipments()))
                 .initialMetersSnapshot(toJson(snapshots.getMeters()))
-                .revisionNote("Bản chụp dữ liệu khởi tạo từ hồ sơ hai bên, tin đăng và yêu cầu thuê.")
+                .initialPaymentSnapshot(toJson(snapshots.getInitialPayment()))
+                .amenitiesSnapshot(toJson(snapshots.getAmenities()))
+                .policiesSnapshot(toJson(snapshots.getPolicies()))
+                .revisionNote("Bản chụp dữ liệu khởi tạo từ hồ sơ hai bên, tin đăng và khoản thanh toán ban đầu.")
                 .build();
 
         revision = revisionRepository.save(revision);
@@ -399,6 +404,7 @@ public class ContractServiceImpl implements ContractService {
                 .contract(contract)
                 .revisionNumber(nextRev)
                 .templateVersionId(contract.getTemplateVersionId())
+                .schemaVersion(2)
                 .landlordSnapshot(toJson(request.getLandlord()))
                 .tenantSnapshot(toJson(request.getTenant()))
                 .propertySnapshot(toJson(request.getProperty()))
@@ -407,6 +413,9 @@ public class ContractServiceImpl implements ContractService {
                 .chargesSnapshot(toJson(request.getCharges()))
                 .equipmentSnapshot(toJson(request.getEquipments()))
                 .initialMetersSnapshot(toJson(request.getMeters()))
+                .initialPaymentSnapshot(toJson(request.getInitialPayment()))
+                .amenitiesSnapshot(toJson(request.getAmenities()))
+                .policiesSnapshot(toJson(request.getPolicies()))
                 .specialTerms(request.getSpecialTerms())
                 .revisionNote(request.getRevisionNote() != null ? request.getRevisionNote() : "Cập nhật thỏa thuận hợp đồng (Revision " + nextRev + ")")
                 .build();
@@ -457,6 +466,18 @@ public class ContractServiceImpl implements ContractService {
         int total = 0;
         int filled = 0;
 
+        ListingCategory category = templateVersion.getTemplate() != null ? templateVersion.getTemplate().getCategory() : null;
+        if (category == null && dataModel.get("property") instanceof Map<?, ?> propMap) {
+            Object catObj = propMap.get("category");
+            if (catObj instanceof ListingCategory lc) {
+                category = lc;
+            } else if (catObj instanceof String catStr && !catStr.isBlank()) {
+                try {
+                    category = ListingCategory.valueOf(catStr);
+                } catch (IllegalArgumentException ignored) {}
+            }
+        }
+
         for (String raw : placeholders) {
             String key = ContractFieldCatalog.normalizeKey(raw);
             if (key.isBlank() || !seen.add(key)) {
@@ -469,19 +490,28 @@ public class ContractServiceImpl implements ContractService {
 
             total++;
             Object value = ContractRenderService.resolvePath(dataModel, key);
-            // Legacy template tags — treat blank as filled so they don't block.
-            if (("landlord.idIssueDate".equals(key) || "landlord.idIssuePlace".equals(key)
-                    || "tenant.idIssueDate".equals(key) || "tenant.idIssuePlace".equals(key)
-                    || "lease.rentalMode".equals(key)
-                    || "tenant.organizationName".equals(key) || "tenant.representativeName".equals(key)
-                    || "tenant.representativePosition".equals(key))) {
+            boolean isRequired = fieldCatalog.isRequiredFor(key, category)
+                    && !"landlord.idIssueDate".equals(key)
+                    && !"landlord.idIssuePlace".equals(key)
+                    && !"tenant.idIssueDate".equals(key)
+                    && !"tenant.idIssuePlace".equals(key)
+                    && !"lease.rentalMode".equals(key)
+                    && !"tenant.organizationName".equals(key)
+                    && !"tenant.representativeName".equals(key)
+                    && !"tenant.representativePosition".equals(key)
+                    && !"contract.specialTerms".equals(key)
+                    && !"contract.revisionNumber".equals(key)
+                    && !"contract.schemaVersion".equals(key)
+                    && !key.startsWith("meters.")
+                    && !key.startsWith("payment.initial.");
+
+            if (value != null && !String.valueOf(value).isBlank()) {
                 filled++;
-                continue;
-            }
-            if (value == null || String.valueOf(value).isBlank()) {
-                missing.add(toMissingField(key));
+            } else if (!isRequired) {
+                // Trường tùy chọn hoặc không bắt buộc cho loại hình này - không chặn hoàn tất hợp đồng
+                filled++;
             } else {
-                filled++;
+                missing.add(toMissingField(key));
             }
         }
 
@@ -492,6 +522,10 @@ public class ContractServiceImpl implements ContractService {
         if (dynamicTables.contains("#equipmentTable")
                 && isEmptyList(fromJson(revision.getEquipmentSnapshot(), CHARGE_LIST_TYPE))) {
             warnings.add("Tin đăng chưa khai báo nội thất bàn giao nên biên bản trang thiết bị sẽ để trống.");
+        }
+        if (dynamicTables.contains("#amenitiesTable")
+                && isEmptyList(fromJson(revision.getAmenitiesSnapshot(), CHARGE_LIST_TYPE))) {
+            warnings.add("Tin đăng chưa khai báo tiện ích nên bảng tiện ích trong hợp đồng sẽ để trống.");
         }
 
         return ContractCompletenessResponse.builder()
@@ -651,6 +685,7 @@ public class ContractServiceImpl implements ContractService {
         documentRepository.saveAll(readyDocuments);
 
         contract.setStatus(ContractStatus.PENDING_REVIEW);
+        contract.setLandlordConfirmedAt(Instant.now());
         contract = contractRepository.save(contract);
         log.info("Sent contract id={} revision={} to tenant id={}", contractId, revision.getRevisionNumber(), contract.getTenantId());
         return toContractResponse(contract);
@@ -833,6 +868,23 @@ public class ContractServiceImpl implements ContractService {
     }
 
     private ContractPaymentStatus paymentStatusOf(Contract contract) {
+        if (contract.getRentalPaymentId() != null && rentalPaymentRepository != null) {
+            Optional<RentalPayment> paymentOpt = rentalPaymentRepository.findById(contract.getRentalPaymentId());
+            if (paymentOpt.isPresent()) {
+                RentalPaymentStatus rps = paymentOpt.get().getStatus();
+                if (rps == RentalPaymentStatus.PAID) {
+                    return ContractPaymentStatus.PAID;
+                } else if (rps == RentalPaymentStatus.PAID_MOCK) {
+                    return ContractPaymentStatus.PAID_MOCK;
+                } else if (rps == RentalPaymentStatus.REFUNDED) {
+                    return ContractPaymentStatus.REFUNDED;
+                } else if (rps == RentalPaymentStatus.FAILED) {
+                    return ContractPaymentStatus.FAILED;
+                } else {
+                    return ContractPaymentStatus.UNPAID;
+                }
+            }
+        }
         return contract.getPaymentStatus() != null
                 ? contract.getPaymentStatus()
                 : ContractPaymentStatus.UNPAID;
@@ -883,7 +935,15 @@ public class ContractServiceImpl implements ContractService {
                 fromJson(revision.getChargesSnapshot(), CHARGE_LIST_TYPE),
                 fromJson(revision.getEquipmentSnapshot(), CHARGE_LIST_TYPE),
                 fromJson(revision.getInitialMetersSnapshot(), MAP_TYPE),
-                contract.getContractNumber(), LocalDate.now(), "Thành phố Hồ Chí Minh"
+                fromJson(revision.getInitialPaymentSnapshot(), MAP_TYPE),
+                fromJson(revision.getAmenitiesSnapshot(), CHARGE_LIST_TYPE),
+                fromJson(revision.getPoliciesSnapshot(), MAP_TYPE),
+                revision.getSpecialTerms(),
+                revision.getSchemaVersion() != null ? revision.getSchemaVersion() : 2,
+                revision.getRevisionNumber(),
+                contract.getContractNumber(),
+                LocalDate.now(),
+                "Thành phố Hồ Chí Minh"
         );
     }
 
@@ -968,6 +1028,7 @@ public class ContractServiceImpl implements ContractService {
                 .rentalPaymentId(c.getRentalPaymentId())
                 .paymentStatus(paymentStatusOf(c))
                 .paidAt(c.getPaidAt())
+                .landlordConfirmedAt(c.getLandlordConfirmedAt())
                 .signedAt(c.getSignedAt())
                 .createdAt(c.getCreatedAt())
                 .updatedAt(c.getUpdatedAt())
@@ -985,10 +1046,14 @@ public class ContractServiceImpl implements ContractService {
                 .property(fromJson(r.getPropertySnapshot(), new TypeReference<Map<String, Object>>() {}))
                 .lease(fromJson(r.getLeaseSnapshot(), new TypeReference<Map<String, Object>>() {}))
                 .financial(fromJson(r.getFinancialSnapshot(), new TypeReference<Map<String, Object>>() {}))
+                .initialPayment(fromJson(r.getInitialPaymentSnapshot(), new TypeReference<Map<String, Object>>() {}))
+                .amenities(fromJson(r.getAmenitiesSnapshot(), new TypeReference<List<Map<String, Object>>>() {}))
+                .policies(fromJson(r.getPoliciesSnapshot(), new TypeReference<Map<String, Object>>() {}))
                 .charges(fromJson(r.getChargesSnapshot(), new TypeReference<List<Map<String, Object>>>() {}))
                 .equipments(fromJson(r.getEquipmentSnapshot(), new TypeReference<List<Map<String, Object>>>() {}))
                 .meters(fromJson(r.getInitialMetersSnapshot(), new TypeReference<Map<String, Object>>() {}))
                 .specialTerms(r.getSpecialTerms())
+                .schemaVersion(r.getSchemaVersion() != null ? r.getSchemaVersion() : 2)
                 .revisionNote(r.getRevisionNote())
                 .createdAt(r.getCreatedAt())
                 .build();

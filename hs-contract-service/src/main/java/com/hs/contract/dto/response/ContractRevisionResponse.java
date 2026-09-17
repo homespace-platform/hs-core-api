@@ -26,6 +26,10 @@ public class ContractRevisionResponse {
     private List<Map<String, Object>> charges;
     private List<Map<String, Object>> equipments;
     private Map<String, Object> meters;
+    private Map<String, Object> initialPayment;
+    private List<Map<String, Object>> amenities;
+    private Map<String, Object> policies;
+    private Integer schemaVersion;
     private String specialTerms;
     private String revisionNote;
     private Instant createdAt;

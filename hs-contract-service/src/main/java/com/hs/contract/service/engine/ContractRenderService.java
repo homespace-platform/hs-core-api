@@ -37,7 +37,7 @@ public class ContractRenderService {
     }
 
     /**
-     * Chuẩn bị data model hoàn chỉnh cho poi-tl từ các trường snapshot của ContractRevision
+     * Chuẩn bị data model V1 (tương thích ngược) cho poi-tl từ các trường snapshot của ContractRevision
      */
     public Map<String, Object> buildDataModelFromSnapshots(
             Map<String, Object> landlord,
@@ -52,24 +52,59 @@ public class ContractRenderService {
             LocalDate signingDate,
             String signingCity
     ) {
+        return buildDataModelFromSnapshots(
+                landlord, tenant, property, lease, financial, charges, equipments, meters,
+                null, null, null, null, 1, 1, contractNumber, signingDate, signingCity
+        );
+    }
+
+    /**
+     * Chuẩn bị data model V2 hoàn chỉnh cho poi-tl bao gồm cả các bảng động và trường mới V2.
+     */
+    public Map<String, Object> buildDataModelFromSnapshots(
+            Map<String, Object> landlord,
+            Map<String, Object> tenant,
+            Map<String, Object> property,
+            Map<String, Object> lease,
+            Map<String, Object> financial,
+            List<Map<String, Object>> charges,
+            List<Map<String, Object>> equipments,
+            Map<String, Object> meters,
+            Map<String, Object> initialPayment,
+            List<Map<String, Object>> amenities,
+            Map<String, Object> policies,
+            String specialTerms,
+            Integer schemaVersion,
+            Integer revisionNumber,
+            String contractNumber,
+            LocalDate signingDate,
+            String signingCity
+    ) {
         Map<String, Object> model = new HashMap<>();
 
-        // poi-tl resolves {{landlord.fullName}} as nested maps, not flat "landlord.fullName" keys.
         putLandlordFields(model, landlord);
         putTenantFields(model, tenant);
         putPropertyFields(model, property);
         putLeaseFields(model, lease);
         putFinancialFields(model, financial);
         putMeterFields(model, meters);
+        putInitialPaymentFields(model, initialPayment, financial);
 
         Map<String, Object> contract = new LinkedHashMap<>();
         contract.put("number", contractNumber != null ? contractNumber : "HD-" + System.currentTimeMillis());
         contract.put("signingDate", signingDate != null ? signingDate.format(DATE_FORMATTER) : LocalDate.now().format(DATE_FORMATTER));
         contract.put("signingCity", signingCity != null ? signingCity : "Thành phố Hồ Chí Minh");
+        contract.put("schemaVersion", schemaVersion != null ? String.valueOf(schemaVersion) : "2");
+        contract.put("revisionNumber", revisionNumber != null ? String.valueOf(revisionNumber) : "1");
+        contract.put("specialTerms", specialTerms != null ? specialTerms : "");
         model.put("contract", contract);
 
+        // Bảng động
         model.put("chargesTable", buildChargesTable(charges));
         model.put("equipmentTable", buildEquipmentTable(equipments));
+        model.put("propertyFeaturesTable", buildPropertyFeaturesTable(property));
+        model.put("amenitiesTable", buildAmenitiesTable(amenities));
+        model.put("initialPaymentTable", buildInitialPaymentTable(initialPayment, financial));
 
         return model;
     }
@@ -114,16 +149,19 @@ public class ContractRenderService {
         tenant.put("phone", "0987654321");
         tenant.put("email", "tranthibinh.tenant@example.com");
         tenant.put("occupantCount", 2);
-        tenant.put("motorbikeCount", 0);
+        tenant.put("motorbikeCount", 1);
         tenant.put("carCount", 0);
 
-        Map<String, Object> property = Map.of(
-                "fullAddress", "Tầng 12, Căn hộ A12-08, Tòa tháp Landmark, 720A Điện Biên Phủ, Phường 22, Quận Bình Thạnh, TP.HCM",
-                "areaText", "75 m²",
-                "propertyType", "Căn hộ chung cư",
-                "unitNumber", "A12-08",
-                "floor", "Tầng 12"
-        );
+        Map<String, Object> property = new LinkedHashMap<>();
+        property.put("listingCode", "HS-2026-DEMO");
+        property.put("rentalScope", "Thuê toàn bộ căn hộ chung cư");
+        property.put("fullAddress", "Tầng 12, Căn hộ A12-08, Tòa tháp Landmark, 720A Điện Biên Phủ, Phường 22, Quận Bình Thạnh, TP.HCM");
+        property.put("areaText", "75 m²");
+        property.put("propertyType", "Căn hộ chung cư");
+        property.put("unitNumber", "A12-08");
+        property.put("floor", "Tầng 12");
+        property.put("maxOccupants", 4);
+        property.put("maxVehicles", 2);
 
         Map<String, Object> lease = Map.of(
                 "startDateText", "15/09/2026",
@@ -134,14 +172,35 @@ public class ContractRenderService {
         );
 
         Map<String, Object> financial = Map.of(
+                "amountValue", "15000000",
                 "amountNumber", "15.000.000 VNĐ/tháng",
                 "amountWords", "Mười lăm triệu đồng chẵn",
                 "paymentCycle", "Hàng tháng",
                 "paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng",
                 "paymentMethod", "Thanh toán trực tuyến qua hệ thống HomeSpace",
+                "depositAmountValue", "15000000",
                 "depositAmountNumber", "15.000.000 VNĐ",
                 "depositAmountWords", "Mười lăm triệu đồng chẵn",
                 "depositDescription", "Tiền đặt cọc tương đương 01 tháng tiền thuê nhà. Khoản tiền cọc này được bên A hoàn trả đầy đủ cho bên B ngay sau khi chấm dứt hợp đồng sau khi đã khấu trừ các chi phí sinh hoạt phát sinh chưa thanh toán (nếu có)."
+        );
+
+        Map<String, Object> initialPayment = Map.of(
+                "status", "Đã thanh toán",
+                "paidAt", "15/09/2026 10:30:00",
+                "provider", "MOCK",
+                "transactionCode", "TXN-20260915-DEMO",
+                "monthlyRent", "15.000.000 VNĐ",
+                "monthlyCharges", "120.000 VNĐ",
+                "depositAmount", "15.000.000 VNĐ",
+                "totalAmount", "30.120.000 VNĐ",
+                "currency", "VND"
+        );
+
+        List<Map<String, Object>> amenities = List.of(
+                Map.of("index", 1, "code", "WIFI", "name", "Internet Wifi tốc độ cao", "scope", "Riêng trong căn/phòng/nhà", "costText", "Đã bao gồm trong giá thuê", "conditionText", "Gói cước 150 Mbps"),
+                Map.of("index", 2, "code", "PARKING", "name", "Chỗ để xe máy", "scope", "Dùng chung", "costText", "120.000 VNĐ / xe / tháng", "conditionText", "Đăng ký 01 xe máy với ban quản lý"),
+                Map.of("index", 3, "code", "ELEVATOR", "name", "Thang máy thẻ từ", "scope", "Dùng chung", "costText", "Đã bao gồm trong giá thuê", "conditionText", "Theo nội quy tòa nhà"),
+                Map.of("index", 4, "code", "PETS_ALLOWED", "name", "Được phép nuôi thú cưng", "scope", "Riêng trong căn/phòng/nhà", "costText", "Miễn phí", "conditionText", "Bên B chịu trách nhiệm giữ gìn vệ sinh, tiếng ồn và bồi thường thiệt hại nếu có")
         );
 
         List<Map<String, Object>> charges = List.of(
@@ -166,6 +225,7 @@ public class ContractRenderService {
 
         return buildDataModelFromSnapshots(
                 landlord, tenant, property, lease, financial, charges, equipments, meters,
+                initialPayment, amenities, Map.of(), "Bên B giữ gìn an ninh trật tự sau 23h.", 2, 1,
                 "HD-20260905-DEMO", LocalDate.now(), "Thành phố Hồ Chí Minh"
         );
     }
@@ -175,7 +235,6 @@ public class ContractRenderService {
         Map<String, Object> landlord = new LinkedHashMap<>();
         landlord.put("fullName", getStr(src, "fullName", ""));
         landlord.put("idNumber", getStr(src, "idNumber", ""));
-        // Backward-compat for older Word templates that still have these tags.
         landlord.put("idIssueDate", getStr(src, "idIssueDate", ""));
         landlord.put("idIssuePlace", getStr(src, "idIssuePlace", ""));
         landlord.put("permanentAddress", getStr(src, "permanentAddress", ""));
@@ -203,11 +262,16 @@ public class ContractRenderService {
     private void putPropertyFields(Map<String, Object> model, Map<String, Object> p) {
         Map<String, Object> src = p != null ? p : Map.of();
         Map<String, Object> property = new LinkedHashMap<>();
+        property.put("listingCode", getStr(src, "listingCode", ""));
+        property.put("rentalScope", getStr(src, "rentalScope", ""));
         property.put("fullAddress", getStr(src, "fullAddress", ""));
         property.put("areaText", getStr(src, "areaText", ""));
         property.put("propertyType", getStr(src, "propertyType", ""));
         property.put("unitNumber", getStr(src, "unitNumber", ""));
         property.put("floor", getStr(src, "floor", ""));
+        property.put("buildingName", getStr(src, "buildingName", ""));
+        property.put("maxOccupants", String.valueOf(src.getOrDefault("maxOccupants", "")));
+        property.put("maxVehicles", String.valueOf(src.getOrDefault("maxVehicles", "")));
         model.put("property", property);
     }
 
@@ -245,6 +309,148 @@ public class ContractRenderService {
         meters.put("electricityInitial", getStr(src, "electricityInitial", ""));
         meters.put("waterInitial", getStr(src, "waterInitial", ""));
         model.put("meters", meters);
+    }
+
+    private void putInitialPaymentFields(Map<String, Object> model, Map<String, Object> initialPayment, Map<String, Object> financial) {
+        Map<String, Object> src = initialPayment != null ? initialPayment : Map.of();
+        Map<String, Object> initial = new LinkedHashMap<>();
+        initial.put("status", getStr(src, "status", "Đã thanh toán"));
+        initial.put("paidAt", getStr(src, "paidAt", ""));
+        initial.put("provider", getStr(src, "provider", "HomeSpace"));
+        initial.put("transactionCode", getStr(src, "transactionCode", ""));
+        initial.put("monthlyRent", getStr(src, "monthlyRent", getStr(financial, "amountNumber", "")));
+        initial.put("monthlyCharges", getStr(src, "monthlyCharges", "0 VNĐ"));
+        initial.put("depositAmount", getStr(src, "depositAmount", getStr(financial, "depositAmountNumber", "")));
+        initial.put("totalAmount", getStr(src, "totalAmount", ""));
+        initial.put("currency", getStr(src, "currency", "VND"));
+
+        Map<String, Object> payment = new LinkedHashMap<>();
+        payment.put("initial", initial);
+        model.put("payment", payment);
+    }
+
+    /**
+     * Bảng động đặc điểm bất động sản {{#propertyFeaturesTable}}
+     */
+    @SuppressWarnings("unchecked")
+    private TableRenderData buildPropertyFeaturesTable(Map<String, Object> property) {
+        RowRenderData header = Rows.of("Đặc điểm", "Giá trị")
+                .bgColor("F2F4F7")
+                .textColor("1D2939")
+                .textBold()
+                .create();
+
+        List<RowRenderData> rows = new ArrayList<>();
+
+        if (property != null && property.get("features") instanceof List<?> list && !list.isEmpty()) {
+            for (Object obj : list) {
+                if (obj instanceof Map<?, ?> map) {
+                    String name = String.valueOf(map.get("featureName"));
+                    String val = String.valueOf(map.get("featureValue"));
+                    if (!val.isBlank() && !"null".equalsIgnoreCase(val)) {
+                        rows.add(Rows.of(name, val).create());
+                    }
+                }
+            }
+        }
+
+        if (rows.isEmpty() && property != null) {
+            // Tự sinh từ các trường chuẩn nếu không có danh sách features chi tiết
+            addFeatureRowIfPresent(rows, "Loại hình bất động sản", property.get("propertyType"));
+            addFeatureRowIfPresent(rows, "Địa chỉ chi tiết", property.get("fullAddress"));
+            addFeatureRowIfPresent(rows, "Diện tích sử dụng", property.get("areaText"));
+            addFeatureRowIfPresent(rows, "Số căn / phòng", property.get("unitNumber"));
+            addFeatureRowIfPresent(rows, "Tầng", property.get("floor"));
+            addFeatureRowIfPresent(rows, "Phạm vi cho thuê", property.get("rentalScope"));
+            addFeatureRowIfPresent(rows, "Số người ở tối đa", property.get("maxOccupants"));
+            addFeatureRowIfPresent(rows, "Số phương tiện tối đa", property.get("maxVehicles"));
+        }
+
+        if (rows.isEmpty()) {
+            rows.add(Rows.of("Thông số chi tiết", "Theo hiện trạng bàn giao thực tế").create());
+        }
+
+        List<RowRenderData> allRows = new ArrayList<>();
+        allRows.add(header);
+        allRows.addAll(rows);
+        return Tables.create(allRows.toArray(new RowRenderData[0]));
+    }
+
+    private void addFeatureRowIfPresent(List<RowRenderData> rows, String label, Object val) {
+        if (val != null && !String.valueOf(val).isBlank() && !"null".equalsIgnoreCase(String.valueOf(val))) {
+            rows.add(Rows.of(label, String.valueOf(val)).create());
+        }
+    }
+
+    /**
+     * Bảng động tiện ích & quyền sử dụng {{#amenitiesTable}}
+     */
+    private TableRenderData buildAmenitiesTable(List<Map<String, Object>> amenities) {
+        RowRenderData header = Rows.of("STT", "Tiện ích / Quyền sử dụng", "Phạm vi", "Chi phí", "Điều kiện / Ghi chú")
+                .bgColor("F2F4F7")
+                .textColor("1D2939")
+                .textBold()
+                .create();
+
+        List<RowRenderData> rows = new ArrayList<>();
+        if (amenities != null && !amenities.isEmpty()) {
+            int stt = 1;
+            for (Map<String, Object> a : amenities) {
+                String name = getStr(a, "name", "");
+                String scope = getStr(a, "scope", "Riêng trong căn/phòng/nhà");
+                String cost = getStr(a, "costText", "Đã bao gồm trong giá thuê");
+                String condition = getStr(a, "conditionText", "Theo nội quy sử dụng");
+                rows.add(Rows.of(String.valueOf(stt++), name, scope, cost, condition).create());
+            }
+        } else {
+            rows.add(Rows.of("1", "Tiện ích cơ bản theo tài sản thuê", "Theo phạm vi bàn giao", "Đã bao gồm trong giá thuê", "Sử dụng đúng mục đích").create());
+        }
+
+        List<RowRenderData> allRows = new ArrayList<>();
+        allRows.add(header);
+        allRows.addAll(rows);
+        return Tables.create(allRows.toArray(new RowRenderData[0]));
+    }
+
+    /**
+     * Bảng động phụ lục thanh toán ban đầu {{#initialPaymentTable}}
+     */
+    @SuppressWarnings("unchecked")
+    private TableRenderData buildInitialPaymentTable(Map<String, Object> initialPayment, Map<String, Object> financial) {
+        RowRenderData header = Rows.of("Khoản thanh toán", "Số tiền", "Trạng thái / Ghi chú")
+                .bgColor("F2F4F7")
+                .textColor("1D2939")
+                .textBold()
+                .create();
+
+        List<RowRenderData> rows = new ArrayList<>();
+
+        if (initialPayment != null && initialPayment.get("rows") instanceof List<?> list && !list.isEmpty()) {
+            for (Object obj : list) {
+                if (obj instanceof Map<?, ?> m) {
+                    String item = String.valueOf(m.get("itemName"));
+                    String amt = String.valueOf(m.get("amountText"));
+                    String note = String.valueOf(m.get("note"));
+                    rows.add(Rows.of(item, amt, note).create());
+                }
+            }
+        }
+
+        if (rows.isEmpty()) {
+            String rent = getStr(initialPayment, "monthlyRent", getStr(financial, "amountNumber", "—"));
+            String deposit = getStr(initialPayment, "depositAmount", getStr(financial, "depositAmountNumber", "—"));
+            String total = getStr(initialPayment, "totalAmount", "—");
+            String paidAt = getStr(initialPayment, "paidAt", "Trước thời điểm lập hợp đồng");
+
+            rows.add(Rows.of("Tiền thuê kỳ đầu", rent, "Đã thanh toán").create());
+            rows.add(Rows.of("Tiền đặt cọc", deposit, "Đã thanh toán").create());
+            rows.add(Rows.of("Tổng cộng thanh toán", total, "Hoàn tất lúc: " + paidAt).create());
+        }
+
+        List<RowRenderData> allRows = new ArrayList<>();
+        allRows.add(header);
+        allRows.addAll(rows);
+        return Tables.create(allRows.toArray(new RowRenderData[0]));
     }
 
     /**
@@ -305,6 +511,7 @@ public class ContractRenderService {
     }
 
     private String getStr(Map<String, Object> map, String key, String defaultVal) {
+        if (map == null) return defaultVal;
         Object val = map.get(key);
         return val != null ? String.valueOf(val) : defaultVal;
     }

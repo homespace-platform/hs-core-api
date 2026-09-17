@@ -34,6 +34,7 @@ public record RentalRequestResponse(
         BigDecimal estimatedLeaseTotal,
         String costBreakdownSnapshot,
         String excludedChargesSnapshot,
+        String listingSnapshot,
         String renterNote,
         RentalRequestStatus status,
         String rejectReason,

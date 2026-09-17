@@ -72,10 +72,28 @@ public class ContractFieldCatalog {
         add("contract.number", "Số hợp đồng", "Pháp lý hợp đồng", "TEXT", "Mã hiệu hợp đồng tự sinh", "HD-20260905-001", ALL);
         add("contract.signingDate", "Ngày ký kết", "Pháp lý hợp đồng", "DATE", "Ngày hai bên ký kết hợp đồng", "05/09/2026", ALL);
         add("contract.signingCity", "Địa điểm ký", "Pháp lý hợp đồng", "TEXT", "Tỉnh/Thành phố lập hợp đồng", "Thành phố Hồ Chí Minh", OPTIONAL);
+        add("contract.schemaVersion", "Phiên bản schema hợp đồng", "Pháp lý hợp đồng", "NUMBER", "Phiên bản cấu trúc dữ liệu hợp đồng (mặc định 2)", "2", OPTIONAL);
+        add("contract.revisionNumber", "Số lần sửa đổi hợp đồng", "Pháp lý hợp đồng", "NUMBER", "Số thứ tự phiên bản sửa đổi của hợp đồng", "1", OPTIONAL);
+        add("contract.specialTerms", "Điều khoản đặc biệt / Thỏa thuận riêng", "Pháp lý hợp đồng", "TEXT", "Nội dung điều khoản thỏa thuận bổ sung giữa hai bên", "Bên B không được gây ồn sau 23h.", OPTIONAL);
+
+        // --- Bổ sung bất động sản V2 ---
+        add("property.listingCode", "Mã tin đăng", "Bất động sản", "TEXT", "Mã hiệu quản lý của tin đăng", "HS-2026-001", OPTIONAL);
+        add("property.rentalScope", "Phạm vi cho thuê", "Bất động sản", "TEXT", "Mô tả phạm vi thuê tài sản", "Thuê toàn bộ căn hộ chung cư", OPTIONAL);
+        add("property.maxOccupants", "Số người tối đa cho phép", "Bất động sản", "NUMBER", "Số lượng người lưu trú tối đa cho phép", "4", OPTIONAL);
+        add("property.maxVehicles", "Số phương tiện tối đa cho phép", "Bất động sản", "NUMBER", "Số lượng phương tiện tối đa cho phép gửi", "2", OPTIONAL);
+
+        // --- Thanh toán ban đầu V2 ---
+        add("payment.initial.status", "Trạng thái thanh toán ban đầu", "Thanh toán ban đầu", "TEXT", "Trạng thái khoản thanh toán ban đầu trước khi ký hợp đồng", "Đã thanh toán", OPTIONAL);
+        add("payment.initial.paidAt", "Thời điểm thanh toán ban đầu", "Thanh toán ban đầu", "TEXT", "Thời gian hoàn tất thanh toán ban đầu", "15/09/2026 14:30:00", OPTIONAL);
+        add("payment.initial.transactionCode", "Mã giao dịch thanh toán", "Thanh toán ban đầu", "TEXT", "Mã giao dịch thanh toán trực tuyến", "TXN-20260915-001", OPTIONAL);
+        add("payment.initial.totalAmount", "Tổng số tiền đã thanh toán", "Thanh toán ban đầu", "TEXT", "Tổng khoản tiền người thuê đã thanh toán", "20.000.000 VNĐ", OPTIONAL);
 
         // --- Bảng động poi-tl ---
         add("#chargesTable", "Bảng biểu phí dịch vụ", "Bảng động", "DYNAMIC_TABLE", "Bảng chi tiết các khoản tiền điện, nước, gửi xe, quản lý... tự động mở rộng theo thỏa thuận", "[Bảng 3 cột: Khoản phí | Đơn giá / Cách tính | Ghi chú]", ALL);
         add("#equipmentTable", "Bảng trang thiết bị bàn giao", "Bảng động", "DYNAMIC_TABLE", "Biên bản danh mục trang thiết bị nội thất bàn giao", "[Bảng 4 cột: STT | Tên tài sản | Số lượng | Hiện trạng]", OPTIONAL);
+        add("#propertyFeaturesTable", "Bảng đặc điểm bất động sản", "Bảng động", "DYNAMIC_TABLE", "Bảng chi tiết các thông số kỹ thuật và đặc điểm của tài sản cho thuê theo loại hình", "[Bảng 2 cột: Đặc điểm | Giá trị]", OPTIONAL);
+        add("#amenitiesTable", "Bảng tiện ích & quyền sử dụng", "Bảng động", "DYNAMIC_TABLE", "Bảng chi tiết các tiện ích và quyền sử dụng đi kèm", "[Bảng 5 cột: STT | Tiện ích / Quyền sử dụng | Phạm vi | Chi phí | Điều kiện / Ghi chú]", OPTIONAL);
+        add("#initialPaymentTable", "Bảng phụ lục thanh toán ban đầu", "Bảng động", "DYNAMIC_TABLE", "Bảng xác nhận các khoản tiền người thuê đã thanh toán trước thời điểm ký hợp đồng", "[Bảng 3 cột: Khoản thanh toán | Số tiền | Trạng thái / Ghi chú]", OPTIONAL);
     }
 
     private static void add(String key, String label, String group, String dataType, String description,
@@ -104,6 +122,13 @@ public class ContractFieldCatalog {
         return DEFINITIONS.values().stream()
                 .filter(def -> isRequiredFor(def, category))
                 .toList();
+    }
+
+    public boolean isRequiredFor(String rawKey, ListingCategory category) {
+        String cleanKey = normalizeKey(rawKey);
+        TemplateFieldDefinition def = DEFINITIONS.get(cleanKey);
+        if (def == null) return false;
+        return isRequiredFor(def, category);
     }
 
     private static boolean isRequiredFor(TemplateFieldDefinition def, ListingCategory category) {

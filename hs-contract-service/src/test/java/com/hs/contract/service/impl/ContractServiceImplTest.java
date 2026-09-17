@@ -345,7 +345,7 @@ class ContractServiceImplTest {
         when(rentalPaymentRepository.findByRentalRequestIdAndType("req-1", RentalPaymentType.INITIAL_PAYMENT))
                 .thenReturn(Optional.of(payment));
         when(templateVersionRepository.findById("ver-1")).thenReturn(Optional.of(tplVer));
-        when(dataBuilder.build(any(), any())).thenReturn(ContractDataBuilder.ContractSnapshots.builder().build());
+        when(dataBuilder.build(any(), any(), any())).thenReturn(ContractDataBuilder.ContractSnapshots.builder().build());
         when(contractRepository.save(any(Contract.class))).thenAnswer(inv -> inv.getArgument(0));
         when(revisionRepository.save(any(ContractRevision.class))).thenAnswer(inv -> {
             ContractRevision r = inv.getArgument(0);
@@ -437,6 +437,194 @@ class ContractServiceImplTest {
         assertEquals(ContractStatus.ACTIVE, response.getStatus());
         assertEquals(RentalRequestStatus.COMPLETED, rentalRequest.getStatus());
         verify(listingStatusService).markRentedByContract("listing-1", "tenant-1");
+    }
+
+    @Test
+    void createDraft_succeedsWhenInitialPaymentIsPaidReal() {
+        ContractRepository contractRepository = mock(ContractRepository.class);
+        RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
+        RentalPaymentRepository rentalPaymentRepository = mock(RentalPaymentRepository.class);
+        ContractTemplateVersionRepository templateVersionRepository = mock(ContractTemplateVersionRepository.class);
+        ContractRevisionRepository revisionRepository = mock(ContractRevisionRepository.class);
+        ContractDataBuilder dataBuilder = mock(ContractDataBuilder.class);
+
+        ContractServiceImpl service = new ContractServiceImpl(
+                contractRepository,
+                revisionRepository,
+                mock(ContractDocumentRepository.class),
+                templateVersionRepository,
+                rentalRequestRepository,
+                mock(ListingStatusService.class),
+                dataBuilder,
+                new ContractFieldCatalog(),
+                mock(ContractRenderService.class),
+                mock(DocumentConversionService.class),
+                mock(StorageService.class),
+                new ObjectMapper(),
+                mock(com.hs.listing.service.ParkingReservationService.class),
+                rentalPaymentRepository
+        );
+
+        Listing listing = Listing.builder().id("listing-1").ownerId("landlord-1").build();
+        RentalRequest req = RentalRequest.builder()
+                .id("req-1")
+                .listing(listing)
+                .ownerId("landlord-1")
+                .renterId("tenant-1")
+                .status(RentalRequestStatus.ACCEPTED)
+                .build();
+
+        RentalPayment payment = RentalPayment.builder()
+                .id("pay-real-1")
+                .rentalRequestId("req-1")
+                .status(RentalPaymentStatus.PAID)
+                .paidAt(java.time.Instant.now())
+                .totalAmount(new BigDecimal("15000000"))
+                .build();
+
+        com.hs.contract.model.ContractTemplate template = com.hs.contract.model.ContractTemplate.builder()
+                .id("tpl-1")
+                .name("Mẫu hợp đồng thuê chuẩn")
+                .build();
+
+        ContractTemplateVersion tplVer = ContractTemplateVersion.builder()
+                .id("ver-1")
+                .template(template)
+                .placeholdersJson("[]")
+                .build();
+
+        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+        when(contractRepository.findByRentalRequestId("req-1")).thenReturn(Optional.empty());
+        when(rentalPaymentRepository.findByRentalRequestIdAndType("req-1", RentalPaymentType.INITIAL_PAYMENT))
+                .thenReturn(Optional.of(payment));
+        when(templateVersionRepository.findById("ver-1")).thenReturn(Optional.of(tplVer));
+        when(dataBuilder.build(any(), any(), any())).thenReturn(ContractDataBuilder.ContractSnapshots.builder().build());
+        when(contractRepository.save(any(Contract.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(revisionRepository.save(any(ContractRevision.class))).thenAnswer(inv -> {
+            ContractRevision r = inv.getArgument(0);
+            r.setId("rev-1");
+            return r;
+        });
+
+        UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
+
+        var response = service.createDraft(new CreateContractDraftRequest("req-1", "ver-1"));
+        org.junit.jupiter.api.Assertions.assertNotNull(response);
+        assertEquals("pay-real-1", response.getRentalPaymentId());
+        assertEquals(ContractPaymentStatus.PAID, response.getPaymentStatus());
+    }
+
+    @Test
+    void assessCompleteness_doesNotBlockWhenMetersAreEmpty() {
+        ContractRepository contractRepository = mock(ContractRepository.class);
+        ContractRevisionRepository revisionRepository = mock(ContractRevisionRepository.class);
+        ContractTemplateVersionRepository templateVersionRepository = mock(ContractTemplateVersionRepository.class);
+        ContractRenderService renderService = mock(ContractRenderService.class);
+
+        ContractServiceImpl service = new ContractServiceImpl(
+                contractRepository,
+                revisionRepository,
+                mock(ContractDocumentRepository.class),
+                templateVersionRepository,
+                mock(RentalRequestRepository.class),
+                mock(ListingStatusService.class),
+                mock(ContractDataBuilder.class),
+                new ContractFieldCatalog(),
+                renderService,
+                mock(DocumentConversionService.class),
+                mock(StorageService.class),
+                new ObjectMapper(),
+                null,
+                null
+        );
+
+        Contract contract = Contract.builder()
+                .id("contract-complete-1")
+                .landlordId("landlord-1")
+                .tenantId("tenant-1")
+                .templateVersionId("tpl-v1")
+                .currentRevisionId("rev-1")
+                .build();
+
+        ContractRevision revision = ContractRevision.builder()
+                .id("rev-1")
+                .contract(contract)
+                .revisionNumber(1)
+                .build();
+
+        // Word template contains meters.electricityInitial and meters.waterInitial
+        ContractTemplateVersion tplVer = ContractTemplateVersion.builder()
+                .id("tpl-v1")
+                .placeholdersJson("[\"meters.electricityInitial\", \"meters.waterInitial\", \"contract.number\"]")
+                .build();
+
+        when(contractRepository.findById("contract-complete-1")).thenReturn(Optional.of(contract));
+        when(revisionRepository.findById("rev-1")).thenReturn(Optional.of(revision));
+        when(templateVersionRepository.findById("tpl-v1")).thenReturn(Optional.of(tplVer));
+
+        java.util.Map<String, Object> dataModel = new java.util.HashMap<>();
+        java.util.Map<String, Object> contractMap = new java.util.HashMap<>();
+        contractMap.put("number", "HD-2026-001");
+        dataModel.put("contract", contractMap);
+        // meters are empty
+        dataModel.put("meters", new java.util.HashMap<>());
+
+        when(renderService.buildDataModelFromSnapshots(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(dataModel);
+
+        UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
+
+        var completeness = service.getCompleteness("contract-complete-1");
+        org.junit.jupiter.api.Assertions.assertTrue(completeness.isComplete(), "Meters being empty must NOT block completeness");
+        org.junit.jupiter.api.Assertions.assertTrue(completeness.getMissingFields().isEmpty());
+    }
+
+    @Test
+    void tenantCannotSignIfDifferentTenant() {
+        ContractRepository contractRepository = mock(ContractRepository.class);
+        ContractServiceImpl service = createService(
+                contractRepository,
+                mock(ContractRevisionRepository.class),
+                mock(ContractDocumentRepository.class),
+                mock(ContractTemplateVersionRepository.class)
+        );
+
+        Contract contract = Contract.builder()
+                .id("contract-1")
+                .landlordId("landlord-1")
+                .tenantId("tenant-1")
+                .status(ContractStatus.PENDING_REVIEW)
+                .paymentStatus(ContractPaymentStatus.PAID_MOCK)
+                .build();
+
+        // User is tenant-2, not tenant-1
+        UserContextHolder.set(new UserContext("tenant-2", "tenant2@example.com"));
+        when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
+
+        assertThrows(AppException.class, () -> service.sign("contract-1"));
+    }
+
+    @Test
+    void cannotUpdateRevisionIfNotDraft() {
+        ContractRepository contractRepository = mock(ContractRepository.class);
+        ContractServiceImpl service = createService(
+                contractRepository,
+                mock(ContractRevisionRepository.class),
+                mock(ContractDocumentRepository.class),
+                mock(ContractTemplateVersionRepository.class)
+        );
+
+        Contract contract = Contract.builder()
+                .id("contract-1")
+                .landlordId("landlord-1")
+                .tenantId("tenant-1")
+                .status(ContractStatus.PENDING_REVIEW) // Not DRAFT
+                .build();
+
+        UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
+        when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
+
+        assertThrows(AppException.class, () -> service.updateRevision("contract-1", new com.hs.contract.dto.request.UpdateContractRevisionRequest()));
     }
 
     private ContractServiceImpl createService(

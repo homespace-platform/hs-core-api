@@ -102,6 +102,9 @@ public class RentalRequest extends BaseEntity {
     @Column(name = "excluded_charges_snapshot", columnDefinition = "TEXT")
     private String excludedChargesSnapshot;
 
+    @Column(name = "listing_snapshot", columnDefinition = "TEXT")
+    private String listingSnapshot;
+
     @Column(name = "renter_note", columnDefinition = "TEXT")
     private String renterNote;
 
