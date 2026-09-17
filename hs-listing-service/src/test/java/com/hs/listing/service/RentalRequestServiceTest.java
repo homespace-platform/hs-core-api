@@ -7,11 +7,15 @@ import com.hs.listing.dto.request.RejectRentalRequest;
 import com.hs.listing.dto.response.RentalRequestResponse;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.RentalRequest;
+import com.hs.listing.model.RentalPayment;
 import com.hs.listing.model.constant.DepositType;
 import com.hs.listing.model.constant.ListingStatus;
+import com.hs.listing.model.constant.RentalPaymentStatus;
+import com.hs.listing.model.constant.RentalPaymentType;
 import com.hs.listing.model.constant.RentalRequestStatus;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.PropertyBranchRepository;
+import com.hs.listing.repository.RentalPaymentRepository;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.storage.config.StorageProperties;
 import com.hs.user.repository.AddressRepository;
@@ -40,6 +44,8 @@ class RentalRequestServiceTest {
     private ParkingReservationService parkingReservationService;
     private PropertyBranchRepository propertyBranchRepository;
     private ObjectMapper objectMapper;
+    private RentalPaymentRepository rentalPaymentRepository;
+    private RentalPaymentService rentalPaymentService;
     private RentalRequestService rentalRequestService;
 
     @BeforeEach
@@ -50,6 +56,8 @@ class RentalRequestServiceTest {
         addressRepository = mock(AddressRepository.class);
         storageProperties = mock(StorageProperties.class);
         parkingReservationService = mock(ParkingReservationService.class);
+        rentalPaymentRepository = mock(RentalPaymentRepository.class);
+        rentalPaymentService = mock(RentalPaymentService.class);
         when(parkingReservationService.getAvailability(any(), any(), any(), any(), any()))
                 .thenReturn(new VehicleAvailabilityInfo(5, 0, 5));
         rentalCostCalculator = new RentalCostCalculator(parkingReservationService);
@@ -66,6 +74,8 @@ class RentalRequestServiceTest {
                 parkingReservationService,
                 propertyBranchRepository,
                 objectMapper,
+                rentalPaymentRepository,
+                rentalPaymentService,
                 15
         );
     }
@@ -496,5 +506,71 @@ class RentalRequestServiceTest {
 
         AppException ex = assertThrows(AppException.class, () -> rentalRequestService.getRequestById("req-999", "owner-1"));
         assertEquals(ListingErrorCode.RENTAL_REQUEST_NOT_FOUND.getCode(), ex.getCode());
+    }
+
+    @Test
+    void rejectRentalRequest_failsWhenAlreadyPaid() {
+        RentalRequest req = RentalRequest.builder()
+                .id("req-1")
+                .ownerId("owner-1")
+                .renterId("renter-1")
+                .status(RentalRequestStatus.ACCEPTED)
+                .build();
+        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+        when(rentalPaymentService.isPaid("req-1")).thenReturn(true);
+
+        AppException ex = assertThrows(AppException.class,
+                () -> rentalRequestService.rejectRentalRequest("owner-1", "req-1", new RejectRentalRequest("Không thích nữa")));
+        assertEquals(ListingErrorCode.RENTAL_REQUEST_ALREADY_PAID.getCode(), ex.getCode());
+    }
+
+    @Test
+    void cancelRentalRequest_failsWhenAlreadyPaid() {
+        RentalRequest req = RentalRequest.builder()
+                .id("req-1")
+                .ownerId("owner-1")
+                .renterId("renter-1")
+                .status(RentalRequestStatus.ACCEPTED)
+                .build();
+        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+        when(rentalPaymentService.isPaid("req-1")).thenReturn(true);
+
+        AppException ex = assertThrows(AppException.class,
+                () -> rentalRequestService.cancelRentalRequest("renter-1", "req-1"));
+        assertEquals(ListingErrorCode.RENTAL_REQUEST_ALREADY_PAID.getCode(), ex.getCode());
+    }
+
+    @Test
+    void expirePendingHoldRequests_refundsWhenPaidAndDeadlineExpired() {
+        Instant now = Instant.now();
+        Listing listing = Listing.builder().id("l-1").status(ListingStatus.RESERVED).build();
+        RentalRequest req = RentalRequest.builder()
+                .id("req-1")
+                .listing(listing)
+                .status(RentalRequestStatus.ACCEPTED)
+                .holdExpiresAt(now.minusSeconds(10))
+                .build();
+
+        RentalPayment payment = RentalPayment.builder()
+                .id("pay-1")
+                .rentalRequestId("req-1")
+                .status(RentalPaymentStatus.PAID_MOCK)
+                .totalAmount(new BigDecimal("10000000"))
+                .build();
+
+        when(rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(eq(RentalRequestStatus.ACCEPTED), any()))
+                .thenReturn(List.of(req));
+        when(rentalPaymentRepository.findByRentalRequestIdAndType("req-1", RentalPaymentType.INITIAL_PAYMENT))
+                .thenReturn(Optional.of(payment));
+
+        int count = rentalRequestService.expirePendingHoldRequests(now);
+
+        assertEquals(1, count);
+        assertEquals(RentalRequestStatus.EXPIRED, req.getStatus());
+        assertEquals(RentalPaymentStatus.REFUNDED, payment.getStatus());
+        assertNotNull(payment.getRefundedAt());
+        verify(rentalPaymentRepository).save(payment);
+        verify(listingStatusService).releaseReserved(eq(listing), eq("SYSTEM"), any());
+        verify(parkingReservationService).expireReservationsForRequest("req-1");
     }
 }

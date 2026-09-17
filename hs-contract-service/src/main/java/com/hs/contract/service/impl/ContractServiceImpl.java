@@ -34,8 +34,12 @@ import com.hs.contract.service.engine.ContractDataBuilder;
 import com.hs.contract.service.engine.ContractFieldCatalog;
 import com.hs.contract.service.engine.ContractRenderService;
 import com.hs.listing.model.Listing;
+import com.hs.listing.model.RentalPayment;
 import com.hs.listing.model.RentalRequest;
+import com.hs.listing.model.constant.RentalPaymentStatus;
+import com.hs.listing.model.constant.RentalPaymentType;
 import com.hs.listing.model.constant.RentalRequestStatus;
+import com.hs.listing.repository.RentalPaymentRepository;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.listing.service.ListingStatusService;
 import com.hs.storage.dto.response.StorageObjectResponse;
@@ -81,6 +85,7 @@ public class ContractServiceImpl implements ContractService {
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
     private final ParkingReservationService parkingReservationService;
+    private final RentalPaymentRepository rentalPaymentRepository;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Autowired
@@ -97,7 +102,8 @@ public class ContractServiceImpl implements ContractService {
             DocumentConversionService conversionService,
             StorageService storageService,
             ObjectMapper objectMapper,
-            ParkingReservationService parkingReservationService) {
+            ParkingReservationService parkingReservationService,
+            RentalPaymentRepository rentalPaymentRepository) {
         this.contractRepository = contractRepository;
         this.revisionRepository = revisionRepository;
         this.documentRepository = documentRepository;
@@ -111,6 +117,7 @@ public class ContractServiceImpl implements ContractService {
         this.storageService = storageService;
         this.objectMapper = objectMapper;
         this.parkingReservationService = parkingReservationService;
+        this.rentalPaymentRepository = rentalPaymentRepository;
     }
 
     public ContractServiceImpl(
@@ -128,7 +135,7 @@ public class ContractServiceImpl implements ContractService {
             ObjectMapper objectMapper) {
         this(contractRepository, revisionRepository, documentRepository, templateVersionRepository,
                 rentalRequestRepository, listingStatusService, dataBuilder, fieldCatalog, renderService,
-                conversionService, storageService, objectMapper, null);
+                conversionService, storageService, objectMapper, null, null);
     }
 
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
@@ -152,20 +159,29 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
 
-        // 3. Nếu đã tồn tại Contract cho RentalRequest này thì trả về luôn
+        // 3. Nếu đã tồn tại Contract cho RentalRequest này thì trả về luôn (tương thích backward)
         Optional<Contract> existing = contractRepository.findByRentalRequestId(rentalRequest.getId());
         if (existing.isPresent()) {
             log.info("Contract already exists for rentalRequestId={}, returning existing", rentalRequest.getId());
             return toContractResponse(existing.get());
         }
 
-        // 4. Lấy phiên bản mẫu
+        // 4. GATE: Kiểm tra INITIAL_PAYMENT của request. Chỉ cho tạo hợp đồng khi đã thanh toán (PAID_MOCK hoặc PAID)
+        RentalPayment payment = rentalPaymentRepository != null
+                ? rentalPaymentRepository.findByRentalRequestIdAndType(rentalRequest.getId(), RentalPaymentType.INITIAL_PAYMENT).orElse(null)
+                : null;
+
+        if (payment == null || (payment.getStatus() != RentalPaymentStatus.PAID_MOCK && payment.getStatus() != RentalPaymentStatus.PAID)) {
+            throw new AppException(ContractErrorCode.RENTAL_PAYMENT_REQUIRED_BEFORE_CONTRACT);
+        }
+
+        // 5. Lấy phiên bản mẫu
         ContractTemplateVersion templateVersion = templateVersionRepository.findById(request.getTemplateVersionId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
 
         Listing listing = rentalRequest.getListing();
 
-        // 5. Sinh số hợp đồng
+        // 6. Sinh số hợp đồng
         String contractNumber = "HD-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-"
                 + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
 
@@ -178,6 +194,9 @@ public class ContractServiceImpl implements ContractService {
                 .templateId(templateVersion.getTemplate().getId())
                 .templateVersionId(templateVersion.getId())
                 .status(ContractStatus.DRAFT)
+                .rentalPaymentId(payment.getId())
+                .paymentStatus(ContractPaymentStatus.PAID_MOCK)
+                .paidAt(payment.getPaidAt())
                 .build();
 
         contract = contractRepository.save(contract);
@@ -649,6 +668,13 @@ public class ContractServiceImpl implements ContractService {
     public ContractPaymentBreakdownResponse payMock(String contractId) {
         Contract contract = findContractForUpdateAndCheckAccess(contractId);
         requireTenant(contract);
+
+        // Với Contract thuộc luồng mới (đã liên kết RentalPayment), từ chối thanh toán qua endpoint hợp đồng cũ
+        if (contract.getRentalPaymentId() != null) {
+            throw new AppException(ContractErrorCode.CONTRACT_PAYMENT_NOT_ALLOWED);
+        }
+
+        // Nhánh tương thích legacy cho hợp đồng cũ
         if (contract.getStatus() != ContractStatus.PENDING_REVIEW
                 || paymentStatusOf(contract) != ContractPaymentStatus.UNPAID) {
             throw new AppException(ContractErrorCode.CONTRACT_PAYMENT_NOT_ALLOWED);
@@ -663,7 +689,7 @@ public class ContractServiceImpl implements ContractService {
 
         breakdown.setPaymentStatus(ContractPaymentStatus.PAID_MOCK);
         breakdown.setPaidAt(paidAt);
-        log.info("Mock payment completed for contract id={} tenant id={} amount={}",
+        log.info("Mock payment completed for legacy contract id={} tenant id={} amount={}",
                 contractId, contract.getTenantId(), breakdown.getTotalAmount());
         return breakdown;
     }
@@ -673,9 +699,24 @@ public class ContractServiceImpl implements ContractService {
     public ContractResponse sign(String contractId) {
         Contract contract = findContractForUpdateAndCheckAccess(contractId);
         requireTenant(contract);
-        if (contract.getStatus() != ContractStatus.PENDING_REVIEW
-                || paymentStatusOf(contract) != ContractPaymentStatus.PAID_MOCK) {
+        if (contract.getStatus() != ContractStatus.PENDING_REVIEW) {
             throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
+        }
+
+        // Kiểm tra thanh toán:
+        // Luồng mới: Kiểm tra RentalPayment liên kết đã PAID_MOCK hoặc PAID
+        if (contract.getRentalPaymentId() != null) {
+            RentalPayment payment = rentalPaymentRepository != null
+                    ? rentalPaymentRepository.findById(contract.getRentalPaymentId()).orElse(null)
+                    : null;
+            if (payment == null || (payment.getStatus() != RentalPaymentStatus.PAID_MOCK && payment.getStatus() != RentalPaymentStatus.PAID)) {
+                throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
+            }
+        } else {
+            // Nhánh tương thích legacy cho hợp đồng cũ:
+            if (paymentStatusOf(contract) != ContractPaymentStatus.PAID_MOCK) {
+                throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
+            }
         }
 
         RentalRequest rentalRequest = rentalRequestRepository.findById(contract.getRentalRequestId())
@@ -924,6 +965,7 @@ public class ContractServiceImpl implements ContractService {
                 .templateVersionId(c.getTemplateVersionId())
                 .currentRevisionId(c.getCurrentRevisionId())
                 .status(c.getStatus())
+                .rentalPaymentId(c.getRentalPaymentId())
                 .paymentStatus(paymentStatusOf(c))
                 .paidAt(c.getPaidAt())
                 .signedAt(c.getSignedAt())

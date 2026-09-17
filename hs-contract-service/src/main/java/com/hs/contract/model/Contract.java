@@ -67,6 +67,9 @@ public class Contract extends BaseEntity {
     @Column(name = "payment_status", length = 20)
     private ContractPaymentStatus paymentStatus = ContractPaymentStatus.UNPAID;
 
+    @Column(name = "rental_payment_id", length = 36)
+    private String rentalPaymentId;
+
     @Column(name = "paid_at")
     private Instant paidAt;
 

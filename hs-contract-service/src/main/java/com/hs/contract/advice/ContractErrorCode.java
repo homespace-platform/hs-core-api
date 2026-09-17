@@ -24,7 +24,8 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     CONTRACT_DOCUMENT_REQUIRED(6015, "Không thể gửi: hợp đồng chưa có tài liệu hoàn chỉnh", HttpStatus.BAD_REQUEST),
     CONTRACT_PAYMENT_NOT_ALLOWED(6016, "Hợp đồng không ở trạng thái cho phép thanh toán", HttpStatus.CONFLICT),
     CONTRACT_SIGNING_NOT_ALLOWED(6017, "Hợp đồng chưa được thanh toán hoặc không thể ký ở trạng thái hiện tại", HttpStatus.CONFLICT),
-    CONTRACT_PAYMENT_DATA_INVALID(6018, "Dữ liệu tiền thuê hoặc tiền cọc trong hợp đồng không hợp lệ", HttpStatus.UNPROCESSABLE_ENTITY);
+    CONTRACT_PAYMENT_DATA_INVALID(6018, "Dữ liệu tiền thuê hoặc tiền cọc trong hợp đồng không hợp lệ", HttpStatus.UNPROCESSABLE_ENTITY),
+    RENTAL_PAYMENT_REQUIRED_BEFORE_CONTRACT(6019, "Hợp đồng chỉ có thể được tạo sau khi khách thuê hoàn tất thanh toán ban đầu", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

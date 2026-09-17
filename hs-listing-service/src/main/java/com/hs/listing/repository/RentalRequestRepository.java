@@ -28,4 +28,8 @@ public interface RentalRequestRepository extends JpaRepository<RentalRequest, St
     long countByListingIdAndStatusIn(String listingId, Collection<RentalRequestStatus> statuses);
 
     boolean existsByListingIdAndRenterId(String listingId, String renterId);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("SELECT r FROM RentalRequest r WHERE r.id = :id")
+    Optional<RentalRequest> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") String id);
 }

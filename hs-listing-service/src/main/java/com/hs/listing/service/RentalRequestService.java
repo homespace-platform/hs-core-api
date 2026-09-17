@@ -6,14 +6,19 @@ import com.hs.common.dto.PageResponse;
 import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.dto.request.CreateRentalRequest;
 import com.hs.listing.dto.request.RejectRentalRequest;
+import com.hs.listing.dto.response.InitialPaymentSummary;
 import com.hs.listing.dto.response.RentalRequestResponse;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.ListingMedia;
+import com.hs.listing.model.RentalPayment;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.model.constant.DepositType;
 import com.hs.listing.model.constant.ListingStatus;
+import com.hs.listing.model.constant.RentalPaymentStatus;
+import com.hs.listing.model.constant.RentalPaymentType;
 import com.hs.listing.model.constant.RentalRequestStatus;
 import com.hs.listing.repository.ListingRepository;
+import com.hs.listing.repository.RentalPaymentRepository;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.storage.config.StorageProperties;
 import com.hs.storage.model.constant.StorageVisibility;
@@ -35,6 +40,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -56,6 +62,8 @@ public class RentalRequestService {
     private final ParkingReservationService parkingReservationService;
     private final PropertyBranchRepository propertyBranchRepository;
     private final ObjectMapper objectMapper;
+    private final RentalPaymentRepository rentalPaymentRepository;
+    private final RentalPaymentService rentalPaymentService;
     private List<RentalHoldProtectionChecker> holdProtectionCheckers = List.of();
 
     @Autowired
@@ -69,6 +77,8 @@ public class RentalRequestService {
             ParkingReservationService parkingReservationService,
             PropertyBranchRepository propertyBranchRepository,
             ObjectMapper objectMapper,
+            RentalPaymentRepository rentalPaymentRepository,
+            RentalPaymentService rentalPaymentService,
             @Value("${rental.hold-duration-minutes:15}") long holdDurationMinutes) {
         this.rentalRequestRepository = rentalRequestRepository;
         this.listingRepository = listingRepository;
@@ -79,7 +89,25 @@ public class RentalRequestService {
         this.parkingReservationService = parkingReservationService;
         this.propertyBranchRepository = propertyBranchRepository;
         this.objectMapper = objectMapper;
+        this.rentalPaymentRepository = rentalPaymentRepository;
+        this.rentalPaymentService = rentalPaymentService;
         this.holdDuration = Duration.ofMinutes(Math.max(holdDurationMinutes, 1L));
+    }
+
+    public RentalRequestService(
+            RentalRequestRepository rentalRequestRepository,
+            ListingRepository listingRepository,
+            ListingStatusService listingStatusService,
+            AddressRepository addressRepository,
+            StorageProperties storageProperties,
+            RentalCostCalculator rentalCostCalculator,
+            ParkingReservationService parkingReservationService,
+            PropertyBranchRepository propertyBranchRepository,
+            ObjectMapper objectMapper,
+            long holdDurationMinutes) {
+        this(rentalRequestRepository, listingRepository, listingStatusService, addressRepository,
+                storageProperties, rentalCostCalculator, parkingReservationService, propertyBranchRepository,
+                objectMapper, null, null, holdDurationMinutes);
     }
 
     @Autowired(required = false)
@@ -270,6 +298,11 @@ public class RentalRequestService {
             }
         }
 
+        // Tạo INITIAL_PAYMENT trạng thái PENDING trong cùng transaction
+        if (rentalPaymentService != null) {
+            rentalPaymentService.createInitialPayment(saved, holdExpiresAt);
+        }
+
         log.info("Owner [{}] ACCEPTED rental request [{}]. Listing [{}] marked as RESERVED until [{}]",
                 ownerId, requestId, listing.getId(), holdExpiresAt);
 
@@ -290,6 +323,10 @@ public class RentalRequestService {
             throw new AppException(ListingErrorCode.RENTAL_REQUEST_FORBIDDEN);
         }
 
+        if (rentalPaymentService != null && rentalPaymentService.isPaid(requestId)) {
+            throw new AppException(ListingErrorCode.RENTAL_REQUEST_ALREADY_PAID);
+        }
+
         if (req.getStatus() != RentalRequestStatus.PENDING) {
             throw new AppException(ListingErrorCode.INVALID_RENTAL_REQUEST_STATUS);
         }
@@ -298,6 +335,17 @@ public class RentalRequestService {
         req.setRejectReason(rejectReq != null && rejectReq.rejectReason() != null && !rejectReq.rejectReason().isBlank()
                 ? rejectReq.rejectReason().trim() : "Chủ nhà từ chối yêu cầu thuê");
         RentalRequest saved = rentalRequestRepository.save(req);
+
+        // Hủy pending payment nếu có
+        if (rentalPaymentRepository != null) {
+            rentalPaymentRepository.findByRentalRequestIdAndType(requestId, RentalPaymentType.INITIAL_PAYMENT)
+                    .ifPresent(p -> {
+                        if (p.getStatus() == RentalPaymentStatus.PENDING) {
+                            p.setStatus(RentalPaymentStatus.CANCELLED);
+                            rentalPaymentRepository.save(p);
+                        }
+                    });
+        }
 
         // Giải phóng slot xe (nếu có)
         parkingReservationService.releaseReservationsForRequest(requestId);
@@ -320,12 +368,27 @@ public class RentalRequestService {
             throw new AppException(ListingErrorCode.RENTAL_REQUEST_FORBIDDEN);
         }
 
+        if (rentalPaymentService != null && rentalPaymentService.isPaid(requestId)) {
+            throw new AppException(ListingErrorCode.RENTAL_REQUEST_ALREADY_PAID);
+        }
+
         if (req.getStatus() != RentalRequestStatus.PENDING) {
             throw new AppException(ListingErrorCode.INVALID_RENTAL_REQUEST_STATUS);
         }
 
         req.setStatus(RentalRequestStatus.CANCELLED_BY_RENTER);
         RentalRequest saved = rentalRequestRepository.save(req);
+
+        // Hủy pending payment nếu có
+        if (rentalPaymentRepository != null) {
+            rentalPaymentRepository.findByRentalRequestIdAndType(requestId, RentalPaymentType.INITIAL_PAYMENT)
+                    .ifPresent(p -> {
+                        if (p.getStatus() == RentalPaymentStatus.PENDING) {
+                            p.setStatus(RentalPaymentStatus.CANCELLED);
+                            rentalPaymentRepository.save(p);
+                        }
+                    });
+        }
 
         // Giải phóng slot xe (nếu có)
         parkingReservationService.releaseReservationsForRequest(requestId);
@@ -375,7 +438,11 @@ public class RentalRequestService {
         var sort = Sort.by(Sort.Order.desc("createdAt"));
         var pageable = PageRequest.of(Math.max(page - 1, 0), Math.min(Math.max(size, 1), 50), sort);
         Page<RentalRequest> pageResult = rentalRequestRepository.findAll(spec, pageable);
-        return new PageResponse<>(pageResult.map(this::toResponse));
+        List<String> requestIds = pageResult.getContent().stream().map(RentalRequest::getId).toList();
+        Map<String, RentalPayment> paymentsMap = requestIds.isEmpty() ? Map.of()
+                : rentalPaymentRepository.findByRentalRequestIdInAndType(requestIds, RentalPaymentType.INITIAL_PAYMENT).stream()
+                .collect(Collectors.toMap(RentalPayment::getRentalRequestId, p -> p, (p1, p2) -> p1));
+        return new PageResponse<>(pageResult.map(r -> toResponse(r, paymentsMap.get(r.getId()))));
     }
 
     // 7. CHỦ NHÀ XEM DANH SÁCH YÊU CẦU THUÊ ĐƯỢC GỬI ĐẾN
@@ -405,7 +472,11 @@ public class RentalRequestService {
         var sort = Sort.by(Sort.Order.desc("createdAt"));
         var pageable = PageRequest.of(Math.max(page - 1, 0), Math.min(Math.max(size, 1), 50), sort);
         Page<RentalRequest> pageResult = rentalRequestRepository.findAll(spec, pageable);
-        return new PageResponse<>(pageResult.map(this::toResponse));
+        List<String> requestIds = pageResult.getContent().stream().map(RentalRequest::getId).toList();
+        Map<String, RentalPayment> paymentsMap = requestIds.isEmpty() ? Map.of()
+                : rentalPaymentRepository.findByRentalRequestIdInAndType(requestIds, RentalPaymentType.INITIAL_PAYMENT).stream()
+                .collect(Collectors.toMap(RentalPayment::getRentalRequestId, p -> p, (p1, p2) -> p1));
+        return new PageResponse<>(pageResult.map(r -> toResponse(r, paymentsMap.get(r.getId()))));
     }
 
     // 8. KIỂM TRA XEM KHÁCH CÓ YÊU CẦU ACTIVE TRÊN BÀI ĐĂNG NÀY KHÔNG
@@ -441,6 +512,23 @@ public class RentalRequestService {
                 continue;
             }
 
+            RentalPayment payment = rentalPaymentRepository.findByRentalRequestIdAndType(
+                    req.getId(), RentalPaymentType.INITIAL_PAYMENT).orElse(null);
+
+            boolean wasPaid = payment != null && (payment.getStatus() == RentalPaymentStatus.PAID_MOCK || payment.getStatus() == RentalPaymentStatus.PAID);
+
+            if (wasPaid) {
+                // Đã thanh toán nhưng quá deadline tạo hợp đồng mà chủ nhà chưa hoàn tất hợp đồng -> mock refund
+                payment.setStatus(RentalPaymentStatus.REFUNDED);
+                payment.setRefundedAt(now);
+                rentalPaymentRepository.save(payment);
+                log.info("[RENTAL_PAYMENT_REFUNDED] Request [{}] contract preparation deadline expired. Payment mock-refunded.", req.getId());
+            } else if (payment != null && payment.getStatus() == RentalPaymentStatus.PENDING) {
+                payment.setStatus(RentalPaymentStatus.EXPIRED);
+                rentalPaymentRepository.save(payment);
+                log.info("[RENTAL_PAYMENT_EXPIRED] Request [{}] initial payment expired without payment.", req.getId());
+            }
+
             req.setStatus(RentalRequestStatus.EXPIRED);
             rentalRequestRepository.save(req);
             expiredCount++;
@@ -450,7 +538,10 @@ public class RentalRequestService {
 
             Listing listing = req.getListing();
             if (listing != null && listing.getStatus() == ListingStatus.RESERVED) {
-                listingStatusService.releaseReserved(listing, "SYSTEM", "Hết hạn giữ chỗ mà không hoàn tất thủ tục thuê");
+                String reason = wasPaid
+                        ? "Hết hạn chuẩn bị hợp đồng sau khi khách đã thanh toán ban đầu"
+                        : "Hết hạn giữ chỗ mà không hoàn tất thủ tục thuê";
+                listingStatusService.releaseReserved(listing, "SYSTEM", reason);
                 log.info("[RENTAL_HOLD_EXPIRED] Rental request [{}] expired. Listing [{}] returned to PUBLISHED.",
                         req.getId(), listing.getId());
             }
@@ -467,11 +558,15 @@ public class RentalRequestService {
     /**
      * Nếu thời hạn giữ chỗ cấu hình ngắn hơn mốc đã lưu (sau khi đổi config),
      * cắt holdExpiresAt về acceptedAt + holdDuration (hoặc now nếu đã quá hạn theo config mới).
+     * KHÔNG cắt ngắn nếu yêu cầu đã thanh toán ban đầu (đang được bảo vệ tới contractDueAt) hoặc có contract bảo vệ.
      */
     private void clampActiveHoldExpiriesToConfig(Instant now) {
         List<RentalRequest> activeHolds =
                 rentalRequestRepository.findAllByStatusAndHoldExpiresAtIsNotNull(RentalRequestStatus.ACCEPTED);
         for (RentalRequest req : activeHolds) {
+            if (isHoldProtected(req.getId()) || (rentalPaymentService != null && rentalPaymentService.isPaid(req.getId()))) {
+                continue;
+            }
             Instant acceptedAt = req.getAcceptedAt() != null ? req.getAcceptedAt() : now;
             Instant maxExpiry = acceptedAt.plus(holdDuration);
             Instant currentExpiry = req.getHoldExpiresAt();
@@ -485,7 +580,14 @@ public class RentalRequestService {
     }
 
     // MAPPER
-    private RentalRequestResponse toResponse(RentalRequest r) {
+    public RentalRequestResponse toResponse(RentalRequest r) {
+        RentalPayment payment = rentalPaymentRepository != null
+                ? rentalPaymentRepository.findByRentalRequestIdAndType(r.getId(), RentalPaymentType.INITIAL_PAYMENT).orElse(null)
+                : null;
+        return toResponse(r, payment);
+    }
+
+    private RentalRequestResponse toResponse(RentalRequest r, RentalPayment payment) {
         Listing l = r.getListing();
         String thumbnail = null;
         String addressStr = null;
@@ -515,6 +617,10 @@ public class RentalRequestService {
                 addressStr = addr.getFullAddress();
             }
         }
+
+        InitialPaymentSummary paymentSummary = (payment != null && rentalPaymentService != null)
+                ? rentalPaymentService.toSummary(payment)
+                : null;
 
         return RentalRequestResponse.builder()
                 .id(r.getId())
@@ -547,6 +653,7 @@ public class RentalRequestService {
                 .rejectReason(r.getRejectReason())
                 .acceptedAt(r.getAcceptedAt())
                 .holdExpiresAt(r.getHoldExpiresAt())
+                .initialPayment(paymentSummary)
                 .createdAt(r.getCreatedAt())
                 .updatedAt(r.getUpdatedAt())
                 .build();

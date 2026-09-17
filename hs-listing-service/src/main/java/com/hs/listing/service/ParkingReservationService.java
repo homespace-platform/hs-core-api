@@ -224,6 +224,20 @@ public class ParkingReservationService {
     }
 
     /**
+     * Gia hạn holdExpiresAt cho reservation HELD khi khách hoàn tất thanh toán ban đầu.
+     */
+    @Transactional
+    public void extendHeldReservations(String rentalRequestId, Instant newHoldExpiresAt) {
+        List<ParkingReservation> reservations = parkingReservationRepository.findByRentalRequestId(rentalRequestId);
+        for (ParkingReservation r : reservations) {
+            if (r.getStatus() == ParkingReservationStatus.HELD) {
+                r.setHoldExpiresAt(newHoldExpiresAt);
+                parkingReservationRepository.save(r);
+            }
+        }
+    }
+
+    /**
      * Kích hoạt reservation sang ACTIVE khi hợp đồng có hiệu lực.
      */
     @Transactional

@@ -25,6 +25,7 @@ public class ContractResponse {
     private String currentRevisionId;
     private ContractStatus status;
     private ContractPaymentStatus paymentStatus;
+    private String rentalPaymentId;
     private Instant paidAt;
     private Instant signedAt;
     private Instant createdAt;

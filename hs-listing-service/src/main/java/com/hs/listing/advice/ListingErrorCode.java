@@ -45,7 +45,14 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     MOTORBIKE_CAPACITY_EXCEEDED(4050, "Motorbike parking capacity exceeded for the selected period", HttpStatus.CONFLICT),
     CAR_CAPACITY_EXCEEDED(4051, "Car parking capacity exceeded for the selected period", HttpStatus.CONFLICT),
     PARKING_CAPACITY_CHANGED(4052, "Parking capacity cannot be reduced below current active reservations", HttpStatus.BAD_REQUEST),
-    RENTAL_ESTIMATE_INVALID(4053, "Rental estimate parameters are invalid", HttpStatus.BAD_REQUEST);
+    RENTAL_ESTIMATE_INVALID(4053, "Rental estimate parameters are invalid", HttpStatus.BAD_REQUEST),
+    RENTAL_PAYMENT_NOT_FOUND(4060, "Rental payment not found", HttpStatus.NOT_FOUND),
+    RENTAL_PAYMENT_FORBIDDEN(4061, "You do not have permission to perform this payment action", HttpStatus.FORBIDDEN),
+    RENTAL_PAYMENT_EXPIRED(4062, "Rental payment has expired", HttpStatus.CONFLICT),
+    RENTAL_PAYMENT_NOT_ALLOWED(4063, "Rental payment is not allowed in current state", HttpStatus.CONFLICT),
+    RENTAL_PAYMENT_ALREADY_COMPLETED(4064, "Rental payment has already been completed", HttpStatus.CONFLICT),
+    RENTAL_PAYMENT_INVALID_AMOUNT(4065, "Rental payment amount is invalid", HttpStatus.UNPROCESSABLE_ENTITY),
+    RENTAL_REQUEST_ALREADY_PAID(4066, "Rental request has already been paid and cannot be cancelled or rejected normally", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;
