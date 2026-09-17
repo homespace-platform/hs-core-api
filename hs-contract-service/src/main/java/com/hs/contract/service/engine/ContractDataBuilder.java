@@ -114,6 +114,8 @@ public class ContractDataBuilder {
         map.put("phone", firstNonBlank(request.getRenterPhone(), user == null ? null : user.getPhone()));
         map.put("email", firstNonBlank(request.getRenterEmail(), user == null ? null : user.getEmail()));
         map.put("occupantCount", resolveOccupantCount(request));
+        map.put("motorbikeCount", request.getMotorbikeCount() != null ? request.getMotorbikeCount() : 0);
+        map.put("carCount", request.getCarCount() != null ? request.getCarCount() : 0);
         return map;
     }
 

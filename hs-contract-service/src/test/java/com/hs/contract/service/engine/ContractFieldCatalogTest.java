@@ -16,7 +16,7 @@ class ContractFieldCatalogTest {
 
     @Test
     void testCatalogDefinitionsCountAndFields() {
-        assertEquals(36, catalog.getAllDefinitions().size(), "Catalog must have exactly 36 field definitions");
+        assertEquals(38, catalog.getAllDefinitions().size(), "Catalog must have exactly 38 field definitions");
 
         // Valid fields from CONTRACT_PROMPT.md
         assertTrue(catalog.isValidPlaceholder("contract.number"));
@@ -33,6 +33,8 @@ class ContractFieldCatalogTest {
         assertTrue(catalog.isValidPlaceholder("tenant.phone"));
         assertTrue(catalog.isValidPlaceholder("tenant.email"));
         assertTrue(catalog.isValidPlaceholder("tenant.occupantCount"));
+        assertTrue(catalog.isValidPlaceholder("tenant.motorbikeCount"));
+        assertTrue(catalog.isValidPlaceholder("tenant.carCount"));
         assertTrue(catalog.isValidPlaceholder("property.fullAddress"));
         assertTrue(catalog.isValidPlaceholder("property.areaText"));
         assertTrue(catalog.isValidPlaceholder("property.propertyType"));

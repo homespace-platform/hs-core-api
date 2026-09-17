@@ -427,4 +427,74 @@ class RentalRequestServiceTest {
         assertEquals(new BigDecimal("5000000"), res.effectiveMonthlyRent());
         assertEquals(new BigDecimal("5000000"), res.estimatedMonthlyTotal());
     }
+
+    @Test
+    void getRequestById_asOwner_succeeds() {
+        RentalRequest req = RentalRequest.builder()
+                .id("req-1")
+                .ownerId("owner-1")
+                .renterId("renter-1")
+                .listing(Listing.builder().id("listing-1").title("Nhà đẹp").build())
+                .status(RentalRequestStatus.PENDING)
+                .occupantCount(2)
+                .motorbikeCount(1)
+                .carCount(0)
+                .build();
+        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+
+        RentalRequestResponse response = rentalRequestService.getRequestById("req-1", "owner-1");
+        assertNotNull(response);
+        assertEquals("req-1", response.id());
+        assertEquals(1, response.motorbikeCount());
+        assertEquals(0, response.carCount());
+    }
+
+    @Test
+    void getRequestById_asRenter_succeeds() {
+        RentalRequest req = RentalRequest.builder()
+                .id("req-1")
+                .ownerId("owner-1")
+                .renterId("renter-1")
+                .listing(Listing.builder().id("listing-1").title("Nhà đẹp").build())
+                .status(RentalRequestStatus.PENDING)
+                .occupantCount(3)
+                .motorbikeCount(2)
+                .carCount(1)
+                .build();
+        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+
+        RentalRequestResponse response = rentalRequestService.getRequestById("req-1", "renter-1");
+        assertNotNull(response);
+        assertEquals("req-1", response.id());
+        assertEquals(2, response.motorbikeCount());
+        assertEquals(1, response.carCount());
+    }
+
+    @Test
+    void getRequestById_asStranger_throwsForbidden() {
+        RentalRequest req = RentalRequest.builder()
+                .id("req-1")
+                .ownerId("owner-1")
+                .renterId("renter-1")
+                .status(RentalRequestStatus.PENDING)
+                .build();
+        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+
+        AppException ex = assertThrows(AppException.class, () -> rentalRequestService.getRequestById("req-1", "stranger-999"));
+        assertEquals(ListingErrorCode.RENTAL_REQUEST_FORBIDDEN.getCode(), ex.getCode());
+    }
+
+    @Test
+    void getRequestById_unauthenticated_throwsUnauthenticated() {
+        assertThrows(AppException.class, () -> rentalRequestService.getRequestById("req-1", null));
+        assertThrows(AppException.class, () -> rentalRequestService.getRequestById("req-1", "   "));
+    }
+
+    @Test
+    void getRequestById_notFound_throwsNotFound() {
+        when(rentalRequestRepository.findById("req-999")).thenReturn(Optional.empty());
+
+        AppException ex = assertThrows(AppException.class, () -> rentalRequestService.getRequestById("req-999", "owner-1"));
+        assertEquals(ListingErrorCode.RENTAL_REQUEST_NOT_FOUND.getCode(), ex.getCode());
+    }
 }

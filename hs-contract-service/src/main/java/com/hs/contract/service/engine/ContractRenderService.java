@@ -114,6 +114,8 @@ public class ContractRenderService {
         tenant.put("phone", "0987654321");
         tenant.put("email", "tranthibinh.tenant@example.com");
         tenant.put("occupantCount", 2);
+        tenant.put("motorbikeCount", 0);
+        tenant.put("carCount", 0);
 
         Map<String, Object> property = Map.of(
                 "fullAddress", "Tầng 12, Căn hộ A12-08, Tòa tháp Landmark, 720A Điện Biên Phủ, Phường 22, Quận Bình Thạnh, TP.HCM",
@@ -193,6 +195,8 @@ public class ContractRenderService {
         tenant.put("phone", getStr(src, "phone", ""));
         tenant.put("email", getStr(src, "email", ""));
         tenant.put("occupantCount", String.valueOf(src.getOrDefault("occupantCount", "1")));
+        tenant.put("motorbikeCount", String.valueOf(src.getOrDefault("motorbikeCount", "0")));
+        tenant.put("carCount", String.valueOf(src.getOrDefault("carCount", "0")));
         model.put("tenant", tenant);
     }
 

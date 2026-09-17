@@ -37,6 +37,8 @@ public class ContractFieldCatalog {
         add("tenant.phone", "Số điện thoại người thuê", "Bên thuê (Bên B)", "TEXT", "Số điện thoại liên hệ", "0987654321", ALL);
         add("tenant.email", "Email người thuê", "Bên thuê (Bên B)", "TEXT", "Email nhận thông báo và hợp đồng", "nguoithue@example.com", OPTIONAL);
         add("tenant.occupantCount", "Số người vào ở", "Bên thuê (Bên B)", "NUMBER", "Số lượng người dọn vào ở thực tế", "2", ALL);
+        add("tenant.motorbikeCount", "Số xe máy đăng ký", "Bên thuê (Bên B)", "NUMBER", "Số lượng xe máy đăng ký gửi", "0", OPTIONAL);
+        add("tenant.carCount", "Số ô tô đăng ký", "Bên thuê (Bên B)", "NUMBER", "Số lượng ô tô đăng ký gửi", "0", OPTIONAL);
 
         // --- Tài sản & Bất động sản ---
         add("property.fullAddress", "Địa chỉ BĐS cho thuê", "Bất động sản", "TEXT", "Địa chỉ chi tiết nơi cho thuê", "Tầng 5, Căn hộ A-05, Tòa Landmark 81, 720A Điện Biên Phủ, P.22, Q.Bình Thạnh, TP.HCM", ALL);

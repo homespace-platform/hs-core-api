@@ -61,6 +61,9 @@ class ContractDataBuilderTest {
                 "12 Nguyễn Huệ, Phường Sài Gòn, TP. Hồ Chí Minh",
                 snapshots.getLandlord().get("permanentAddress")
         );
+        assertEquals(3, snapshots.getTenant().get("occupantCount"));
+        assertEquals(0, snapshots.getTenant().get("motorbikeCount"));
+        assertEquals(0, snapshots.getTenant().get("carCount"));
 
         // Verify rentalMode and B2B tenant fields are absent
         org.junit.jupiter.api.Assertions.assertFalse(snapshots.getLease().containsKey("rentalMode"),
