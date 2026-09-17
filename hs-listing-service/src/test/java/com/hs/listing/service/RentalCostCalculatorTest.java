@@ -304,4 +304,66 @@ class RentalCostCalculatorTest {
         // estimatedLeaseTotal = 10,500,000 * 12 + 20,000,000 = 126,000,000 + 20,000,000 = 146,000,000
         assertEquals(new BigDecimal("146000000"), res.estimatedLeaseTotal());
     }
+
+    @Test
+    @DisplayName("11. Phí quản lý tòa nhà bị bỏ qua đối với ROOM và HOUSE (ngay cả khi CSDL có dữ liệu cũ)")
+    void testManagementChargeIgnoredForRoomAndHouse() {
+        LocalDate moveIn = LocalDate.of(2026, 10, 1);
+
+        // Trường hợp ROOM có MANAGEMENT INCLUDED
+        Listing roomListing = createBasicListing(ListingCategory.ROOM, PriceUnit.ROOM_MONTH, new BigDecimal("3500000"));
+        roomListing.getCharges().add(ListingCharge.builder()
+                .chargeType(ChargeType.MANAGEMENT)
+                .billingMethod(BillingMethod.INCLUDED)
+                .amount(new BigDecimal("200000"))
+                .includedInRent(true)
+                .build());
+
+        RentalEstimateResponse roomRes = calculator.calculate(roomListing, moveIn, 6, 1, 0, 0, null);
+        assertFalse(roomRes.predictableCharges().stream().anyMatch(c -> "MANAGEMENT".equals(c.chargeType())),
+                "ROOM không được có phí MANAGEMENT trong predictableCharges");
+        assertFalse(roomRes.excludedCharges().stream().anyMatch(c -> "MANAGEMENT".equals(c.chargeType())),
+                "ROOM không được có phí MANAGEMENT trong excludedCharges");
+
+        // Trường hợp HOUSE có MANAGEMENT PER_MONTH
+        Listing houseListing = createBasicListing(ListingCategory.HOUSE, PriceUnit.MONTH, new BigDecimal("15000000"));
+        houseListing.getCharges().add(ListingCharge.builder()
+                .chargeType(ChargeType.MANAGEMENT)
+                .billingMethod(BillingMethod.PER_MONTH)
+                .amount(new BigDecimal("500000"))
+                .includedInRent(false)
+                .build());
+
+        RentalEstimateResponse houseRes = calculator.calculate(houseListing, moveIn, 12, 4, 0, 0, null);
+        assertFalse(houseRes.predictableCharges().stream().anyMatch(c -> "MANAGEMENT".equals(c.chargeType())),
+                "HOUSE không được có phí MANAGEMENT trong predictableCharges");
+        assertEquals(new BigDecimal("15000000"), houseRes.effectiveMonthlyRent());
+        assertEquals(BigDecimal.ZERO, houseRes.predictableMonthlyChargesTotal());
+        assertEquals(new BigDecimal("15000000"), houseRes.estimatedMonthlyTotal());
+    }
+
+    @Test
+    @DisplayName("12. Phí quản lý tòa nhà cho APARTMENT được tính đúng")
+    void testManagementChargeProcessedForApartment() {
+        LocalDate moveIn = LocalDate.of(2026, 10, 1);
+
+        // APARTMENT có MANAGEMENT PER_MONTH
+        Listing aptListing = createBasicListing(ListingCategory.APARTMENT, PriceUnit.MONTH, new BigDecimal("8000000"));
+        aptListing.getCharges().add(ListingCharge.builder()
+                .chargeType(ChargeType.MANAGEMENT)
+                .billingMethod(BillingMethod.PER_MONTH)
+                .amount(new BigDecimal("400000"))
+                .build());
+
+        RentalEstimateResponse aptRes = calculator.calculate(aptListing, moveIn, 12, 2, 0, 0, null);
+        PredictableChargeItem mgmtItem = aptRes.predictableCharges().stream()
+                .filter(c -> "MANAGEMENT".equals(c.chargeType()))
+                .findFirst()
+                .orElse(null);
+
+        assertNotNull(mgmtItem, "APARTMENT phải có phí MANAGEMENT");
+        assertEquals("Phí quản lý tòa nhà", mgmtItem.displayName());
+        assertEquals(new BigDecimal("400000"), mgmtItem.amount());
+        assertEquals(new BigDecimal("8400000"), aptRes.estimatedMonthlyTotal());
+    }
 }

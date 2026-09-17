@@ -320,6 +320,13 @@ public class RentalCostCalculator {
         for (ListingCharge charge : sorted) {
             ChargeType type = charge.getChargeType();
             BillingMethod method = charge.getBillingMethod();
+
+            // Quy tắc nghiệp vụ: Phí quản lý tòa nhà chỉ áp dụng cho Căn hộ (APARTMENT).
+            // Bỏ qua charge MANAGEMENT đối với ROOM và HOUSE (kể cả dữ liệu cũ trong CSDL).
+            if (type == ChargeType.MANAGEMENT && (listing.getCategory() == ListingCategory.ROOM || listing.getCategory() == ListingCategory.HOUSE)) {
+                continue;
+            }
+
             String displayName = chargeDisplayName(charge);
 
             // Xử lý riêng cho xe máy
@@ -459,7 +466,7 @@ public class RentalCostCalculator {
         return switch (type) {
             case ELECTRICITY -> "Tiền điện";
             case WATER -> "Tiền nước";
-            case MANAGEMENT -> "Phí quản lý";
+            case MANAGEMENT -> "Phí quản lý tòa nhà";
             case INTERNET -> "Internet / WiFi";
             case SERVICE_OR_GARBAGE -> "Phí dịch vụ & rác";
             case MOTORBIKE_PARKING -> "Phí gửi xe máy";
