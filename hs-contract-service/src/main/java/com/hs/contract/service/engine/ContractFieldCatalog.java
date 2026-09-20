@@ -29,6 +29,9 @@ public class ContractFieldCatalog {
         add("landlord.permanentAddress", "Nơi thường trú chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Nơi thường trú của bên A theo Luật Cư trú 2020", "123 Đường Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM", OPTIONAL);
         add("landlord.phone", "Số điện thoại chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Số điện thoại liên hệ chính", "0901234567", ALL);
         add("landlord.email", "Email chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Địa chỉ hòm thư điện tử", "chuanha@example.com", OPTIONAL);
+        add("landlord.bankName", "Tên ngân hàng chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Tên ngân hàng nhận thanh toán của Bên A", "Ngân hàng TMCP Quân đội (MBBank)", ALL);
+        add("landlord.bankAccountNumber", "Số tài khoản chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Số tài khoản ngân hàng nhận thanh toán của Bên A", "0123456789", ALL);
+        add("landlord.bankAccountHolder", "Tên chủ tài khoản chủ nhà", "Bên cho thuê (Bên A)", "TEXT", "Tên chủ tài khoản ngân hàng nhận thanh toán của Bên A", "NGUYEN VAN A", ALL);
 
         // --- Bên thuê (Bên B) ---
         add("tenant.fullName", "Họ và tên người thuê", "Bên thuê (Bên B)", "TEXT", "Họ và tên đầy đủ người thuê đại diện ký", "Trần Thị B", ALL);
@@ -39,6 +42,9 @@ public class ContractFieldCatalog {
         add("tenant.occupantCount", "Số người vào ở", "Bên thuê (Bên B)", "NUMBER", "Số lượng người dọn vào ở thực tế", "2", ALL);
         add("tenant.motorbikeCount", "Số xe máy đăng ký", "Bên thuê (Bên B)", "NUMBER", "Số lượng xe máy đăng ký gửi", "0", OPTIONAL);
         add("tenant.carCount", "Số ô tô đăng ký", "Bên thuê (Bên B)", "NUMBER", "Số lượng ô tô đăng ký gửi", "0", OPTIONAL);
+        add("tenant.bankName", "Tên ngân hàng người thuê", "Bên thuê (Bên B)", "TEXT", "Tên ngân hàng nhận hoàn trả của Bên B", "Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank)", ALL);
+        add("tenant.bankAccountNumber", "Số tài khoản người thuê", "Bên thuê (Bên B)", "TEXT", "Số tài khoản ngân hàng nhận hoàn trả của Bên B", "9876543210", ALL);
+        add("tenant.bankAccountHolder", "Tên chủ tài khoản người thuê", "Bên thuê (Bên B)", "TEXT", "Tên chủ tài khoản ngân hàng nhận hoàn trả của Bên B", "TRAN THI B", ALL);
 
         // --- Tài sản & Bất động sản ---
         add("property.fullAddress", "Địa chỉ BĐS cho thuê", "Bất động sản", "TEXT", "Địa chỉ chi tiết nơi cho thuê", "Tầng 5, Căn hộ A-05, Tòa Landmark 81, 720A Điện Biên Phủ, P.22, Q.Bình Thạnh, TP.HCM", ALL);
@@ -59,7 +65,7 @@ public class ContractFieldCatalog {
         add("rent.amountWords", "Giá thuê bằng chữ", "Giá thuê & Cọc", "TEXT", "Số tiền thuê viết bằng chữ tiếng Việt", "Mười triệu đồng chẵn", ALL);
         add("rent.paymentCycle", "Chu kỳ thanh toán", "Giá thuê & Cọc", "TEXT", "Kỳ hạn trả tiền thuê (Hàng tháng)", "Hàng tháng", ALL);
         add("rent.paymentDueDay", "Hạn đóng tiền hàng tháng", "Giá thuê & Cọc", "TEXT", "Ngày thanh toán cố định trong tháng", "Từ ngày 01 đến ngày 05 hàng tháng", ALL);
-        add("rent.paymentMethod", "Phương thức thanh toán", "Giá thuê & Cọc", "TEXT", "Kênh thanh toán tiền thuê, mặc định qua hệ thống HomeSpace", "Thanh toán trực tuyến qua hệ thống HomeSpace", OPTIONAL);
+        add("rent.paymentMethod", "Phương thức thanh toán", "Giá thuê & Cọc", "TEXT", "Kênh thanh toán tiền thuê, chuyển khoản trực tiếp vào tài khoản ngân hàng của Bên A", "Chuyển khoản trực tiếp vào tài khoản ngân hàng của Bên A chỉ định trong Hợp đồng này", OPTIONAL);
         add("deposit.amountNumber", "Tiền cọc bằng số", "Giá thuê & Cọc", "NUMBER", "Số tiền đặt cọc", "10.000.000 VNĐ", ALL);
         add("deposit.amountWords", "Tiền cọc bằng chữ", "Giá thuê & Cọc", "TEXT", "Số tiền đặt cọc viết bằng chữ tiếng Việt", "Mười triệu đồng chẵn", ALL);
         add("deposit.description", "Nội dung quy định cọc", "Giá thuê & Cọc", "TEXT", "Chi tiết điều khoản cọc và hoàn trả tiền cọc", "Tiền cọc được hoàn lại sau khi hết hạn hợp đồng và trừ các chi phí chưa thanh toán (nếu có).", OPTIONAL);
@@ -72,21 +78,26 @@ public class ContractFieldCatalog {
         add("contract.number", "Số hợp đồng", "Pháp lý hợp đồng", "TEXT", "Mã hiệu hợp đồng tự sinh", "HD-20260905-001", ALL);
         add("contract.signingDate", "Ngày ký kết", "Pháp lý hợp đồng", "DATE", "Ngày hai bên ký kết hợp đồng", "05/09/2026", ALL);
         add("contract.signingCity", "Địa điểm ký", "Pháp lý hợp đồng", "TEXT", "Tỉnh/Thành phố lập hợp đồng", "Thành phố Hồ Chí Minh", OPTIONAL);
-        add("contract.schemaVersion", "Phiên bản schema hợp đồng", "Pháp lý hợp đồng", "NUMBER", "Phiên bản cấu trúc dữ liệu hợp đồng (mặc định 2)", "2", OPTIONAL);
+        add("contract.schemaVersion", "Phiên bản schema hợp đồng", "Pháp lý hợp đồng", "NUMBER", "Phiên bản cấu trúc dữ liệu hợp đồng (mặc định 3)", "3", OPTIONAL);
         add("contract.revisionNumber", "Số lần sửa đổi hợp đồng", "Pháp lý hợp đồng", "NUMBER", "Số thứ tự phiên bản sửa đổi của hợp đồng", "1", OPTIONAL);
         add("contract.specialTerms", "Điều khoản đặc biệt / Thỏa thuận riêng", "Pháp lý hợp đồng", "TEXT", "Nội dung điều khoản thỏa thuận bổ sung giữa hai bên", "Bên B không được gây ồn sau 23h.", OPTIONAL);
 
-        // --- Bổ sung bất động sản V2 ---
+        // --- Bất động sản ---
         add("property.listingCode", "Mã tin đăng", "Bất động sản", "TEXT", "Mã hiệu quản lý của tin đăng", "HS-2026-001", OPTIONAL);
         add("property.rentalScope", "Phạm vi cho thuê", "Bất động sản", "TEXT", "Mô tả phạm vi thuê tài sản", "Thuê toàn bộ căn hộ chung cư", OPTIONAL);
         add("property.maxOccupants", "Số người tối đa cho phép", "Bất động sản", "NUMBER", "Số lượng người lưu trú tối đa cho phép", "4", OPTIONAL);
         add("property.maxVehicles", "Số phương tiện tối đa cho phép", "Bất động sản", "NUMBER", "Số lượng phương tiện tối đa cho phép gửi", "2", OPTIONAL);
 
-        // --- Thanh toán ban đầu V2 ---
-        add("payment.initial.status", "Trạng thái thanh toán ban đầu", "Thanh toán ban đầu", "TEXT", "Trạng thái khoản thanh toán ban đầu trước khi ký hợp đồng", "Đã thanh toán", OPTIONAL);
+        // --- Thanh toán ban đầu (Schema V3) ---
+        add("payment.initial.status", "Trạng thái thanh toán ban đầu", "Thanh toán ban đầu", "TEXT", "Trạng thái xác nhận thanh toán ban đầu trước khi ký hợp đồng", "Khoản chuyển đã được hai bên xác nhận", OPTIONAL);
         add("payment.initial.paidAt", "Thời điểm thanh toán ban đầu", "Thanh toán ban đầu", "TEXT", "Thời gian hoàn tất thanh toán ban đầu", "15/09/2026 14:30:00", OPTIONAL);
-        add("payment.initial.transactionCode", "Mã giao dịch thanh toán", "Thanh toán ban đầu", "TEXT", "Mã giao dịch thanh toán trực tuyến", "TXN-20260915-001", OPTIONAL);
-        add("payment.initial.totalAmount", "Tổng số tiền đã thanh toán", "Thanh toán ban đầu", "TEXT", "Tổng khoản tiền người thuê đã thanh toán", "20.000.000 VNĐ", OPTIONAL);
+        add("payment.initial.payerReportedAt", "Thời điểm người thuê báo chuyển", "Thanh toán ban đầu", "TEXT", "Thời điểm Bên B khai báo chuyển khoản trên hệ thống", "15/09/2026 14:30:00", OPTIONAL);
+        add("payment.initial.payeeConfirmedAt", "Thời điểm chủ nhà xác nhận", "Thanh toán ban đầu", "TEXT", "Thời điểm Bên A xác nhận đã nhận đủ tiền", "15/09/2026 14:45:00", OPTIONAL);
+        add("payment.initial.confirmedAt", "Thời điểm xác nhận hoàn tất", "Thanh toán ban đầu", "TEXT", "Thời điểm xác nhận hoàn tất", "15/09/2026 14:45:00", OPTIONAL);
+        add("payment.initial.transferReference", "Mã nội dung chuyển khoản", "Thanh toán ban đầu", "TEXT", "Mã nội dung chuyển khoản VietQR", "HS7K29P4A1", OPTIONAL);
+        add("payment.initial.bankTransactionReference", "Mã giao dịch ngân hàng", "Thanh toán ban đầu", "TEXT", "Mã tham chiếu ngân hàng Bên B cung cấp", "FT2625901234", OPTIONAL);
+        add("payment.initial.transactionCode", "Mã tham chiếu thanh toán", "Thanh toán ban đầu", "TEXT", "Mã nội dung chuyển khoản hoặc mã giao dịch", "HS7K29P4A1", OPTIONAL);
+        add("payment.initial.totalAmount", "Tổng số tiền ban đầu", "Thanh toán ban đầu", "TEXT", "Tổng khoản tiền người thuê đã thanh toán", "20.000.000 VNĐ", OPTIONAL);
 
         // --- Bảng động poi-tl ---
         add("#chargesTable", "Bảng biểu phí dịch vụ", "Bảng động", "DYNAMIC_TABLE", "Bảng chi tiết các khoản tiền điện, nước, gửi xe, quản lý... tự động mở rộng theo thỏa thuận", "[Bảng 3 cột: Khoản phí | Đơn giá / Cách tính | Ghi chú]", ALL);

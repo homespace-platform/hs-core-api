@@ -1,5 +1,6 @@
 package com.hs.user.model;
 
+import java.time.Instant;
 import java.time.LocalDate;
 
 import com.hs.common.persistence.BaseEntity;
@@ -72,5 +73,11 @@ public class User extends BaseEntity {
 
     @Column(name = "on_boarded", nullable = false)
     Boolean onBoarded = false;
+
+    @Column(name = "onboarding_version")
+    Integer onboardingVersion;
+
+    @Column(name = "onboarding_completed_at")
+    Instant onboardingCompletedAt;
 }
 

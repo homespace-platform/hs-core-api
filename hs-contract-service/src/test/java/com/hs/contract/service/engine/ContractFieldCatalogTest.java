@@ -16,7 +16,7 @@ class ContractFieldCatalogTest {
 
     @Test
     void testCatalogDefinitionsCountAndFields() {
-        assertEquals(52, catalog.getAllDefinitions().size(), "Catalog must have exactly 52 field definitions");
+        assertEquals(63, catalog.getAllDefinitions().size(), "Catalog must have exactly 63 field definitions");
 
         // Valid fields from CONTRACT_PROMPT.md
         assertTrue(catalog.isValidPlaceholder("contract.number"));
@@ -72,6 +72,19 @@ class ContractFieldCatalogTest {
         assertTrue(catalog.isValidPlaceholder("#propertyFeaturesTable"));
         assertTrue(catalog.isValidPlaceholder("#amenitiesTable"));
         assertTrue(catalog.isValidPlaceholder("#initialPaymentTable"));
+
+        // Schema V3 placeholders
+        assertTrue(catalog.isValidPlaceholder("landlord.bankName"));
+        assertTrue(catalog.isValidPlaceholder("landlord.bankAccountNumber"));
+        assertTrue(catalog.isValidPlaceholder("landlord.bankAccountHolder"));
+        assertTrue(catalog.isValidPlaceholder("tenant.bankName"));
+        assertTrue(catalog.isValidPlaceholder("tenant.bankAccountNumber"));
+        assertTrue(catalog.isValidPlaceholder("tenant.bankAccountHolder"));
+        assertTrue(catalog.isValidPlaceholder("payment.initial.payerReportedAt"));
+        assertTrue(catalog.isValidPlaceholder("payment.initial.payeeConfirmedAt"));
+        assertTrue(catalog.isValidPlaceholder("payment.initial.confirmedAt"));
+        assertTrue(catalog.isValidPlaceholder("payment.initial.transferReference"));
+        assertTrue(catalog.isValidPlaceholder("payment.initial.bankTransactionReference"));
 
         // Invalid / removed fields
         assertFalse(catalog.isValidPlaceholder("lease.rentalMode"), "lease.rentalMode must not be valid");

@@ -20,6 +20,7 @@
         <module>hs-storage-service</module>
         <module>hs-listing-service</module>
         <module>hs-notification-service</module>
+        <module>hs-payment-service</module>
         <module>hs-contract-service</module>
         <module>hs-api-service</module>
     </modules>

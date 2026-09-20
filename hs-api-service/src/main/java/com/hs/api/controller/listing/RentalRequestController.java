@@ -12,9 +12,9 @@ import com.hs.listing.dto.request.CreateRentalRequest;
 import com.hs.listing.dto.request.RejectRentalRequest;
 import com.hs.listing.dto.response.RentalRequestResponse;
 import com.hs.listing.model.constant.RentalRequestStatus;
-import com.hs.listing.dto.response.RentalPaymentResponse;
-import com.hs.listing.service.RentalPaymentService;
 import com.hs.listing.service.RentalRequestService;
+import com.hs.payment.dto.PaymentRequestResponse;
+import com.hs.payment.service.PaymentRequestService;
 import com.hs.user.service.kyc.KycGateService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -31,7 +31,7 @@ import org.springframework.web.bind.annotation.*;
 public class RentalRequestController {
 
     private final RentalRequestService rentalRequestService;
-    private final RentalPaymentService rentalPaymentService;
+    private final PaymentRequestService paymentRequestService;
     private final KycGateService kycGateService;
 
     @Value("${rental.hold-duration-minutes:60}")
@@ -96,19 +96,10 @@ public class RentalRequestController {
     }
 
     @GetMapping("/{id}/initial-payment")
-    public ApiResponse<RentalPaymentResponse> getInitialPayment(@PathVariable String id) {
+    public ApiResponse<PaymentRequestResponse> getInitialPayment(@PathVariable String id) {
         String actorId = requireUserId();
-        return ApiResponse.<RentalPaymentResponse>builder()
-                .result(rentalPaymentService.getInitialPayment(id, actorId))
-                .build();
-    }
-
-    @PostMapping("/{id}/initial-payment/pay-mock")
-    public ApiResponse<RentalPaymentResponse> payMock(@PathVariable String id) {
-        String renterId = requireUserId();
-        return ApiResponse.<RentalPaymentResponse>builder()
-                .message("Thanh toán ban đầu giả lập thành công.")
-                .result(rentalPaymentService.payMock(id, renterId))
+        return ApiResponse.<PaymentRequestResponse>builder()
+                .result(paymentRequestService.getInitialPaymentByRentalRequestId(id, actorId))
                 .build();
     }
 

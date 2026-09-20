@@ -172,10 +172,21 @@ public class UserServiceImpl implements UserService {
                 if (onboardingRequest.gender() != null) {
                         user.setGender(onboardingRequest.gender());
                 }
-                user.setOnBoarded(true);
-
+                // Personal profile info saved. Onboarding completion requires bank account step.
                 userRepository.save(user);
-                log.info("Onboarding completed for user {}", user.getId());
+                log.info("Onboarding personal profile saved for user {}", user.getId());
+        }
+
+        @Override
+        @Transactional
+        public void completeOnboarding(String userId) {
+                User user = userRepository.findById(userId)
+                                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
+                user.setOnBoarded(true);
+                user.setOnboardingVersion(2);
+                user.setOnboardingCompletedAt(Instant.now());
+                userRepository.save(user);
+                log.info("Onboarding completed (v2) for user {}", userId);
         }
 
         @Override

@@ -21,10 +21,10 @@ import com.hs.contract.service.converter.DocumentConversionService;
 import com.hs.contract.service.engine.ContractDataBuilder;
 import com.hs.contract.service.engine.ContractFieldCatalog;
 import com.hs.contract.service.engine.ContractRenderService;
-import com.hs.listing.model.RentalPayment;
-import com.hs.listing.model.constant.RentalPaymentStatus;
-import com.hs.listing.model.constant.RentalPaymentType;
-import com.hs.listing.repository.RentalPaymentRepository;
+import com.hs.payment.model.PaymentRequest;
+import com.hs.payment.model.constant.PaymentStatus;
+import com.hs.payment.model.constant.PaymentType;
+import com.hs.payment.repository.PaymentRequestRepository;
 import com.hs.contract.dto.request.CreateContractDraftRequest;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.listing.model.Listing;
@@ -256,7 +256,7 @@ class ContractServiceImplTest {
     void createDraft_failsWhenInitialPaymentNotPaid() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
-        RentalPaymentRepository rentalPaymentRepository = mock(RentalPaymentRepository.class);
+        PaymentRequestRepository paymentRequestRepository = mock(PaymentRequestRepository.class);
 
         ContractServiceImpl service = createServiceWithPayment(
                 contractRepository,
@@ -265,7 +265,7 @@ class ContractServiceImplTest {
                 mock(ContractTemplateVersionRepository.class),
                 rentalRequestRepository,
                 mock(ListingStatusService.class),
-                rentalPaymentRepository
+                paymentRequestRepository
         );
 
         RentalRequest req = RentalRequest.builder()
@@ -278,7 +278,7 @@ class ContractServiceImplTest {
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
         when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
         when(contractRepository.findByRentalRequestId("req-1")).thenReturn(Optional.empty());
-        when(rentalPaymentRepository.findByRentalRequestIdAndType("req-1", RentalPaymentType.INITIAL_PAYMENT))
+        when(paymentRequestRepository.findByRentalRequestIdAndType("req-1", PaymentType.INITIAL))
                 .thenReturn(Optional.empty());
 
         CreateContractDraftRequest draftReq = new CreateContractDraftRequest("req-1", "tpl-v1");
@@ -287,10 +287,10 @@ class ContractServiceImplTest {
     }
 
     @Test
-    void createDraft_succeedsWhenInitialPaymentIsPaidMock() {
+    void createDraft_succeedsWhenInitialPaymentIsConfirmed() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
-        RentalPaymentRepository rentalPaymentRepository = mock(RentalPaymentRepository.class);
+        PaymentRequestRepository paymentRequestRepository = mock(PaymentRequestRepository.class);
         ContractTemplateVersionRepository templateVersionRepository = mock(ContractTemplateVersionRepository.class);
         ContractRevisionRepository revisionRepository = mock(ContractRevisionRepository.class);
         ContractDataBuilder dataBuilder = mock(ContractDataBuilder.class);
@@ -309,7 +309,7 @@ class ContractServiceImplTest {
                 mock(StorageService.class),
                 new ObjectMapper(),
                 mock(com.hs.listing.service.ParkingReservationService.class),
-                rentalPaymentRepository
+                paymentRequestRepository
         );
 
         Listing listing = Listing.builder().id("listing-1").ownerId("landlord-1").build();
@@ -321,11 +321,11 @@ class ContractServiceImplTest {
                 .status(RentalRequestStatus.ACCEPTED)
                 .build();
 
-        RentalPayment payment = RentalPayment.builder()
+        PaymentRequest payment = PaymentRequest.builder()
                 .id("pay-1")
                 .rentalRequestId("req-1")
-                .status(RentalPaymentStatus.PAID_MOCK)
-                .paidAt(java.time.Instant.now())
+                .status(PaymentStatus.CONFIRMED)
+                .confirmedAt(java.time.Instant.now())
                 .totalAmount(new BigDecimal("10000000"))
                 .build();
 
@@ -342,8 +342,9 @@ class ContractServiceImplTest {
 
         when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
         when(contractRepository.findByRentalRequestId("req-1")).thenReturn(Optional.empty());
-        when(rentalPaymentRepository.findByRentalRequestIdAndType("req-1", RentalPaymentType.INITIAL_PAYMENT))
+        when(paymentRequestRepository.findByRentalRequestIdAndType("req-1", PaymentType.INITIAL))
                 .thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
         when(templateVersionRepository.findById("ver-1")).thenReturn(Optional.of(tplVer));
         when(dataBuilder.build(any(), any(), any())).thenReturn(ContractDataBuilder.ContractSnapshots.builder().build());
         when(contractRepository.save(any(Contract.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -358,7 +359,7 @@ class ContractServiceImplTest {
         var response = service.createDraft(new CreateContractDraftRequest("req-1", "ver-1"));
         org.junit.jupiter.api.Assertions.assertNotNull(response);
         assertEquals("pay-1", response.getRentalPaymentId());
-        assertEquals(ContractPaymentStatus.PAID_MOCK, response.getPaymentStatus());
+        assertEquals(ContractPaymentStatus.PAID, response.getPaymentStatus());
     }
 
     @Test
@@ -387,11 +388,11 @@ class ContractServiceImplTest {
     }
 
     @Test
-    void sign_allowedForNewContractWhenRentalPaymentIsPaidMock() {
+    void sign_allowedForNewContractWhenRentalPaymentIsConfirmed() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
         ListingStatusService listingStatusService = mock(ListingStatusService.class);
-        RentalPaymentRepository rentalPaymentRepository = mock(RentalPaymentRepository.class);
+        PaymentRequestRepository paymentRequestRepository = mock(PaymentRequestRepository.class);
 
         ContractServiceImpl service = createServiceWithPayment(
                 contractRepository,
@@ -400,7 +401,7 @@ class ContractServiceImplTest {
                 mock(ContractTemplateVersionRepository.class),
                 rentalRequestRepository,
                 listingStatusService,
-                rentalPaymentRepository
+                paymentRequestRepository
         );
 
         Listing listing = Listing.builder().id("listing-1").ownerId("landlord-1").build();
@@ -421,14 +422,14 @@ class ContractServiceImplTest {
                 .rentalPaymentId("pay-1")
                 .build();
 
-        RentalPayment payment = RentalPayment.builder()
+        PaymentRequest payment = PaymentRequest.builder()
                 .id("pay-1")
-                .status(RentalPaymentStatus.PAID_MOCK)
+                .status(PaymentStatus.CONFIRMED)
                 .build();
 
         UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
         when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
-        when(rentalPaymentRepository.findById("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
         when(rentalRequestRepository.findById("request-1")).thenReturn(Optional.of(rentalRequest));
         when(contractRepository.save(contract)).thenReturn(contract);
 
@@ -440,10 +441,10 @@ class ContractServiceImplTest {
     }
 
     @Test
-    void createDraft_succeedsWhenInitialPaymentIsPaidReal() {
+    void createDraft_succeedsWhenInitialPaymentIsConfirmedReal() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
-        RentalPaymentRepository rentalPaymentRepository = mock(RentalPaymentRepository.class);
+        PaymentRequestRepository paymentRequestRepository = mock(PaymentRequestRepository.class);
         ContractTemplateVersionRepository templateVersionRepository = mock(ContractTemplateVersionRepository.class);
         ContractRevisionRepository revisionRepository = mock(ContractRevisionRepository.class);
         ContractDataBuilder dataBuilder = mock(ContractDataBuilder.class);
@@ -462,7 +463,7 @@ class ContractServiceImplTest {
                 mock(StorageService.class),
                 new ObjectMapper(),
                 mock(com.hs.listing.service.ParkingReservationService.class),
-                rentalPaymentRepository
+                paymentRequestRepository
         );
 
         Listing listing = Listing.builder().id("listing-1").ownerId("landlord-1").build();
@@ -474,11 +475,11 @@ class ContractServiceImplTest {
                 .status(RentalRequestStatus.ACCEPTED)
                 .build();
 
-        RentalPayment payment = RentalPayment.builder()
+        PaymentRequest payment = PaymentRequest.builder()
                 .id("pay-real-1")
                 .rentalRequestId("req-1")
-                .status(RentalPaymentStatus.PAID)
-                .paidAt(java.time.Instant.now())
+                .status(PaymentStatus.CONFIRMED)
+                .confirmedAt(java.time.Instant.now())
                 .totalAmount(new BigDecimal("15000000"))
                 .build();
 
@@ -495,8 +496,9 @@ class ContractServiceImplTest {
 
         when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
         when(contractRepository.findByRentalRequestId("req-1")).thenReturn(Optional.empty());
-        when(rentalPaymentRepository.findByRentalRequestIdAndType("req-1", RentalPaymentType.INITIAL_PAYMENT))
+        when(paymentRequestRepository.findByRentalRequestIdAndType("req-1", PaymentType.INITIAL))
                 .thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-real-1")).thenReturn(Optional.of(payment));
         when(templateVersionRepository.findById("ver-1")).thenReturn(Optional.of(tplVer));
         when(dataBuilder.build(any(), any(), any())).thenReturn(ContractDataBuilder.ContractSnapshots.builder().build());
         when(contractRepository.save(any(Contract.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -658,7 +660,7 @@ class ContractServiceImplTest {
                 templateVersionRepository,
                 rentalRequestRepository,
                 listingStatusService,
-                mock(RentalPaymentRepository.class)
+                mock(PaymentRequestRepository.class)
         );
     }
 
@@ -669,7 +671,7 @@ class ContractServiceImplTest {
             ContractTemplateVersionRepository templateVersionRepository,
             RentalRequestRepository rentalRequestRepository,
             ListingStatusService listingStatusService,
-            RentalPaymentRepository rentalPaymentRepository
+            PaymentRequestRepository paymentRequestRepository
     ) {
         return new ContractServiceImpl(
                 contractRepository,
@@ -685,7 +687,7 @@ class ContractServiceImplTest {
                 mock(StorageService.class),
                 new ObjectMapper(),
                 mock(com.hs.listing.service.ParkingReservationService.class),
-                rentalPaymentRepository
+                paymentRequestRepository
         );
     }
 }

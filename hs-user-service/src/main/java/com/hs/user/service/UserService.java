@@ -32,6 +32,8 @@ public interface UserService {
 
     void processOnboarding(OnboardingRequest onboardingRequest);
 
+    void completeOnboarding(String userId);
+
     @Transactional(readOnly = true)
     UserPermissionsResponse getUserPermissions(String userId);
 

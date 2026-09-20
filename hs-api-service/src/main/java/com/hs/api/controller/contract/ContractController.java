@@ -265,10 +265,16 @@ public class ContractController {
                 .build();
     }
 
+    @org.springframework.beans.factory.annotation.Value("${homespace.payment.mock.enabled:false}")
+    private boolean mockPaymentEnabled;
+
     @PostMapping("/{contractId}/pay-mock")
     public ApiResponse<ContractPaymentBreakdownResponse> payMock(@PathVariable String contractId) {
+        if (!mockPaymentEnabled) {
+            throw new AppException(ErrorCode.UNAUTHORIZED, "Thử nghiệm thanh toán giả lập bị vô hiệu hóa.");
+        }
         return ApiResponse.<ContractPaymentBreakdownResponse>builder()
-                .message("Thanh toán giả lập thành công")
+                .message("Thực hiện thử nghiệm thanh toán giả lập")
                 .result(contractService.payMock(contractId))
                 .build();
     }

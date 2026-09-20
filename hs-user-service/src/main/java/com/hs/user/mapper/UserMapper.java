@@ -48,6 +48,8 @@ public class UserMapper {
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .address(AddressMapper.mapToAddressResponse(address))
+                .onboardingVersion(user.getOnboardingVersion())
+                .onboardingCompletedAt(user.getOnboardingCompletedAt())
                 .build();
     }
 

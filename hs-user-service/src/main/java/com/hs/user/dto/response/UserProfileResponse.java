@@ -29,7 +29,9 @@ public record UserProfileResponse(
         Boolean kycOptional,
         Instant createdAt,
         Instant updatedAt,
-        AddressResponse address
+        AddressResponse address,
+        Integer onboardingVersion,
+        Instant onboardingCompletedAt
 ) {
 }
 

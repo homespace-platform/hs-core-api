@@ -240,6 +240,9 @@ public class ContractRenderService {
         landlord.put("permanentAddress", getStr(src, "permanentAddress", ""));
         landlord.put("phone", getStr(src, "phone", ""));
         landlord.put("email", getStr(src, "email", ""));
+        landlord.put("bankName", getStr(src, "bankName", ""));
+        landlord.put("bankAccountNumber", getStr(src, "bankAccountNumber", ""));
+        landlord.put("bankAccountHolder", getStr(src, "bankAccountHolder", ""));
         model.put("landlord", landlord);
     }
 
@@ -256,6 +259,9 @@ public class ContractRenderService {
         tenant.put("occupantCount", String.valueOf(src.getOrDefault("occupantCount", "1")));
         tenant.put("motorbikeCount", String.valueOf(src.getOrDefault("motorbikeCount", "0")));
         tenant.put("carCount", String.valueOf(src.getOrDefault("carCount", "0")));
+        tenant.put("bankName", getStr(src, "bankName", ""));
+        tenant.put("bankAccountNumber", getStr(src, "bankAccountNumber", ""));
+        tenant.put("bankAccountHolder", getStr(src, "bankAccountHolder", ""));
         model.put("tenant", tenant);
     }
 
@@ -291,9 +297,9 @@ public class ContractRenderService {
         Map<String, Object> rent = new LinkedHashMap<>();
         rent.put("amountNumber", getStr(src, "amountNumber", ""));
         rent.put("amountWords", getStr(src, "amountWords", ""));
-        rent.put("paymentCycle", getStr(src, "paymentCycle", ""));
-        rent.put("paymentDueDay", getStr(src, "paymentDueDay", ""));
-        rent.put("paymentMethod", getStr(src, "paymentMethod", ""));
+        rent.put("paymentCycle", getStr(src, "paymentCycle", "Hàng tháng"));
+        rent.put("paymentDueDay", getStr(src, "paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng"));
+        rent.put("paymentMethod", getStr(src, "paymentMethod", "Chuyển khoản trực tiếp vào tài khoản ngân hàng của Bên A"));
         model.put("rent", rent);
 
         Map<String, Object> deposit = new LinkedHashMap<>();
@@ -314,9 +320,13 @@ public class ContractRenderService {
     private void putInitialPaymentFields(Map<String, Object> model, Map<String, Object> initialPayment, Map<String, Object> financial) {
         Map<String, Object> src = initialPayment != null ? initialPayment : Map.of();
         Map<String, Object> initial = new LinkedHashMap<>();
-        initial.put("status", getStr(src, "status", "Đã thanh toán"));
+        initial.put("status", getStr(src, "status", "Khoản chuyển đã được hai bên xác nhận"));
         initial.put("paidAt", getStr(src, "paidAt", ""));
-        initial.put("provider", getStr(src, "provider", "HomeSpace"));
+        initial.put("payerReportedAt", getStr(src, "payerReportedAt", ""));
+        initial.put("payeeConfirmedAt", getStr(src, "payeeConfirmedAt", ""));
+        initial.put("confirmedAt", getStr(src, "confirmedAt", ""));
+        initial.put("transferReference", getStr(src, "transferReference", ""));
+        initial.put("bankTransactionReference", getStr(src, "bankTransactionReference", ""));
         initial.put("transactionCode", getStr(src, "transactionCode", ""));
         initial.put("monthlyRent", getStr(src, "monthlyRent", getStr(financial, "amountNumber", "")));
         initial.put("monthlyCharges", getStr(src, "monthlyCharges", "0 VNĐ"));

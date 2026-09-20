@@ -10,7 +10,8 @@ import com.hs.listing.model.constant.ListingCategory;
 import com.hs.listing.model.constant.ListingEnums.BillingMethod;
 import com.hs.listing.model.constant.ListingEnums.ChargeType;
 import com.hs.listing.model.constant.PaymentCycle;
-import com.hs.listing.model.constant.RentalPaymentStatus;
+import com.hs.payment.dto.BankAccountSnapshotDto;
+import com.hs.payment.model.PaymentRequest;
 import com.hs.user.model.Address;
 import com.hs.user.model.User;
 import com.hs.user.repository.AddressRepository;
@@ -82,22 +83,25 @@ public class ContractDataBuilder {
         private Map<String, Object> policies;
         private String specialTerms;
         @Builder.Default
-        private int schemaVersion = 2;
+        private int schemaVersion = 3;
     }
 
     public ContractSnapshots build(RentalRequest request, Listing listing) {
-        return build(request, listing, null);
+        return build(request, listing, (PaymentRequest) null);
     }
 
-    public ContractSnapshots build(RentalRequest request, Listing listing, RentalPayment payment) {
+    public ContractSnapshots build(RentalRequest request, Listing listing, PaymentRequest payment) {
         int occupants = resolveOccupantCount(request);
 
         // 1. Phân giải snapshot bất biến của Listing
         ListingSnapshotDto listingSnapshot = resolveListingSnapshot(request, listing);
 
+        BankAccountSnapshotDto payeeBank = parseBankSnapshot(payment != null ? payment.getPayeeBankAccountSnapshot() : null);
+        BankAccountSnapshotDto payerBank = parseBankSnapshot(payment != null ? payment.getPayerBankAccountSnapshot() : null);
+
         // 2. Build từng nhóm snapshot
-        Map<String, Object> landlord = buildLandlord(request.getOwnerId());
-        Map<String, Object> tenant = buildTenant(request);
+        Map<String, Object> landlord = buildLandlord(request != null ? request.getOwnerId() : null, payeeBank);
+        Map<String, Object> tenant = buildTenant(request, payerBank);
         Map<String, Object> property = buildProperty(listingSnapshot, listing);
         Map<String, Object> lease = buildLease(request, listingSnapshot, listing);
         Map<String, Object> financial = buildFinancial(request, listingSnapshot, listing, payment);
@@ -123,8 +127,18 @@ public class ContractDataBuilder {
                 .amenities(amenities)
                 .policies(policies)
                 .specialTerms(specialTerms)
-                .schemaVersion(2)
+                .schemaVersion(3)
                 .build();
+    }
+
+    private BankAccountSnapshotDto parseBankSnapshot(String json) {
+        if (json == null || json.isBlank()) return null;
+        try {
+            return objectMapper.readValue(json, BankAccountSnapshotDto.class);
+        } catch (Exception e) {
+            log.warn("Failed to parse bank account snapshot in ContractDataBuilder", e);
+            return null;
+        }
     }
 
     // --- Giải quyết Snapshot bất biến ---
@@ -326,7 +340,7 @@ public class ContractDataBuilder {
 
     // --- Bên A / Bên B ---
 
-    private Map<String, Object> buildLandlord(String landlordId) {
+    private Map<String, Object> buildLandlord(String landlordId, BankAccountSnapshotDto bank) {
         Map<String, Object> map = new LinkedHashMap<>();
         User user = findUser(landlordId);
 
@@ -335,21 +349,28 @@ public class ContractDataBuilder {
         map.put("permanentAddress", permanentAddressOf(landlordId));
         map.put("phone", nullToEmpty(user == null ? null : user.getPhone()));
         map.put("email", nullToEmpty(user == null ? null : user.getEmail()));
+        map.put("bankName", bank != null && isNotBlank(bank.bankName()) ? bank.bankName() : "");
+        map.put("bankAccountNumber", bank != null && isNotBlank(bank.accountNumber()) ? bank.accountNumber() : "");
+        map.put("bankAccountHolder", bank != null && isNotBlank(bank.accountHolderName()) ? bank.accountHolderName() : "");
         return map;
     }
 
-    private Map<String, Object> buildTenant(RentalRequest request) {
+    private Map<String, Object> buildTenant(RentalRequest request, BankAccountSnapshotDto bank) {
         Map<String, Object> map = new LinkedHashMap<>();
-        User user = findUser(request.getRenterId());
+        String renterId = request != null ? request.getRenterId() : null;
+        User user = findUser(renterId);
 
-        map.put("fullName", firstNonBlank(request.getRenterName(), fullNameOf(user, "Người thuê (Bên B)")));
+        map.put("fullName", firstNonBlank(request != null ? request.getRenterName() : null, fullNameOf(user, "Người thuê (Bên B)")));
         map.put("idNumber", nullToEmpty(user == null ? null : user.getCccd()));
-        map.put("permanentAddress", permanentAddressOf(request.getRenterId()));
-        map.put("phone", firstNonBlank(request.getRenterPhone(), user == null ? null : user.getPhone()));
-        map.put("email", firstNonBlank(request.getRenterEmail(), user == null ? null : user.getEmail()));
+        map.put("permanentAddress", permanentAddressOf(renterId));
+        map.put("phone", firstNonBlank(request != null ? request.getRenterPhone() : null, user == null ? null : user.getPhone()));
+        map.put("email", firstNonBlank(request != null ? request.getRenterEmail() : null, user == null ? null : user.getEmail()));
         map.put("occupantCount", resolveOccupantCount(request));
-        map.put("motorbikeCount", request.getMotorbikeCount() != null ? request.getMotorbikeCount() : 0);
-        map.put("carCount", request.getCarCount() != null ? request.getCarCount() : 0);
+        map.put("motorbikeCount", (request != null && request.getMotorbikeCount() != null) ? request.getMotorbikeCount() : 0);
+        map.put("carCount", (request != null && request.getCarCount() != null) ? request.getCarCount() : 0);
+        map.put("bankName", bank != null && isNotBlank(bank.bankName()) ? bank.bankName() : "");
+        map.put("bankAccountNumber", bank != null && isNotBlank(bank.accountNumber()) ? bank.accountNumber() : "");
+        map.put("bankAccountHolder", bank != null && isNotBlank(bank.accountHolderName()) ? bank.accountHolderName() : "");
         return map;
     }
 
@@ -667,18 +688,16 @@ public class ContractDataBuilder {
     // --- Giá thuê & cọc ---
 
     private Map<String, Object> buildFinancial(RentalRequest request, ListingSnapshotDto snapshot, Listing liveListing,
-            RentalPayment payment) {
+            PaymentRequest payment) {
         Map<String, Object> map = new LinkedHashMap<>();
 
-        // Ưu tiên giá đã chốt: effectiveMonthlyRent từ request hoặc payment
+        // Ưu tiên giá đã chốt: effectiveMonthlyRent từ request hoặc snapshot
         BigDecimal rent;
-        if (payment != null && payment.getMonthlyRent() != null) {
-            rent = payment.getMonthlyRent();
-        } else if (request.getEffectiveMonthlyRent() != null) {
+        if (request != null && request.getEffectiveMonthlyRent() != null) {
             rent = request.getEffectiveMonthlyRent();
-        } else if (request.getMonthlyRentPrice() != null) {
+        } else if (request != null && request.getMonthlyRentPrice() != null) {
             rent = request.getMonthlyRentPrice();
-        } else if (snapshot.getPriceAmount() != null) {
+        } else if (snapshot != null && snapshot.getPriceAmount() != null) {
             rent = snapshot.getPriceAmount();
         } else {
             rent = liveListing != null && liveListing.getPriceAmount() != null ? liveListing.getPriceAmount()
@@ -686,17 +705,15 @@ public class ContractDataBuilder {
         }
 
         BigDecimal deposit;
-        if (payment != null && payment.getDepositAmount() != null) {
-            deposit = payment.getDepositAmount();
-        } else if (request.getDepositAmount() != null) {
+        if (request != null && request.getDepositAmount() != null) {
             deposit = request.getDepositAmount();
-        } else if (snapshot.getDepositAmount() != null) {
+        } else if (snapshot != null && snapshot.getDepositAmount() != null) {
             deposit = snapshot.getDepositAmount();
         } else {
             deposit = rent;
         }
 
-        String paymentCycle = snapshot.getPaymentCycle() != null ? paymentCycleLabelStr(snapshot.getPaymentCycle())
+        String paymentCycle = (snapshot != null && snapshot.getPaymentCycle() != null) ? paymentCycleLabelStr(snapshot.getPaymentCycle())
                 : (liveListing != null ? paymentCycleLabel(liveListing.getPaymentCycle()) : "Hàng tháng");
 
         map.put("amountValue", rent.toPlainString());
@@ -704,7 +721,7 @@ public class ContractDataBuilder {
         map.put("amountWords", VietnameseCurrencyTextConverter.toWords(rent));
         map.put("paymentCycle", paymentCycle);
         map.put("paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng");
-        map.put("paymentMethod", "Thanh toán trực tuyến qua hệ thống HomeSpace");
+        map.put("paymentMethod", "Chuyển khoản trực tiếp vào tài khoản ngân hàng của Bên A chỉ định trong Hợp đồng này");
         map.put("depositAmountValue", deposit.toPlainString());
         map.put("depositAmountNumber", ContractRenderService.formatVND(deposit));
         map.put("depositAmountWords", VietnameseCurrencyTextConverter.toWords(deposit));
@@ -1042,49 +1059,69 @@ public class ContractDataBuilder {
 
     private Map<String, Object> buildInitialPayment(
             RentalRequest request,
-            RentalPayment payment,
+            PaymentRequest payment,
             Map<String, Object> financial,
             List<Map<String, Object>> charges) {
         Map<String, Object> map = new LinkedHashMap<>();
 
-        String status = "Đã thanh toán";
+        String status = "Khoản chuyển đã được hai bên xác nhận";
         String paidAt = "";
-        String provider = "HomeSpace";
-        String reqId = (request != null && request.getId() != null) ? request.getId() : "DIRECT";
-        String txnCode = "TXN-" + (reqId.length() >= 8 ? reqId.substring(0, 8).toUpperCase() : reqId.toUpperCase());
+        String payerReportedAt = "";
+        String payeeConfirmedAt = "";
+        String confirmedAt = "";
+        String transferRef = "";
+        String bankTxnRef = "";
 
-        BigDecimal monthlyRent = request.getEffectiveMonthlyRent() != null ? request.getEffectiveMonthlyRent()
-                : (request.getMonthlyRentPrice() != null ? request.getMonthlyRentPrice() : BigDecimal.ZERO);
-        BigDecimal deposit = request.getDepositAmount() != null ? request.getDepositAmount() : monthlyRent;
-        BigDecimal monthlyCharges = request.getEstimatedMonthlyCharges() != null ? request.getEstimatedMonthlyCharges()
+        BigDecimal monthlyRent = (request != null && request.getEffectiveMonthlyRent() != null) ? request.getEffectiveMonthlyRent()
+                : ((request != null && request.getMonthlyRentPrice() != null) ? request.getMonthlyRentPrice() : BigDecimal.ZERO);
+        BigDecimal deposit = (request != null && request.getDepositAmount() != null) ? request.getDepositAmount() : monthlyRent;
+        BigDecimal monthlyCharges = (request != null && request.getEstimatedMonthlyCharges() != null) ? request.getEstimatedMonthlyCharges()
                 : BigDecimal.ZERO;
-        BigDecimal total = request.getEstimatedInitialTotal() != null ? request.getEstimatedInitialTotal()
+        BigDecimal total = (request != null && request.getEstimatedInitialTotal() != null) ? request.getEstimatedInitialTotal()
                 : monthlyRent.add(deposit).add(monthlyCharges);
 
         if (payment != null) {
-            status = payment.getStatus() == RentalPaymentStatus.PAID_MOCK ? "Đã thanh toán (Môi trường giả lập)"
-                    : "Đã thanh toán";
-            if (payment.getPaidAt() != null) {
-                paidAt = DATE_TIME_FORMATTER.format(payment.getPaidAt().atZone(VIETNAM_ZONE));
+            if (payment.getStatus() != null) {
+                status = switch (payment.getStatus()) {
+                    case CONFIRMED -> "Khoản chuyển đã được hai bên xác nhận";
+                    case TRANSFER_REPORTED -> "Người thuê đã báo chuyển, đang chờ chủ nhà xác nhận";
+                    case AWAITING_TRANSFER -> "Chờ người thuê chuyển khoản";
+                    case REJECTED -> "Chủ nhà từ chối xác nhận";
+                    case DISPUTED -> "Đang chờ đối soát tranh chấp";
+                    case EXPIRED -> "Yêu cầu thanh toán đã hết hạn";
+                    case CANCELLED -> "Yêu cầu thanh toán đã hủy";
+                    default -> payment.getStatus().name();
+                };
             }
-            if (payment.getProvider() != null)
-                provider = payment.getProvider();
-            if (payment.getProviderTransactionId() != null)
-                txnCode = payment.getProviderTransactionId();
-            if (payment.getMonthlyRent() != null)
-                monthlyRent = payment.getMonthlyRent();
-            if (payment.getDepositAmount() != null)
-                deposit = payment.getDepositAmount();
-            if (payment.getMonthlyCharges() != null)
-                monthlyCharges = payment.getMonthlyCharges();
-            if (payment.getTotalAmount() != null)
+            if (payment.getConfirmedAt() != null) {
+                confirmedAt = DATE_TIME_FORMATTER.format(payment.getConfirmedAt().atZone(VIETNAM_ZONE));
+                paidAt = confirmedAt;
+            }
+            if (payment.getPayerReportedAt() != null) {
+                payerReportedAt = DATE_TIME_FORMATTER.format(payment.getPayerReportedAt().atZone(VIETNAM_ZONE));
+            }
+            if (payment.getPayeeConfirmedAt() != null) {
+                payeeConfirmedAt = DATE_TIME_FORMATTER.format(payment.getPayeeConfirmedAt().atZone(VIETNAM_ZONE));
+            }
+            if (payment.getTransferReference() != null) {
+                transferRef = payment.getTransferReference();
+            }
+            if (payment.getBankTransactionReference() != null) {
+                bankTxnRef = payment.getBankTransactionReference();
+            }
+            if (payment.getTotalAmount() != null) {
                 total = payment.getTotalAmount();
+            }
         }
 
         map.put("status", status);
         map.put("paidAt", paidAt);
-        map.put("provider", provider);
-        map.put("transactionCode", txnCode);
+        map.put("payerReportedAt", payerReportedAt);
+        map.put("payeeConfirmedAt", payeeConfirmedAt);
+        map.put("confirmedAt", confirmedAt);
+        map.put("transferReference", transferRef);
+        map.put("bankTransactionReference", bankTxnRef);
+        map.put("transactionCode", !transferRef.isBlank() ? transferRef : (!bankTxnRef.isBlank() ? bankTxnRef : "HS-DIRECT"));
         map.put("monthlyRent", ContractRenderService.formatVND(monthlyRent));
         map.put("monthlyCharges", ContractRenderService.formatVND(monthlyCharges));
         map.put("depositAmount", ContractRenderService.formatVND(deposit));
@@ -1093,15 +1130,22 @@ public class ContractDataBuilder {
 
         // Các hàng của bảng {{#initialPaymentTable}}
         List<Map<String, String>> rows = new ArrayList<>();
-        rows.add(createPaymentRow("Tiền thuê kỳ đầu", ContractRenderService.formatVND(monthlyRent), "Đã thanh toán"));
+        rows.add(createPaymentRow("Tiền thuê kỳ đầu", ContractRenderService.formatVND(monthlyRent),
+                "Chuyển khoản trực tiếp vào tài khoản Bên A"));
         if (monthlyCharges.compareTo(BigDecimal.ZERO) > 0) {
             rows.add(createPaymentRow("Chi phí cố định kỳ đầu", ContractRenderService.formatVND(monthlyCharges),
-                    "Đã bao gồm các khoản cố định tháng đầu"));
+                    "Khoản phí dịch vụ cố định tháng đầu"));
         }
         rows.add(createPaymentRow("Tiền đặt cọc", ContractRenderService.formatVND(deposit),
-                "Đã thanh toán (hoàn trả khi thanh lý hợp đồng)"));
-        rows.add(createPaymentRow("Tổng cộng", ContractRenderService.formatVND(total),
-                isNotBlank(paidAt) ? "Thanh toán lúc: " + paidAt : "Đã hoàn tất thanh toán"));
+                "Bên A hoàn cọc trực tiếp cho Bên B khi chấm dứt hợp đồng"));
+
+        String noteTotal = "Khoản chuyển đã được hai bên xác nhận trực tiếp";
+        if (isNotBlank(payerReportedAt) && isNotBlank(payeeConfirmedAt)) {
+            noteTotal = "Bên B báo chuyển: " + payerReportedAt + " | Bên A xác nhận: " + payeeConfirmedAt;
+        } else if (isNotBlank(confirmedAt)) {
+            noteTotal = "Hai bên xác nhận lúc: " + confirmedAt;
+        }
+        rows.add(createPaymentRow("Tổng cộng", ContractRenderService.formatVND(total), noteTotal));
 
         map.put("rows", rows);
         return map;

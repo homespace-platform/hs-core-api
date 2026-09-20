@@ -34,15 +34,15 @@ import com.hs.contract.service.engine.ContractDataBuilder;
 import com.hs.contract.service.engine.ContractFieldCatalog;
 import com.hs.contract.service.engine.ContractRenderService;
 import com.hs.listing.model.Listing;
-import com.hs.listing.model.RentalPayment;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.model.constant.ListingCategory;
-import com.hs.listing.model.constant.RentalPaymentStatus;
-import com.hs.listing.model.constant.RentalPaymentType;
 import com.hs.listing.model.constant.RentalRequestStatus;
-import com.hs.listing.repository.RentalPaymentRepository;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.listing.service.ListingStatusService;
+import com.hs.payment.model.PaymentRequest;
+import com.hs.payment.model.constant.PaymentStatus;
+import com.hs.payment.model.constant.PaymentType;
+import com.hs.payment.repository.PaymentRequestRepository;
 import com.hs.storage.dto.response.StorageObjectResponse;
 import com.hs.storage.dto.response.StorageUrlResponse;
 import com.hs.storage.model.constant.StoragePurpose;
@@ -86,7 +86,7 @@ public class ContractServiceImpl implements ContractService {
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
     private final ParkingReservationService parkingReservationService;
-    private final RentalPaymentRepository rentalPaymentRepository;
+    private final PaymentRequestRepository paymentRequestRepository;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Autowired
@@ -104,7 +104,7 @@ public class ContractServiceImpl implements ContractService {
             StorageService storageService,
             ObjectMapper objectMapper,
             ParkingReservationService parkingReservationService,
-            RentalPaymentRepository rentalPaymentRepository) {
+            @Autowired(required = false) PaymentRequestRepository paymentRequestRepository) {
         this.contractRepository = contractRepository;
         this.revisionRepository = revisionRepository;
         this.documentRepository = documentRepository;
@@ -118,7 +118,7 @@ public class ContractServiceImpl implements ContractService {
         this.storageService = storageService;
         this.objectMapper = objectMapper;
         this.parkingReservationService = parkingReservationService;
-        this.rentalPaymentRepository = rentalPaymentRepository;
+        this.paymentRequestRepository = paymentRequestRepository;
     }
 
     public ContractServiceImpl(
@@ -167,12 +167,12 @@ public class ContractServiceImpl implements ContractService {
             return toContractResponse(existing.get());
         }
 
-        // 4. GATE: Kiểm tra INITIAL_PAYMENT của request. Chỉ cho tạo hợp đồng khi đã thanh toán (PAID_MOCK hoặc PAID)
-        RentalPayment payment = rentalPaymentRepository != null
-                ? rentalPaymentRepository.findByRentalRequestIdAndType(rentalRequest.getId(), RentalPaymentType.INITIAL_PAYMENT).orElse(null)
+        // 4. GATE: Kiểm tra INITIAL_PAYMENT của request. Chỉ cho tạo hợp đồng khi đã xác nhận hoàn tất (CONFIRMED)
+        PaymentRequest payment = paymentRequestRepository != null
+                ? paymentRequestRepository.findByRentalRequestIdAndType(rentalRequest.getId(), PaymentType.INITIAL).orElse(null)
                 : null;
 
-        if (payment == null || (payment.getStatus() != RentalPaymentStatus.PAID_MOCK && payment.getStatus() != RentalPaymentStatus.PAID)) {
+        if (payment == null || payment.getStatus() != PaymentStatus.CONFIRMED) {
             throw new AppException(ContractErrorCode.RENTAL_PAYMENT_REQUIRED_BEFORE_CONTRACT);
         }
 
@@ -196,8 +196,8 @@ public class ContractServiceImpl implements ContractService {
                 .templateVersionId(templateVersion.getId())
                 .status(ContractStatus.DRAFT)
                 .rentalPaymentId(payment.getId())
-                .paymentStatus(payment.getStatus() == RentalPaymentStatus.PAID ? ContractPaymentStatus.PAID : ContractPaymentStatus.PAID_MOCK)
-                .paidAt(payment.getPaidAt())
+                .paymentStatus(ContractPaymentStatus.PAID)
+                .paidAt(payment.getConfirmedAt())
                 .build();
 
         contract = contractRepository.save(contract);
@@ -739,17 +739,17 @@ public class ContractServiceImpl implements ContractService {
         }
 
         // Kiểm tra thanh toán:
-        // Luồng mới: Kiểm tra RentalPayment liên kết đã PAID_MOCK hoặc PAID
+        // Luồng mới: Kiểm tra PaymentRequest liên kết đã CONFIRMED
         if (contract.getRentalPaymentId() != null) {
-            RentalPayment payment = rentalPaymentRepository != null
-                    ? rentalPaymentRepository.findById(contract.getRentalPaymentId()).orElse(null)
+            PaymentRequest payment = paymentRequestRepository != null
+                    ? paymentRequestRepository.findById(contract.getRentalPaymentId()).orElse(null)
                     : null;
-            if (payment == null || (payment.getStatus() != RentalPaymentStatus.PAID_MOCK && payment.getStatus() != RentalPaymentStatus.PAID)) {
+            if (payment == null || payment.getStatus() != PaymentStatus.CONFIRMED) {
                 throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
             }
         } else {
             // Nhánh tương thích legacy cho hợp đồng cũ:
-            if (paymentStatusOf(contract) != ContractPaymentStatus.PAID_MOCK) {
+            if (paymentStatusOf(contract) != ContractPaymentStatus.PAID && paymentStatusOf(contract) != ContractPaymentStatus.PAID_MOCK) {
                 throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
             }
         }
@@ -868,17 +868,13 @@ public class ContractServiceImpl implements ContractService {
     }
 
     private ContractPaymentStatus paymentStatusOf(Contract contract) {
-        if (contract.getRentalPaymentId() != null && rentalPaymentRepository != null) {
-            Optional<RentalPayment> paymentOpt = rentalPaymentRepository.findById(contract.getRentalPaymentId());
+        if (contract.getRentalPaymentId() != null && paymentRequestRepository != null) {
+            Optional<PaymentRequest> paymentOpt = paymentRequestRepository.findById(contract.getRentalPaymentId());
             if (paymentOpt.isPresent()) {
-                RentalPaymentStatus rps = paymentOpt.get().getStatus();
-                if (rps == RentalPaymentStatus.PAID) {
+                PaymentStatus status = paymentOpt.get().getStatus();
+                if (status == PaymentStatus.CONFIRMED) {
                     return ContractPaymentStatus.PAID;
-                } else if (rps == RentalPaymentStatus.PAID_MOCK) {
-                    return ContractPaymentStatus.PAID_MOCK;
-                } else if (rps == RentalPaymentStatus.REFUNDED) {
-                    return ContractPaymentStatus.REFUNDED;
-                } else if (rps == RentalPaymentStatus.FAILED) {
+                } else if (status == PaymentStatus.CANCELLED || status == PaymentStatus.EXPIRED) {
                     return ContractPaymentStatus.FAILED;
                 } else {
                     return ContractPaymentStatus.UNPAID;

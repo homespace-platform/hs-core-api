@@ -32,12 +32,20 @@ public class UserController {
 
     UserService userService;
     UserAvatarFacade userAvatarFacade;
+    com.hs.api.facade.OnboardingFacade onboardingFacade;
+
+    @GetMapping("/me/onboarding-status")
+    public ApiResponse<com.hs.api.dto.OnboardingStatusResponse> getOnboardingStatus() {
+        return ApiResponse.<com.hs.api.dto.OnboardingStatusResponse>builder()
+                .result(onboardingFacade.getOnboardingStatus())
+                .build();
+    }
 
     @PutMapping("/me/onboarding")
     public ApiResponse<Void> onboarding(@RequestBody @Valid OnboardingRequest request) {
         userService.processOnboarding(request);
         return ApiResponse.<Void>builder()
-                .message("Onboarding completed")
+                .message("Thông tin cá nhân đã được lưu")
                 .build();
     }
 
