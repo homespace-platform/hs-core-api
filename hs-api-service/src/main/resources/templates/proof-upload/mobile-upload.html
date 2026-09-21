@@ -314,13 +314,13 @@
         <div style="margin-top: 14px;">
           <button type="submit" class="btn-submit" id="btnSubmit" disabled>
             <span class="spinner" id="submitSpinner"></span>
-            <span id="submitText">Tải chứng từ lên</span>
+            <span id="submitText">Tải lên và gửi chủ nhà xác nhận</span>
           </button>
         </div>
       </form>
 
       <p class="note-text">
-        Chứng từ sẽ tự động xuất hiện trên màn hình máy tính của bạn sau khi tải lên thành công.
+        Chứng từ sẽ được gửi trực tiếp cho chủ nhà xác nhận ngay sau khi bạn tải lên thành công.
       </p>
     </div>
   </div>
@@ -431,7 +431,7 @@
     uploadForm.addEventListener("submit", function() {
       btnSubmit.disabled = true;
       submitSpinner.style.display = "inline-block";
-      submitText.textContent = "Đang tải lên...";
+      submitText.textContent = "Đang gửi chứng từ...";
     });
     /*]]>*/
   </script>

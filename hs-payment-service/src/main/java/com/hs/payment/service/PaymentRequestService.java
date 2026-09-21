@@ -9,7 +9,9 @@ import com.hs.payment.model.constant.*;
 import com.hs.payment.repository.*;
 import com.hs.payment.service.qr.VietQrProvider;
 import com.hs.storage.model.StorageObject;
+import com.hs.storage.model.constant.StoragePurpose;
 import com.hs.storage.model.constant.StorageStatus;
+import com.hs.storage.model.constant.StorageVisibility;
 import com.hs.storage.repository.StorageObjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -229,6 +231,19 @@ public class PaymentRequestService {
                     log.warn("Storage object [{}] is not READY (status={})", proofStorageId, storageObj.getStatus());
                     throw new AppException(PaymentErrorCode.PAYMENT_PROOF_INVALID);
                 }
+                if (storageObj.getVisibility() != StorageVisibility.PRIVATE) {
+                    log.warn("Storage object [{}] is not PRIVATE (visibility={})", proofStorageId, storageObj.getVisibility());
+                    throw new AppException(PaymentErrorCode.PAYMENT_PROOF_INVALID);
+                }
+                if (storageObj.getPurpose() != null && storageObj.getPurpose() != StoragePurpose.PAYMENT_PROOF) {
+                    log.warn("Storage object [{}] purpose [{}] is not PAYMENT_PROOF", proofStorageId, storageObj.getPurpose());
+                    throw new AppException(PaymentErrorCode.PAYMENT_PROOF_INVALID);
+                }
+                if (storageObj.getReferenceType() != null && !storageObj.getReferenceType().isBlank()
+                        && !"PAYMENT_REQUEST".equalsIgnoreCase(storageObj.getReferenceType())) {
+                    log.warn("Storage object [{}] referenceType [{}] is not PAYMENT_REQUEST", proofStorageId, storageObj.getReferenceType());
+                    throw new AppException(PaymentErrorCode.PAYMENT_PROOF_INVALID);
+                }
                 if (storageObj.getReferenceId() != null
                         && !storageObj.getReferenceId().isBlank()
                         && !payment.getId().equals(storageObj.getReferenceId())
@@ -252,25 +267,22 @@ public class PaymentRequestService {
             payment.setRejectedAt(null);
             payment.setRejectedReason(null);
         }
-        if (request.bankTransactionReference() != null && !request.bankTransactionReference().isBlank()) {
-            payment.setBankTransactionReference(request.bankTransactionReference().trim());
-        }
 
         PaymentEvidence evidence = PaymentEvidence.builder()
                 .paymentRequestId(payment.getId())
                 .uploadedBy(actorId)
                 .storageObjectId(proofStorageId)
-                .declaredTransferTime(request.declaredTransferTime() != null ? request.declaredTransferTime() : now)
-                .bankTransactionReference(request.bankTransactionReference() != null ? request.bankTransactionReference().trim() : null)
-                .payerAccountLast4(request.payerAccountLast4() != null ? request.payerAccountLast4().trim() : null)
-                .note(request.note() != null ? request.note().trim() : null)
+                .declaredTransferTime(now)
+                .bankTransactionReference(null)
+                .payerAccountLast4(null)
+                .note(null)
                 .build();
         paymentEvidenceRepository.save(evidence);
 
         PaymentRequest saved = paymentRequestRepository.save(payment);
 
         recordEvent(saved.getId(), PaymentEventType.TRANSFER_REPORTED, oldStatus, PaymentStatus.TRANSFER_REPORTED,
-                actorId, "TENANT", request.note(), null);
+                actorId, "TENANT", "Người thuê đã gửi chứng từ chuyển khoản.", null);
 
         log.info("Tenant [{}] reported transfer for PaymentRequest [{}] with proof [{}]",
                 actorId, paymentRequestId, proofStorageId);

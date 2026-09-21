@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.*;
 public class PaymentProofUploadSessionController {
 
     private final PaymentProofUploadSessionService proofUploadSessionService;
+    private final com.hs.payment.config.PaymentProofUploadProperties proofUploadProperties;
+    private final com.hs.payment.service.PaymentProofUrlResolver urlResolver;
 
     private String requireUserId() {
         UserContext ctx = UserContextHolder.get();
@@ -33,38 +35,26 @@ public class PaymentProofUploadSessionController {
             HttpServletRequest request
     ) {
         String actorId = requireUserId();
-        String baseUrl = resolveBaseUrl(request);
+        String proto = request != null ? request.getHeader("X-Forwarded-Proto") : null;
+        String fwdHost = request != null ? request.getHeader("X-Forwarded-Host") : null;
+        String hostHeader = request != null ? request.getHeader("Host") : null;
+        String serverName = request != null ? request.getServerName() : null;
+        int serverPort = request != null ? request.getServerPort() : 0;
+
+        String baseUrl = urlResolver.resolvePublicBaseUrl(
+                proofUploadProperties.publicBaseUrl(),
+                proto,
+                fwdHost,
+                hostHeader,
+                serverName,
+                serverPort
+        );
+
         CreateUploadSessionResponse response = proofUploadSessionService.createSession(paymentRequestId, actorId, baseUrl);
         return ApiResponse.<CreateUploadSessionResponse>builder()
                 .message("Tạo phiên tải chứng từ từ điện thoại thành công")
                 .result(response)
                 .build();
-    }
-
-    private String resolveBaseUrl(HttpServletRequest request) {
-        if (request == null) {
-            return "http://localhost:8080";
-        }
-        String proto = request.getHeader("X-Forwarded-Proto");
-        if (proto == null || proto.isBlank()) {
-            proto = request.getScheme();
-        }
-        String host = request.getHeader("X-Forwarded-Host");
-        if (host == null || host.isBlank()) {
-            host = request.getHeader("Host");
-        }
-        if (host == null || host.isBlank()) {
-            host = request.getServerName();
-            int port = request.getServerPort();
-            if (("http".equalsIgnoreCase(proto) && port != 80) || ("https".equalsIgnoreCase(proto) && port != 443)) {
-                host = host + ":" + port;
-            }
-        }
-        // Validate host against host-header injection
-        if (!host.matches("^[a-zA-Z0-9.:\\-_]+$")) {
-            host = "localhost:8080";
-        }
-        return proto + "://" + host;
     }
 
     @GetMapping("/{sessionId}")

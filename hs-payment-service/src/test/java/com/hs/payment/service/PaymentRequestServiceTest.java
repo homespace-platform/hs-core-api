@@ -149,17 +149,16 @@ class PaymentRequestServiceTest {
                 .id("storage-1")
                 .ownerId("tenant-1")
                 .status(com.hs.storage.model.constant.StorageStatus.READY)
+                .purpose(com.hs.storage.model.constant.StoragePurpose.PAYMENT_PROOF)
+                .visibility(com.hs.storage.model.constant.StorageVisibility.PRIVATE)
+                .referenceType("PAYMENT_REQUEST")
                 .referenceId("pay-1")
                 .build();
         when(storageObjectRepository.findById("storage-1")).thenReturn(Optional.of(mockStorage));
 
-        ReportTransferRequest request = new ReportTransferRequest(
-                Instant.now(),
-                "FT260920123456",
-                "1234",
-                "storage-1",
-                "Da chuyen khoan du 15 trieu"
-        );
+        ReportTransferRequest request = ReportTransferRequest.builder()
+                .proofStorageId("storage-1")
+                .build();
 
         PaymentRequestResponse resp = paymentRequestService.reportTransfer("pay-1", "tenant-1", request);
 
@@ -184,14 +183,9 @@ class PaymentRequestServiceTest {
         when(paymentProofUploadSessionService.consumeSession("sess-123", "pay-1", "tenant-1"))
                 .thenReturn("storage-from-session");
 
-        ReportTransferRequest request = new ReportTransferRequest(
-                Instant.now(),
-                "FT260920999999",
-                "9999",
-                null,
-                "sess-123",
-                "Chuyen khoan qua mobile"
-        );
+        ReportTransferRequest request = ReportTransferRequest.builder()
+                .evidenceUploadSessionId("sess-123")
+                .build();
 
         PaymentRequestResponse resp = paymentRequestService.reportTransfer("pay-1", "tenant-1", request);
 
@@ -213,9 +207,7 @@ class PaymentRequestServiceTest {
 
         when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
 
-        ReportTransferRequest request = new ReportTransferRequest(
-                Instant.now(), "FT123", "1234", "", "note"
-        );
+        ReportTransferRequest request = ReportTransferRequest.builder().build();
 
         AppException ex = assertThrows(AppException.class, () ->
                 paymentRequestService.reportTransfer("pay-1", "tenant-1", request));
@@ -238,12 +230,16 @@ class PaymentRequestServiceTest {
                 .id("storage-fake")
                 .ownerId("hacker-user")
                 .status(com.hs.storage.model.constant.StorageStatus.READY)
+                .purpose(com.hs.storage.model.constant.StoragePurpose.PAYMENT_PROOF)
+                .visibility(com.hs.storage.model.constant.StorageVisibility.PRIVATE)
+                .referenceType("PAYMENT_REQUEST")
+                .referenceId("pay-1")
                 .build();
         when(storageObjectRepository.findById("storage-fake")).thenReturn(Optional.of(wrongOwnerStorage));
 
-        ReportTransferRequest request = new ReportTransferRequest(
-                Instant.now(), "FT123", "1234", "storage-fake", "note"
-        );
+        ReportTransferRequest request = ReportTransferRequest.builder()
+                .proofStorageId("storage-fake")
+                .build();
 
         AppException ex = assertThrows(AppException.class, () ->
                 paymentRequestService.reportTransfer("pay-1", "tenant-1", request));
@@ -270,13 +266,16 @@ class PaymentRequestServiceTest {
                 .id("storage-2")
                 .ownerId("tenant-1")
                 .status(com.hs.storage.model.constant.StorageStatus.READY)
+                .purpose(com.hs.storage.model.constant.StoragePurpose.PAYMENT_PROOF)
+                .visibility(com.hs.storage.model.constant.StorageVisibility.PRIVATE)
+                .referenceType("PAYMENT_REQUEST")
                 .referenceId("pay-1")
                 .build();
         when(storageObjectRepository.findById("storage-2")).thenReturn(Optional.of(mockStorage));
 
-        ReportTransferRequest request = new ReportTransferRequest(
-                Instant.now(), "FT999", "1234", "storage-2", "Gui lai bien lai"
-        );
+        ReportTransferRequest request = ReportTransferRequest.builder()
+                .proofStorageId("storage-2")
+                .build();
 
         paymentRequestService.reportTransfer("pay-1", "tenant-1", request);
 
@@ -297,9 +296,9 @@ class PaymentRequestServiceTest {
 
         when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
 
-        ReportTransferRequest request = new ReportTransferRequest(
-                Instant.now(), "FT123", "1234", "storage-1", null
-        );
+        ReportTransferRequest request = ReportTransferRequest.builder()
+                .proofStorageId("storage-1")
+                .build();
 
         AppException ex = assertThrows(AppException.class, () ->
                 paymentRequestService.reportTransfer("pay-1", "other-user", request));

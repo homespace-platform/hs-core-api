@@ -8,6 +8,8 @@ import com.hs.payment.model.PaymentProofUploadSession;
 import com.hs.payment.model.PaymentRequest;
 import com.hs.payment.model.constant.PaymentStatus;
 import com.hs.payment.model.constant.UploadSessionStatus;
+import com.hs.payment.repository.PaymentEventRepository;
+import com.hs.payment.repository.PaymentEvidenceRepository;
 import com.hs.payment.repository.PaymentProofUploadSessionRepository;
 import com.hs.payment.repository.PaymentRequestRepository;
 import com.hs.storage.dto.response.StorageObjectResponse;
@@ -41,6 +43,12 @@ class PaymentProofUploadSessionServiceTest {
 
     @Mock
     private PaymentRequestRepository paymentRequestRepository;
+
+    @Mock
+    private PaymentEvidenceRepository paymentEvidenceRepository;
+
+    @Mock
+    private PaymentEventRepository paymentEventRepository;
 
     @Mock
     private StorageService storageService;
@@ -168,6 +176,7 @@ class PaymentProofUploadSessionServiceTest {
                 .build();
 
         when(uploadSessionRepository.findByTokenHash(anyString())).thenReturn(Optional.of(session));
+        when(paymentRequestRepository.findByIdForUpdate("pay-123")).thenReturn(Optional.of(paymentRequest));
 
         byte[] fakeBytes = "content".getBytes(StandardCharsets.UTF_8);
 
@@ -183,7 +192,7 @@ class PaymentProofUploadSessionServiceTest {
     }
 
     @Test
-    @DisplayName("7. Upload thanh cong chuyen session sang UPLOADED va chua doi PaymentRequest")
+    @DisplayName("7. Upload thanh cong tao PaymentEvidence, chuyen PaymentRequest sang TRANSFER_REPORTED va session sang CONSUMED")
     void handleMobileUpload_Success() {
         PaymentProofUploadSession session = PaymentProofUploadSession.builder()
                 .id("sess-valid")
@@ -196,6 +205,10 @@ class PaymentProofUploadSessionServiceTest {
 
         when(uploadSessionRepository.findByTokenHash(anyString())).thenReturn(Optional.of(session));
         when(uploadSessionRepository.save(any(PaymentProofUploadSession.class))).thenAnswer(i -> i.getArgument(0));
+        when(paymentRequestRepository.findByIdForUpdate("pay-123")).thenReturn(Optional.of(paymentRequest));
+        when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> i.getArgument(0));
+        when(paymentEvidenceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(paymentEventRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
         StorageObjectResponse mockStorageResp = new StorageObjectResponse(
                 "storage-uuid-999",
@@ -221,7 +234,8 @@ class PaymentProofUploadSessionServiceTest {
                 eq(StoragePurpose.PAYMENT_PROOF),
                 eq("PAYMENT_REQUEST"),
                 eq("pay-123"),
-                eq(StorageVisibility.PRIVATE)
+                eq(StorageVisibility.PRIVATE),
+                eq("tenant-1")
         )).thenReturn(mockStorageResp);
 
         byte[] fileBytes = new byte[]{1, 2, 3, 4};
@@ -233,13 +247,79 @@ class PaymentProofUploadSessionServiceTest {
                 4L
         );
 
-        assertEquals(UploadSessionStatus.UPLOADED, uploadedSession.getStatus());
+        assertEquals(UploadSessionStatus.CONSUMED, uploadedSession.getStatus());
         assertEquals("storage-uuid-999", uploadedSession.getStorageId());
         assertEquals("receipt.png", uploadedSession.getOriginalFileName());
         assertEquals(4L, uploadedSession.getFileSize());
         assertNotNull(uploadedSession.getUploadedAt());
+        assertNotNull(uploadedSession.getConsumedAt());
 
-        // PaymentRequest repository is NOT modified during upload!
+        // PaymentRequest repository is updated to TRANSFER_REPORTED!
+        assertEquals(PaymentStatus.TRANSFER_REPORTED, paymentRequest.getStatus());
+        verify(paymentRequestRepository).save(paymentRequest);
+        verify(paymentEvidenceRepository).save(any());
+        verify(paymentEventRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("7b. Reload/Re-POST khi session da CONSUMED va payment la TRANSFER_REPORTED tra ve session ma khong loi")
+    void handleMobileUpload_IdempotentAlreadyConsumed() {
+        PaymentProofUploadSession session = PaymentProofUploadSession.builder()
+                .id("sess-consumed")
+                .paymentRequestId("pay-123")
+                .tenantUserId("tenant-1")
+                .tokenHash("some-hash")
+                .status(UploadSessionStatus.CONSUMED)
+                .storageId("storage-uuid-999")
+                .expiresAt(Instant.now().plusSeconds(300))
+                .build();
+
+        paymentRequest.setStatus(PaymentStatus.TRANSFER_REPORTED);
+        when(uploadSessionRepository.findByTokenHash(anyString())).thenReturn(Optional.of(session));
+        when(paymentRequestRepository.findById("pay-123")).thenReturn(Optional.of(paymentRequest));
+
+        PaymentProofUploadSession result = sessionService.handleMobileUpload(
+                "valid-token",
+                new byte[]{1, 2},
+                "receipt.png",
+                "image/png",
+                2L
+        );
+
+        assertEquals(UploadSessionStatus.CONSUMED, result.getStatus());
+        verify(storageService, never()).uploadDirect(any(), any(), any(), any(), any(), any(), any());
+        verify(paymentEvidenceRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("7c. Upload storage loi thi revert session ve CREATED va quang loi")
+    void handleMobileUpload_StorageError_RevertsSessionToCreated() {
+        PaymentProofUploadSession session = PaymentProofUploadSession.builder()
+                .id("sess-valid")
+                .paymentRequestId("pay-123")
+                .tenantUserId("tenant-1")
+                .tokenHash("some-hash")
+                .status(UploadSessionStatus.CREATED)
+                .expiresAt(Instant.now().plusSeconds(300))
+                .build();
+
+        when(uploadSessionRepository.findByTokenHash(anyString())).thenReturn(Optional.of(session));
+        when(paymentRequestRepository.findByIdForUpdate("pay-123")).thenReturn(Optional.of(paymentRequest));
+        when(uploadSessionRepository.save(any(PaymentProofUploadSession.class))).thenAnswer(i -> i.getArgument(0));
+
+        when(storageService.uploadDirect(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("S3 connection error"));
+
+        assertThrows(RuntimeException.class, () -> sessionService.handleMobileUpload(
+                "valid-token",
+                new byte[]{1, 2},
+                "receipt.png",
+                "image/png",
+                2L
+        ));
+
+        assertEquals(UploadSessionStatus.CREATED, session.getStatus());
+        verify(paymentEvidenceRepository, never()).save(any());
         verify(paymentRequestRepository, never()).save(any());
     }
 

@@ -12,6 +12,8 @@ public record StorageProperties(
         @NotBlank String bucket,
         @NotBlank String region,
         @NotNull Duration uploadUrlDuration,
-        @NotNull Duration downloadUrlDuration
+        @NotNull Duration downloadUrlDuration,
+        String accessKey,
+        String secretKey
 ) {
 }

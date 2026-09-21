@@ -57,6 +57,6 @@ class ListingQueryServiceTest {
     }
 
     private StorageProperties properties() {
-        return new StorageProperties("bucket", "ap-southeast-1", Duration.ofMinutes(10), Duration.ofMinutes(5));
+        return new StorageProperties("bucket", "ap-southeast-1", Duration.ofMinutes(10), Duration.ofMinutes(5), null, null);
     }
 }

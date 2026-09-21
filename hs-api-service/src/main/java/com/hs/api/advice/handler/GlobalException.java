@@ -16,11 +16,41 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import com.hs.storage.advice.entity.enums.StorageErrorCode;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.servlet.ModelAndView;
+import jakarta.servlet.http.HttpServletRequest;
+
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @ControllerAdvice
 public class GlobalException {
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    Object handlingMaxUploadSizeExceeded(MaxUploadSizeExceededException exception, HttpServletRequest request) {
+        log.warn("Max upload size exceeded: {}", exception.getMessage());
+        if (request != null && request.getRequestURI() != null && request.getRequestURI().startsWith("/u/")) {
+            ModelAndView mav = new ModelAndView("proof-upload/mobile-upload-error");
+            mav.addObject("errorTitle", "Dung lượng tệp quá lớn");
+            mav.addObject("errorMessage", "Dung lượng tệp chứng từ vượt quá giới hạn cho phép (tối đa 15MB). Vui lòng chọn ảnh có dung lượng nhỏ hơn.");
+            return mav;
+        }
+        return buildResponse(StorageErrorCode.STORAGE_FILE_TOO_LARGE);
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    Object handlingMultipartException(MultipartException exception, HttpServletRequest request) {
+        log.warn("Multipart exception: {}", exception.getMessage());
+        if (request != null && request.getRequestURI() != null && request.getRequestURI().startsWith("/u/")) {
+            ModelAndView mav = new ModelAndView("proof-upload/mobile-upload-error");
+            mav.addObject("errorTitle", "Lỗi tải tệp");
+            mav.addObject("errorMessage", "Không thể tiếp nhận tệp tải lên. Vui lòng thử lại với định dạng JPG, PNG hoặc PDF.");
+            return mav;
+        }
+        return buildResponse(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
+    }
+
     @ExceptionHandler(Exception.class)
     ResponseEntity<ApiResponse<Void>> handlingRuntimeException(Exception exception) {
         log.error("Exception: ", exception);

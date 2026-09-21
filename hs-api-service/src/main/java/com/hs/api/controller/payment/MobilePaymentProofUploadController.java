@@ -1,7 +1,9 @@
 package com.hs.api.controller.payment;
 
+import com.hs.payment.advice.PaymentErrorCode;
 import com.hs.payment.model.PaymentProofUploadSession;
 import com.hs.payment.model.PaymentRequest;
+import com.hs.payment.model.constant.UploadSessionStatus;
 import com.hs.payment.repository.PaymentRequestRepository;
 import com.hs.payment.service.PaymentProofUploadSessionService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -10,6 +12,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
+import com.hs.common.advice.entity.AppException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.text.DecimalFormat;
@@ -55,12 +60,19 @@ public class MobilePaymentProofUploadController {
 
         PaymentProofUploadSession session = uploadSessionService.findValidSessionByRawToken(token);
         if (session == null) {
-            model.addAttribute("errorMessage", "Phiên tải chứng từ này không tồn tại, đã hết hạn hoặc đã được sử dụng.");
+            model.addAttribute("errorTitle", "Phiên không hợp lệ");
+            model.addAttribute("errorMessage", "Phiên tải chứng từ này không tồn tại hoặc đã hết hạn. Vui lòng tạo mã QR mới trên máy tính.");
             return "proof-upload/mobile-upload-error";
+        }
+
+        // Nếu session đã gửi thành công trước đó (người dùng reload lại trang)
+        if (session.getStatus() == UploadSessionStatus.CONSUMED) {
+            return "proof-upload/mobile-upload-success";
         }
 
         PaymentRequest payment = paymentRequestRepository.findById(session.getPaymentRequestId()).orElse(null);
         if (payment == null) {
+            model.addAttribute("errorTitle", "Không tìm thấy yêu cầu");
             model.addAttribute("errorMessage", "Yêu cầu thanh toán không hợp lệ.");
             return "proof-upload/mobile-upload-error";
         }
@@ -92,6 +104,7 @@ public class MobilePaymentProofUploadController {
             HttpServletResponse response
     ) {
         applySecurityHeaders(response);
+        String correlationId = java.util.UUID.randomUUID().toString().substring(0, 8);
 
         try {
             uploadSessionService.handleMobileUpload(
@@ -102,10 +115,85 @@ public class MobilePaymentProofUploadController {
                     file.getSize()
             );
             return "proof-upload/mobile-upload-success";
+        } catch (AppException e) {
+            log.warn("[{}] Mobile upload rejected for token: code={}, message={}", correlationId, e.getCode(), e.getErrorMessage());
+            model.addAttribute("errorTitle", "Không thể tải chứng từ");
+            model.addAttribute("errorMessage", resolveFriendlyErrorMessage(e));
+            return "proof-upload/mobile-upload-error";
         } catch (Exception e) {
-            log.warn("Mobile upload failed for token: {}", e.getMessage());
-            model.addAttribute("errorMessage", e.getMessage());
+            log.error("[{}] Mobile upload unexpected error for token: {}", correlationId, e.getMessage(), e);
+            model.addAttribute("errorTitle", "Không thể tải chứng từ");
+            model.addAttribute("errorMessage", "Không thể tải chứng từ lên. Vui lòng thử lại hoặc tạo mã QR mới.");
             return "proof-upload/mobile-upload-error";
         }
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public String handleMaxSizeExceeded(MaxUploadSizeExceededException e, Model model, HttpServletResponse response) {
+        log.warn("Mobile upload size exceeded: {}", e.getMessage());
+        applySecurityHeaders(response);
+        model.addAttribute("errorTitle", "Dung lượng file quá lớn");
+        model.addAttribute("errorMessage", "Dung lượng file không được vượt quá 15 MB. Vui lòng chọn ảnh có dung lượng nhỏ hơn.");
+        return "proof-upload/mobile-upload-error";
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    public String handleMultipartException(MultipartException e, Model model, HttpServletResponse response) {
+        log.warn("Mobile multipart exception: {}", e.getMessage());
+        applySecurityHeaders(response);
+        model.addAttribute("errorTitle", "Lỗi tải tệp");
+        model.addAttribute("errorMessage", "Không thể tiếp nhận tệp tải lên. Vui lòng thử lại với định dạng JPG, PNG hoặc PDF.");
+        return "proof-upload/mobile-upload-error";
+    }
+
+    @ExceptionHandler(AppException.class)
+    public String handleAppException(AppException e, Model model, HttpServletResponse response) {
+        log.warn("Mobile upload controller AppException: code={}, message={}", e.getCode(), e.getErrorMessage());
+        applySecurityHeaders(response);
+        model.addAttribute("errorTitle", "Không thể tải chứng từ");
+        model.addAttribute("errorMessage", resolveFriendlyErrorMessage(e));
+        return "proof-upload/mobile-upload-error";
+    }
+
+    @ExceptionHandler(Exception.class)
+    public String handleGeneralException(Exception e, Model model, HttpServletResponse response) {
+        log.error("Unhandled exception in MobilePaymentProofUploadController: ", e);
+        applySecurityHeaders(response);
+        model.addAttribute("errorTitle", "Không thể tải chứng từ");
+        model.addAttribute("errorMessage", "Không thể tải chứng từ lên. Vui lòng thử lại hoặc tạo mã QR mới.");
+        return "proof-upload/mobile-upload-error";
+    }
+
+    private String resolveFriendlyErrorMessage(AppException e) {
+        if (e == null) {
+            return "Không thể tải chứng từ lên. Vui lòng thử lại hoặc tạo mã QR mới.";
+        }
+        int code = e.getCode();
+        if (code == PaymentErrorCode.PROOF_SESSION_EXPIRED.getCode()) {
+            return "Phiên tải chứng từ đã hết hạn.";
+        }
+        if (code == PaymentErrorCode.PROOF_SESSION_INVALID.getCode()) {
+            return "Phiên tải chứng từ không hợp lệ hoặc đã kết thúc.";
+        }
+        if (code == PaymentErrorCode.PROOF_SESSION_NOT_FOUND.getCode()) {
+            return "Phiên tải chứng từ không tồn tại hoặc đã bị hủy.";
+        }
+        if (code == PaymentErrorCode.PAYMENT_PROOF_REQUIRED.getCode()) {
+            return "Vui lòng chọn ảnh hoặc tệp chứng từ chuyển khoản.";
+        }
+        if (code == PaymentErrorCode.PAYMENT_PROOF_INVALID.getCode()) {
+            String msg = e.getErrorMessage();
+            if (msg != null && (msg.contains("15") || msg.toLowerCase().contains("dung lượng"))) {
+                return "Dung lượng file không được vượt quá 15 MB.";
+            }
+            if (msg != null && (msg.contains("JPG") || msg.toLowerCase().contains("định dạng") || msg.toLowerCase().contains("loại"))) {
+                return "Chỉ chấp nhận JPG, PNG, WebP hoặc PDF.";
+            }
+            return "Chứng từ không hợp lệ. Vui lòng chọn ảnh (JPG, PNG, WebP) hoặc PDF.";
+        }
+        if (code == PaymentErrorCode.PAYMENT_ALREADY_CONFIRMED.getCode()) {
+            return "Yêu cầu thanh toán này đã được xác nhận hoàn tất.";
+        }
+        return "Không thể tải chứng từ lên. Vui lòng thử lại hoặc tạo mã QR mới.";
     }
 }

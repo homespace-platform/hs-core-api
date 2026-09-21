@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Phiên không hợp lệ - HomeSpace</title>
+  <title th:text="${errorTitle != null ? errorTitle + ' - HomeSpace' : 'Phiên không hợp lệ - HomeSpace'}">Phiên không hợp lệ - HomeSpace</title>
   <style>
     :root {
       --primary: #2563eb;
@@ -95,7 +95,7 @@
         </svg>
       </div>
 
-      <h1>Phiên tải chứng từ không hợp lệ</h1>
+      <h1 th:text="${errorTitle != null ? errorTitle : 'Phiên tải chứng từ không hợp lệ'}">Phiên tải chứng từ không hợp lệ</h1>
       <p th:text="${errorMessage}">Đường dẫn hoặc mã QR này đã hết hạn, đã được sử dụng hoặc không hợp lệ.</p>
 
       <div class="instruction-box">

@@ -270,20 +270,39 @@ public class StorageServiceImpl implements StorageService {
             String referenceType,
             String referenceId,
             StorageVisibility visibility) {
+        return uploadDirect(data, fileName, contentType, purpose, referenceType, referenceId, visibility, null);
+    }
+
+    @Override
+    @Transactional
+    public StorageObjectResponse uploadDirect(
+            byte[] data,
+            String fileName,
+            String contentType,
+            StoragePurpose purpose,
+            String referenceType,
+            String referenceId,
+            StorageVisibility visibility,
+            String ownerId) {
         String normalizedContentType = contentType.trim().toLowerCase(Locale.ROOT);
+        if ("image/jpg".equals(normalizedContentType) || "image/pjpeg".equals(normalizedContentType)) {
+            normalizedContentType = "image/jpeg";
+        }
         validateFile(purpose, normalizedContentType, (long) data.length);
         validateMagicBytes(purpose, normalizedContentType, data);
 
-        String ownerId;
-        try {
-            ownerId = currentUserId();
-        } catch (Exception e) {
-            ownerId = "system";
+        String effectiveOwnerId = ownerId;
+        if (effectiveOwnerId == null || effectiveOwnerId.isBlank()) {
+            try {
+                effectiveOwnerId = currentUserId();
+            } catch (Exception e) {
+                effectiveOwnerId = "system";
+            }
         }
 
         String storageId = UUID.randomUUID().toString();
         String extension = extractExtension(fileName);
-        String objectKey = buildObjectKey(purpose, ownerId, storageId, extension);
+        String objectKey = buildObjectKey(purpose, effectiveOwnerId, storageId, extension);
 
         try {
             PutObjectRequest putObject = PutObjectRequest.builder()
@@ -295,6 +314,7 @@ public class StorageServiceImpl implements StorageService {
 
             s3Client.putObject(putObject, software.amazon.awssdk.core.sync.RequestBody.fromBytes(data));
         } catch (Exception e) {
+            log.error("Failed to putObject to S3 bucket [{}] key [{}]: ", properties.bucket(), objectKey, e);
             throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
         }
 
@@ -306,7 +326,7 @@ public class StorageServiceImpl implements StorageService {
                 .contentType(contentType)
                 .sizeBytes((long) data.length)
                 .extension(extension)
-                .ownerId(ownerId)
+                .ownerId(effectiveOwnerId)
                 .referenceType(normalizeReferenceType(referenceType))
                 .referenceId(normalizeNullable(referenceId))
                 .purpose(purpose)
@@ -314,7 +334,23 @@ public class StorageServiceImpl implements StorageService {
                 .status(StorageStatus.READY)
                 .build();
 
-        return toResponse(repository.save(object));
+        StorageObject saved;
+        try {
+            saved = repository.save(object);
+        } catch (Exception e) {
+            log.error("Failed to save storage object metadata for id={}, cleaning up S3 object key={}", storageId, objectKey, e);
+            try {
+                s3Client.deleteObject(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.builder()
+                        .bucket(properties.bucket())
+                        .key(objectKey)
+                        .build());
+            } catch (Exception s3Ex) {
+                log.warn("Failed to delete orphan S3 object key={}: {}", objectKey, s3Ex.getMessage());
+            }
+            throw e;
+        }
+
+        return toResponse(saved);
     }
 
     @Override
