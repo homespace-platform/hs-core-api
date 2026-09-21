@@ -21,7 +21,12 @@ public enum PaymentErrorCode implements AppException.ErrorCode {
     DISPUTE_NOT_ALLOWED(7012, "Chỉ có thể mở khiếu nại đối soát khi đã báo chuyển hoặc bị từ chối", HttpStatus.BAD_REQUEST),
     PAYMENT_HOLD_EXPIRED(7013, "Thời gian giữ chỗ thanh toán đã hết hạn", HttpStatus.BAD_REQUEST),
     BANK_ACCOUNT_DEFAULT_DELETE_FORBIDDEN(7014, "Không thể xóa hoặc tắt tài khoản đang là mặc định", HttpStatus.BAD_REQUEST),
-    BANK_ACCOUNT_INVALID(7015, "Thông tin tài khoản ngân hàng không hợp lệ", HttpStatus.BAD_REQUEST);
+    BANK_ACCOUNT_INVALID(7015, "Thông tin tài khoản ngân hàng không hợp lệ", HttpStatus.BAD_REQUEST),
+    PAYMENT_PROOF_REQUIRED(7016, "Vui lòng tải lên ảnh hoặc tài liệu chứng từ chuyển khoản", HttpStatus.BAD_REQUEST),
+    PAYMENT_PROOF_INVALID(7017, "Chứng từ chuyển khoản không hợp lệ hoặc không thuộc về yêu cầu này", HttpStatus.BAD_REQUEST),
+    PROOF_SESSION_NOT_FOUND(7018, "Phiên tải chứng từ không tồn tại", HttpStatus.NOT_FOUND),
+    PROOF_SESSION_EXPIRED(7019, "Phiên tải chứng từ đã hết hạn. Vui lòng tạo phiên mới.", HttpStatus.BAD_REQUEST),
+    PROOF_SESSION_INVALID(7020, "Phiên tải chứng từ không hợp lệ hoặc đã được sử dụng", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

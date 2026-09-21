@@ -8,5 +8,6 @@ public enum StoragePurpose {
     LISTING_IMAGE,
     LISTING_VIDEO,
     NEWS_IMAGE,
+    PAYMENT_PROOF,
     GENERAL
 }

@@ -51,6 +51,10 @@ class PaymentRequestServiceTest {
     private VietQrProvider vietQrProvider;
     @Mock
     private TransferReferenceGenerator transferReferenceGenerator;
+    @Mock
+    private com.hs.storage.repository.StorageObjectRepository storageObjectRepository;
+    @Mock
+    private PaymentProofUploadSessionService paymentProofUploadSessionService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -141,11 +145,19 @@ class PaymentRequestServiceTest {
         when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
         when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> i.getArgument(0));
 
+        com.hs.storage.model.StorageObject mockStorage = com.hs.storage.model.StorageObject.builder()
+                .id("storage-1")
+                .ownerId("tenant-1")
+                .status(com.hs.storage.model.constant.StorageStatus.READY)
+                .referenceId("pay-1")
+                .build();
+        when(storageObjectRepository.findById("storage-1")).thenReturn(Optional.of(mockStorage));
+
         ReportTransferRequest request = new ReportTransferRequest(
                 Instant.now(),
                 "FT260920123456",
                 "1234",
-                "https://storage.homespace.com/evidence1.jpg",
+                "storage-1",
                 "Da chuyen khoan du 15 trieu"
         );
 
@@ -154,6 +166,123 @@ class PaymentRequestServiceTest {
         assertEquals(PaymentStatus.TRANSFER_REPORTED, payment.getStatus());
         verify(paymentEvidenceRepository).save(any(PaymentEvidence.class));
         verify(paymentEventRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("reportTransfer with valid evidenceUploadSessionId consumes session and transitions to TRANSFER_REPORTED")
+    void reportTransfer_WithEvidenceUploadSessionId_Success() {
+        PaymentRequest payment = PaymentRequest.builder()
+                .id("pay-1")
+                .payerId("tenant-1")
+                .payeeId("landlord-1")
+                .status(PaymentStatus.AWAITING_TRANSFER)
+                .totalAmount(new BigDecimal("15000000"))
+                .build();
+
+        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> i.getArgument(0));
+        when(paymentProofUploadSessionService.consumeSession("sess-123", "pay-1", "tenant-1"))
+                .thenReturn("storage-from-session");
+
+        ReportTransferRequest request = new ReportTransferRequest(
+                Instant.now(),
+                "FT260920999999",
+                "9999",
+                null,
+                "sess-123",
+                "Chuyen khoan qua mobile"
+        );
+
+        PaymentRequestResponse resp = paymentRequestService.reportTransfer("pay-1", "tenant-1", request);
+
+        assertEquals(PaymentStatus.TRANSFER_REPORTED, payment.getStatus());
+        verify(paymentProofUploadSessionService).consumeSession("sess-123", "pay-1", "tenant-1");
+        verify(paymentEvidenceRepository).save(any(PaymentEvidence.class));
+        verify(paymentEventRepository).save(any());
+    }
+
+    @Test
+    @DisplayName("reportTransfer without proofStorageId throws PAYMENT_PROOF_REQUIRED")
+    void reportTransfer_MissingProof_ThrowsException() {
+        PaymentRequest payment = PaymentRequest.builder()
+                .id("pay-1")
+                .payerId("tenant-1")
+                .payeeId("landlord-1")
+                .status(PaymentStatus.AWAITING_TRANSFER)
+                .build();
+
+        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+
+        ReportTransferRequest request = new ReportTransferRequest(
+                Instant.now(), "FT123", "1234", "", "note"
+        );
+
+        AppException ex = assertThrows(AppException.class, () ->
+                paymentRequestService.reportTransfer("pay-1", "tenant-1", request));
+        assertEquals(PaymentErrorCode.PAYMENT_PROOF_REQUIRED.getCode(), ex.getCode());
+    }
+
+    @Test
+    @DisplayName("reportTransfer with proof owned by different user throws PAYMENT_PROOF_INVALID")
+    void reportTransfer_WrongOwnerProof_ThrowsException() {
+        PaymentRequest payment = PaymentRequest.builder()
+                .id("pay-1")
+                .payerId("tenant-1")
+                .payeeId("landlord-1")
+                .status(PaymentStatus.AWAITING_TRANSFER)
+                .build();
+
+        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+
+        com.hs.storage.model.StorageObject wrongOwnerStorage = com.hs.storage.model.StorageObject.builder()
+                .id("storage-fake")
+                .ownerId("hacker-user")
+                .status(com.hs.storage.model.constant.StorageStatus.READY)
+                .build();
+        when(storageObjectRepository.findById("storage-fake")).thenReturn(Optional.of(wrongOwnerStorage));
+
+        ReportTransferRequest request = new ReportTransferRequest(
+                Instant.now(), "FT123", "1234", "storage-fake", "note"
+        );
+
+        AppException ex = assertThrows(AppException.class, () ->
+                paymentRequestService.reportTransfer("pay-1", "tenant-1", request));
+        assertEquals(PaymentErrorCode.PAYMENT_PROOF_INVALID.getCode(), ex.getCode());
+    }
+
+    @Test
+    @DisplayName("reportTransfer re-submission from REJECTED clears rejection info")
+    void reportTransfer_ResubmitFromRejected_Success() {
+        PaymentRequest payment = PaymentRequest.builder()
+                .id("pay-1")
+                .payerId("tenant-1")
+                .payeeId("landlord-1")
+                .status(PaymentStatus.REJECTED)
+                .rejectedAt(Instant.now())
+                .rejectedReason("Chua thay bien dong so du")
+                .totalAmount(new BigDecimal("15000000"))
+                .build();
+
+        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> i.getArgument(0));
+
+        com.hs.storage.model.StorageObject mockStorage = com.hs.storage.model.StorageObject.builder()
+                .id("storage-2")
+                .ownerId("tenant-1")
+                .status(com.hs.storage.model.constant.StorageStatus.READY)
+                .referenceId("pay-1")
+                .build();
+        when(storageObjectRepository.findById("storage-2")).thenReturn(Optional.of(mockStorage));
+
+        ReportTransferRequest request = new ReportTransferRequest(
+                Instant.now(), "FT999", "1234", "storage-2", "Gui lai bien lai"
+        );
+
+        paymentRequestService.reportTransfer("pay-1", "tenant-1", request);
+
+        assertEquals(PaymentStatus.TRANSFER_REPORTED, payment.getStatus());
+        assertNull(payment.getRejectedReason());
+        assertNull(payment.getRejectedAt());
     }
 
     @Test
@@ -169,7 +298,7 @@ class PaymentRequestServiceTest {
         when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
 
         ReportTransferRequest request = new ReportTransferRequest(
-                Instant.now(), "FT123", "1234", "https://img.jpg", null
+                Instant.now(), "FT123", "1234", "storage-1", null
         );
 
         AppException ex = assertThrows(AppException.class, () ->

@@ -23,12 +23,16 @@ public class BankAccountCryptoConverter implements AttributeConverter<String, St
     private static final String ALGORITHM = "AES/GCM/NoPadding";
     private static final int TAG_LENGTH_BIT = 128;
     private static final int IV_LENGTH_BYTE = 12;
-    private static final String DEV_FALLBACK_KEY = "HomeSpaceDevSecretBankKey2026!#"; // 32 chars = 256 bits
+    private static final String DEV_FALLBACK_KEY = "HomeSpaceDevSecretBankKey2026!#$*"; // Exactly 32 chars = 256 bits
 
     private static SecretKey secretKey;
 
     @Value("${homespace.security.bank-account.encryption-key:}")
     public void setConfiguredKey(String configuredKey) {
+        initSecretKey(configuredKey);
+    }
+
+    private static synchronized void initSecretKey(String configuredKey) {
         String keyToUse = configuredKey;
         if (keyToUse == null || keyToUse.isBlank()) {
             keyToUse = System.getenv("HOMESPACE_BANK_ENCRYPTION_KEY");
@@ -37,25 +41,41 @@ public class BankAccountCryptoConverter implements AttributeConverter<String, St
             keyToUse = DEV_FALLBACK_KEY;
         }
 
-        byte[] keyBytes;
-        if (keyToUse.length() == 32) {
-            keyBytes = keyToUse.getBytes(StandardCharsets.UTF_8);
-        } else {
-            try {
-                keyBytes = Base64.getDecoder().decode(keyToUse);
-                if (keyBytes.length != 16 && keyBytes.length != 24 && keyBytes.length != 32) {
-                    keyBytes = DEV_FALLBACK_KEY.getBytes(StandardCharsets.UTF_8);
-                }
-            } catch (Exception e) {
-                keyBytes = DEV_FALLBACK_KEY.getBytes(StandardCharsets.UTF_8);
-            }
-        }
+        byte[] keyBytes = deriveKeyBytes(keyToUse);
         secretKey = new SecretKeySpec(keyBytes, "AES");
+    }
+
+    private static byte[] deriveKeyBytes(String rawKey) {
+        if (rawKey == null || rawKey.isBlank()) {
+            rawKey = DEV_FALLBACK_KEY;
+        }
+        // If it's valid Base64 decoding to 16, 24, or 32 bytes, use decoded bytes
+        try {
+            byte[] decoded = Base64.getDecoder().decode(rawKey);
+            if (decoded.length == 16 || decoded.length == 24 || decoded.length == 32) {
+                return decoded;
+            }
+        } catch (Exception ignored) {
+            // Not Base64 or wrong format, fall through
+        }
+
+        byte[] rawBytes = rawKey.getBytes(StandardCharsets.UTF_8);
+        if (rawBytes.length == 16 || rawBytes.length == 24 || rawBytes.length == 32) {
+            return rawBytes;
+        }
+
+        // Always hash to 32 bytes (256 bits) using SHA-256 for any arbitrary length passphrase
+        try {
+            java.security.MessageDigest sha256 = java.security.MessageDigest.getInstance("SHA-256");
+            return sha256.digest(rawBytes);
+        } catch (Exception e) {
+            throw new IllegalStateException("SHA-256 not available", e);
+        }
     }
 
     private SecretKey getSecretKey() {
         if (secretKey == null) {
-            secretKey = new SecretKeySpec(DEV_FALLBACK_KEY.getBytes(StandardCharsets.UTF_8), "AES");
+            initSecretKey(null);
         }
         return secretKey;
     }

@@ -8,6 +8,9 @@ import com.hs.payment.model.*;
 import com.hs.payment.model.constant.*;
 import com.hs.payment.repository.*;
 import com.hs.payment.service.qr.VietQrProvider;
+import com.hs.storage.model.StorageObject;
+import com.hs.storage.model.constant.StorageStatus;
+import com.hs.storage.repository.StorageObjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +40,8 @@ public class PaymentRequestService {
     private final VietQrProvider vietQrProvider;
     private final TransferReferenceGenerator transferReferenceGenerator;
     private final ObjectMapper objectMapper;
+    private final StorageObjectRepository storageObjectRepository;
+    private final PaymentProofUploadSessionService proofUploadSessionService;
 
     @Value("${homespace.payment.confirmation-window-hours:24}")
     private long confirmationWindowHours = 24;
@@ -199,37 +204,76 @@ public class PaymentRequestService {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
         }
 
+        // Chấp nhận 1 trong 2 nguồn chứng từ: mobile session hoặc web proofStorageId
+        String proofStorageId;
+        if (request != null && request.evidenceUploadSessionId() != null && !request.evidenceUploadSessionId().isBlank()) {
+            proofStorageId = proofUploadSessionService.consumeSession(
+                    request.evidenceUploadSessionId().trim(),
+                    payment.getId(),
+                    actorId
+            );
+        } else if (request != null && request.proofStorageId() != null && !request.proofStorageId().isBlank()) {
+            proofStorageId = request.proofStorageId().trim();
+
+            // Kiểm tra tính hợp lệ của file chứng từ nếu storageObjectRepository có sẵn
+            if (storageObjectRepository != null) {
+                StorageObject storageObj = storageObjectRepository.findById(proofStorageId)
+                        .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_PROOF_INVALID));
+
+                if (!actorId.equals(storageObj.getOwnerId())) {
+                    log.warn("Actor [{}] tried to use storage object [{}] owned by [{}]",
+                            actorId, proofStorageId, storageObj.getOwnerId());
+                    throw new AppException(PaymentErrorCode.PAYMENT_PROOF_INVALID);
+                }
+                if (storageObj.getStatus() != StorageStatus.READY) {
+                    log.warn("Storage object [{}] is not READY (status={})", proofStorageId, storageObj.getStatus());
+                    throw new AppException(PaymentErrorCode.PAYMENT_PROOF_INVALID);
+                }
+                if (storageObj.getReferenceId() != null
+                        && !storageObj.getReferenceId().isBlank()
+                        && !payment.getId().equals(storageObj.getReferenceId())
+                        && !payment.getRentalRequestId().equals(storageObj.getReferenceId())) {
+                    log.warn("Storage object [{}] referenceId [{}] does not match payment [{}] or rentalRequest [{}]",
+                            proofStorageId, storageObj.getReferenceId(), payment.getId(), payment.getRentalRequestId());
+                    throw new AppException(PaymentErrorCode.PAYMENT_PROOF_INVALID);
+                }
+            }
+        } else {
+            throw new AppException(PaymentErrorCode.PAYMENT_PROOF_REQUIRED);
+        }
+
         PaymentStatus oldStatus = payment.getStatus();
         Instant now = Instant.now();
 
         payment.setStatus(PaymentStatus.TRANSFER_REPORTED);
         payment.setPayerReportedAt(now);
         payment.setConfirmationDueAt(now.plus(Duration.ofHours(confirmationWindowHours)));
+        if (payment.getRejectedAt() != null || payment.getRejectedReason() != null) {
+            payment.setRejectedAt(null);
+            payment.setRejectedReason(null);
+        }
         if (request.bankTransactionReference() != null && !request.bankTransactionReference().isBlank()) {
             payment.setBankTransactionReference(request.bankTransactionReference().trim());
         }
 
-        // Save evidence if provided
-        if ((request.proofStorageId() != null && !request.proofStorageId().isBlank())
-                || (request.bankTransactionReference() != null && !request.bankTransactionReference().isBlank())) {
-            PaymentEvidence evidence = PaymentEvidence.builder()
-                    .paymentRequestId(payment.getId())
-                    .uploadedBy(actorId)
-                    .storageObjectId(request.proofStorageId() != null ? request.proofStorageId().trim() : "")
-                    .declaredTransferTime(request.declaredTransferTime() != null ? request.declaredTransferTime() : now)
-                    .bankTransactionReference(request.bankTransactionReference())
-                    .payerAccountLast4(request.payerAccountLast4())
-                    .note(request.note())
-                    .build();
-            paymentEvidenceRepository.save(evidence);
-        }
+        PaymentEvidence evidence = PaymentEvidence.builder()
+                .paymentRequestId(payment.getId())
+                .uploadedBy(actorId)
+                .storageObjectId(proofStorageId)
+                .declaredTransferTime(request.declaredTransferTime() != null ? request.declaredTransferTime() : now)
+                .bankTransactionReference(request.bankTransactionReference() != null ? request.bankTransactionReference().trim() : null)
+                .payerAccountLast4(request.payerAccountLast4() != null ? request.payerAccountLast4().trim() : null)
+                .note(request.note() != null ? request.note().trim() : null)
+                .build();
+        paymentEvidenceRepository.save(evidence);
 
         PaymentRequest saved = paymentRequestRepository.save(payment);
 
         recordEvent(saved.getId(), PaymentEventType.TRANSFER_REPORTED, oldStatus, PaymentStatus.TRANSFER_REPORTED,
                 actorId, "TENANT", request.note(), null);
 
-        log.info("Tenant [{}] reported transfer for PaymentRequest [{}]", actorId, paymentRequestId);
+        log.info("Tenant [{}] reported transfer for PaymentRequest [{}] with proof [{}]",
+                actorId, paymentRequestId, proofStorageId);
         return toResponse(saved, actorId);
     }
 

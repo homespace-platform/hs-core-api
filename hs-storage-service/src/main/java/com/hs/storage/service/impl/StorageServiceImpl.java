@@ -143,6 +143,25 @@ public class StorageServiceImpl implements StorageService {
                 repository.save(object);
                 throw new AppException(StorageErrorCode.STORAGE_UPLOAD_MISMATCH);
             }
+
+            // Inspect magic bytes to verify real MIME and block executables/scripts
+            if (object.getSizeBytes() > 0) {
+                try (var is = s3Client.getObject(GetObjectRequest.builder()
+                        .bucket(object.getBucketName())
+                        .key(object.getObjectKey())
+                        .range("bytes=0-63")
+                        .build())) {
+                    byte[] headerBytes = is.readNBytes(64);
+                    validateMagicBytes(object.getPurpose(), object.getContentType(), headerBytes);
+                } catch (AppException e) {
+                    object.setStatus(StorageStatus.REJECTED);
+                    repository.save(object);
+                    throw e;
+                } catch (Exception e) {
+                    log.warn("Failed to read header bytes for magic byte check on object [{}]: {}", object.getId(), e.getMessage());
+                }
+            }
+
             object.setChecksum(normalizeNullable(request.checksum()));
             object.setStatus(StorageStatus.READY);
             return toResponse(repository.save(object));
@@ -251,6 +270,10 @@ public class StorageServiceImpl implements StorageService {
             String referenceType,
             String referenceId,
             StorageVisibility visibility) {
+        String normalizedContentType = contentType.trim().toLowerCase(Locale.ROOT);
+        validateFile(purpose, normalizedContentType, (long) data.length);
+        validateMagicBytes(purpose, normalizedContentType, data);
+
         String ownerId;
         try {
             ownerId = currentUserId();
@@ -410,6 +433,10 @@ public class StorageServiceImpl implements StorageService {
                 typeAllowed = IMAGE_TYPES.contains(contentType);
                 maxSize = 25 * MIB;
             }
+            case PAYMENT_PROOF -> {
+                typeAllowed = IMAGE_TYPES.contains(contentType) || contentType.equals("application/pdf");
+                maxSize = 15 * MIB;
+            }
             case GENERAL -> {
                 typeAllowed = IMAGE_TYPES.contains(contentType) || DOCUMENT_TYPES.contains(contentType);
                 maxSize = 25 * MIB;
@@ -418,6 +445,48 @@ public class StorageServiceImpl implements StorageService {
         }
         if (!typeAllowed) throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
         if (size > maxSize) throw new AppException(StorageErrorCode.STORAGE_FILE_TOO_LARGE);
+    }
+
+    private void validateMagicBytes(StoragePurpose purpose, String contentType, byte[] data) {
+        if (data == null || data.length < 4) {
+            throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
+        }
+
+        // Check for blocked executable signatures
+        // DOS/PE executable (MZ)
+        if (data[0] == 0x4D && data[1] == 0x5A) {
+            log.warn("Blocked executable file (MZ magic bytes) for purpose {}", purpose);
+            throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
+        }
+        // ELF executable
+        if (data.length >= 4 && data[0] == 0x7F && data[1] == 0x45 && data[2] == 0x4C && data[3] == 0x46) {
+            log.warn("Blocked executable file (ELF magic bytes) for purpose {}", purpose);
+            throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
+        }
+
+        // Check for scripts, HTML, SVG, XML
+        int checkLen = Math.min(data.length, 64);
+        String headerAscii = new String(data, 0, checkLen, StandardCharsets.US_ASCII).toLowerCase(Locale.ROOT).trim();
+        if (headerAscii.startsWith("<?xml") || headerAscii.startsWith("<svg")
+                || headerAscii.startsWith("<html") || headerAscii.startsWith("<!doctype")
+                || headerAscii.startsWith("<?php") || headerAscii.startsWith("#!/")) {
+            log.warn("Blocked script or markup file with header [{}] for purpose {}", headerAscii, purpose);
+            throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
+        }
+
+        boolean isJpeg = data.length >= 3 && (data[0] & 0xFF) == 0xFF && (data[1] & 0xFF) == 0xD8 && (data[2] & 0xFF) == 0xFF;
+        boolean isPng = data.length >= 8 && (data[0] & 0xFF) == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47
+                && data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A;
+        boolean isWebp = data.length >= 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F'
+                && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P';
+        boolean isPdf = data.length >= 4 && data[0] == '%' && data[1] == 'P' && data[2] == 'D' && data[3] == 'F';
+
+        if (purpose == StoragePurpose.PAYMENT_PROOF) {
+            if (!isJpeg && !isPng && !isWebp && !isPdf) {
+                log.warn("Invalid magic bytes for PAYMENT_PROOF with declared contentType {}", contentType);
+                throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
+            }
+        }
     }
 
     private String buildObjectKey(StoragePurpose purpose, String ownerId, String id, String extension) {
