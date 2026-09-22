@@ -36,7 +36,7 @@ Tài liệu này hướng dẫn cách kiểm thử chức năng quét mã QR b�
    - Ví dụ: `https://13zp4kj8-8080.asse.devtunnels.ms`
 
 ### Bước 3: Cấu hình biến môi trường
-Mở file `.env.dev` (hoặc cấu hình environment trong IDE run configuration) của `hs-api-service`:
+Mở file `hs-core-api/.env.dev` (hoặc cấu hình environment trong IDE run configuration):
 ```properties
 PAYMENT_PROOF_UPLOAD_PUBLIC_BASE_URL=https://13zp4kj8-8080.asse.devtunnels.ms
 ```
