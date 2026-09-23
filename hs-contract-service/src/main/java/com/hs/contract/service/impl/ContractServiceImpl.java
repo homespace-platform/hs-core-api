@@ -33,6 +33,7 @@ import com.hs.contract.service.converter.DocumentConversionService;
 import com.hs.contract.service.engine.ContractDataBuilder;
 import com.hs.contract.service.engine.ContractFieldCatalog;
 import com.hs.contract.service.engine.ContractRenderService;
+import com.hs.contract.pdf.PdfSignatureEngine;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.model.constant.ListingCategory;
@@ -68,6 +69,7 @@ import java.util.*;
 
 import com.hs.listing.service.ParkingReservationService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 @Slf4j
 @Service
@@ -88,6 +90,12 @@ public class ContractServiceImpl implements ContractService {
     private final ParkingReservationService parkingReservationService;
     private final PaymentRequestRepository paymentRequestRepository;
     private final RestTemplate restTemplate = new RestTemplate();
+
+    @Autowired(required = false)
+    private PdfSignatureEngine pdfSignatureEngine;
+
+    @Value("${homespace.signature.mode:INTERNAL}")
+    private String signatureMode;
 
     @Autowired
     public ContractServiceImpl(
@@ -623,6 +631,15 @@ public class ContractServiceImpl implements ContractService {
 
         if (pdfBytesOpt.isPresent()) {
             byte[] pdfBytes = pdfBytesOpt.get();
+            if ("SMARTCA".equalsIgnoreCase(signatureMode)) {
+                if (pdfSignatureEngine == null) throw new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY);
+                try {
+                    pdfBytes = pdfSignatureEngine.addSignaturePage(pdfBytes);
+                } catch (Exception e) {
+                    log.error("Unable to prepare signature page for contract {}", contractId, e);
+                    throw new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY);
+                }
+            }
             String pdfName = contract.getContractNumber() + "_rev" + revision.getRevisionNumber() + ".pdf";
 
             StorageObjectResponse pdfStorage = storageService.uploadDirect(
@@ -652,6 +669,10 @@ public class ContractServiceImpl implements ContractService {
             log.info("Successfully generated and saved PDF document id={} for contract id={}", pdfDoc.getId(), contractId);
             return toDocumentResponse(pdfDoc);
         } else {
+            if ("SMARTCA".equalsIgnoreCase(signatureMode)) {
+                throw new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY,
+                        "Không thể chuyển Word sang PDF; cần PDF trước khi ký số.");
+            }
             log.info("PDF conversion was skipped or failed. Returning DOCX document id={}", docxDoc.getId());
             return toDocumentResponse(docxDoc);
         }
@@ -660,6 +681,10 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional
     public ContractResponse sendToTenant(String contractId) {
+        if ("SMARTCA".equalsIgnoreCase(signatureMode)) {
+            throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED,
+                    "Trong chế độ SmartCA, chủ nhà phải ký số trước khi hợp đồng được gửi cho người thuê.");
+        }
         Contract contract = findContractAndCheckAccess(contractId);
         requireLandlord(contract);
         if (contract.getStatus() != ContractStatus.DRAFT) {
@@ -732,6 +757,10 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional
     public ContractResponse sign(String contractId) {
+        if ("SMARTCA".equalsIgnoreCase(signatureMode)) {
+            throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED,
+                    "Hãy ký trên ứng dụng VNPT SmartCA thay vì xác nhận ký nội bộ.");
+        }
         Contract contract = findContractForUpdateAndCheckAccess(contractId);
         requireTenant(contract);
         if (contract.getStatus() != ContractStatus.PENDING_REVIEW) {

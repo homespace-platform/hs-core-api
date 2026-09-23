@@ -1,5 +1,6 @@
 package com.hs.user.repository;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -18,5 +19,7 @@ public interface UserRepository extends JpaRepository<User, String> {
     boolean existsByPhoneAndIdNot(String phone, String id);
 
     boolean existsByCccdAndIdNot(String cccd, String id);
+
+    List<User> findAllByCccd(String cccd);
 }
 

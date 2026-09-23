@@ -449,6 +449,7 @@ public class StorageServiceImpl implements StorageService {
         switch (purpose) {
             case USER_AVATAR -> { typeAllowed = IMAGE_TYPES.contains(contentType); maxSize = 5 * MIB; }
             case CONTRACT_DOCUMENT -> { typeAllowed = DOCUMENT_TYPES.contains(contentType); maxSize = 25 * MIB; }
+            case SIGNATURE_PREPARED_DOCUMENT -> { typeAllowed = contentType.equals("application/pdf"); maxSize = 25 * MIB; }
             case IDENTITY_DOCUMENT -> {
                 typeAllowed = IMAGE_TYPES.contains(contentType) || contentType.equals("application/pdf");
                 maxSize = 15 * MIB;
@@ -516,6 +517,11 @@ public class StorageServiceImpl implements StorageService {
         boolean isWebp = data.length >= 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F'
                 && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P';
         boolean isPdf = data.length >= 4 && data[0] == '%' && data[1] == 'P' && data[2] == 'D' && data[3] == 'F';
+
+        if (purpose == StoragePurpose.SIGNATURE_PREPARED_DOCUMENT && !isPdf) {
+            log.warn("Invalid magic bytes for prepared signature PDF");
+            throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
+        }
 
         if (purpose == StoragePurpose.PAYMENT_PROOF) {
             if (!isJpeg && !isPng && !isWebp && !isPdf) {

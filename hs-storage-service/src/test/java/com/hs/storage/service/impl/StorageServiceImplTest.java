@@ -115,6 +115,60 @@ class StorageServiceImplTest {
     }
 
     @Test
+    void uploadDirect_preparedSignaturePdf_success() {
+        byte[] validPdf = "%PDF-1.4 test content".getBytes(StandardCharsets.US_ASCII);
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = storageService.uploadDirect(
+                validPdf,
+                "contract.pdf",
+                "application/pdf",
+                StoragePurpose.SIGNATURE_PREPARED_DOCUMENT,
+                "CONTRACT",
+                "contract-123",
+                StorageVisibility.PRIVATE
+        );
+
+        assertNotNull(response);
+        assertEquals("application/pdf", response.contentType());
+        assertEquals(StoragePurpose.SIGNATURE_PREPARED_DOCUMENT, response.purpose());
+    }
+
+    @Test
+    void uploadDirect_preparedSignatureDocumentRejectsDocx() {
+        byte[] docxBytes = new byte[]{0x50, 0x4B, 0x03, 0x04};
+
+        AppException ex = assertThrows(AppException.class, () -> storageService.uploadDirect(
+                docxBytes,
+                "contract.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                StoragePurpose.SIGNATURE_PREPARED_DOCUMENT,
+                "CONTRACT",
+                "contract-123",
+                StorageVisibility.PRIVATE
+        ));
+
+        assertEquals(StorageErrorCode.STORAGE_INVALID_FILE_TYPE.getCode(), ex.getCode());
+    }
+
+    @Test
+    void uploadDirect_preparedSignaturePdfRejectsNonPdfBytes() {
+        byte[] nonPdfBytes = "not a PDF".getBytes(StandardCharsets.US_ASCII);
+
+        AppException ex = assertThrows(AppException.class, () -> storageService.uploadDirect(
+                nonPdfBytes,
+                "contract.pdf",
+                "application/pdf",
+                StoragePurpose.SIGNATURE_PREPARED_DOCUMENT,
+                "CONTRACT",
+                "contract-123",
+                StorageVisibility.PRIVATE
+        ));
+
+        assertEquals(StorageErrorCode.STORAGE_INVALID_FILE_TYPE.getCode(), ex.getCode());
+    }
+
+    @Test
     void uploadDirect_blockedExecutableMz_throwsException() {
         byte[] fakeExe = new byte[]{0x4D, 0x5A, 0x00, 0x00, 0x00}; // MZ header
 

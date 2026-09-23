@@ -19,6 +19,7 @@ import com.hs.user.model.Role;
 import com.hs.user.model.User;
 import com.hs.user.repository.RoleRepository;
 import com.hs.user.repository.UserRepository;
+import com.hs.user.service.impl.CccdTestSharingPolicy;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
     private final RoleRepository roleRepository;
     private final RealmResource keycloakRealm;
     private final BootstrapAdminProperties properties;
+    private final CccdTestSharingPolicy cccdTestSharingPolicy;
 
     @Override
     public void run(String... args) {
@@ -69,8 +71,8 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         String userId = findOrCreateKeycloakAdmin(account);
         if (userRepository.existsById(userId)) {
             syncPhone(userId, account);
-            syncCccd(userId, account.email(), cccd);
             ensureAdminRole(userId, adminRole, account.email());
+            syncCccd(userId, account.email(), cccd);
             log.info("Bootstrap admin '{}' already present — synced role/phone/cccd", account.username());
             return;
         }
@@ -150,10 +152,10 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         admin.setFirstName(account.firstName());
         admin.setLastName(account.lastName());
         admin.setPhone(account.phoneNumber());
-        if (cccd != null && !userRepository.existsByCccdAndIdNot(cccd, userId)) {
+        admin.setRole(adminRole);
+        if (cccd != null && cccdTestSharingPolicy.mayClaim(admin, cccd)) {
             admin.setCccd(cccd);
         }
-        admin.setRole(adminRole);
         admin.setActive(true);
         admin.setOnBoarded(false);
 
@@ -215,11 +217,12 @@ public class AdminUserDataInitializer implements CommandLineRunner {
                 if (cccd.equals(admin.getCccd())) {
                     return;
                 }
-                if (admin.getCccd() != null && !admin.getCccd().isBlank()) {
+                if (!cccdTestSharingPolicy.isEnabled()
+                        && admin.getCccd() != null && !admin.getCccd().isBlank()) {
                     return;
                 }
-                if (userRepository.existsByCccdAndIdNot(cccd, userId)) {
-                    log.warn("Cannot seed bootstrap admin CCCD {} — already used", cccd);
+                if (!cccdTestSharingPolicy.mayClaim(admin, cccd)) {
+                    log.warn("Cannot sync bootstrap admin CCCD — already used or not allowed for this account");
                     return;
                 }
 
