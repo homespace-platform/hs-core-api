@@ -30,8 +30,11 @@ import org.springframework.stereotype.Component;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.awt.Color;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -62,6 +65,24 @@ public class PdfSignatureEngine {
      */
     private static final int SIGNATURE_CONTAINER_SIZE = 65536;
 
+    // Shared page geometry. Keep these coordinates aligned with the marker text
+    // written into each party's box in prepareForSigning(). PDF points: 72 per inch.
+    private static final float SIGNATURE_PAGE_MARGIN_X = 55f;
+    private static final float SIGNATURE_BOX_WIDTH = 228f;
+    private static final float SIGNATURE_BOX_BOTTOM = 545f;
+    private static final float SIGNATURE_BOX_HEIGHT = 135f;
+    private static final float SIGNATURE_BOX_GAP = 24f;
+    private static final float SIGNATURE_MARKER_INSET_X = 12f;
+    private static final float SIGNATURE_MARKER_Y = 610f;
+    private static final float SIGNATURE_DATE_Y = 595f;
+    private static final DateTimeFormatter SIGNATURE_DATE_FORMAT =
+            DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm 'UTC'").withZone(ZoneOffset.UTC);
+    private static final Color BRAND_COLOR = new Color(31, 78, 121);
+    private static final Color TEXT_COLOR = new Color(45, 55, 65);
+    private static final Color MUTED_COLOR = new Color(105, 115, 125);
+    private static final Color BORDER_COLOR = new Color(178, 190, 202);
+    private static final Color BOX_HEADER_COLOR = new Color(235, 242, 248);
+
     // =========================================================================
     // Data classes
     // =========================================================================
@@ -74,32 +95,105 @@ public class PdfSignatureEngine {
             String signerRole
     ) {}
 
-    /** Add a fixed final page before the first signature so both parties sign the same revision. */
+    /** Add a dedicated, consistently laid out A4 page for both parties to sign. */
     public byte[] addSignaturePage(byte[] pdfBytes) throws IOException {
         try (PDDocument doc = Loader.loadPDF(pdfBytes); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             PDPage page = new PDPage(PDRectangle.A4);
             doc.addPage(page);
             try (PDPageContentStream stream = new PDPageContentStream(doc, page)) {
-                stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 15);
-                stream.beginText();
-                stream.newLineAtOffset(68, 748);
-                stream.showText("DIGITAL SIGNATURES - VNPT SMARTCA");
-                stream.endText();
-                drawSignatureBox(stream, 55, "PARTY A - LANDLORD");
-                drawSignatureBox(stream, 307, "PARTY B - TENANT");
+                drawSignaturePageHeader(stream);
+                drawSignatureBox(stream, SIGNATURE_PAGE_MARGIN_X, "PARTY A - LANDLORD");
+                float partyBX = SIGNATURE_PAGE_MARGIN_X + SIGNATURE_BOX_WIDTH + SIGNATURE_BOX_GAP;
+                drawSignatureBox(stream, partyBX, "PARTY B - TENANT");
+                drawSignaturePageFooter(stream);
             }
             doc.save(out);
             return out.toByteArray();
         }
     }
 
-    private void drawSignatureBox(PDPageContentStream stream, int x, String label) throws IOException {
-        stream.addRect(x, 545, 228, 135);
+    private void drawSignaturePageHeader(PDPageContentStream stream) throws IOException {
+        PDType1Font regular = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+        PDType1Font bold = new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
+
+        stream.setStrokingColor(BRAND_COLOR);
+        stream.setLineWidth(2f);
+        stream.moveTo(SIGNATURE_PAGE_MARGIN_X, 780);
+        stream.lineTo(PDRectangle.A4.getWidth() - SIGNATURE_PAGE_MARGIN_X, 780);
         stream.stroke();
-        stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 10);
+
+        drawCenteredText(stream, bold, 9f, BRAND_COLOR,
+                "HOMESPACE  |  VNPT SMARTCA", 758f);
+        drawCenteredText(stream, bold, 15f, TEXT_COLOR,
+                "CONTRACT SIGNATURES", 730f);
+        drawCenteredText(stream, regular, 9f, MUTED_COLOR,
+                "Each party signs in the designated area below.", 712f);
+
+        stream.setStrokingColor(BORDER_COLOR);
+        stream.setLineWidth(0.7f);
+        stream.moveTo(SIGNATURE_PAGE_MARGIN_X, 695);
+        stream.lineTo(PDRectangle.A4.getWidth() - SIGNATURE_PAGE_MARGIN_X, 695);
+        stream.stroke();
+    }
+
+    private void drawSignatureBox(PDPageContentStream stream, float x, String label) throws IOException {
+        float boxTop = SIGNATURE_BOX_BOTTOM + SIGNATURE_BOX_HEIGHT;
+        float headerHeight = 32f;
+
+        stream.setNonStrokingColor(BOX_HEADER_COLOR);
+        stream.addRect(x, boxTop - headerHeight, SIGNATURE_BOX_WIDTH, headerHeight);
+        stream.fill();
+
+        stream.setStrokingColor(BORDER_COLOR);
+        stream.setLineWidth(0.9f);
+        stream.addRect(x, SIGNATURE_BOX_BOTTOM, SIGNATURE_BOX_WIDTH, SIGNATURE_BOX_HEIGHT);
+        stream.stroke();
+
+        stream.setNonStrokingColor(BRAND_COLOR);
+        stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 10f);
         stream.beginText();
-        stream.newLineAtOffset(x + 12, 651);
+        stream.newLineAtOffset(x + SIGNATURE_MARKER_INSET_X, boxTop - 21f);
         stream.showText(label);
+        stream.endText();
+
+        stream.setNonStrokingColor(MUTED_COLOR);
+        stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 8f);
+        stream.beginText();
+        stream.newLineAtOffset(x + SIGNATURE_MARKER_INSET_X, SIGNATURE_BOX_BOTTOM + 15f);
+        stream.showText("Digitally signed by VNPT SmartCA");
+        stream.endText();
+    }
+
+    private void drawSignaturePageFooter(PDPageContentStream stream) throws IOException {
+        stream.setStrokingColor(BORDER_COLOR);
+        stream.setLineWidth(0.6f);
+        stream.moveTo(SIGNATURE_PAGE_MARGIN_X, 78);
+        stream.lineTo(PDRectangle.A4.getWidth() - SIGNATURE_PAGE_MARGIN_X, 78);
+        stream.stroke();
+
+        stream.setNonStrokingColor(MUTED_COLOR);
+        stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 8f);
+        stream.beginText();
+        stream.newLineAtOffset(SIGNATURE_PAGE_MARGIN_X, 62);
+        stream.showText("This page is part of the electronically signed HomeSpace contract.");
+        stream.endText();
+    }
+
+    private void drawCenteredText(
+            PDPageContentStream stream,
+            PDType1Font font,
+            float fontSize,
+            Color color,
+            String text,
+            float y
+    ) throws IOException {
+        float textWidth = font.getStringWidth(text) / 1000f * fontSize;
+        float x = (PDRectangle.A4.getWidth() - textWidth) / 2f;
+        stream.setNonStrokingColor(color);
+        stream.setFont(font, fontSize);
+        stream.beginText();
+        stream.newLineAtOffset(x, y);
+        stream.showText(text);
         stream.endText();
     }
 
@@ -190,14 +284,20 @@ public class PdfSignatureEngine {
             if (doc.getNumberOfPages() == 0) throw new IOException("PDF has no pages");
             PDPage last = doc.getPage(doc.getNumberOfPages() - 1);
             boolean landlord = "LANDLORD".equals(params.signerRole());
+            float boxX = landlord
+                    ? SIGNATURE_PAGE_MARGIN_X
+                    : SIGNATURE_PAGE_MARGIN_X + SIGNATURE_BOX_WIDTH + SIGNATURE_BOX_GAP;
+            String signedAt = SIGNATURE_DATE_FORMAT.format(signDate);
             try (PDPageContentStream stream = new PDPageContentStream(doc, last,
                     PDPageContentStream.AppendMode.APPEND, true, true)) {
-                stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 9);
+                stream.setNonStrokingColor(TEXT_COLOR);
+                stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 8.5f);
                 stream.beginText();
-                stream.newLineAtOffset(landlord ? 67 : 319, 610);
+                stream.newLineAtOffset(boxX + SIGNATURE_MARKER_INSET_X, SIGNATURE_MARKER_Y);
                 stream.showText("SIGNED WITH VNPT SMARTCA");
-                stream.newLineAtOffset(0, -15);
-                stream.showText(signDate.toString().replaceAll("[^\\x20-\\x7E]", ""));
+                stream.newLineAtOffset(0, SIGNATURE_DATE_Y - SIGNATURE_MARKER_Y);
+                stream.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 8f);
+                stream.showText(signedAt);
                 stream.endText();
             }
             SignatureOptions options = new SignatureOptions();
