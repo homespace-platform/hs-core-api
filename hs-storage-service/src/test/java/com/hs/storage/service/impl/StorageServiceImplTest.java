@@ -5,6 +5,8 @@ import com.hs.common.context.UserContext;
 import com.hs.common.context.UserContextHolder;
 import com.hs.storage.advice.entity.enums.StorageErrorCode;
 import com.hs.storage.config.StorageProperties;
+import com.hs.storage.dto.request.CreateUploadRequest;
+import com.hs.storage.model.StorageObject;
 import com.hs.storage.model.constant.StoragePurpose;
 import com.hs.storage.model.constant.StorageVisibility;
 import com.hs.storage.repository.StorageObjectRepository;
@@ -12,12 +14,16 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
@@ -255,6 +261,46 @@ class StorageServiceImplTest {
                         StorageVisibility.PRIVATE
                 )
         );
+        assertEquals(StorageErrorCode.STORAGE_FILE_TOO_LARGE.getCode(), ex.getCode());
+    }
+
+    @Test
+    void createUpload_listingVideoAllows500MiB() throws Exception {
+        var presigned = mock(PresignedPutObjectRequest.class);
+        when(presigner.presignPutObject(any(PutObjectPresignRequest.class))).thenReturn(presigned);
+        when(presigned.url()).thenReturn(URI.create("https://example.com/upload").toURL());
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = storageService.createUpload(new CreateUploadRequest(
+                "listing.mp4",
+                "video/mp4",
+                500L * 1024 * 1024,
+                StoragePurpose.GENERAL,
+                StorageVisibility.PUBLIC,
+                "LISTING",
+                "listing"
+        ));
+
+        assertNotNull(response);
+        var objectCaptor = ArgumentCaptor.forClass(StorageObject.class);
+        verify(repository).save(objectCaptor.capture());
+        assertEquals(StoragePurpose.LISTING_VIDEO, objectCaptor.getValue().getPurpose());
+    }
+
+    @Test
+    void createUpload_listingVideoOver500MiB_throwsException() {
+        AppException ex = assertThrows(AppException.class, () ->
+                storageService.createUpload(new CreateUploadRequest(
+                        "listing.mp4",
+                        "video/mp4",
+                        500L * 1024 * 1024 + 1,
+                        StoragePurpose.GENERAL,
+                        StorageVisibility.PUBLIC,
+                        "LISTING",
+                        "listing"
+                ))
+        );
+
         assertEquals(StorageErrorCode.STORAGE_FILE_TOO_LARGE.getCode(), ex.getCode());
     }
 }
