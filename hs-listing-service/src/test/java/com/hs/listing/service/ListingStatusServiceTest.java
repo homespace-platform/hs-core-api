@@ -71,6 +71,21 @@ class ListingStatusServiceTest {
     }
 
     @Test
+    void applySubmissionRejectsRentedStatus() {
+        Listing listing = listing(ListingStatus.RENTED);
+
+        AppException ex = assertThrows(AppException.class, () -> service.applySubmission(
+                listing, ListingSubmissionAction.SAVE_DRAFT, "owner-1", ListingStatusActorType.USER));
+        assertEquals(ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT.getCode(), ex.getCode());
+
+        AppException exReview = assertThrows(AppException.class, () -> service.applySubmission(
+                listing, ListingSubmissionAction.SUBMIT_FOR_REVIEW, "owner-1", ListingStatusActorType.USER));
+        assertEquals(ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT.getCode(), exReview.getCode());
+
+        verify(history, never()).save(any());
+    }
+
+    @Test
     void ownerCanMarkPublishedListingAsRentedOutsideThePlatform() {
         Listing listing = publishedListingWithWindow(Duration.ofDays(10));
         when(listings.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));

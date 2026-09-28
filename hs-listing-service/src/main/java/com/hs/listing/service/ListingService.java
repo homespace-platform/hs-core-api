@@ -46,9 +46,20 @@ public class ListingService {
             throw error(400, "DUPLICATE_INVALID_REQUEST", "Cannot specify duplicateSourceListingId when updating an existing listing");
         }
         Listing l = upsertTarget(ownerId, r.id());
+        if (updating) {
+            if (l.getStatus() == ListingStatus.RENTED) {
+                throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT);
+            }
+            if (l.getStatus() == ListingStatus.RENTED_EXTERNALLY) {
+                throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_RENTED_EXTERNALLY);
+            }
+            if (l.getStatus() == ListingStatus.VIOLATION) {
+                throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
+            }
+        }
         validate(r, l.getId() != null ? l : null);
-        if (l.getStatus() == ListingStatus.VIOLATION)
-            throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
+
+
         if (updating) {
             clearOwnedData(l);
             listingRepository.flush();
@@ -101,6 +112,12 @@ public class ListingService {
         requireActor(adminId);
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> error(404, "LISTING_NOT_FOUND", "Listing not found"));
+        if (listing.getStatus() == ListingStatus.RENTED) {
+            throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT);
+        }
+        if (listing.getStatus() == ListingStatus.RENTED_EXTERNALLY) {
+            throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_RENTED_EXTERNALLY);
+        }
         validate(request, listing);
         ListingStatus preservedStatus = listing.getStatus();
         clearOwnedData(listing);

@@ -52,6 +52,12 @@ public class ListingStatusService {
     @Transactional
     public void applySubmission(Listing listing, ListingSubmissionAction action, String actorId,
                                 ListingStatusActorType actorType) {
+        if (listing.getStatus() == ListingStatus.RENTED) {
+            throw new AppException(ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT);
+        }
+        if (listing.getStatus() == ListingStatus.RENTED_EXTERNALLY) {
+            throw new AppException(ListingErrorCode.LISTING_RENTED_EXTERNALLY);
+        }
         if (listing.getStatus() == ListingStatus.VIOLATION && actorType == ListingStatusActorType.USER) {
             throw new AppException(ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
         }

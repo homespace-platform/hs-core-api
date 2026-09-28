@@ -516,11 +516,145 @@ class ListingServiceTest {
         assertEquals(422, missing.getStatusCode().value());
     }
 
+    @Test
+    void rejectsUpsertWhenListingIsRentedForSaveDraft() {
+        var listingRepo = mock(ListingRepository.class);
+        var statusService = mock(ListingStatusService.class);
+        var storageService = mock(com.hs.storage.service.StorageService.class);
+        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+                mock(StorageObjectRepository.class), storageService,
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                statusService, mock(PropertyBranchRepository.class));
+
+        com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
+        rentedListing.setId("listing-rented-1");
+        rentedListing.setOwnerId("owner-1");
+        rentedListing.setStatus(com.hs.listing.model.constant.ListingStatus.RENTED);
+        rentedListing.setTitle("Phòng trọ cao cấp");
+        rentedListing.setDescription("Mô tả phòng");
+
+        when(listingRepo.findByIdAndActiveTrue("listing-rented-1")).thenReturn(java.util.Optional.of(rentedListing));
+
+        var req = createDummyRequest(null, "listing-rented-1");
+        AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", req));
+        assertEquals(com.hs.listing.advice.ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT.getCode(), ex.getCode());
+        assertEquals(409, ex.getStatusCode().value());
+
+        // Verify side effects were prevented
+        verify(listingRepo, never()).flush();
+        verify(listingRepo, never()).save(any());
+        verify(statusService, never()).applySubmission(any(), any(), any(), any());
+    }
+
+    @Test
+    void rejectsUpsertWhenListingIsRentedForSubmitForReview() {
+        var listingRepo = mock(ListingRepository.class);
+        var statusService = mock(ListingStatusService.class);
+        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                statusService, mock(PropertyBranchRepository.class));
+
+        com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
+        rentedListing.setId("listing-rented-1");
+        rentedListing.setOwnerId("owner-1");
+        rentedListing.setStatus(com.hs.listing.model.constant.ListingStatus.RENTED);
+
+        when(listingRepo.findByIdAndActiveTrue("listing-rented-1")).thenReturn(java.util.Optional.of(rentedListing));
+
+        var reviewReq = createDummyRequest(null, "listing-rented-1", "R202", com.hs.listing.model.constant.ListingSubmissionAction.SUBMIT_FOR_REVIEW);
+
+        AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", reviewReq));
+        assertEquals(com.hs.listing.advice.ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT.getCode(), ex.getCode());
+        assertEquals(409, ex.getStatusCode().value());
+
+        verify(listingRepo, never()).flush();
+        verify(listingRepo, never()).save(any());
+        verify(statusService, never()).applySubmission(any(), any(), any(), any());
+    }
+
+    @Test
+    void rejectsUpdateByAdminWhenListingIsRented() {
+        var listingRepo = mock(ListingRepository.class);
+        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+
+        com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
+        rentedListing.setId("listing-rented-1");
+        rentedListing.setOwnerId("owner-1");
+        rentedListing.setStatus(com.hs.listing.model.constant.ListingStatus.RENTED);
+
+        when(listingRepo.findByIdAndActiveTrue("listing-rented-1")).thenReturn(java.util.Optional.of(rentedListing));
+
+        var req = createDummyRequest(null, "listing-rented-1");
+        AppException ex = assertThrows(AppException.class, () -> service.updateByAdmin("admin-1", "listing-rented-1", req));
+        assertEquals(com.hs.listing.advice.ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT.getCode(), ex.getCode());
+        assertEquals(409, ex.getStatusCode().value());
+
+        verify(listingRepo, never()).flush();
+        verify(listingRepo, never()).save(any());
+    }
+
+    @Test
+    void allowsDuplicatingFromRentedListing() {
+        var listingRepo = mock(ListingRepository.class);
+        var statusService = mock(ListingStatusService.class);
+        var storageService = mock(com.hs.storage.service.StorageService.class);
+        var storageObjRepo = mock(StorageObjectRepository.class);
+        var addressRepo = mock(AddressRepository.class);
+
+        ListingService service = new ListingService(listingRepo, addressRepo,
+                storageObjRepo, storageService,
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                statusService, mock(PropertyBranchRepository.class));
+
+        com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
+        rentedListing.setId("source-rented-1");
+        rentedListing.setOwnerId("owner-1");
+        rentedListing.setStatus(com.hs.listing.model.constant.ListingStatus.RENTED);
+        rentedListing.setTitle("Phòng trọ đã cho thuê");
+
+        com.hs.storage.model.StorageObject dummyObj = new com.hs.storage.model.StorageObject();
+        dummyObj.setId("st-dummy");
+        dummyObj.setOwnerId("owner-1");
+        dummyObj.setStatus(com.hs.storage.model.constant.StorageStatus.READY);
+        dummyObj.setActive(true);
+        dummyObj.setPurpose(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE);
+        dummyObj.setContentType("image/jpeg");
+        dummyObj.setObjectKey("listings/dummy.jpg");
+        when(storageObjRepo.findById("st-dummy")).thenReturn(java.util.Optional.of(dummyObj));
+
+        when(listingRepo.findByIdAndActiveTrue("source-rented-1")).thenReturn(java.util.Optional.of(rentedListing));
+        when(listingRepo.save(any())).thenAnswer(inv -> {
+            com.hs.listing.model.Listing saved = inv.getArgument(0);
+            saved.setId("new-duplicated-id");
+            saved.setStatus(com.hs.listing.model.constant.ListingStatus.DRAFT);
+            return saved;
+        });
+
+        // Request has duplicateSourceListingId = source-rented-1, id = null
+        var duplicateReq = createDummyRequest("source-rented-1", null);
+        var resp = service.upsert("owner-1", duplicateReq);
+
+        assertNotNull(resp);
+        assertEquals("new-duplicated-id", resp.id());
+        // Verify source rented listing was NOT modified
+        assertEquals(com.hs.listing.model.constant.ListingStatus.RENTED, rentedListing.getStatus());
+        verify(listingRepo).save(any());
+        verify(statusService).applySubmission(any(), eq(com.hs.listing.model.constant.ListingSubmissionAction.SAVE_DRAFT), eq("owner-1"), any());
+    }
+
     private com.hs.listing.dto.request.CreateListingRequest createDummyRequest(String duplicateSourceListingId, String id) {
-        return createDummyRequest(duplicateSourceListingId, id, "R202");
+        return createDummyRequest(duplicateSourceListingId, id, "R202", com.hs.listing.model.constant.ListingSubmissionAction.SAVE_DRAFT);
     }
 
     private com.hs.listing.dto.request.CreateListingRequest createDummyRequest(String duplicateSourceListingId, String id, String roomCode) {
+        return createDummyRequest(duplicateSourceListingId, id, roomCode, com.hs.listing.model.constant.ListingSubmissionAction.SAVE_DRAFT);
+    }
+
+    private com.hs.listing.dto.request.CreateListingRequest createDummyRequest(String duplicateSourceListingId, String id, String roomCode, com.hs.listing.model.constant.ListingSubmissionAction action) {
         var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
                 java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
                 false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
@@ -543,7 +677,7 @@ class ListingServiceTest {
                 2, 2, com.hs.listing.model.constant.ListingEnums.ParkingPolicy.FREE);
 
         return new com.hs.listing.dto.request.CreateListingRequest(
-                id, duplicateSourceListingId, null, com.hs.listing.model.constant.ListingSubmissionAction.SAVE_DRAFT,
+                id, duplicateSourceListingId, null, action,
                 "Title", "Description of property listing",
                 com.hs.listing.model.constant.ListingCategory.ROOM,
                 java.time.LocalDate.now(), java.math.BigDecimal.valueOf(25),
