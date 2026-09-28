@@ -281,7 +281,7 @@ class ContractServiceImplTest {
         when(paymentRequestRepository.findByRentalRequestIdAndType("req-1", PaymentType.INITIAL))
                 .thenReturn(Optional.empty());
 
-        CreateContractDraftRequest draftReq = new CreateContractDraftRequest("req-1", "tpl-v1");
+        CreateContractDraftRequest draftReq = new CreateContractDraftRequest("req-1");
         AppException ex = assertThrows(AppException.class, () -> service.createDraft(draftReq));
         assertEquals(com.hs.contract.advice.ContractErrorCode.RENTAL_PAYMENT_REQUIRED_BEFORE_CONTRACT.getCode(), ex.getCode());
     }
@@ -312,7 +312,8 @@ class ContractServiceImplTest {
                 paymentRequestRepository
         );
 
-        Listing listing = Listing.builder().id("listing-1").ownerId("landlord-1").build();
+        Listing listing = Listing.builder().id("listing-1").ownerId("landlord-1")
+                .category(com.hs.listing.model.constant.ListingCategory.ROOM).build();
         RentalRequest req = RentalRequest.builder()
                 .id("req-1")
                 .listing(listing)
@@ -345,7 +346,8 @@ class ContractServiceImplTest {
         when(paymentRequestRepository.findByRentalRequestIdAndType("req-1", PaymentType.INITIAL))
                 .thenReturn(Optional.of(payment));
         when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
-        when(templateVersionRepository.findById("ver-1")).thenReturn(Optional.of(tplVer));
+        when(templateVersionRepository.findCurrentPublishedSystemVersions(com.hs.listing.model.constant.ListingCategory.ROOM))
+                .thenReturn(java.util.List.of(tplVer));
         when(dataBuilder.build(any(), any(), any())).thenReturn(ContractDataBuilder.ContractSnapshots.builder().build());
         when(contractRepository.save(any(Contract.class))).thenAnswer(inv -> inv.getArgument(0));
         when(revisionRepository.save(any(ContractRevision.class))).thenAnswer(inv -> {
@@ -356,10 +358,53 @@ class ContractServiceImplTest {
 
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
 
-        var response = service.createDraft(new CreateContractDraftRequest("req-1", "ver-1"));
+        var response = service.createDraft(new CreateContractDraftRequest("req-1"));
         org.junit.jupiter.api.Assertions.assertNotNull(response);
         assertEquals("pay-1", response.getRentalPaymentId());
         assertEquals(ContractPaymentStatus.PAID, response.getPaymentStatus());
+    }
+
+    @Test
+    void createDraft_requiresPublishedSystemTemplateForListingCategory() {
+        assertTemplateConfigurationError(0,
+                com.hs.contract.advice.ContractErrorCode.SYSTEM_TEMPLATE_NOT_AVAILABLE);
+    }
+
+    @Test
+    void createDraft_rejectsDuplicateActiveSystemTemplates() {
+        assertTemplateConfigurationError(2,
+                com.hs.contract.advice.ContractErrorCode.SYSTEM_TEMPLATE_CONFIGURATION_INVALID);
+    }
+
+    private void assertTemplateConfigurationError(long activeCount,
+            com.hs.contract.advice.ContractErrorCode expectedError) {
+        ContractRepository contracts = mock(ContractRepository.class);
+        RentalRequestRepository requests = mock(RentalRequestRepository.class);
+        PaymentRequestRepository payments = mock(PaymentRequestRepository.class);
+        ContractTemplateVersionRepository versions = mock(ContractTemplateVersionRepository.class);
+        ContractServiceImpl service = createServiceWithPayment(
+                contracts, mock(ContractRevisionRepository.class), mock(ContractDocumentRepository.class),
+                versions, requests, mock(ListingStatusService.class), payments);
+        Listing listing = Listing.builder().id("listing-1")
+                .category(com.hs.listing.model.constant.ListingCategory.ROOM).build();
+        RentalRequest request = RentalRequest.builder().id("req-1").listing(listing)
+                .ownerId("landlord-1").renterId("tenant-1")
+                .status(RentalRequestStatus.ACCEPTED).build();
+        PaymentRequest payment = PaymentRequest.builder().id("payment-1")
+                .status(PaymentStatus.CONFIRMED).build();
+        UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
+        when(requests.findById("req-1")).thenReturn(Optional.of(request));
+        when(contracts.findByRentalRequestId("req-1")).thenReturn(Optional.empty());
+        when(payments.findByRentalRequestIdAndType("req-1", PaymentType.INITIAL))
+                .thenReturn(Optional.of(payment));
+        when(versions.countActiveSystemTemplates(com.hs.listing.model.constant.ListingCategory.ROOM))
+                .thenReturn(activeCount);
+        when(versions.findCurrentPublishedSystemVersions(com.hs.listing.model.constant.ListingCategory.ROOM))
+                .thenReturn(List.of());
+
+        AppException error = assertThrows(AppException.class,
+                () -> service.createDraft(new CreateContractDraftRequest("req-1")));
+        assertEquals(expectedError.getCode(), error.getCode());
     }
 
     @Test
@@ -466,7 +511,8 @@ class ContractServiceImplTest {
                 paymentRequestRepository
         );
 
-        Listing listing = Listing.builder().id("listing-1").ownerId("landlord-1").build();
+        Listing listing = Listing.builder().id("listing-1").ownerId("landlord-1")
+                .category(com.hs.listing.model.constant.ListingCategory.ROOM).build();
         RentalRequest req = RentalRequest.builder()
                 .id("req-1")
                 .listing(listing)
@@ -499,7 +545,8 @@ class ContractServiceImplTest {
         when(paymentRequestRepository.findByRentalRequestIdAndType("req-1", PaymentType.INITIAL))
                 .thenReturn(Optional.of(payment));
         when(paymentRequestRepository.findById("pay-real-1")).thenReturn(Optional.of(payment));
-        when(templateVersionRepository.findById("ver-1")).thenReturn(Optional.of(tplVer));
+        when(templateVersionRepository.findCurrentPublishedSystemVersions(com.hs.listing.model.constant.ListingCategory.ROOM))
+                .thenReturn(java.util.List.of(tplVer));
         when(dataBuilder.build(any(), any(), any())).thenReturn(ContractDataBuilder.ContractSnapshots.builder().build());
         when(contractRepository.save(any(Contract.class))).thenAnswer(inv -> inv.getArgument(0));
         when(revisionRepository.save(any(ContractRevision.class))).thenAnswer(inv -> {
@@ -510,7 +557,7 @@ class ContractServiceImplTest {
 
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
 
-        var response = service.createDraft(new CreateContractDraftRequest("req-1", "ver-1"));
+        var response = service.createDraft(new CreateContractDraftRequest("req-1"));
         org.junit.jupiter.api.Assertions.assertNotNull(response);
         assertEquals("pay-real-1", response.getRentalPaymentId());
         assertEquals(ContractPaymentStatus.PAID, response.getPaymentStatus());

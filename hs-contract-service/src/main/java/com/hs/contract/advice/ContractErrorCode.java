@@ -41,7 +41,11 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     SIGNATURE_PDF_EMBED_FAILED(6030, "Không thể nhúng chữ ký số vào PDF — dữ liệu chữ ký từ VNPT không hợp lệ", HttpStatus.INTERNAL_SERVER_ERROR),
     SIGNATURE_RETRY_NOT_ALLOWED(6031, "Yêu cầu ký số không thể thử lại ở trạng thái hiện tại", HttpStatus.CONFLICT),
     SIGNATURE_MODE_NOT_ENABLED(6032, "Tính năng ký số VNPT SmartCA chưa được kích hoạt trên hệ thống", HttpStatus.SERVICE_UNAVAILABLE),
-    SIGNATURE_PDF_VERIFICATION_FAILED(6033, "Xác minh chữ ký số trong PDF thất bại — dữ liệu có thể bị thay đổi", HttpStatus.INTERNAL_SERVER_ERROR);
+    SIGNATURE_PDF_VERIFICATION_FAILED(6033, "Xác minh chữ ký số trong PDF thất bại — dữ liệu có thể bị thay đổi", HttpStatus.INTERNAL_SERVER_ERROR),
+    SYSTEM_TEMPLATE_NOT_AVAILABLE(6040, "HomeSpace chưa có mẫu hợp đồng cho loại hình bất động sản này. Vui lòng liên hệ quản trị viên để được hỗ trợ.", HttpStatus.CONFLICT),
+    SYSTEM_TEMPLATE_ALREADY_EXISTS(6041, "Loại hình này đã có mẫu hợp đồng hệ thống. Vui lòng cập nhật bằng phiên bản mới trong mẫu hiện có.", HttpStatus.CONFLICT),
+    SYSTEM_TEMPLATE_CONFIGURATION_INVALID(6042, "Cấu hình mẫu hợp đồng hệ thống chưa hợp lệ. Vui lòng liên hệ quản trị viên.", HttpStatus.CONFLICT),
+    SYSTEM_TEMPLATE_CATEGORY_INVALID(6043, "Mẫu hợp đồng chỉ áp dụng cho nhà nguyên căn, căn hộ chung cư hoặc phòng trọ.", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

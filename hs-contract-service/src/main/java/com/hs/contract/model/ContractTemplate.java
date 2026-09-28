@@ -12,7 +12,9 @@ import java.util.List;
 import java.util.UUID;
 
 @Entity
-@Table(name = "contract_templates", indexes = {
+@Table(name = "contract_templates", uniqueConstraints = {
+        @UniqueConstraint(name = "uq_contract_template_category", columnNames = "category")
+}, indexes = {
         @Index(name = "idx_contract_template_status", columnList = "status"),
         @Index(name = "idx_contract_template_category", columnList = "category"),
         @Index(name = "idx_contract_template_source", columnList = "source"),
@@ -36,7 +38,7 @@ public class ContractTemplate extends BaseEntity {
     private String description;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "category", length = 30)
+    @Column(name = "category", nullable = false, length = 30)
     private ListingCategory category;
 
     /** SYSTEM = mẫu admin; LANDLORD = mẫu chủ nhà tự tạo. */

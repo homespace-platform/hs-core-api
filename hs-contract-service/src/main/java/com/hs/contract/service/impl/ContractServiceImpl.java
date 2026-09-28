@@ -184,11 +184,24 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.RENTAL_PAYMENT_REQUIRED_BEFORE_CONTRACT);
         }
 
-        // 5. Lấy phiên bản mẫu
-        ContractTemplateVersion templateVersion = templateVersionRepository.findById(request.getTemplateVersionId())
-                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
-
         Listing listing = rentalRequest.getListing();
+        if (listing == null || listing.getCategory() == null) {
+            throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_NOT_AVAILABLE);
+        }
+        if (templateVersionRepository.countActiveSystemTemplates(listing.getCategory()) > 1) {
+            throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_CONFIGURATION_INVALID);
+        }
+
+        // Mẫu chỉ do admin phát hành. Client không được quyết định template/version.
+        List<ContractTemplateVersion> currentVersions = templateVersionRepository
+                .findCurrentPublishedSystemVersions(listing.getCategory());
+        if (currentVersions.isEmpty()) {
+            throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_NOT_AVAILABLE);
+        }
+        if (currentVersions.size() != 1) {
+            throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_CONFIGURATION_INVALID);
+        }
+        ContractTemplateVersion templateVersion = currentVersions.get(0);
 
         // 6. Sinh số hợp đồng
         String contractNumber = "HD-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-"

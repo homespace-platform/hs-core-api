@@ -19,7 +19,7 @@ public class ListingRoomDetail {
     @JoinColumn(name = "listing_id")
     private Listing listing;
 
-    @Column(name = "room_code")
+    @Column(name = "room_code", nullable = false)
     private String roomCode;
 
     @Column(name = "floor_number")

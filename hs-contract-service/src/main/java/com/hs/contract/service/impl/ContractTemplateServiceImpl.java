@@ -73,6 +73,10 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     @Override
     @Transactional
     public ContractTemplateResponse createTemplate(CreateContractTemplateRequest request) {
+        requireSupportedCategory(request.getCategory());
+        if (!templateRepository.findSystemTemplatesByCategory(request.getCategory()).isEmpty()) {
+            throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_ALREADY_EXISTS);
+        }
         return createTemplateInternal(request, ContractTemplateSource.SYSTEM, null);
     }
 
@@ -205,9 +209,13 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
         Listing listing = request.getListing();
         ListingCategory category = listing != null ? listing.getCategory() : null;
-        String ownerUserId = listing != null ? listing.getOwnerId() : null;
-
-        List<ContractTemplate> templates = templateRepository.findApplicablePublishedTemplates(category, ownerUserId);
+        if (category == null) {
+            throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_CATEGORY_INVALID);
+        }
+        if (templateRepository.findActiveSystemTemplates(category).size() > 1) {
+            throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_CONFIGURATION_INVALID);
+        }
+        List<ContractTemplate> templates = templateRepository.findPublishedSystemTemplates(category);
         return templates.stream()
                 .map(t -> toTemplateResponse(t, t.getVersions().size()))
                 .toList();
@@ -226,7 +234,10 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
             template.setDescription(request.getDescription());
         }
         if (request.getCategory() != null) {
-            template.setCategory(request.getCategory());
+            requireSupportedCategory(request.getCategory());
+            if (!request.getCategory().equals(template.getCategory())) {
+                throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_CATEGORY_INVALID);
+            }
         }
 
         template = templateRepository.save(template);
@@ -249,6 +260,9 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     public ContractTemplateVersionResponse createVersion(String templateId, CreateTemplateVersionRequest request) {
         ContractTemplate template = templateRepository.findById(templateId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_NOT_FOUND));
+        if (template.getStatus() != ContractTemplateStatus.ACTIVE) {
+            throw new AppException(ContractErrorCode.CONTRACT_TEMPLATE_NOT_FOUND);
+        }
 
         int nextVersion = versionRepository.findMaxVersionNumberByTemplateId(templateId) + 1;
 
@@ -290,6 +304,9 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     public ContractTemplateVersionResponse publishVersion(String templateId, String versionId) {
         ContractTemplate template = templateRepository.findById(templateId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_NOT_FOUND));
+        if (template.getStatus() != ContractTemplateStatus.ACTIVE) {
+            throw new AppException(ContractErrorCode.CONTRACT_TEMPLATE_NOT_FOUND);
+        }
 
         ContractTemplateVersion targetVersion = versionRepository.findById(versionId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
@@ -452,6 +469,14 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
     private boolean isSystemTemplate(ContractTemplate template) {
         return template.getSource() == null || template.getSource() == ContractTemplateSource.SYSTEM;
+    }
+
+    private void requireSupportedCategory(ListingCategory category) {
+        if (category != ListingCategory.HOUSE
+                && category != ListingCategory.APARTMENT
+                && category != ListingCategory.ROOM) {
+            throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_CATEGORY_INVALID);
+        }
     }
 
     private ContractTemplateResponse toTemplateResponse(ContractTemplate t, int versionsCount) {

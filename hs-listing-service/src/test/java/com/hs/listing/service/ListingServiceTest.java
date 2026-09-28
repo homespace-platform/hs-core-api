@@ -498,7 +498,29 @@ class ListingServiceTest {
         verify(storageService).deleteS3ObjectDirect("listing_image/owner-1/copied1.jpg");
     }
 
+    @Test
+    void rejectsRoomWithoutCodeEvenForDraft() {
+        ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+
+        for (String roomCode : new String[] { "", "   " }) {
+            AppException ex = assertThrows(AppException.class,
+                    () -> service.upsert("owner-1", createDummyRequest(null, null, roomCode)));
+            assertEquals(422, ex.getStatusCode().value());
+            assertTrue(ex.getMessage().contains("roomDetail.roomCode"));
+        }
+        AppException missing = assertThrows(AppException.class,
+                () -> service.upsert("owner-1", createDummyRequest(null, null, null)));
+        assertEquals(422, missing.getStatusCode().value());
+    }
+
     private com.hs.listing.dto.request.CreateListingRequest createDummyRequest(String duplicateSourceListingId, String id) {
+        return createDummyRequest(duplicateSourceListingId, id, "R202");
+    }
+
+    private com.hs.listing.dto.request.CreateListingRequest createDummyRequest(String duplicateSourceListingId, String id, String roomCode) {
         var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
                 java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
                 false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
@@ -510,7 +532,7 @@ class ListingServiceTest {
                 null, new com.hs.listing.dto.request.ListingAddressRequest("P1", "Province", "W1", "Ward", "123 Street", "123 Street, Ward, Province"));
 
         var roomDetail = new com.hs.listing.dto.request.RoomDetailRequest(
-                "R202", 2, com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE,
+                roomCode, 2, com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE,
                 com.hs.listing.model.constant.ListingEnums.KitchenType.PRIVATE, true,
                 com.hs.listing.model.constant.ListingEnums.BalconyType.PRIVATE, false,
                 com.hs.listing.model.constant.FurnishingStatus.UNFURNISHED,

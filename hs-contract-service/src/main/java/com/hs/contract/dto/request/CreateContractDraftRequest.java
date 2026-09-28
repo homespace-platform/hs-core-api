@@ -15,6 +15,4 @@ public class CreateContractDraftRequest {
     @NotBlank(message = "rentalRequestId không được để trống")
     private String rentalRequestId;
 
-    @NotBlank(message = "templateVersionId không được để trống")
-    private String templateVersionId;
 }

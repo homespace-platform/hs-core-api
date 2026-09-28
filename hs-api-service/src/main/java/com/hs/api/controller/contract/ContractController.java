@@ -8,10 +8,7 @@ import com.hs.common.dto.ApiResponse;
 import com.hs.common.dto.PageResponse;
 import com.hs.contract.dto.catalog.TemplateFieldDefinition;
 import com.hs.contract.dto.request.CreateContractDraftRequest;
-import com.hs.contract.dto.request.CreateContractTemplateRequest;
-import com.hs.contract.dto.request.CreateTemplateVersionRequest;
 import com.hs.contract.dto.request.UpdateContractRevisionRequest;
-import com.hs.contract.dto.request.UpdateContractTemplateRequest;
 import com.hs.user.service.kyc.KycGateService;
 import com.hs.contract.dto.response.ContractCompletenessResponse;
 import com.hs.contract.dto.response.ContractDocumentResponse;
@@ -80,17 +77,6 @@ public class ContractController {
         return templateService.listMyTemplates(requireUserId(), status, category, page, size);
     }
 
-    @PostMapping("/templates/mine")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<ContractTemplateResponse> createMyTemplate(
-            @Valid @RequestBody CreateContractTemplateRequest request
-    ) {
-        return ApiResponse.<ContractTemplateResponse>builder()
-                .message("Tạo mẫu hợp đồng thành công")
-                .result(templateService.createMyTemplate(requireUserId(), request))
-                .build();
-    }
-
     @GetMapping("/templates/{templateId}")
     public ApiResponse<ContractTemplateResponse> getTemplate(@PathVariable String templateId) {
         return ApiResponse.<ContractTemplateResponse>builder()
@@ -98,50 +84,10 @@ public class ContractController {
                 .build();
     }
 
-    @PatchMapping("/templates/{templateId}")
-    public ApiResponse<ContractTemplateResponse> updateMyTemplate(
-            @PathVariable String templateId,
-            @Valid @RequestBody UpdateContractTemplateRequest request
-    ) {
-        return ApiResponse.<ContractTemplateResponse>builder()
-                .message("Cập nhật mẫu hợp đồng thành công")
-                .result(templateService.updateMyTemplate(requireUserId(), templateId, request))
-                .build();
-    }
-
-    @PostMapping("/templates/{templateId}/archive")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void archiveMyTemplate(@PathVariable String templateId) {
-        templateService.archiveMyTemplate(requireUserId(), templateId);
-    }
-
     @GetMapping("/templates/{templateId}/versions")
     public ApiResponse<List<ContractTemplateVersionResponse>> getVersions(@PathVariable String templateId) {
         return ApiResponse.<List<ContractTemplateVersionResponse>>builder()
                 .result(templateService.getVersionsForLandlord(requireUserId(), templateId))
-                .build();
-    }
-
-    @PostMapping("/templates/{templateId}/versions")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<ContractTemplateVersionResponse> createMyVersion(
-            @PathVariable String templateId,
-            @Valid @RequestBody CreateTemplateVersionRequest request
-    ) {
-        return ApiResponse.<ContractTemplateVersionResponse>builder()
-                .message("Tải lên phiên bản mẫu hợp đồng mới thành công")
-                .result(templateService.createMyVersion(requireUserId(), templateId, request))
-                .build();
-    }
-
-    @PostMapping("/templates/{templateId}/versions/{versionId}/publish")
-    public ApiResponse<ContractTemplateVersionResponse> publishMyVersion(
-            @PathVariable String templateId,
-            @PathVariable String versionId
-    ) {
-        return ApiResponse.<ContractTemplateVersionResponse>builder()
-                .message("Xuất bản phiên bản mẫu hợp đồng thành công")
-                .result(templateService.publishMyVersion(requireUserId(), templateId, versionId))
                 .build();
     }
 

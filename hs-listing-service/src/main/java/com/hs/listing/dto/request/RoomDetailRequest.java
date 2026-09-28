@@ -5,6 +5,8 @@ import com.hs.listing.model.constant.ListingEnums.*;
 import jakarta.validation.constraints.*;
 
 public record RoomDetailRequest(
+        @NotBlank(message = "Mã phòng / tên phòng không được để trống")
+        @Size(max = 255, message = "Mã phòng / tên phòng không được vượt quá 255 ký tự")
         String roomCode,
         @Min(0) Integer floorNumber,
         @NotNull RestroomType restroomType,

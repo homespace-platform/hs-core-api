@@ -241,6 +241,13 @@ public class ListingService {
             default -> true;
         })
             throw error(409, "DETAIL_CATEGORY_CONFLICT", "Exactly one matching detail is required");
+        if (r.category() == ListingCategory.ROOM) {
+            String roomCode = r.roomDetail().roomCode();
+            if (roomCode == null || roomCode.isBlank())
+                invalid("roomDetail.roomCode", "REQUIRED");
+            if (roomCode.length() > 255)
+                invalid("roomDetail.roomCode", "TOO_LONG");
+        }
         Set<PriceUnit> units = switch (r.category()) {
             case APARTMENT, HOUSE -> Set.of(PriceUnit.MONTH);
             case ROOM -> Set.of(PriceUnit.ROOM_MONTH, PriceUnit.PERSON_MONTH, PriceUnit.MONTH);
@@ -315,7 +322,7 @@ public class ListingService {
             case ROOM -> {
                 var src = Objects.requireNonNull(r.roomDetail(), "roomDetail");
                 var d = new ListingRoomDetail();
-                d.setRoomCode(src.roomCode());
+                d.setRoomCode(src.roomCode().trim());
                 d.setFloorNumber(src.floorNumber());
                 d.setRestroomType(src.restroomType());
                 d.setKitchenType(src.kitchenType());

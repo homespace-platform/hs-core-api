@@ -181,15 +181,6 @@ public class ContractAdminController {
         return new ResponseEntity<>(docBytes, headers, HttpStatus.OK);
     }
 
-    /**
-     * Lưu trữ (ngừng áp dụng) mẫu hợp đồng
-     */
-    @PostMapping("/contract-templates/{templateId}/archive")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void archiveTemplate(@PathVariable String templateId) {
-        templateService.archiveTemplate(templateId);
-    }
-
     // =========================================================================
     // QUẢN LÝ HỢP ĐỒNG HỆ THỐNG (ADMIN)
     // =========================================================================
