@@ -574,6 +574,33 @@ class ListingServiceTest {
     }
 
     @Test
+    void rejectsUpsertWhenListingIsRentedExternally() {
+        var listingRepo = mock(ListingRepository.class);
+        var statusService = mock(ListingStatusService.class);
+        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                statusService, mock(PropertyBranchRepository.class));
+
+        com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
+        rentedListing.setId("listing-rented-ext-1");
+        rentedListing.setOwnerId("owner-1");
+        rentedListing.setStatus(com.hs.listing.model.constant.ListingStatus.RENTED_EXTERNALLY);
+
+        when(listingRepo.findByIdAndActiveTrue("listing-rented-ext-1")).thenReturn(java.util.Optional.of(rentedListing));
+
+        var draftReq = createDummyRequest(null, "listing-rented-ext-1", "R202");
+
+        AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", draftReq));
+        assertEquals(com.hs.listing.advice.ListingErrorCode.LISTING_RENTED_EXTERNALLY.getCode(), ex.getCode());
+        assertEquals(409, ex.getStatusCode().value());
+
+        verify(listingRepo, never()).flush();
+        verify(listingRepo, never()).save(any());
+        verify(statusService, never()).applySubmission(any(), any(), any(), any());
+    }
+
+    @Test
     void rejectsUpdateByAdminWhenListingIsRented() {
         var listingRepo = mock(ListingRepository.class);
         ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
