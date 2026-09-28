@@ -1,6 +1,7 @@
 package com.hs.listing.service;
 
 import com.hs.common.advice.entity.AppException;
+import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.ListingStatusHistory;
 import com.hs.listing.model.constant.*;
@@ -212,13 +213,28 @@ class ListingStatusServiceTest {
     }
 
     @Test
-    void adminCanMoveListingBetweenRentedStates() {
+    void adminCannotMarkHomeSpaceRentedListingAsRentedExternally() {
         Listing listing = listing(ListingStatus.RENTED);
+        when(listings.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+
+        AppException ex = assertThrows(AppException.class,
+                () -> service.changeByAdmin("admin-1", "listing-1", ListingStatus.RENTED_EXTERNALLY, null));
+
+        assertEquals(ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT.getCode(), ex.getCode());
+        assertEquals(ListingStatus.RENTED, listing.getStatus());
+        verify(listings, never()).save(any());
+        verify(history, never()).save(any());
+    }
+
+    @Test
+    void adminCanMarkPublishedListingAsRentedExternally() {
+        Listing listing = listing(ListingStatus.PUBLISHED);
         when(listings.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
 
         service.changeByAdmin("admin-1", "listing-1", ListingStatus.RENTED_EXTERNALLY, null);
 
         assertEquals(ListingStatus.RENTED_EXTERNALLY, listing.getStatus());
+        verify(history).save(any());
     }
 
     @Test

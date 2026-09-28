@@ -95,6 +95,9 @@ public class ListingStatusService {
     public Listing changeByAdmin(String adminId, String listingId, ListingStatus target, String reason) {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
+        if (listing.getStatus() == ListingStatus.RENTED && target == ListingStatus.RENTED_EXTERNALLY) {
+            throw new AppException(ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT);
+        }
         validateAdminTransition(listing.getStatus(), target);
         if (Set.of(ListingStatus.REJECTED, ListingStatus.HIDDEN, ListingStatus.VIOLATION).contains(target)
                 && (reason == null || reason.isBlank())) {
@@ -132,7 +135,7 @@ public class ListingStatusService {
             case PUBLISHED -> from == ListingStatus.PENDING_REVIEW || from == ListingStatus.VIOLATION || from == ListingStatus.RESERVED;
             case REJECTED -> from == ListingStatus.PENDING_REVIEW;
             case RENTED -> false; // RENTED is reserved strictly for contract execution flow
-            case RENTED_EXTERNALLY -> from == ListingStatus.PUBLISHED || from == ListingStatus.RENTED;
+            case RENTED_EXTERNALLY -> from == ListingStatus.PUBLISHED;
             case EXPIRED -> from == ListingStatus.PUBLISHED;
             case VIOLATION -> from != ListingStatus.VIOLATION;
             case HIDDEN -> from != ListingStatus.HIDDEN;

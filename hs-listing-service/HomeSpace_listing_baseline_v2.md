@@ -769,7 +769,7 @@ Chủ tin không được tự chuyển sang `RENTED`. Tin `RENTED` có hợp đ
 - `PENDING_REVIEW → PUBLISHED`.
 - `PENDING_REVIEW → REJECTED`.
 - `PUBLISHED` hoặc `RENTED_EXTERNALLY → RENTED`.
-- `PUBLISHED` hoặc `RENTED → RENTED_EXTERNALLY`.
+- Chỉ `PUBLISHED → RENTED_EXTERNALLY`; tin `RENTED` đã có hợp đồng HomeSpace nên không thể đánh dấu thuê ngoài.
 - `PUBLISHED → EXPIRED`.
 - Bất kỳ trạng thái khác `VIOLATION → VIOLATION`.
 - Bất kỳ trạng thái khác `HIDDEN → HIDDEN`.
