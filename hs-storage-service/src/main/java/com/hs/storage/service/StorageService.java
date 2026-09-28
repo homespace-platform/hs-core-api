@@ -52,4 +52,13 @@ public interface StorageService {
             String ownerId);
 
     byte[] downloadDirect(String storageId);
+
+    StorageObjectResponse copyObject(
+            String sourceStorageId,
+            String newOwnerId,
+            String newReferenceType,
+            String newReferenceId,
+            StoragePurpose expectedPurpose);
+
+    void deleteS3ObjectDirect(String objectKey);
 }

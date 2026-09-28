@@ -4,7 +4,8 @@ class ListingServiceTest {
     @Test
     void rejectsUnauthenticatedUpsert() {
         ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),
-                mock(StorageObjectRepository.class), mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
         AppException ex = assertThrows(AppException.class, () -> service.upsert(null, null));
         assertEquals(401, ex.getStatusCode().value());
@@ -13,7 +14,8 @@ class ListingServiceTest {
     @Test
     void rejectsOfficeAndCommercialSpaceCategories() {
         ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),
-                mock(StorageObjectRepository.class), mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
 
         var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
@@ -72,7 +74,7 @@ class ListingServiceTest {
         var furnishingRepo = mock(FurnishingItemRepository.class);
         var statusService = mock(ListingStatusService.class);
 
-        ListingService service = new ListingService(listingRepo, addressRepo, storageRepo, amenityRepo, furnishingRepo, statusService, branchRepo);
+        ListingService service = new ListingService(listingRepo, addressRepo, storageRepo, mock(com.hs.storage.service.StorageService.class), amenityRepo, furnishingRepo, statusService, branchRepo);
 
         String branchId = "branch-incomplete";
         com.hs.listing.model.PropertyBranch branch = com.hs.listing.model.PropertyBranch.builder()
@@ -139,7 +141,8 @@ class ListingServiceTest {
     @Test
     void testUpsert_rejectsAvailableFromInPast() {
         ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),
-                mock(StorageObjectRepository.class), mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
 
         var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
@@ -174,6 +177,359 @@ class ListingServiceTest {
         AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", pastReq));
         assertEquals(422, ex.getStatusCode().value());
         assertTrue(ex.getMessage().contains("CANNOT_BE_IN_PAST"));
+    }
+
+    @Test
+    void upsert_duplicateListing_copiesMediaAndCreatesNewIndependentListing() {
+        var listingRepo = mock(ListingRepository.class);
+        var addressRepo = mock(AddressRepository.class);
+        var storageRepo = mock(StorageObjectRepository.class);
+        var storageService = mock(com.hs.storage.service.StorageService.class);
+        var amenityRepo = mock(AmenityRepository.class);
+        var furnishingRepo = mock(FurnishingItemRepository.class);
+        var statusService = mock(ListingStatusService.class);
+        var branchRepo = mock(PropertyBranchRepository.class);
+
+        ListingService service = new ListingService(listingRepo, addressRepo, storageRepo, storageService,
+                amenityRepo, furnishingRepo, statusService, branchRepo);
+
+        // Source listing with 2 photos and 1 video
+        String sourceId = "source-listing-1";
+        com.hs.listing.model.Listing sourceListing = new com.hs.listing.model.Listing();
+        sourceListing.setId(sourceId);
+        sourceListing.setOwnerId("owner-1");
+        sourceListing.setStatus(com.hs.listing.model.constant.ListingStatus.PUBLISHED);
+
+        var srcStorageImg1 = com.hs.storage.model.StorageObject.builder()
+                .id("storage-img-1").ownerId("owner-1").status(com.hs.storage.model.constant.StorageStatus.READY)
+                .purpose(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE).contentType("image/jpeg")
+                .objectKey("listing_image/owner-1/img-1.jpg").build();
+        srcStorageImg1.setActive(true);
+
+        var srcStorageImg2 = com.hs.storage.model.StorageObject.builder()
+                .id("storage-img-2").ownerId("owner-1").status(com.hs.storage.model.constant.StorageStatus.READY)
+                .purpose(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE).contentType("image/jpeg")
+                .objectKey("listing_image/owner-1/img-2.jpg").build();
+        srcStorageImg2.setActive(true);
+
+        var srcStorageVid = com.hs.storage.model.StorageObject.builder()
+                .id("storage-vid-1").ownerId("owner-1").status(com.hs.storage.model.constant.StorageStatus.READY)
+                .purpose(com.hs.storage.model.constant.StoragePurpose.LISTING_VIDEO).contentType("video/mp4")
+                .objectKey("listing_video/owner-1/vid-1.mp4").build();
+        srcStorageVid.setActive(true);
+
+        var media1 = new com.hs.listing.model.ListingMedia();
+        media1.setId("media-1"); media1.setStorageObject(srcStorageImg1); media1.setMediaType(com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE);
+        var media2 = new com.hs.listing.model.ListingMedia();
+        media2.setId("media-2"); media2.setStorageObject(srcStorageImg2); media2.setMediaType(com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE);
+        var mediaVid = new com.hs.listing.model.ListingMedia();
+        mediaVid.setId("media-vid"); mediaVid.setStorageObject(srcStorageVid); mediaVid.setMediaType(com.hs.listing.model.constant.ListingEnums.MediaType.VIDEO);
+
+        sourceListing.getMedia().addAll(java.util.List.of(media1, media2, mediaVid));
+        when(listingRepo.findByIdAndActiveTrue(sourceId)).thenReturn(java.util.Optional.of(sourceListing));
+
+        // Mock copying for media-1 and media-vid (dropping media-2)
+        var copiedStorageImg1 = com.hs.storage.model.StorageObject.builder()
+                .id("copied-storage-img-1").ownerId("owner-1").status(com.hs.storage.model.constant.StorageStatus.READY)
+                .purpose(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE).contentType("image/jpeg")
+                .objectKey("listing_image/owner-1/copied-img-1.jpg").build();
+        copiedStorageImg1.setActive(true);
+
+        var copiedStorageVid = com.hs.storage.model.StorageObject.builder()
+                .id("copied-storage-vid").ownerId("owner-1").status(com.hs.storage.model.constant.StorageStatus.READY)
+                .purpose(com.hs.storage.model.constant.StoragePurpose.LISTING_VIDEO).contentType("video/mp4")
+                .objectKey("listing_video/owner-1/copied-vid.mp4").build();
+        copiedStorageVid.setActive(true);
+
+        // Also 1 newly uploaded photo
+        var newUploadedImg = com.hs.storage.model.StorageObject.builder()
+                .id("new-upload-storage").ownerId("owner-1").status(com.hs.storage.model.constant.StorageStatus.READY)
+                .purpose(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE).contentType("image/jpeg")
+                .objectKey("listing_image/owner-1/new.jpg").build();
+        newUploadedImg.setActive(true);
+
+        when(storageService.copyObject(eq("storage-img-1"), eq("owner-1"), eq("LISTING"), any(), eq(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE)))
+                .thenReturn(new com.hs.storage.dto.response.StorageObjectResponse("copied-storage-img-1", "img-1.jpg", "image/jpeg", 100L, null, "jpg", "owner-1", "LISTING", null, com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE, null, com.hs.storage.model.constant.StorageStatus.READY, null, null));
+        when(storageRepo.findById("copied-storage-img-1")).thenReturn(java.util.Optional.of(copiedStorageImg1));
+
+        when(storageService.copyObject(eq("storage-vid-1"), eq("owner-1"), eq("LISTING"), any(), eq(com.hs.storage.model.constant.StoragePurpose.LISTING_VIDEO)))
+                .thenReturn(new com.hs.storage.dto.response.StorageObjectResponse("copied-storage-vid", "vid.mp4", "video/mp4", 500L, null, "mp4", "owner-1", "LISTING", null, com.hs.storage.model.constant.StoragePurpose.LISTING_VIDEO, null, com.hs.storage.model.constant.StorageStatus.READY, null, null));
+        when(storageRepo.findById("copied-storage-vid")).thenReturn(java.util.Optional.of(copiedStorageVid));
+
+        when(storageRepo.findById("new-upload-storage")).thenReturn(java.util.Optional.of(newUploadedImg));
+
+        when(listingRepo.save(any(com.hs.listing.model.Listing.class))).thenAnswer(invocation -> {
+            com.hs.listing.model.Listing saved = invocation.getArgument(0);
+            saved.setId("new-listing-999");
+            return saved;
+        });
+
+        var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
+                java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
+                false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
+                java.math.BigDecimal.valueOf(4000000), null,
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
+
+        var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
+                com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
+                null, new com.hs.listing.dto.request.ListingAddressRequest("P1", "Province", "W1", "Ward", "123 Street", "123 Street, Ward, Province"));
+
+        var roomDetail = new com.hs.listing.dto.request.RoomDetailRequest(
+                "R202", 2, com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.KitchenType.PRIVATE, true,
+                com.hs.listing.model.constant.ListingEnums.BalconyType.PRIVATE, false,
+                com.hs.listing.model.constant.FurnishingStatus.UNFURNISHED,
+                com.hs.listing.model.constant.ListingEnums.AccessType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.AccessHoursType.FLEXIBLE,
+                com.hs.listing.model.constant.ListingEnums.MeterType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.MeterType.PRIVATE,
+                2, 2, com.hs.listing.model.constant.ListingEnums.ParkingPolicy.FREE);
+
+        // Duplicate request: Keep media1 (photo), Keep mediaVid (video), Add new upload, omit media2
+        var mediaReq1 = new com.hs.listing.dto.request.ListingMediaRequest(null, "media-1", com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE, 0, true);
+        var mediaReq2 = new com.hs.listing.dto.request.ListingMediaRequest(null, "media-vid", com.hs.listing.model.constant.ListingEnums.MediaType.VIDEO, 1, false);
+        var mediaReq3 = new com.hs.listing.dto.request.ListingMediaRequest("new-upload-storage", null, com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE, 2, false);
+
+        var duplicateReq = new com.hs.listing.dto.request.CreateListingRequest(
+                null, sourceId, null, com.hs.listing.model.constant.ListingSubmissionAction.SAVE_DRAFT,
+                "Bản sao của phòng R101", "Mô tả bản sao phòng",
+                com.hs.listing.model.constant.ListingCategory.ROOM,
+                java.time.LocalDate.now(), java.math.BigDecimal.valueOf(25),
+                null, null,
+                pricing, null, null, null, null, roomDetail, null, null, null, null,
+                addressSource, java.util.List.of(mediaReq1, mediaReq2, mediaReq3), java.util.List.of(), java.util.List.of());
+
+        var response = service.upsert("owner-1", duplicateReq);
+
+        assertNotNull(response);
+        assertEquals("new-listing-999", response.id());
+
+        // Verify independent storage objects: source still has 3 media items, new listing has 3 media items
+        assertEquals(3, sourceListing.getMedia().size());
+        assertEquals("storage-img-1", sourceListing.getMedia().get(0).getStorageObject().getId());
+
+        // Verify copyObject was called for the 2 copied media items
+        verify(storageService).copyObject(eq("storage-img-1"), eq("owner-1"), eq("LISTING"), any(), eq(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE));
+        verify(storageService).copyObject(eq("storage-vid-1"), eq("owner-1"), eq("LISTING"), any(), eq(com.hs.storage.model.constant.StoragePurpose.LISTING_VIDEO));
+        verify(storageService, never()).copyObject(eq("storage-img-2"), any(), any(), any(), any());
+    }
+
+    @Test
+    void upsert_duplicateListing_forbiddenWhenSourceBelongsToAnotherOwner() {
+        var listingRepo = mock(ListingRepository.class);
+        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+
+        com.hs.listing.model.Listing foreignListing = new com.hs.listing.model.Listing();
+        foreignListing.setId("source-foreign");
+        foreignListing.setOwnerId("owner-other");
+        when(listingRepo.findByIdAndActiveTrue("source-foreign")).thenReturn(java.util.Optional.of(foreignListing));
+
+        var req = createDummyRequest("source-foreign", null);
+        AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", req));
+        assertEquals(403, ex.getStatusCode().value());
+        assertTrue(ex.getMessage().contains("Bạn không có quyền"));
+    }
+
+    @Test
+    void upsert_duplicateListing_forbiddenWhenSourceIsViolation() {
+        var listingRepo = mock(ListingRepository.class);
+        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+
+        com.hs.listing.model.Listing violationListing = new com.hs.listing.model.Listing();
+        violationListing.setId("source-violation");
+        violationListing.setOwnerId("owner-1");
+        violationListing.setStatus(com.hs.listing.model.constant.ListingStatus.VIOLATION);
+        when(listingRepo.findByIdAndActiveTrue("source-violation")).thenReturn(java.util.Optional.of(violationListing));
+
+        var req = createDummyRequest("source-violation", null);
+        AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", req));
+        assertEquals(com.hs.listing.advice.ListingErrorCode.LISTING_LOCKED_BY_VIOLATION.getCode(), ex.getCode());
+    }
+
+    @Test
+    void upsert_duplicateListing_rejectsWhenIdIsSpecified() {
+        ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+
+        var req = createDummyRequest("source-1", "cannot-have-id-in-duplicate");
+        AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", req));
+        assertEquals(400, ex.getStatusCode().value());
+    }
+
+    @Test
+    void upsert_duplicateListing_rejectsForeignSourceMedia() {
+        var listingRepo = mock(ListingRepository.class);
+        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+
+        com.hs.listing.model.Listing sourceListing = new com.hs.listing.model.Listing();
+        sourceListing.setId("source-1");
+        sourceListing.setOwnerId("owner-1");
+        sourceListing.setStatus(com.hs.listing.model.constant.ListingStatus.DRAFT);
+        when(listingRepo.findByIdAndActiveTrue("source-1")).thenReturn(java.util.Optional.of(sourceListing));
+
+        var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
+                java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
+                false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
+                java.math.BigDecimal.valueOf(4000000), null,
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
+
+        var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
+                com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
+                null, new com.hs.listing.dto.request.ListingAddressRequest("P1", "Province", "W1", "Ward", "123 Street", "123 Street, Ward, Province"));
+
+        var roomDetail = new com.hs.listing.dto.request.RoomDetailRequest(
+                "R202", 2, com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.KitchenType.PRIVATE, true,
+                com.hs.listing.model.constant.ListingEnums.BalconyType.PRIVATE, false,
+                com.hs.listing.model.constant.FurnishingStatus.UNFURNISHED,
+                com.hs.listing.model.constant.ListingEnums.AccessType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.AccessHoursType.FLEXIBLE,
+                com.hs.listing.model.constant.ListingEnums.MeterType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.MeterType.PRIVATE,
+                2, 2, com.hs.listing.model.constant.ListingEnums.ParkingPolicy.FREE);
+
+        // media references "media-non-existent"
+        var mediaReq = new com.hs.listing.dto.request.ListingMediaRequest(null, "media-non-existent", com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE, 0, true);
+
+        var req = new com.hs.listing.dto.request.CreateListingRequest(
+                null, "source-1", null, com.hs.listing.model.constant.ListingSubmissionAction.SAVE_DRAFT,
+                "Title", "Description of property listing",
+                com.hs.listing.model.constant.ListingCategory.ROOM,
+                java.time.LocalDate.now(), java.math.BigDecimal.valueOf(25),
+                null, null,
+                pricing, null, null, null, null, roomDetail, null, null, null, null,
+                addressSource, java.util.List.of(mediaReq), java.util.List.of(), java.util.List.of());
+
+        AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", req));
+        assertEquals(400, ex.getStatusCode().value());
+        assertTrue(ex.getMessage().contains("Source media does not belong to the source listing"));
+    }
+
+    @Test
+    void upsert_duplicateListing_s3CleanupOnError() {
+        var listingRepo = mock(ListingRepository.class);
+        var storageRepo = mock(StorageObjectRepository.class);
+        var storageService = mock(com.hs.storage.service.StorageService.class);
+        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+                storageRepo, storageService,
+                mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
+                mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+
+        com.hs.listing.model.Listing sourceListing = new com.hs.listing.model.Listing();
+        sourceListing.setId("source-cleanup");
+        sourceListing.setOwnerId("owner-1");
+        sourceListing.setStatus(com.hs.listing.model.constant.ListingStatus.DRAFT);
+
+        var srcStorage1 = com.hs.storage.model.StorageObject.builder().id("st-1").ownerId("owner-1")
+                .status(com.hs.storage.model.constant.StorageStatus.READY).purpose(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE)
+                .contentType("image/jpeg").objectKey("listing_image/owner-1/st1.jpg").build();
+        srcStorage1.setActive(true);
+
+        var srcStorage2 = com.hs.storage.model.StorageObject.builder().id("st-2").ownerId("owner-1")
+                .status(com.hs.storage.model.constant.StorageStatus.READY).purpose(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE)
+                .contentType("image/jpeg").objectKey("listing_image/owner-1/st2.jpg").build();
+        srcStorage2.setActive(true);
+
+        var m1 = new com.hs.listing.model.ListingMedia(); m1.setId("m-1"); m1.setStorageObject(srcStorage1); m1.setMediaType(com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE);
+        var m2 = new com.hs.listing.model.ListingMedia(); m2.setId("m-2"); m2.setStorageObject(srcStorage2); m2.setMediaType(com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE);
+        sourceListing.getMedia().addAll(java.util.List.of(m1, m2));
+        when(listingRepo.findByIdAndActiveTrue("source-cleanup")).thenReturn(java.util.Optional.of(sourceListing));
+
+        // First copy succeeds and returns S3 key "listing_image/owner-1/copied1.jpg"
+        when(storageService.copyObject(eq("st-1"), eq("owner-1"), eq("LISTING"), any(), eq(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE)))
+                .thenReturn(new com.hs.storage.dto.response.StorageObjectResponse("copied-1", "f1.jpg", "image/jpeg", 100L, null, "jpg", "owner-1", "LISTING", null, com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE, null, com.hs.storage.model.constant.StorageStatus.READY, null, null));
+        var copiedStorage1 = com.hs.storage.model.StorageObject.builder().id("copied-1").ownerId("owner-1")
+                .status(com.hs.storage.model.constant.StorageStatus.READY).purpose(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE)
+                .contentType("image/jpeg").objectKey("listing_image/owner-1/copied1.jpg").build();
+        copiedStorage1.setActive(true);
+        when(storageRepo.findById("copied-1")).thenReturn(java.util.Optional.of(copiedStorage1));
+
+        // Second copy fails
+        when(storageService.copyObject(eq("st-2"), eq("owner-1"), eq("LISTING"), any(), eq(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE)))
+                .thenThrow(new AppException(502, "S3 error", org.springframework.http.HttpStatus.BAD_GATEWAY));
+
+        var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
+                java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
+                false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
+                java.math.BigDecimal.valueOf(4000000), null,
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
+
+        var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
+                com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
+                null, new com.hs.listing.dto.request.ListingAddressRequest("P1", "Province", "W1", "Ward", "123 Street", "123 Street, Ward, Province"));
+
+        var roomDetail = new com.hs.listing.dto.request.RoomDetailRequest(
+                "R202", 2, com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.KitchenType.PRIVATE, true,
+                com.hs.listing.model.constant.ListingEnums.BalconyType.PRIVATE, false,
+                com.hs.listing.model.constant.FurnishingStatus.UNFURNISHED,
+                com.hs.listing.model.constant.ListingEnums.AccessType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.AccessHoursType.FLEXIBLE,
+                com.hs.listing.model.constant.ListingEnums.MeterType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.MeterType.PRIVATE,
+                2, 2, com.hs.listing.model.constant.ListingEnums.ParkingPolicy.FREE);
+
+        var req = new com.hs.listing.dto.request.CreateListingRequest(
+                null, "source-cleanup", null, com.hs.listing.model.constant.ListingSubmissionAction.SAVE_DRAFT,
+                "Title", "Description of property listing",
+                com.hs.listing.model.constant.ListingCategory.ROOM,
+                java.time.LocalDate.now(), java.math.BigDecimal.valueOf(25),
+                null, null,
+                pricing, null, null, null, null, roomDetail, null, null, null, null,
+                addressSource, java.util.List.of(
+                        new com.hs.listing.dto.request.ListingMediaRequest(null, "m-1", com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE, 0, true),
+                        new com.hs.listing.dto.request.ListingMediaRequest(null, "m-2", com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE, 1, false)),
+                java.util.List.of(), java.util.List.of());
+
+        assertThrows(AppException.class, () -> service.upsert("owner-1", req));
+
+        // Verify cleanup called for the first copied S3 key!
+        verify(storageService).deleteS3ObjectDirect("listing_image/owner-1/copied1.jpg");
+    }
+
+    private com.hs.listing.dto.request.CreateListingRequest createDummyRequest(String duplicateSourceListingId, String id) {
+        var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
+                java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
+                false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
+                java.math.BigDecimal.valueOf(4000000), null,
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
+
+        var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
+                com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
+                null, new com.hs.listing.dto.request.ListingAddressRequest("P1", "Province", "W1", "Ward", "123 Street", "123 Street, Ward, Province"));
+
+        var roomDetail = new com.hs.listing.dto.request.RoomDetailRequest(
+                "R202", 2, com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.KitchenType.PRIVATE, true,
+                com.hs.listing.model.constant.ListingEnums.BalconyType.PRIVATE, false,
+                com.hs.listing.model.constant.FurnishingStatus.UNFURNISHED,
+                com.hs.listing.model.constant.ListingEnums.AccessType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.AccessHoursType.FLEXIBLE,
+                com.hs.listing.model.constant.ListingEnums.MeterType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.MeterType.PRIVATE,
+                2, 2, com.hs.listing.model.constant.ListingEnums.ParkingPolicy.FREE);
+
+        return new com.hs.listing.dto.request.CreateListingRequest(
+                id, duplicateSourceListingId, null, com.hs.listing.model.constant.ListingSubmissionAction.SAVE_DRAFT,
+                "Title", "Description of property listing",
+                com.hs.listing.model.constant.ListingCategory.ROOM,
+                java.time.LocalDate.now(), java.math.BigDecimal.valueOf(25),
+                null, null,
+                pricing, null, null, null, null, roomDetail, null, null, null, null,
+                addressSource, java.util.List.of(
+                        new com.hs.listing.dto.request.ListingMediaRequest("st-dummy", null, com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE, 0, true)),
+                java.util.List.of(), java.util.List.of());
     }
 
     private boolean hasDeclaredField(Class<?> clazz, String fieldName) {

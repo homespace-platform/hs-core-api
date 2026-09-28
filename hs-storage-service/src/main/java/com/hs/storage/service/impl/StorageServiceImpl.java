@@ -39,6 +39,8 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -368,6 +370,85 @@ public class StorageServiceImpl implements StorageService {
         } catch (Exception e) {
             log.error("Failed to download storage object id={} from S3 directly: {}", storageId, e.getMessage(), e);
             throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
+        }
+    }
+
+    @Override
+    @Transactional
+    public StorageObjectResponse copyObject(
+            String sourceStorageId,
+            String newOwnerId,
+            String newReferenceType,
+            String newReferenceId,
+            StoragePurpose expectedPurpose) {
+        StorageObject source = findActive(sourceStorageId);
+        if (source.getStatus() != StorageStatus.READY) {
+            throw new AppException(StorageErrorCode.STORAGE_NOT_READY);
+        }
+        if (expectedPurpose != null && source.getPurpose() != expectedPurpose) {
+            throw new AppException(StorageErrorCode.STORAGE_INVALID_PURPOSE);
+        }
+
+        String targetOwnerId = (newOwnerId != null && !newOwnerId.isBlank()) ? newOwnerId : currentUserId();
+        String newStorageId = UUID.randomUUID().toString();
+        String extension = source.getExtension() != null ? source.getExtension() : "";
+        StoragePurpose targetPurpose = expectedPurpose != null ? expectedPurpose : source.getPurpose();
+        String newObjectKey = buildObjectKey(targetPurpose, targetOwnerId, newStorageId, extension);
+
+        try {
+            var copyReq = CopyObjectRequest.builder()
+                    .sourceBucket(source.getBucketName())
+                    .sourceKey(source.getObjectKey())
+                    .destinationBucket(properties.bucket())
+                    .destinationKey(newObjectKey)
+                    .contentType(source.getContentType())
+                    .build();
+            s3Client.copyObject(copyReq);
+        } catch (Exception e) {
+            log.error("Failed to copy S3 object from [{}/{}] to [{}/{}]: ",
+                    source.getBucketName(), source.getObjectKey(), properties.bucket(), newObjectKey, e);
+            throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
+        }
+
+        StorageObject copied = StorageObject.builder()
+                .id(newStorageId)
+                .originalName(source.getOriginalName())
+                .objectKey(newObjectKey)
+                .bucketName(properties.bucket())
+                .contentType(source.getContentType())
+                .sizeBytes(source.getSizeBytes())
+                .checksum(source.getChecksum())
+                .extension(extension)
+                .ownerId(targetOwnerId)
+                .referenceType(normalizeReferenceType(newReferenceType))
+                .referenceId(normalizeNullable(newReferenceId))
+                .purpose(targetPurpose)
+                .visibility(source.getVisibility() != null ? source.getVisibility() : StorageVisibility.PRIVATE)
+                .status(StorageStatus.READY)
+                .build();
+        copied.setActive(true);
+
+        try {
+            StorageObject saved = repository.save(copied);
+            return toResponse(saved);
+        } catch (Exception e) {
+            log.error("Failed to save copied storage object metadata for id={}, cleaning up S3 object key={}",
+                    newStorageId, newObjectKey, e);
+            deleteS3ObjectDirect(newObjectKey);
+            throw e;
+        }
+    }
+
+    @Override
+    public void deleteS3ObjectDirect(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) return;
+        try {
+            s3Client.deleteObject(DeleteObjectRequest.builder()
+                    .bucket(properties.bucket())
+                    .key(objectKey)
+                    .build());
+        } catch (Exception ex) {
+            log.warn("Failed to delete S3 object key [{}]: {}", objectKey, ex.getMessage());
         }
     }
 

@@ -11,6 +11,7 @@ import com.hs.listing.repository.*;
 import com.hs.storage.model.StorageObject;
 import com.hs.storage.model.constant.StorageStatus;
 import com.hs.storage.repository.StorageObjectRepository;
+import com.hs.storage.service.StorageService;
 import com.hs.user.model.Address;
 import com.hs.user.repository.AddressRepository;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -29,6 +31,7 @@ public class ListingService {
     private final ListingRepository listingRepository;
     private final AddressRepository addressRepository;
     private final StorageObjectRepository storageObjectRepository;
+    private final StorageService storageService;
     private final AmenityRepository amenityRepository;
     private final FurnishingItemRepository furnishingItemRepository;
     private final ListingStatusService listingStatusService;
@@ -39,6 +42,9 @@ public class ListingService {
         if (ownerId == null || ownerId.isBlank())
             throw error(401, "AUTHENTICATION_REQUIRED", "Authentication is required");
         boolean updating = r.id() != null && !r.id().isBlank();
+        if (updating && r.duplicateSourceListingId() != null && !r.duplicateSourceListingId().isBlank()) {
+            throw error(400, "DUPLICATE_INVALID_REQUEST", "Cannot specify duplicateSourceListingId when updating an existing listing");
+        }
         Listing l = upsertTarget(ownerId, r.id());
         validate(r, l.getId() != null ? l : null);
         if (l.getStatus() == ListingStatus.VIOLATION)
@@ -47,11 +53,24 @@ public class ListingService {
             clearOwnedData(l);
             listingRepository.flush();
         }
+
+        Listing sourceListing = null;
+        if (r.duplicateSourceListingId() != null && !r.duplicateSourceListingId().isBlank()) {
+            sourceListing = listingRepository.findByIdAndActiveTrue(r.duplicateSourceListingId())
+                    .orElseThrow(() -> error(404, "SOURCE_LISTING_NOT_FOUND", "Tin gốc không tồn tại hoặc đã bị xóa"));
+            if (!ownerId.equals(sourceListing.getOwnerId())) {
+                throw error(403, "SOURCE_LISTING_FORBIDDEN", "Bạn không có quyền nhân bản tin đăng của người khác");
+            }
+            if (sourceListing.getStatus() == ListingStatus.VIOLATION) {
+                throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
+            }
+        }
+
         applyCommonFields(l, ownerId, r);
         attachDetail(l, r);
         attachCatalogs(l, r);
         attachCharges(l, r);
-        attachMedia(l, r, ownerId);
+        attachMedia(l, r, ownerId, sourceListing);
         attachViewingSchedule(l, r);
         listingStatusService.applySubmission(
                 l, r.submissionAction(), ownerId, ListingStatusActorType.USER);
@@ -95,11 +114,19 @@ public class ListingService {
     }
 
     private void applyContent(Listing listing, String ownerId, CreateListingRequest request) {
+        Listing sourceListing = null;
+        if (request.duplicateSourceListingId() != null && !request.duplicateSourceListingId().isBlank()) {
+            sourceListing = listingRepository.findByIdAndActiveTrue(request.duplicateSourceListingId())
+                    .orElseThrow(() -> error(404, "SOURCE_LISTING_NOT_FOUND", "Tin gốc không tồn tại hoặc đã bị xóa"));
+            if (sourceListing.getStatus() == ListingStatus.VIOLATION) {
+                throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
+            }
+        }
         applyCommonFields(listing, ownerId, request);
         attachDetail(listing, request);
         attachCatalogs(listing, request);
         attachCharges(listing, request);
-        attachMedia(listing, request, ownerId);
+        attachMedia(listing, request, ownerId, sourceListing);
         attachViewingSchedule(listing, request);
     }
 
@@ -187,6 +214,11 @@ public class ListingService {
     }
 
     private void validate(CreateListingRequest r, Listing existing) {
+        if (r.duplicateSourceListingId() != null && !r.duplicateSourceListingId().isBlank()) {
+            if (r.id() != null && !r.id().isBlank()) {
+                throw error(400, "DUPLICATE_INVALID_REQUEST", "Cannot specify duplicateSourceListingId when updating an existing listing");
+            }
+        }
         if (r.availableFrom() == null) {
             invalid("availableFrom", "REQUIRED");
         }
@@ -240,6 +272,16 @@ public class ListingService {
                 if (c.chargeType() == ChargeType.OVERTIME_AIR_CONDITIONING)
                     invalid("charges.chargeType", "INVALID_FOR_CATEGORY");
             }
+        for (var m : r.media()) {
+            boolean hasStorage = m.storageObjectId() != null && !m.storageObjectId().isBlank();
+            boolean hasSource = m.sourceMediaId() != null && !m.sourceMediaId().isBlank();
+            if (!hasStorage && !hasSource) {
+                invalid("media", "STORAGE_OR_SOURCE_REQUIRED");
+            }
+            if (hasSource && (r.duplicateSourceListingId() == null || r.duplicateSourceListingId().isBlank())) {
+                invalid("media.sourceMediaId", "SOURCE_LISTING_REQUIRED");
+            }
+        }
         long images = r.media().stream().filter(m -> m.mediaType() == MediaType.IMAGE).count(),
                 covers = r.media().stream().filter(ListingMediaRequest::cover).count();
         if (images == 0)
@@ -426,32 +468,90 @@ public class ListingService {
         }
     }
 
-    private void attachMedia(Listing l, CreateListingRequest r, String ownerId) {
+    private void attachMedia(Listing l, CreateListingRequest r, String ownerId, Listing sourceListing) {
         Set<String> seen = new HashSet<>();
-        for (var q : r.media()) {
-            if (!seen.add(q.storageObjectId()))
-                invalid("media.storageObjectId", "DUPLICATE");
-            StorageObject s = storageObjectRepository.findById(q.storageObjectId())
-                    .orElseThrow(() -> error(404, "STORAGE_OBJECT_NOT_FOUND", "Storage object not found"));
-            if (!ownerId.equals(s.getOwnerId()))
-                throw error(403, "STORAGE_OBJECT_FORBIDDEN", "Storage object belongs to another user");
-            if (s.getStatus() != StorageStatus.READY || !Boolean.TRUE.equals(s.getActive()))
-                invalid("media.storageObjectId", "NOT_READY");
-            StoragePurpose expectedPurpose = q.mediaType() == MediaType.IMAGE ? StoragePurpose.LISTING_IMAGE
-                    : StoragePurpose.LISTING_VIDEO;
-            if (s.getPurpose() != expectedPurpose)
-                invalid("media.storageObjectId", "INVALID_STORAGE_PURPOSE");
-            if (q.mediaType() == MediaType.IMAGE && !s.getContentType().startsWith("image/")
-                    || q.mediaType() == MediaType.VIDEO && !s.getContentType().startsWith("video/"))
-                invalid("media.mediaType", "CONTENT_TYPE_MISMATCH");
-            var m = new ListingMedia();
-            m.setListing(l);
-            m.setStorageObject(s);
-            m.setMediaType(q.mediaType());
-            m.setSortOrder(q.sortOrder());
-            m.setCover(q.cover());
-            m.setMediaUrl(s.getObjectKey());
-            l.getMedia().add(m);
+        List<String> copiedS3Keys = new ArrayList<>();
+        Map<String, ListingMedia> sourceMediaMap = (sourceListing != null && sourceListing.getMedia() != null)
+                ? sourceListing.getMedia().stream().collect(Collectors.toMap(ListingMedia::getId, java.util.function.Function.identity()))
+                : Collections.emptyMap();
+
+        try {
+            for (var q : r.media()) {
+                boolean hasStorageId = q.storageObjectId() != null && !q.storageObjectId().isBlank();
+                boolean hasSourceMediaId = q.sourceMediaId() != null && !q.sourceMediaId().isBlank();
+
+                StorageObject storageObject;
+                if (hasSourceMediaId) {
+                    if (sourceListing == null) {
+                        invalid("media.sourceMediaId", "SOURCE_LISTING_REQUIRED");
+                    }
+                    if (!seen.add("src:" + q.sourceMediaId())) {
+                        invalid("media.sourceMediaId", "DUPLICATE");
+                    }
+                    ListingMedia srcMedia = sourceMediaMap.get(q.sourceMediaId());
+                    if (srcMedia == null) {
+                        throw error(400, "INVALID_SOURCE_MEDIA", "Source media does not belong to the source listing");
+                    }
+                    StorageObject srcObj = srcMedia.getStorageObject();
+                    if (srcObj == null || !Boolean.TRUE.equals(srcObj.getActive()) || srcObj.getStatus() != StorageStatus.READY) {
+                        invalid("media.sourceMediaId", "NOT_READY");
+                    }
+                    if (!ownerId.equals(srcObj.getOwnerId())) {
+                        throw error(403, "STORAGE_OBJECT_FORBIDDEN", "Storage object belongs to another user");
+                    }
+                    if (srcMedia.getMediaType() != q.mediaType()) {
+                        invalid("media.mediaType", "CONTENT_TYPE_MISMATCH");
+                    }
+                    StoragePurpose expectedPurpose = q.mediaType() == MediaType.IMAGE ? StoragePurpose.LISTING_IMAGE
+                            : StoragePurpose.LISTING_VIDEO;
+
+                    var copyResp = storageService.copyObject(
+                            srcObj.getId(),
+                            ownerId,
+                            "LISTING",
+                            l.getId(),
+                            expectedPurpose);
+
+                    storageObject = storageObjectRepository.findById(copyResp.id())
+                            .orElseThrow(() -> error(500, "STORAGE_COPY_FAILED", "Failed to load copied storage object"));
+                    copiedS3Keys.add(storageObject.getObjectKey());
+                } else {
+                    if (!seen.add(q.storageObjectId()))
+                        invalid("media.storageObjectId", "DUPLICATE");
+                    StorageObject s = storageObjectRepository.findById(q.storageObjectId())
+                            .orElseThrow(() -> error(404, "STORAGE_OBJECT_NOT_FOUND", "Storage object not found"));
+                    if (!ownerId.equals(s.getOwnerId()))
+                        throw error(403, "STORAGE_OBJECT_FORBIDDEN", "Storage object belongs to another user");
+                    if (s.getStatus() != StorageStatus.READY || !Boolean.TRUE.equals(s.getActive()))
+                        invalid("media.storageObjectId", "NOT_READY");
+                    StoragePurpose expectedPurpose = q.mediaType() == MediaType.IMAGE ? StoragePurpose.LISTING_IMAGE
+                            : StoragePurpose.LISTING_VIDEO;
+                    if (s.getPurpose() != expectedPurpose)
+                        invalid("media.storageObjectId", "INVALID_STORAGE_PURPOSE");
+                    if ((q.mediaType() == MediaType.IMAGE && !s.getContentType().startsWith("image/"))
+                            || (q.mediaType() == MediaType.VIDEO && !s.getContentType().startsWith("video/")))
+                        invalid("media.mediaType", "CONTENT_TYPE_MISMATCH");
+                    storageObject = s;
+                }
+
+                var m = new ListingMedia();
+                m.setListing(l);
+                m.setStorageObject(storageObject);
+                m.setMediaType(q.mediaType());
+                m.setSortOrder(q.sortOrder());
+                m.setCover(q.cover());
+                m.setMediaUrl(storageObject.getObjectKey());
+                l.getMedia().add(m);
+            }
+        } catch (Exception e) {
+            for (String key : copiedS3Keys) {
+                try {
+                    storageService.deleteS3ObjectDirect(key);
+                } catch (Exception ex) {
+                    // ignore cleanup error
+                }
+            }
+            throw e;
         }
     }
 
