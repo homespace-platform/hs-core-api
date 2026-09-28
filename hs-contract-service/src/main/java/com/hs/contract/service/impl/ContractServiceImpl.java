@@ -479,6 +479,9 @@ public class ContractServiceImpl implements ContractService {
         }
 
         Map<String, Object> dataModel = buildDataModel(contract, revision);
+        List<Map<String, Object>> charges = fromJson(revision.getChargesSnapshot(), CHARGE_LIST_TYPE);
+        boolean electricityMetered = hasMeteredCharge(charges, "ELECTRICITY", Set.of("PER_KWH"));
+        boolean waterMetered = hasMeteredCharge(charges, "WATER", Set.of("PER_M3", "STATE_WATER_RATE"));
 
         List<ContractCompletenessResponse.MissingField> missing = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
@@ -526,13 +529,33 @@ public class ContractServiceImpl implements ContractService {
                     && !key.startsWith("meters.")
                     && !key.startsWith("payment.initial.");
 
-            if (value != null && !String.valueOf(value).isBlank()) {
+            if ("meters.electricityInitial".equals(key)) {
+                isRequired = electricityMetered;
+            } else if ("meters.waterInitial".equals(key)) {
+                isRequired = waterMetered;
+            }
+
+            if (isRequired && key.startsWith("meters.") && !isValidMeterReading(value)) {
+                missing.add(toMissingField(key));
+            } else if (value != null && !String.valueOf(value).isBlank()) {
                 filled++;
             } else if (!isRequired) {
                 // Trường tùy chọn hoặc không bắt buộc cho loại hình này - không chặn hoàn tất hợp đồng
                 filled++;
             } else {
                 missing.add(toMissingField(key));
+            }
+        }
+
+        for (String meterKey : List.of("meters.electricityInitial", "meters.waterInitial")) {
+            boolean required = "meters.electricityInitial".equals(meterKey) ? electricityMetered : waterMetered;
+            if (required && !seen.contains(meterKey)) {
+                total++;
+                if (isValidMeterReading(ContractRenderService.resolvePath(dataModel, meterKey))) {
+                    filled++;
+                } else {
+                    missing.add(toMissingField(meterKey));
+                }
             }
         }
 
@@ -568,6 +591,18 @@ public class ContractServiceImpl implements ContractService {
                 .group(definition != null ? definition.getGroup() : "Khác")
                 .section(sectionOf(key))
                 .build();
+    }
+
+    private static boolean hasMeteredCharge(List<Map<String, Object>> charges, String chargeType, Set<String> methods) {
+        if (charges == null) return false;
+        return charges.stream().filter(Objects::nonNull).anyMatch(charge -> chargeType.equals(String.valueOf(charge.get("chargeType")))
+                && methods.contains(String.valueOf(charge.get("billingMethod"))));
+    }
+
+    private static boolean isValidMeterReading(Object value) {
+        if (value == null) return false;
+        String reading = String.valueOf(value).trim();
+        return reading.length() <= 20 && reading.matches("\\d+(\\.\\d+)?");
     }
 
     /** Ánh xạ mã trường về đúng nhóm snapshot mà frontend cần mở ra để sửa. */

@@ -564,7 +564,7 @@ class ContractServiceImplTest {
     }
 
     @Test
-    void assessCompleteness_doesNotBlockWhenMetersAreEmpty() {
+    void assessCompleteness_requiresInitialReadingsOnlyForMeteredCharges() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         ContractRevisionRepository revisionRepository = mock(ContractRevisionRepository.class);
         ContractTemplateVersionRepository templateVersionRepository = mock(ContractTemplateVersionRepository.class);
@@ -624,8 +624,42 @@ class ContractServiceImplTest {
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
 
         var completeness = service.getCompleteness("contract-complete-1");
-        org.junit.jupiter.api.Assertions.assertTrue(completeness.isComplete(), "Meters being empty must NOT block completeness");
+        org.junit.jupiter.api.Assertions.assertTrue(completeness.isComplete(), "No metered charges means readings are optional");
         org.junit.jupiter.api.Assertions.assertTrue(completeness.getMissingFields().isEmpty());
+
+        revision.setChargesSnapshot("[{\"chargeType\":\"ELECTRICITY\",\"billingMethod\":\"PER_KWH\"},"
+                + "{\"chargeType\":\"WATER\",\"billingMethod\":\"PER_M3\"}]");
+        completeness = service.getCompleteness("contract-complete-1");
+        org.junit.jupiter.api.Assertions.assertFalse(completeness.isComplete());
+        assertEquals(java.util.Set.of("meters.electricityInitial", "meters.waterInitial"),
+                completeness.getMissingFields().stream().map(field -> field.getKey()).collect(java.util.stream.Collectors.toSet()));
+
+        java.util.Map<String, Object> meters = new java.util.HashMap<>();
+        meters.put("electricityInitial", "0");
+        meters.put("waterInitial", "85.5");
+        dataModel.put("meters", meters);
+        org.junit.jupiter.api.Assertions.assertTrue(service.getCompleteness("contract-complete-1").isComplete());
+
+        meters.put("electricityInitial", "-1");
+        org.junit.jupiter.api.Assertions.assertFalse(service.getCompleteness("contract-complete-1").isComplete());
+        meters.put("electricityInitial", "1250");
+
+        revision.setChargesSnapshot("[{\"chargeType\":\"ELECTRICITY\",\"billingMethod\":\"PER_KWH\"},"
+                + "{\"chargeType\":\"WATER\",\"billingMethod\":\"PER_PERSON_MONTH\"}]");
+        meters.remove("waterInitial");
+        org.junit.jupiter.api.Assertions.assertTrue(service.getCompleteness("contract-complete-1").isComplete(),
+                "Water billed per person does not need an initial water reading");
+
+        tplVer.setPlaceholdersJson("[\"contract.number\"]");
+        meters.remove("electricityInitial");
+        completeness = service.getCompleteness("contract-complete-1");
+        org.junit.jupiter.api.Assertions.assertFalse(completeness.isComplete(),
+                "Metered readings are required even if the Word template omits their placeholders");
+        assertEquals("meters.electricityInitial", completeness.getMissingFields().get(0).getKey());
+
+        revision.setChargesSnapshot("[{\"chargeType\":\"WATER\",\"billingMethod\":\"STATE_WATER_RATE\"}]");
+        completeness = service.getCompleteness("contract-complete-1");
+        assertEquals("meters.waterInitial", completeness.getMissingFields().get(0).getKey());
     }
 
     @Test

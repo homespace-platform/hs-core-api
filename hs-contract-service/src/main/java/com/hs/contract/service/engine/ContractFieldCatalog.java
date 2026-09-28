@@ -71,8 +71,8 @@ public class ContractFieldCatalog {
         add("deposit.description", "Nội dung quy định cọc", "Giá thuê & Cọc", "TEXT", "Chi tiết điều khoản cọc và hoàn trả tiền cọc", "Tiền cọc được hoàn lại sau khi hết hạn hợp đồng và trừ các chi phí chưa thanh toán (nếu có).", OPTIONAL);
 
         // --- Chỉ số điện nước ban đầu ---
-        add("meters.electricityInitial", "Chỉ số điện ban đầu", "Chỉ số bàn giao", "NUMBER", "Chỉ số công tơ điện lúc giao nhận nhà", "1250 kWh", OPTIONAL);
-        add("meters.waterInitial", "Chỉ số nước ban đầu", "Chỉ số bàn giao", "NUMBER", "Chỉ số đồng hồ nước lúc giao nhận nhà", "85 m³", OPTIONAL);
+        add("meters.electricityInitial", "Chỉ số điện ban đầu", "Chỉ số bàn giao", "NUMBER", "Bắt buộc khi tiền điện tính theo kWh; không áp dụng khi điện không tính theo công tơ", "1250 kWh", OPTIONAL);
+        add("meters.waterInitial", "Chỉ số nước ban đầu", "Chỉ số bàn giao", "NUMBER", "Bắt buộc khi tiền nước tính theo m³ hoặc giá nhà nước; không áp dụng khi tính theo đầu người", "85 m³", OPTIONAL);
 
         // --- Hợp đồng & Pháp lý ---
         add("contract.number", "Số hợp đồng", "Pháp lý hợp đồng", "TEXT", "Mã hiệu hợp đồng tự sinh", "HD-20260905-001", ALL);
