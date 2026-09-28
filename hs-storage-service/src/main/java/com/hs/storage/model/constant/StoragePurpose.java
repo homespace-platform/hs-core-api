@@ -11,5 +11,6 @@ public enum StoragePurpose {
     PAYMENT_PROOF,
     /** PDF trung gian đã chèn signature placeholder — dùng nội bộ trong luồng SmartCA. */
     SIGNATURE_PREPARED_DOCUMENT,
+    BRANCH_COVER_IMAGE,
     GENERAL
 }

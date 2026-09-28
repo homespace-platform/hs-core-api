@@ -25,8 +25,13 @@ public class PropertyBranchResponse {
     private String description;
     private String buildingRules;
     private Integer totalUnits;
+    private Integer activeListingsCount;
     private Integer motorbikeParkingCapacity;
     private Integer carParkingCapacity;
+    private String coverImageId;
+    private String coverImageUrl;
+    private Boolean isComplete;
+    private List<String> missingCharges;
     private List<BranchChargeResponse> defaultCharges;
     private List<String> buildingAmenityCodes;
     private Instant createdAt;

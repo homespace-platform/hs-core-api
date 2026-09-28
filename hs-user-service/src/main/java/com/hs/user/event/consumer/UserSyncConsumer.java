@@ -4,6 +4,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.hs.user.config.database.BootstrapAdminProperties;
 import com.hs.user.constant.RoleConstants;
 import com.hs.common.context.UserContextHolder;
 import com.hs.common.context.UserContext;
@@ -31,6 +32,7 @@ public class UserSyncConsumer {
     AddressRepository addressRepository;
     RoleRepository roleRepository;
     ObjectMapper objectMapper;
+    BootstrapAdminProperties bootstrapAdminProperties;
 
     @KafkaListener(topics = "${spring.kafka.topic.keycloak-user-events}")
     @Transactional
@@ -70,23 +72,41 @@ public class UserSyncConsumer {
                 return;
             }
 
+            String username = payload.path("username").asText(userId);
+            String email = payload.path("email").asText(null);
+
             User newUser = new User();
             newUser.setId(userId);
-            newUser.setUsername(payload.path("username").asText(userId));
-            newUser.setEmail(payload.path("email").asText(null));
+            newUser.setUsername(username);
+            newUser.setEmail(email);
             newUser.setFirstName(payload.path("firstName").asText(null));
             newUser.setLastName(payload.path("lastName").asText(null));
             if (payload.has("avatarUrl")) newUser.setAvatarUrl(nullableText(payload, "avatarUrl"));
             if (payload.has("phoneNumber")) newUser.setPhone(nullableText(payload, "phoneNumber"));
             if (payload.hasNonNull("enabled")) newUser.setActive(payload.path("enabled").asBoolean());
-            newUser.setRole(resolveDefaultRole());
+            newUser.setRole(resolveInitialRole(username, email));
             userRepository.save(newUser);
 
-            log.info("Successfully persisted new user to DB.");
+            log.info("Successfully persisted new user {} with role {} to DB.",
+                    userId, newUser.getRole() != null ? newUser.getRole().getName() : "UNKNOWN");
         } catch (Exception e) {
             log.error("Error saving user: {}", e.getMessage());
             throw e;
         }
+    }
+
+    private Role resolveInitialRole(String username, String email) {
+        if (bootstrapAdminProperties != null) {
+            boolean isBootstrapAdmin = bootstrapAdminProperties.enabledAdmins().stream()
+                    .anyMatch(admin -> (username != null && username.equalsIgnoreCase(admin.username()))
+                            || (email != null && email.equalsIgnoreCase(admin.email())));
+            if (isBootstrapAdmin) {
+                return roleRepository
+                        .findByName(RoleConstants.ADMIN)
+                        .orElseGet(this::resolveDefaultRole);
+            }
+        }
+        return resolveDefaultRole();
     }
 
     private void handleUpdateUser(JsonNode payload, String userId) {

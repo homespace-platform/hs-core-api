@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.*;
 
 @Service
@@ -37,9 +38,9 @@ public class ListingService {
     public CreateListingResponse upsert(String ownerId, CreateListingRequest r) {
         if (ownerId == null || ownerId.isBlank())
             throw error(401, "AUTHENTICATION_REQUIRED", "Authentication is required");
-        validate(r);
         boolean updating = r.id() != null && !r.id().isBlank();
         Listing l = upsertTarget(ownerId, r.id());
+        validate(r, l.getId() != null ? l : null);
         if (l.getStatus() == ListingStatus.VIOLATION)
             throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
         if (updating) {
@@ -65,7 +66,7 @@ public class ListingService {
         requireActor(adminId);
         if (ownerId == null || ownerId.isBlank())
             throw error(400, "OWNER_REQUIRED", "ownerId is required");
-        validate(request);
+        validate(request, null);
         Listing listing = new Listing();
         applyContent(listing, ownerId, request);
         listingStatusService.applySubmission(
@@ -79,9 +80,9 @@ public class ListingService {
     @Transactional
     public CreateListingResponse updateByAdmin(String adminId, String listingId, CreateListingRequest request) {
         requireActor(adminId);
-        validate(request);
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> error(404, "LISTING_NOT_FOUND", "Listing not found"));
+        validate(request, listing);
         ListingStatus preservedStatus = listing.getStatus();
         clearOwnedData(listing);
         listingRepository.flush();
@@ -185,7 +186,17 @@ public class ListingService {
         }
     }
 
-    private void validate(CreateListingRequest r) {
+    private void validate(CreateListingRequest r, Listing existing) {
+        if (r.availableFrom() == null) {
+            invalid("availableFrom", "REQUIRED");
+        }
+        if (r.availableFrom() != null && r.availableFrom().isBefore(LocalDate.now())) {
+            boolean isUnchangedExisting = existing != null && existing.getAvailableFrom() != null
+                    && existing.getAvailableFrom().equals(r.availableFrom());
+            if (!isUnchangedExisting) {
+                invalid("availableFrom", "CANNOT_BE_IN_PAST");
+            }
+        }
         if (r.category() != ListingCategory.HOUSE && r.category() != ListingCategory.APARTMENT && r.category() != ListingCategory.ROOM) {
             throw error(400, "UNSUPPORTED_CATEGORY", "Only HOUSE, APARTMENT, and ROOM are supported");
         }
@@ -390,6 +401,19 @@ public class ListingService {
     }
 
     private void attachCharges(Listing l, CreateListingRequest r) {
+        if (l.getBranchId() != null && !l.getBranchId().isBlank()) {
+            PropertyBranch branch = branchRepository.findByIdAndActiveTrue(l.getBranchId())
+                    .orElseThrow(() -> error(400, "INVALID_BRANCH", "Chi nhánh không tồn tại hoặc đã bị ngừng hoạt động"));
+            List<String> missing = BranchChargeMappingHelper.findMissingCharges(branch.getCategory(), branch.getDefaultCharges());
+            if (!missing.isEmpty()) {
+                throw new AppException(com.hs.listing.advice.ListingErrorCode.BRANCH_CHARGES_INCOMPLETE,
+                        "Biểu phí chi nhánh '" + branch.getName() + "' chưa hoàn chỉnh (còn thiếu: " + String.join(", ", missing) + "). Vui lòng cập nhật đầy đủ biểu phí chi nhánh trước khi đăng tin.");
+            }
+            List<ListingCharge> branchListingCharges = BranchChargeMappingHelper.mapBranchChargesToListing(branch.getDefaultCharges(), l);
+            l.getCharges().addAll(branchListingCharges);
+            return;
+        }
+
         if (r.charges() == null)
             return;
         for (var q : r.charges()) {
@@ -493,6 +517,7 @@ public class ListingService {
         return switch (code) {
             case "REQUIRED" -> field + " is required";
             case "INVALID_FOR_CATEGORY" -> field + " is not allowed for this listing category";
+            case "CANNOT_BE_IN_PAST" -> "Ngày có thể vào thuê / bàn giao không được ở trong quá khứ";
             default -> field + " is invalid";
         };
     }

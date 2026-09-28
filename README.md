@@ -1,3 +1,4 @@
 ```
-mvn compile -pl hs-storage-service,hs-listing-service,hs-api-service
+mvn clean install -DskipTests
+mvn spring-boot:run -pl hs-api-service
 ```

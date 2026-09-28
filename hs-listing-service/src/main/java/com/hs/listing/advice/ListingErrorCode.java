@@ -52,7 +52,9 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     RENTAL_PAYMENT_NOT_ALLOWED(4063, "Rental payment is not allowed in current state", HttpStatus.CONFLICT),
     RENTAL_PAYMENT_ALREADY_COMPLETED(4064, "Rental payment has already been completed", HttpStatus.CONFLICT),
     RENTAL_PAYMENT_INVALID_AMOUNT(4065, "Rental payment amount is invalid", HttpStatus.UNPROCESSABLE_ENTITY),
-    RENTAL_REQUEST_ALREADY_PAID(4066, "Rental request has already been paid and cannot be cancelled or rejected normally", HttpStatus.CONFLICT);
+    RENTAL_REQUEST_ALREADY_PAID(4066, "Rental request has already been paid and cannot be cancelled or rejected normally", HttpStatus.CONFLICT),
+    BRANCH_CHARGES_INCOMPLETE(4070, "Biểu phí chi nhánh chưa hoàn chỉnh. Vui lòng cập nhật đầy đủ biểu phí chi nhánh trước khi đăng tin.", HttpStatus.BAD_REQUEST),
+    BRANCH_COVER_IMAGE_INVALID(4071, "Ảnh bìa chi nhánh không hợp lệ hoặc chưa sẵn sàng", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

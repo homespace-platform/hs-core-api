@@ -8,10 +8,18 @@ import com.hs.listing.dto.response.BranchChargeResponse;
 import com.hs.listing.dto.response.PropertyBranchResponse;
 import com.hs.listing.model.Amenity;
 import com.hs.listing.model.BranchCharge;
+import com.hs.listing.model.Listing;
+import com.hs.listing.model.ListingCharge;
 import com.hs.listing.model.PropertyBranch;
 import com.hs.listing.repository.AmenityRepository;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.PropertyBranchRepository;
+import com.hs.storage.config.StorageProperties;
+import com.hs.storage.model.StorageObject;
+import com.hs.storage.model.constant.StoragePurpose;
+import com.hs.storage.model.constant.StorageStatus;
+import com.hs.storage.model.constant.StorageVisibility;
+import com.hs.storage.repository.StorageObjectRepository;
 import com.hs.user.model.Address;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -29,6 +37,8 @@ public class PropertyBranchService {
     private final AmenityRepository amenityRepository;
     private final ListingRepository listingRepository;
     private final ParkingReservationService parkingReservationService;
+    private final StorageObjectRepository storageObjectRepository;
+    private final StorageProperties storageProperties;
 
     private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final java.security.SecureRandom SECURE_RANDOM = new java.security.SecureRandom();
@@ -53,6 +63,10 @@ public class PropertyBranchService {
             throw new AppException(401, "Xác thực không hợp lệ", HttpStatus.UNAUTHORIZED);
         }
 
+        int motorbikeCap = request.getMotorbikeParkingCapacity() != null ? Math.max(0, request.getMotorbikeParkingCapacity()) : 0;
+        int carCap = request.getCarParkingCapacity() != null ? Math.max(0, request.getCarParkingCapacity()) : 0;
+        BranchChargeMappingHelper.validateBranchCharges(request.getDefaultCharges(), motorbikeCap, carCap);
+
         Address address = new Address();
         address.setStreetLine(request.getStreetLine() != null ? request.getStreetLine() : "");
         address.setWardCode(request.getWardCode() != null ? request.getWardCode() : "");
@@ -74,11 +88,12 @@ public class PropertyBranchService {
                 .address(address)
                 .description(request.getDescription())
                 .buildingRules(request.getBuildingRules())
-                .motorbikeParkingCapacity(request.getMotorbikeParkingCapacity() != null ? Math.max(0, request.getMotorbikeParkingCapacity()) : 0)
-                .carParkingCapacity(request.getCarParkingCapacity() != null ? Math.max(0, request.getCarParkingCapacity()) : 0)
+                .motorbikeParkingCapacity(motorbikeCap)
+                .carParkingCapacity(carCap)
                 .totalUnits(0)
                 .build();
 
+        validateAndLinkCoverImage(branch, request.getCoverImageId(), ownerId);
         attachCharges(branch, request.getDefaultCharges());
         attachAmenities(branch, request.getBuildingAmenityCodes());
 
@@ -132,6 +147,8 @@ public class PropertyBranchService {
             }
         }
 
+        BranchChargeMappingHelper.validateBranchCharges(request.getDefaultCharges(), newMotorbikeCap, newCarCap);
+
         branch.setName(request.getName().trim());
         if (request.getCode() != null && !request.getCode().trim().isBlank()) {
             branch.setCode(request.getCode().trim().toUpperCase());
@@ -156,6 +173,8 @@ public class PropertyBranchService {
         address.setProvinceName(request.getProvinceName() != null ? request.getProvinceName() : "");
         address.setFullAddress(request.getFullAddress().trim());
 
+        validateAndLinkCoverImage(branch, request.getCoverImageId(), ownerId);
+
         branch.getDefaultCharges().clear();
         attachCharges(branch, request.getDefaultCharges());
 
@@ -163,6 +182,18 @@ public class PropertyBranchService {
         attachAmenities(branch, request.getBuildingAmenityCodes());
 
         PropertyBranch updated = branchRepository.save(branch);
+
+        // Đồng bộ toàn bộ biểu phí mới sang các tin đăng đang hoạt động thuộc chi nhánh
+        List<Listing> branchListings = listingRepository.findAllByBranchIdAndActiveTrue(updated.getId());
+        for (Listing l : branchListings) {
+            l.getCharges().clear();
+            List<ListingCharge> newCharges = BranchChargeMappingHelper.mapBranchChargesToListing(updated.getDefaultCharges(), l);
+            l.getCharges().addAll(newCharges);
+        }
+        if (!branchListings.isEmpty()) {
+            listingRepository.saveAll(branchListings);
+        }
+
         return mapToResponse(updated);
     }
 
@@ -180,36 +211,31 @@ public class PropertyBranchService {
         branchRepository.save(branch);
     }
 
+    private void validateAndLinkCoverImage(PropertyBranch branch, String coverImageId, String ownerId) {
+        if (coverImageId == null || coverImageId.isBlank()) {
+            branch.setCoverImageId(null);
+            return;
+        }
+        StorageObject s = storageObjectRepository.findById(coverImageId)
+                .orElseThrow(() -> new AppException(404, "Không tìm thấy ảnh bìa trong hệ thống lưu trữ", HttpStatus.NOT_FOUND));
+        if (!ownerId.equals(s.getOwnerId())) {
+            throw new AppException(403, "Ảnh bìa không thuộc quyền sở hữu của bạn", HttpStatus.FORBIDDEN);
+        }
+        if (s.getStatus() != StorageStatus.READY || !Boolean.TRUE.equals(s.getActive())) {
+            throw new AppException(ListingErrorCode.BRANCH_COVER_IMAGE_INVALID, "Ảnh bìa chưa được tải lên thành công hoặc chưa sẵn sàng");
+        }
+        if (s.getContentType() == null || !s.getContentType().startsWith("image/")) {
+            throw new AppException(ListingErrorCode.BRANCH_COVER_IMAGE_INVALID, "Tệp tải lên làm ảnh bìa phải là hình ảnh (JPEG, PNG, WebP)");
+        }
+        branch.setCoverImageId(coverImageId);
+        s.setReferenceType("PROPERTY_BRANCH");
+        s.setReferenceId(branch.getId());
+    }
+
     private void attachCharges(PropertyBranch branch, List<CreateBranchChargeRequest> charges) {
         if (charges == null || charges.isEmpty()) return;
         int order = 1;
-        int motorbikeCap = branch.getMotorbikeParkingCapacity() != null ? branch.getMotorbikeParkingCapacity() : 0;
-        int carCap = branch.getCarParkingCapacity() != null ? branch.getCarParkingCapacity() : 0;
-
         for (CreateBranchChargeRequest c : charges) {
-            if (c.getChargeType() == com.hs.listing.model.constant.ListingEnums.ChargeType.MOTORBIKE_PARKING && motorbikeCap == 0) {
-                if (c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.FREE
-                        || c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.INCLUDED
-                        || c.isIncludedInRent()
-                        || c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.PER_VEHICLE_MONTH) {
-                    throw new AppException(
-                            ListingErrorCode.MOTORBIKE_PARKING_NOT_ALLOWED,
-                            "Không thể cấu hình phí gửi xe máy khi tổng số chỗ xe máy của chi nhánh bằng 0."
-                    );
-                }
-            }
-            if (c.getChargeType() == com.hs.listing.model.constant.ListingEnums.ChargeType.CAR_PARKING && carCap == 0) {
-                if (c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.FREE
-                        || c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.INCLUDED
-                        || c.isIncludedInRent()
-                        || c.getBillingMethod() == com.hs.listing.model.constant.ListingEnums.BillingMethod.PER_VEHICLE_MONTH) {
-                    throw new AppException(
-                            ListingErrorCode.CAR_PARKING_NOT_ALLOWED,
-                            "Không thể cấu hình phí gửi ô tô khi tổng số chỗ ô tô của chi nhánh bằng 0."
-                    );
-                }
-            }
-
             BranchCharge bc = BranchCharge.builder()
                     .id(UUID.randomUUID().toString())
                     .branch(branch)
@@ -259,6 +285,18 @@ public class PropertyBranchService {
         long count = listingRepository.countByBranchIdAndActiveTrue(b.getId());
         int totalUnits = count > 0 ? (int) count : (b.getTotalUnits() != null ? b.getTotalUnits() : 0);
 
+        String coverImageUrl = null;
+        if (b.getCoverImageId() != null) {
+            StorageObject s = storageObjectRepository.findById(b.getCoverImageId()).orElse(null);
+            if (s != null && s.getVisibility() == StorageVisibility.PUBLIC) {
+                coverImageUrl = "https://%s.s3.%s.amazonaws.com/%s"
+                        .formatted(s.getBucketName(), storageProperties.region(), s.getObjectKey());
+            }
+        }
+
+        List<String> missingCharges = BranchChargeMappingHelper.findMissingCharges(b.getCategory(), b.getDefaultCharges());
+        boolean isComplete = missingCharges.isEmpty();
+
         return PropertyBranchResponse.builder()
                 .id(b.getId())
                 .ownerId(b.getOwnerId())
@@ -274,8 +312,13 @@ public class PropertyBranchService {
                 .description(b.getDescription())
                 .buildingRules(b.getBuildingRules())
                 .totalUnits(totalUnits)
+                .activeListingsCount((int) count)
                 .motorbikeParkingCapacity(b.getMotorbikeParkingCapacity() != null ? b.getMotorbikeParkingCapacity() : 0)
                 .carParkingCapacity(b.getCarParkingCapacity() != null ? b.getCarParkingCapacity() : 0)
+                .coverImageId(b.getCoverImageId())
+                .coverImageUrl(coverImageUrl)
+                .isComplete(isComplete)
+                .missingCharges(missingCharges)
                 .defaultCharges(chargeResponses)
                 .buildingAmenityCodes(amenityCodes)
                 .createdAt(b.getCreatedAt())
@@ -283,3 +326,4 @@ public class PropertyBranchService {
                 .build();
     }
 }
+

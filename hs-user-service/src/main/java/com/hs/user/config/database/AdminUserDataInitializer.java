@@ -77,9 +77,17 @@ public class AdminUserDataInitializer implements CommandLineRunner {
             return;
         }
 
-        persistAdmin(userId, account, adminRole, cccd);
-        log.warn("Bootstrap admin '{}' is ready with the configured password. Change it after the first login.",
-                account.username());
+        try {
+            persistAdmin(userId, account, adminRole, cccd);
+            log.warn("Bootstrap admin '{}' is ready with the configured password. Change it after the first login.",
+                    account.username());
+        } catch (Exception exception) {
+            log.warn("Direct persist for bootstrap admin '{}' encountered conflict (likely concurrent user sync): {}. Falling back to sync.",
+                    account.username(), exception.getMessage());
+            syncPhone(userId, account);
+            ensureAdminRole(userId, adminRole, account.email());
+            syncCccd(userId, account.email(), cccd);
+        }
     }
 
     private static String resolveCccd(BootstrapAdminAccount account, int index) {
@@ -175,7 +183,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
             admin.setRole(adminRole);
             UserContextHolder.set(new UserContext(userId, email));
             try {
-                userRepository.save(admin);
+                userRepository.saveAndFlush(admin);
             } finally {
                 UserContextHolder.clear();
             }
@@ -229,7 +237,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
                 admin.setCccd(cccd);
                 UserContextHolder.set(new UserContext(userId, email));
                 try {
-                    userRepository.save(admin);
+                    userRepository.saveAndFlush(admin);
                     log.info("Synced bootstrap admin CCCD for user {}", userId);
                 } finally {
                     UserContextHolder.clear();

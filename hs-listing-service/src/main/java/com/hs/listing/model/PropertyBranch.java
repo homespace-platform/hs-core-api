@@ -66,6 +66,9 @@ public class PropertyBranch extends BaseEntity {
         return carParkingCapacity != null ? carParkingCapacity : 0;
     }
 
+    @Column(name = "cover_image_id", length = 36)
+    private String coverImageId;
+
     @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @JoinColumn(name = "address_id")
     private Address address;

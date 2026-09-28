@@ -474,6 +474,10 @@ public class StorageServiceImpl implements StorageService {
                 typeAllowed = IMAGE_TYPES.contains(contentType) || contentType.equals("application/pdf");
                 maxSize = 15 * MIB;
             }
+            case BRANCH_COVER_IMAGE -> {
+                typeAllowed = IMAGE_TYPES.contains(contentType);
+                maxSize = 15 * MIB;
+            }
             case GENERAL -> {
                 typeAllowed = IMAGE_TYPES.contains(contentType) || DOCUMENT_TYPES.contains(contentType);
                 maxSize = 25 * MIB;
@@ -529,6 +533,13 @@ public class StorageServiceImpl implements StorageService {
                 throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
             }
         }
+
+        if (purpose == StoragePurpose.BRANCH_COVER_IMAGE) {
+            if (!isJpeg && !isPng && !isWebp) {
+                log.warn("Invalid magic bytes for BRANCH_COVER_IMAGE with declared contentType {}", contentType);
+                throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
+            }
+        }
     }
 
     private String buildObjectKey(StoragePurpose purpose, String ownerId, String id, String extension) {
@@ -541,6 +552,10 @@ public class StorageServiceImpl implements StorageService {
         if (requestedPurpose == StoragePurpose.GENERAL && "LISTING".equals(referenceType)) {
             if (IMAGE_TYPES.contains(contentType)) return StoragePurpose.LISTING_IMAGE;
             if (VIDEO_TYPES.contains(contentType)) return StoragePurpose.LISTING_VIDEO;
+            throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
+        }
+        if (requestedPurpose == StoragePurpose.GENERAL && ("BRANCH".equals(referenceType) || "PROPERTY_BRANCH".equals(referenceType))) {
+            if (IMAGE_TYPES.contains(contentType)) return StoragePurpose.BRANCH_COVER_IMAGE;
             throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
         }
         return requestedPurpose;

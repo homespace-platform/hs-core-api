@@ -35,6 +35,7 @@ public class CreatePropertyBranchRequest {
     private Integer motorbikeParkingCapacity = 0;
     @Builder.Default
     private Integer carParkingCapacity = 0;
+    private String coverImageId;
     private List<CreateBranchChargeRequest> defaultCharges;
     private List<String> buildingAmenityCodes;
 }
