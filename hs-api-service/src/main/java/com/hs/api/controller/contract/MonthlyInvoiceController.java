@@ -33,6 +33,14 @@ public class MonthlyInvoiceController {
                 .result(billing.issue(invoiceId, requireUserId(), request)).build();
     }
 
+    @PostMapping("/{invoiceId}/prepare")
+    public ApiResponse<MonthlyInvoiceResponse> prepare(@PathVariable String invoiceId,
+                                                        @RequestBody @Valid IssueMonthlyInvoiceRequest request) {
+        return ApiResponse.<MonthlyInvoiceResponse>builder()
+                .message("Đã lưu chỉ số và khoản phát sinh để phát hành tự động")
+                .result(billing.prepare(invoiceId, requireUserId(), request)).build();
+    }
+
     private String requireUserId() {
         UserContext context = UserContextHolder.get();
         if (context == null || context.userId() == null || context.userId().isBlank())

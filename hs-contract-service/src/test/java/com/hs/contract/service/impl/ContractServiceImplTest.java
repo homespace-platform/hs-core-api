@@ -39,6 +39,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Optional;
 import java.math.BigDecimal;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -49,6 +50,26 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ContractServiceImplTest {
+
+    @Test
+    void lateFeeCannotBeSavedWhenWordTemplateCannotShowSignedClause() {
+        ContractRepository contracts = mock(ContractRepository.class);
+        ContractTemplateVersionRepository templates = mock(ContractTemplateVersionRepository.class);
+        ContractServiceImpl service = createService(contracts, mock(ContractRevisionRepository.class),
+                mock(ContractDocumentRepository.class), templates);
+        Contract contract = Contract.builder().id("contract-1").landlordId("landlord-1")
+                .tenantId("tenant-1").templateVersionId("template-version-1")
+                .status(ContractStatus.DRAFT).build();
+        when(contracts.findById("contract-1")).thenReturn(Optional.of(contract));
+        when(templates.findById("template-version-1")).thenReturn(Optional.of(
+                ContractTemplateVersion.builder().id("template-version-1").placeholdersJson("[]").build()));
+        UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
+        var request = new com.hs.contract.dto.request.UpdateContractRevisionRequest();
+        request.setPolicies(Map.of("latePaymentFeeMode", "FIXED_ONCE",
+                "latePaymentFeeAmount", 50000, "latePaymentFeeGraceDays", 0));
+
+        assertThrows(AppException.class, () -> service.updateRevision("contract-1", request));
+    }
 
     @AfterEach
     void clearUserContext() {

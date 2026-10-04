@@ -40,8 +40,14 @@ public class MonthlyInvoice extends BaseEntity {
     private BigDecimal waterEnd;
     @Column(name = "line_items_snapshot", columnDefinition = "TEXT")
     private String lineItemsSnapshot;
+    @Column(name = "draft_extra_charges_snapshot", columnDefinition = "TEXT")
+    private String draftExtraChargesSnapshot;
     @Column(name = "total_amount", nullable = false, precision = 18, scale = 2)
     private BigDecimal totalAmount;
+    @Column(name = "base_amount", precision = 18, scale = 2)
+    private BigDecimal baseAmount;
+    @Column(name = "late_fee_amount", precision = 18, scale = 2)
+    private BigDecimal lateFeeAmount;
     @Column(name = "payment_request_id", length = 36)
     private String paymentRequestId;
     @Column(name = "issued_at")
@@ -50,6 +56,14 @@ public class MonthlyInvoice extends BaseEntity {
     private Instant dueAt;
     @Column(name = "paid_at")
     private Instant paidAt;
+    @Column(name = "meter_reminder_logged_at")
+    private Instant meterReminderLoggedAt;
+    @Column(name = "meter_deadline_logged_at")
+    private Instant meterDeadlineLoggedAt;
+    @Column(name = "payment_reminder_logged_at")
+    private Instant paymentReminderLoggedAt;
+    @Column(name = "overdue_action_logged_at")
+    private Instant overdueActionLoggedAt;
 
     @PrePersist
     void initialize() {

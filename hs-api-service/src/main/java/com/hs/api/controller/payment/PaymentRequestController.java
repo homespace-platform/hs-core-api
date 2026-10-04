@@ -7,6 +7,8 @@ import com.hs.common.context.UserContextHolder;
 import com.hs.common.dto.ApiResponse;
 import com.hs.payment.dto.*;
 import com.hs.payment.service.PaymentRequestService;
+import com.hs.contract.service.MonthlyBillingService;
+import com.hs.payment.model.constant.PaymentType;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -19,6 +21,7 @@ import java.util.List;
 public class PaymentRequestController {
 
     private final PaymentRequestService paymentRequestService;
+    private final MonthlyBillingService monthlyBillingService;
 
     private String requireUserId() {
         UserContext ctx = UserContextHolder.get();
@@ -31,6 +34,9 @@ public class PaymentRequestController {
     @GetMapping("/{id}")
     public ApiResponse<PaymentRequestResponse> getPaymentRequest(@PathVariable String id) {
         String actorId = requireUserId();
+        PaymentRequestResponse payment = paymentRequestService.getPaymentRequest(id, actorId);
+        if (payment.type() == PaymentType.MONTHLY_RENT && payment.contractId() != null)
+            monthlyBillingService.syncContract(payment.contractId());
         return ApiResponse.<PaymentRequestResponse>builder()
                 .result(paymentRequestService.getPaymentRequest(id, actorId))
                 .build();
@@ -56,6 +62,9 @@ public class PaymentRequestController {
             @PathVariable String id,
             @RequestBody @Valid ReportTransferRequest request) {
         String actorId = requireUserId();
+        PaymentRequestResponse payment = paymentRequestService.getPaymentRequest(id, actorId);
+        if (payment.type() == PaymentType.MONTHLY_RENT && payment.contractId() != null)
+            monthlyBillingService.syncContract(payment.contractId());
         return ApiResponse.<PaymentRequestResponse>builder()
                 .message("Đã ghi nhận khai báo chuyển khoản. Đang chờ chủ nhà xác nhận.")
                 .result(paymentRequestService.reportTransfer(id, actorId, request))

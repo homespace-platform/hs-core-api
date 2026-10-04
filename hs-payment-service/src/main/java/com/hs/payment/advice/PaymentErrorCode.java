@@ -28,7 +28,8 @@ public enum PaymentErrorCode implements AppException.ErrorCode {
     PROOF_SESSION_EXPIRED(7019, "Phiên tải chứng từ đã hết hạn. Vui lòng tạo phiên mới.", HttpStatus.BAD_REQUEST),
     PROOF_SESSION_INVALID(7020, "Phiên tải chứng từ không hợp lệ hoặc đã được sử dụng", HttpStatus.BAD_REQUEST),
     PROOF_PUBLIC_BASE_URL_REQUIRED(7021, "Chưa cấu hình URL công khai để tải chứng từ từ điện thoại. Vui lòng cấu hình PAYMENT_PROOF_UPLOAD_PUBLIC_BASE_URL.", HttpStatus.BAD_REQUEST),
-    PROOF_PUBLIC_BASE_URL_INVALID(7022, "PAYMENT_PROOF_UPLOAD_PUBLIC_BASE_URL không hợp lệ.", HttpStatus.BAD_REQUEST);
+    PROOF_PUBLIC_BASE_URL_INVALID(7022, "PAYMENT_PROOF_UPLOAD_PUBLIC_BASE_URL không hợp lệ.", HttpStatus.BAD_REQUEST),
+    MONTHLY_AMOUNT_CHANGED(7023, "Số tiền hóa đơn tháng đã thay đổi (có thể do phí chậm thanh toán). Vui lòng làm mới hóa đơn và chuyển đúng số tiền mới.", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

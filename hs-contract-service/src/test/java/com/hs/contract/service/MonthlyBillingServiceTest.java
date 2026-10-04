@@ -24,6 +24,9 @@ import com.hs.payment.service.PaymentRequestService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -137,6 +140,42 @@ class MonthlyBillingServiceTest {
     }
 
     @Test
+    void landlordCanPrepareMeterReadingsBeforeAutomaticIssue() {
+        MonthlyInvoiceResponse prepared = service.prepare("invoice", "landlord",
+                new IssueMonthlyInvoiceRequest(new BigDecimal("150"), new BigDecimal("12"),
+                        List.of(new IssueMonthlyInvoiceRequest.ExtraCharge("Sửa khóa", new BigDecimal("20000")))));
+        assertEquals(new BigDecimal("150"), prepared.electricityEnd());
+        assertEquals(new BigDecimal("12"), prepared.waterEnd());
+        assertEquals(1, prepared.draftExtraCharges().size());
+        assertEquals(MonthlyInvoiceStatus.DRAFT, prepared.status());
+        verify(payments, never()).createMonthlyPayment(anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), any(), anyString(), any());
+    }
+
+    @Test
+    void scheduledSyncAutomaticallyIssuesPreparedInvoiceAtTenAm() {
+        Contract contract = contracts.findById("contract").orElseThrow();
+        when(contracts.findByStatus(eq(ContractStatus.ACTIVE), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(contract)));
+        when(contracts.findByIdForUpdate("contract")).thenReturn(Optional.of(contract));
+        when(rentals.findById("rental")).thenReturn(Optional.of(RentalRequest.builder()
+                .moveInDate(LocalDate.of(2026, 10, 1)).leaseMonths(1).build()));
+        when(invoices.findByContractIdAndPeriodIndex("contract", 0)).thenReturn(Optional.of(invoice));
+        when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(invoice));
+        when(tx.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        invoice.setElectricityEnd(new BigDecimal("150"));
+        invoice.setWaterEnd(new BigDecimal("12"));
+        invoice.setDraftExtraChargesSnapshot("[]");
+
+        service.scheduledSync();
+
+        assertEquals(MonthlyInvoiceStatus.UNPAID, invoice.getStatus());
+        assertEquals(new BigDecimal("207000"), invoice.getTotalAmount());
+        verify(payments, times(1)).createMonthlyPayment(anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), any(), anyString(), any());
+    }
+
+    @Test
     void tenantCannotIssueAndIssuedInvoiceCannotBeIssuedAgain() {
         assertThrows(AppException.class, () -> service.issue("invoice", "tenant",
                 new IssueMonthlyInvoiceRequest(new BigDecimal("150"), new BigDecimal("12"), List.of())));
@@ -216,5 +255,35 @@ class MonthlyBillingServiceTest {
                 .status(PaymentStatus.CONFIRMED).confirmedAt(Instant.parse("2026-11-02T00:00:00Z")).build()));
         service.syncContract("contract");
         assertEquals(MonthlyInvoiceStatus.PAID, invoice.getStatus());
+    }
+
+    @Test
+    void overdueFeeIncreasesSameInvoiceAndPaymentOnlyOncePerDay() {
+        Contract contract = contracts.findById("contract").orElseThrow();
+        when(contracts.findByIdForUpdate("contract")).thenReturn(Optional.of(contract));
+        when(rentals.findById("rental")).thenReturn(Optional.of(RentalRequest.builder()
+                .moveInDate(LocalDate.of(2026, 12, 1)).leaseMonths(1).build()));
+        ContractRevision revision = revisions.findById("revision").orElseThrow();
+        revision.setPoliciesSnapshot("{\"latePaymentFeeMode\":\"FIXED_PER_DAY\",\"latePaymentFeeAmount\":10000,\"latePaymentFeeGraceDays\":0}");
+        invoice.setStatus(MonthlyInvoiceStatus.UNPAID);
+        invoice.setPaymentRequestId("monthly-payment");
+        invoice.setBaseAmount(new BigDecimal("100000"));
+        invoice.setTotalAmount(new BigDecimal("100000"));
+        invoice.setLineItemsSnapshot("[]");
+        invoice.setDueAt(Instant.parse("2026-11-05T16:59:59Z"));
+        when(time.now()).thenReturn(Instant.parse("2026-11-07T03:00:00Z"));
+        when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(invoice));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder()
+                .status(PaymentStatus.AWAITING_TRANSFER).build()));
+        when(payments.increaseMonthlyPayment(eq("invoice"), eq(new BigDecimal("120000")), anyString()))
+                .thenReturn(true);
+
+        service.syncContract("contract");
+        service.syncContract("contract");
+
+        assertEquals(new BigDecimal("20000"), invoice.getLateFeeAmount());
+        assertEquals(new BigDecimal("120000"), invoice.getTotalAmount());
+        assertEquals(MonthlyInvoiceStatus.OVERDUE, invoice.getStatus());
+        verify(payments, times(1)).increaseMonthlyPayment(eq("invoice"), eq(new BigDecimal("120000")), anyString());
     }
 }

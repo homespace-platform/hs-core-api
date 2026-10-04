@@ -164,19 +164,33 @@ class PaymentRequestServiceTest {
     void monthlyOverdueCanStillReportTransferAndConfirmationDoesNotOpenContractWindow() {
         PaymentRequest monthly = PaymentRequest.builder().id("monthly-1").type(PaymentType.MONTHLY_RENT)
                 .rentalRequestId("req-1").payerId("tenant-1").payeeId("landlord-1")
-                .status(PaymentStatus.OVERDUE).build();
+                .status(PaymentStatus.OVERDUE).totalAmount(new BigDecimal("210000")).build();
         when(paymentRequestRepository.findByIdForUpdate("monthly-1")).thenReturn(Optional.of(monthly));
         when(paymentRequestRepository.save(any())).thenAnswer(i -> i.getArgument(0));
         when(paymentProofUploadSessionService.consumeSession("session-1", "monthly-1", "tenant-1"))
                 .thenReturn("proof-1");
         when(billingTime.now()).thenReturn(Instant.parse("2026-11-07T00:00:00Z"));
         paymentRequestService.reportTransfer("monthly-1", "tenant-1",
-                ReportTransferRequest.builder().evidenceUploadSessionId("session-1").build());
+                ReportTransferRequest.builder().evidenceUploadSessionId("session-1")
+                        .expectedAmount(new BigDecimal("210000")).build());
         assertEquals(PaymentStatus.TRANSFER_REPORTED, monthly.getStatus());
         paymentRequestService.confirmReceipt("monthly-1", "landlord-1");
         assertEquals(PaymentStatus.CONFIRMED, monthly.getStatus());
         assertEquals(Instant.parse("2026-11-07T00:00:00Z"), monthly.getConfirmedAt());
         assertNull(monthly.getContractDueAt());
+    }
+
+    @Test
+    void monthlyTransferRejectsStaleAmountBeforeConsumingProof() {
+        PaymentRequest monthly = PaymentRequest.builder().id("monthly-1").type(PaymentType.MONTHLY_RENT)
+                .payerId("tenant-1").payeeId("landlord-1")
+                .status(PaymentStatus.OVERDUE).totalAmount(new BigDecimal("220000")).build();
+        when(paymentRequestRepository.findByIdForUpdate("monthly-1")).thenReturn(Optional.of(monthly));
+        assertThrows(AppException.class, () -> paymentRequestService.reportTransfer("monthly-1", "tenant-1",
+                ReportTransferRequest.builder().evidenceUploadSessionId("session-1")
+                        .expectedAmount(new BigDecimal("210000")).build()));
+        verify(paymentProofUploadSessionService, never()).consumeSession(anyString(), anyString(), anyString());
+        assertEquals(PaymentStatus.OVERDUE, monthly.getStatus());
     }
 
     @Test

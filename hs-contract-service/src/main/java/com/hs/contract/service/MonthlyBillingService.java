@@ -54,6 +54,38 @@ public class MonthlyBillingService {
                 .map(this::response).toList();
     }
 
+    /** Landlord records readings and optional charges before the 10:00 automatic issue cutoff. */
+    @Transactional
+    public MonthlyInvoiceResponse prepare(String invoiceId, String landlordId, IssueMonthlyInvoiceRequest request) {
+        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        Contract contract = contracts.findById(invoice.getContractId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if (!contract.getLandlordId().equals(landlordId)) throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        if (contract.getStatus() != ContractStatus.ACTIVE) throw new AppException(ContractErrorCode.INVOICE_NOT_ACTIVE);
+        if (invoice.getStatus() != MonthlyInvoiceStatus.DRAFT
+                || time.today().isBefore(invoice.getPeriodEndExclusive().minusDays(1)))
+            throw new AppException(ContractErrorCode.INVOICE_NOT_READY);
+        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
+        RentalRequest rental = rentalRequests.findById(contract.getRentalRequestId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
+        List<Map<String, Object>> charges = readList(revision.getChargesSnapshot(),
+                new TypeReference<List<Map<String, Object>>>() {});
+        if (meterRate(charges, rental, "PER_KWH") != null) {
+            validateReading(meterStart(contract, invoice, "electricityInitial", true), request.electricityEnd());
+            invoice.setElectricityEnd(request.electricityEnd());
+        }
+        if (meterRate(charges, rental, "PER_M3") != null) {
+            validateReading(meterStart(contract, invoice, "waterInitial", false), request.waterEnd());
+            invoice.setWaterEnd(request.waterEnd());
+        }
+        validateExtras(request.extraCharges());
+        invoice.setDraftExtraChargesSnapshot(write(request.extraCharges() == null ? List.of() : request.extraCharges()));
+        log.info("BILLING_METER_PREPARED contract={} invoice={} period={}", contract.getId(), invoice.getId(), invoice.getPeriodIndex());
+        return response(invoices.save(invoice));
+    }
+
     @Transactional
     public MonthlyInvoiceResponse issue(String invoiceId, String landlordId, IssueMonthlyInvoiceRequest request) {
         MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
@@ -136,12 +168,8 @@ public class MonthlyBillingService {
             invoice.setWaterEnd(request.waterEnd());
         }
         if (request.extraCharges() != null) {
-            if (request.extraCharges().size() > 20) throw new AppException(ContractErrorCode.INVOICE_AMOUNT_INVALID);
+            validateExtras(request.extraCharges());
             for (IssueMonthlyInvoiceRequest.ExtraCharge extra : request.extraCharges()) {
-                if (extra == null || extra.description() == null || extra.description().isBlank()
-                        || extra.amount() == null || extra.amount().signum() <= 0
-                        || extra.amount().stripTrailingZeros().scale() > 0)
-                    throw new AppException(ContractErrorCode.INVOICE_AMOUNT_INVALID);
                 lines.add(new InvoiceLine("EXTRA", extra.description().trim(), BigDecimal.ONE,
                         extra.amount(), extra.amount()));
             }
@@ -151,6 +179,8 @@ public class MonthlyBillingService {
             throw new AppException(ContractErrorCode.INVOICE_AMOUNT_INVALID);
         invoice.setLineItemsSnapshot(write(lines));
         invoice.setTotalAmount(total);
+        invoice.setBaseAmount(total);
+        invoice.setLateFeeAmount(BigDecimal.ZERO);
         invoice.setIssuedAt(time.now());
         // Existing signed HomeSpace templates say payment by the 5th of each month.
         LocalDate fifth = invoice.getPeriodEndExclusive().withDayOfMonth(5);
@@ -180,7 +210,7 @@ public class MonthlyBillingService {
         LocalDate start = rental.getMoveInDate();
         for (int index = 0; index < rental.getLeaseMonths(); index++) {
             LocalDate end = start.plusMonths(index + 1);
-            if (end.isAfter(time.today())) break;
+            if (end.minusDays(1).isAfter(time.today())) break;
             int period = index;
             if (invoices.findByContractIdAndPeriodIndex(contractId, period).isEmpty()) {
                 invoices.saveAndFlush(MonthlyInvoice.builder()
@@ -191,6 +221,7 @@ public class MonthlyBillingService {
         }
         for (MonthlyInvoice invoice : invoices.findByContractIdOrderByPeriodIndexDesc(contractId)) {
             reconcile(invoice);
+            processMilestones(contract, invoice);
         }
     }
 
@@ -205,6 +236,7 @@ public class MonthlyBillingService {
                 try {
                     new TransactionTemplate(transactionManager)
                             .executeWithoutResult(status -> syncContract(contract.getId()));
+                    autoIssueDue(contract.getId());
                 } catch (Exception ex) {
                     log.error("Monthly billing sync failed for contract {}", contract.getId(), ex);
                 }
@@ -228,6 +260,142 @@ public class MonthlyBillingService {
                 invoices.save(invoice);
             }
             payments.markMonthlyOverdue(invoice.getId(), time.now());
+            accrueLateFee(invoice, payment.get());
+        }
+    }
+
+    private void autoIssueDue(String contractId) {
+        Contract contract = contracts.findById(contractId).orElse(null);
+        if (contract == null || contract.getStatus() != ContractStatus.ACTIVE) return;
+        for (MonthlyInvoice invoice : invoices.findByContractIdOrderByPeriodIndexDesc(contractId)) {
+            if (invoice.getStatus() != MonthlyInvoiceStatus.DRAFT
+                    || time.now().isBefore(meterDeadline(invoice))) continue;
+            try {
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    MonthlyInvoice draft = invoices.findByIdForUpdate(invoice.getId()).orElse(null);
+                    if (draft == null || draft.getStatus() != MonthlyInvoiceStatus.DRAFT || !autoReady(contract, draft)) return;
+                    List<IssueMonthlyInvoiceRequest.ExtraCharge> extras = readList(draft.getDraftExtraChargesSnapshot(),
+                            new TypeReference<List<IssueMonthlyInvoiceRequest.ExtraCharge>>() {});
+                    issue(draft.getId(), contract.getLandlordId(),
+                            new IssueMonthlyInvoiceRequest(draft.getElectricityEnd(), draft.getWaterEnd(), extras));
+                    log.info("BILLING_AUTO_ISSUED contract={} invoice={} period={}",
+                            contractId, draft.getId(), draft.getPeriodIndex());
+                });
+            } catch (Exception ex) {
+                log.error("BILLING_AUTO_ISSUE_FAILED contract={} invoice={}", contractId, invoice.getId(), ex);
+            }
+        }
+    }
+
+    private boolean autoReady(Contract contract, MonthlyInvoice invoice) {
+        if (invoice.getPeriodIndex() > 0) {
+            MonthlyInvoice previous = invoices.findByContractIdAndPeriodIndex(
+                    contract.getId(), invoice.getPeriodIndex() - 1).orElse(null);
+            if (previous == null || previous.getStatus() == MonthlyInvoiceStatus.DRAFT) return false;
+        }
+        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId()).orElse(null);
+        if (revision == null) return false;
+        List<Map<String, Object>> charges = readList(revision.getChargesSnapshot(),
+                new TypeReference<List<Map<String, Object>>>() {});
+        return charges.stream().noneMatch(c -> "STATE_WATER_RATE".equals(c.get("billingMethod"))
+                    && !Boolean.TRUE.equals(c.get("includedInRent")))
+                && (charges.stream().noneMatch(c -> "PER_KWH".equals(c.get("billingMethod"))
+                    && !Boolean.TRUE.equals(c.get("includedInRent"))) || invoice.getElectricityEnd() != null)
+                && (charges.stream().noneMatch(c -> "PER_M3".equals(c.get("billingMethod"))
+                    && !Boolean.TRUE.equals(c.get("includedInRent"))) || invoice.getWaterEnd() != null);
+    }
+
+    private void processMilestones(Contract contract, MonthlyInvoice invoice) {
+        Instant now = time.now();
+        boolean changed = false;
+        if (invoice.getStatus() == MonthlyInvoiceStatus.DRAFT) {
+            Instant periodLastDay = invoice.getPeriodEndExclusive().minusDays(1)
+                    .atStartOfDay(BillingTime.ZONE).toInstant();
+            if (invoice.getMeterReminderLoggedAt() == null && !now.isBefore(periodLastDay)) {
+                invoice.setMeterReminderLoggedAt(now);
+                changed = true;
+                log.info("BILLING_METER_REMINDER landlord={} contract={} invoice={} deadline={}",
+                        contract.getLandlordId(), contract.getId(), invoice.getId(), meterDeadline(invoice));
+            }
+            if (invoice.getMeterDeadlineLoggedAt() == null && !now.isBefore(meterDeadline(invoice))) {
+                invoice.setMeterDeadlineLoggedAt(now);
+                changed = true;
+                if (!autoReady(contract, invoice))
+                    log.warn("BILLING_METER_REQUIRED landlord={} contract={} invoice={} deadline={}",
+                            contract.getLandlordId(), contract.getId(), invoice.getId(), meterDeadline(invoice));
+                else log.info("BILLING_METER_DEADLINE contract={} invoice={} ready=true", contract.getId(), invoice.getId());
+            }
+        } else if (invoice.getStatus() == MonthlyInvoiceStatus.UNPAID && invoice.getDueAt() != null
+                && invoice.getPaymentReminderLoggedAt() == null
+                && !now.isBefore(invoice.getDueAt().atZone(BillingTime.ZONE).toLocalDate()
+                        .minusDays(2).atStartOfDay(BillingTime.ZONE).toInstant())
+                && !now.isAfter(invoice.getDueAt())) {
+            invoice.setPaymentReminderLoggedAt(now);
+            changed = true;
+            log.info("BILLING_PAYMENT_REMINDER tenant={} contract={} invoice={} amount={} due={}",
+                    contract.getTenantId(), contract.getId(), invoice.getId(), invoice.getTotalAmount(), invoice.getDueAt());
+        }
+        if (invoice.getStatus() == MonthlyInvoiceStatus.OVERDUE && invoice.getDueAt() != null
+                && invoice.getOverdueActionLoggedAt() == null
+                && !now.isBefore(actionRequiredAt(invoice))
+                && payments.findByInvoiceId(invoice.getId()).map(p -> p.getStatus() != PaymentStatus.TRANSFER_REPORTED
+                    && p.getStatus() != PaymentStatus.DISPUTED).orElse(false)) {
+            invoice.setOverdueActionLoggedAt(now);
+            changed = true;
+            log.warn("BILLING_OVERDUE_ACTION_REQUIRED landlord={} tenant={} contract={} invoice={} amount={}",
+                    contract.getLandlordId(), contract.getTenantId(), contract.getId(), invoice.getId(), invoice.getTotalAmount());
+        }
+        if (changed) invoices.save(invoice);
+    }
+
+    private void accrueLateFee(MonthlyInvoice invoice, PaymentRequest payment) {
+        if (!List.of(PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE,
+                PaymentStatus.REJECTED).contains(payment.getStatus())) return;
+        Contract contract = contracts.findById(invoice.getContractId()).orElse(null);
+        if (contract == null) return;
+        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId()).orElse(null);
+        if (revision == null) return;
+        Map<String, Object> policies = read(revision.getPoliciesSnapshot(), new TypeReference<Map<String, Object>>() {});
+        LatePaymentPolicy policy = LatePaymentPolicy.from(policies);
+        BigDecimal accrued = policy.accrued(invoice.getDueAt(), time.now(), BillingTime.ZONE);
+        BigDecimal previous = invoice.getLateFeeAmount() == null ? BigDecimal.ZERO : invoice.getLateFeeAmount();
+        if (accrued.compareTo(previous) <= 0) return;
+        BigDecimal base = invoice.getBaseAmount() == null
+                ? invoice.getTotalAmount().subtract(previous) : invoice.getBaseAmount();
+        List<InvoiceLine> lines = new ArrayList<>(readList(invoice.getLineItemsSnapshot(),
+                new TypeReference<List<InvoiceLine>>() {}));
+        lines.removeIf(line -> "LATE_FEE".equals(line.type()));
+        lines.add(new InvoiceLine("LATE_FEE", "Phí chậm thanh toán", BigDecimal.ONE, accrued, accrued));
+        BigDecimal newTotal = base.add(accrued);
+        String snapshot = write(lines);
+        if (payments.increaseMonthlyPayment(invoice.getId(), newTotal, snapshot)) {
+            invoice.setBaseAmount(base);
+            invoice.setLateFeeAmount(accrued);
+            invoice.setLineItemsSnapshot(snapshot);
+            invoice.setTotalAmount(newTotal);
+            invoices.save(invoice);
+            log.info("BILLING_LATE_FEE_UPDATED contract={} invoice={} previous={} fee={} total={}",
+                    contract.getId(), invoice.getId(), previous, accrued, newTotal);
+        }
+    }
+
+    private Instant meterDeadline(MonthlyInvoice invoice) {
+        return invoice.getPeriodEndExclusive().atTime(10, 0).atZone(BillingTime.ZONE).toInstant();
+    }
+
+    private Instant actionRequiredAt(MonthlyInvoice invoice) {
+        return invoice.getDueAt().atZone(BillingTime.ZONE).toLocalDate()
+                .plusDays(5).atStartOfDay(BillingTime.ZONE).toInstant();
+    }
+
+    private void validateExtras(List<IssueMonthlyInvoiceRequest.ExtraCharge> extras) {
+        if (extras == null) return;
+        if (extras.size() > 20) throw new AppException(ContractErrorCode.INVOICE_AMOUNT_INVALID);
+        for (IssueMonthlyInvoiceRequest.ExtraCharge extra : extras) {
+            if (extra == null || extra.description() == null || extra.description().isBlank()
+                    || extra.description().length() > 150 || extra.amount() == null
+                    || extra.amount().signum() <= 0 || extra.amount().stripTrailingZeros().scale() > 0)
+                throw new AppException(ContractErrorCode.INVOICE_AMOUNT_INVALID);
         }
     }
 
@@ -321,7 +489,32 @@ public class MonthlyBillingService {
                 i.getPeriodStart(), i.getPeriodEndExclusive(), i.getStatus(), i.getElectricityStart(),
                 i.getElectricityEnd(), i.getWaterStart(), i.getWaterEnd(),
                 readList(i.getLineItemsSnapshot(), new TypeReference<List<InvoiceLine>>() {}),
-                i.getTotalAmount(), i.getPaymentRequestId(), i.getIssuedAt(), i.getDueAt(), i.getPaidAt());
+                i.getTotalAmount(), i.getPaymentRequestId(), i.getIssuedAt(), i.getDueAt(), i.getPaidAt(),
+                i.getLateFeeAmount() == null ? BigDecimal.ZERO : i.getLateFeeAmount(),
+                time.now(), meterDeadline(i), workflowState(i),
+                readList(i.getDraftExtraChargesSnapshot(),
+                        new TypeReference<List<IssueMonthlyInvoiceRequest.ExtraCharge>>() {}));
+    }
+
+    private String workflowState(MonthlyInvoice i) {
+        Instant now = time.now();
+        if (i.getStatus() == MonthlyInvoiceStatus.PAID) return "PAID";
+        if (i.getStatus() == MonthlyInvoiceStatus.DRAFT) {
+            if (now.isBefore(i.getPeriodEndExclusive().minusDays(1)
+                    .atStartOfDay(BillingTime.ZONE).toInstant())) return "UPCOMING";
+            if (i.getDraftExtraChargesSnapshot() != null && now.isBefore(meterDeadline(i)))
+                return "READY_FOR_ISSUE";
+            if (now.isBefore(meterDeadline(i))) return "METER_REQUIRED";
+            return "METER_DEADLINE_MISSED";
+        }
+        if (payments.findByInvoiceId(i.getId()).map(p -> p.getStatus() == PaymentStatus.TRANSFER_REPORTED
+                || p.getStatus() == PaymentStatus.DISPUTED).orElse(false)) return "UNDER_REVIEW";
+        if (i.getStatus() == MonthlyInvoiceStatus.OVERDUE)
+            return !now.isBefore(actionRequiredAt(i)) ? "OVERDUE_ACTION_REQUIRED" : "OVERDUE";
+        if (i.getDueAt() != null && !now.isBefore(i.getDueAt().atZone(BillingTime.ZONE)
+                .toLocalDate().minusDays(2).atStartOfDay(BillingTime.ZONE).toInstant()))
+            return "PAYMENT_REMINDER";
+        return "UNPAID";
     }
 
     private <T> T read(String json, Class<T> type) {

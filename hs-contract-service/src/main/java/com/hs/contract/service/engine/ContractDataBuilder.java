@@ -1174,9 +1174,9 @@ public class ContractDataBuilder {
         map.put("paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng");
         map.put("paymentCycle",
                 snapshot.getPaymentCycle() != null ? paymentCycleLabelStr(snapshot.getPaymentCycle()) : "Hàng tháng");
-        map.put("gracePeriodDays", 5);
         map.put("latePaymentPolicy",
-                "Quá 05 ngày kể từ ngày đến hạn thanh toán mà chưa hoàn tất, Bên A có quyền tính lãi suất chậm trả hoặc tạm ngừng cung cấp dịch vụ sau khi thông báo trước 03 ngày");
+                "Nếu quá hạn, hai bên xử lý theo điều khoản thỏa thuận riêng (nếu có); HomeSpace không tự áp dụng phí khi chưa có thỏa thuận.");
+        map.put("latePaymentFeeMode", "NONE");
         map.put("noticeDaysBeforeMoveOut", 30);
         map.put("noticeDaysBeforeTermination", 30);
         map.put("depositRefundDays", 15);

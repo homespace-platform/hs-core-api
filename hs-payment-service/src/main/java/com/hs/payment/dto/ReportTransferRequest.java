@@ -3,6 +3,7 @@ package com.hs.payment.dto;
 import lombok.Builder;
 
 import java.time.Instant;
+import java.math.BigDecimal;
 
 @Builder
 public record ReportTransferRequest(
@@ -11,8 +12,14 @@ public record ReportTransferRequest(
         String payerAccountLast4,
         String proofStorageId,
         String evidenceUploadSessionId,
-        String note
+        String note,
+        BigDecimal expectedAmount
 ) {
+    public ReportTransferRequest(Instant declaredTransferTime, String bankTransactionReference,
+            String payerAccountLast4, String proofStorageId, String evidenceUploadSessionId, String note) {
+        this(declaredTransferTime, bankTransactionReference, payerAccountLast4,
+                proofStorageId, evidenceUploadSessionId, note, null);
+    }
     public ReportTransferRequest(
             Instant declaredTransferTime,
             String bankTransactionReference,
@@ -20,6 +27,6 @@ public record ReportTransferRequest(
             String proofStorageId,
             String note
     ) {
-        this(declaredTransferTime, bankTransactionReference, payerAccountLast4, proofStorageId, null, note);
+        this(declaredTransferTime, bankTransactionReference, payerAccountLast4, proofStorageId, null, note, null);
     }
 }

@@ -29,6 +29,7 @@ import com.hs.contract.repository.ContractRepository;
 import com.hs.contract.repository.ContractRevisionRepository;
 import com.hs.contract.repository.ContractTemplateVersionRepository;
 import com.hs.contract.service.ContractService;
+import com.hs.contract.service.LatePaymentPolicy;
 import com.hs.contract.service.converter.DocumentConversionService;
 import com.hs.contract.service.engine.ContractDataBuilder;
 import com.hs.contract.service.engine.ContractFieldCatalog;
@@ -417,6 +418,16 @@ public class ContractServiceImpl implements ContractService {
 
         if (contract.getStatus() != ContractStatus.DRAFT) {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
+        }
+
+        LatePaymentPolicy lateFee = LatePaymentPolicy.from(request.getPolicies());
+        if (lateFee.mode() != LatePaymentPolicy.Mode.NONE) {
+            ContractTemplateVersion template = templateVersionRepository.findById(contract.getTemplateVersionId())
+                    .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
+            List<String> placeholders = fromJson(template.getPlaceholdersJson(), new TypeReference<List<String>>() {});
+            if (placeholders == null || placeholders.stream().map(ContractFieldCatalog::normalizeKey)
+                    .noneMatch("contract.specialTerms"::equals))
+                throw new AppException(ContractErrorCode.CONTRACT_LATE_FEE_TEMPLATE_REQUIRED);
         }
 
         int nextRev = revisionRepository.findMaxRevisionNumberByContractId(contractId) + 1;
@@ -1000,6 +1011,11 @@ public class ContractServiceImpl implements ContractService {
 
     /** Trải các snapshot của revision thành data model phẳng mà poi-tl dùng để render. */
     private Map<String, Object> buildDataModel(Contract contract, ContractRevision revision) {
+        Map<String, Object> policies = fromJson(revision.getPoliciesSnapshot(), MAP_TYPE);
+        String lateFeeClause = LatePaymentPolicy.from(policies).clause();
+        String specialTerms = revision.getSpecialTerms() == null ? "" : revision.getSpecialTerms().trim();
+        if (!lateFeeClause.isEmpty()) specialTerms = specialTerms.isEmpty()
+                ? lateFeeClause : specialTerms + "\n" + lateFeeClause;
         return renderService.buildDataModelFromSnapshots(
                 fromJson(revision.getLandlordSnapshot(), MAP_TYPE),
                 fromJson(revision.getTenantSnapshot(), MAP_TYPE),
@@ -1011,8 +1027,8 @@ public class ContractServiceImpl implements ContractService {
                 fromJson(revision.getInitialMetersSnapshot(), MAP_TYPE),
                 fromJson(revision.getInitialPaymentSnapshot(), MAP_TYPE),
                 fromJson(revision.getAmenitiesSnapshot(), CHARGE_LIST_TYPE),
-                fromJson(revision.getPoliciesSnapshot(), MAP_TYPE),
-                revision.getSpecialTerms(),
+                policies,
+                specialTerms,
                 revision.getSchemaVersion() != null ? revision.getSchemaVersion() : 2,
                 revision.getRevisionNumber(),
                 contract.getContractNumber(),

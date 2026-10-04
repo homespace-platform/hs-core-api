@@ -51,7 +51,9 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     INVOICE_METER_INVALID(6052, "Chỉ số công tơ thiếu hoặc thấp hơn chỉ số đầu kỳ", HttpStatus.BAD_REQUEST),
     INVOICE_TERMS_INCOMPLETE(6053, "Thiếu dữ liệu biểu phí hoặc chỉ số đầu kỳ trong hợp đồng; vui lòng liên hệ quản trị viên", HttpStatus.CONFLICT),
     INVOICE_NOT_ACTIVE(6054, "Chỉ hợp đồng đang hiệu lực mới phát sinh hóa đơn", HttpStatus.CONFLICT),
-    INVOICE_AMOUNT_INVALID(6055, "Số tiền hoặc phí phát sinh không hợp lệ", HttpStatus.BAD_REQUEST);
+    INVOICE_AMOUNT_INVALID(6055, "Số tiền hoặc phí phát sinh không hợp lệ", HttpStatus.BAD_REQUEST),
+    CONTRACT_LATE_FEE_INVALID(6056, "Cấu hình phí chậm thanh toán không hợp lệ", HttpStatus.BAD_REQUEST),
+    CONTRACT_LATE_FEE_TEMPLATE_REQUIRED(6057, "Mẫu hợp đồng chưa có trường điều khoản thỏa thuận riêng để ghi phí chậm thanh toán. Vui lòng liên hệ quản trị viên.", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

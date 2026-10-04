@@ -228,6 +228,48 @@ public class PaymentRequestService {
         return payment;
     }
 
+    /** Re-price only an unreported monthly transfer. The same reference is retained and QR is regenerated. */
+    @Transactional
+    public boolean increaseMonthlyPayment(String invoiceId, BigDecimal newTotal, String breakdownSnapshot) {
+        PaymentRequest found = paymentRequestRepository.findByInvoiceId(invoiceId).orElse(null);
+        if (found == null) return false;
+        PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(found.getId()).orElse(null);
+        if (payment == null || payment.getType() != PaymentType.MONTHLY_RENT
+                || !List.of(PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE,
+                        PaymentStatus.REJECTED).contains(payment.getStatus())) return false;
+        if (newTotal == null || newTotal.compareTo(payment.getTotalAmount()) <= 0) return false;
+        try {
+            BankAccountSnapshotDto bank = objectMapper.readValue(payment.getPayeeBankAccountSnapshot(),
+                    BankAccountSnapshotDto.class);
+            List<Map<String, Object>> rows = objectMapper.readValue(breakdownSnapshot,
+                    new TypeReference<List<Map<String, Object>>>() {});
+            paymentLineItemRepository.deleteAll(paymentLineItemRepository
+                    .findByPaymentRequestIdOrderBySortOrderAsc(payment.getId()));
+            int sort = 0;
+            for (Map<String, Object> row : rows) {
+                BigDecimal amount = new BigDecimal(String.valueOf(row.get("amount")));
+                paymentLineItemRepository.save(PaymentLineItem.builder()
+                        .paymentRequestId(payment.getId()).type(String.valueOf(row.get("type")))
+                        .displayName(String.valueOf(row.get("description")))
+                        .amount(amount).quantity(1).unitPrice(amount)
+                        .calculationDescription(row.get("quantity") + " × " + row.get("unitPrice"))
+                        .sortOrder(sort++).build());
+            }
+            BigDecimal previous = payment.getTotalAmount();
+            payment.setTotalAmount(newTotal);
+            payment.setBreakdownSnapshot(breakdownSnapshot);
+            payment.setQrImageUrl(vietQrProvider.generateQrImageUrl(bank.bankBin(), bank.accountNumber(),
+                    bank.accountHolderName(), newTotal, payment.getTransferReference()));
+            paymentRequestRepository.save(payment);
+            recordEvent(payment.getId(), PaymentEventType.AMOUNT_ADJUSTED,
+                    payment.getStatus(), payment.getStatus(), "SYSTEM", "SYSTEM",
+                    "Phí chậm thanh toán: " + previous + " -> " + newTotal, null);
+            return true;
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Cannot adjust monthly payment", ex);
+        }
+    }
+
     @Transactional
     public PaymentRequestResponse reportTransfer(String paymentRequestId, String actorId, ReportTransferRequest request) {
         PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)
@@ -249,6 +291,11 @@ public class PaymentRequestService {
         if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED
                 && !(payment.getType() == PaymentType.MONTHLY_RENT && payment.getStatus() == PaymentStatus.OVERDUE)) {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
+        }
+        if (payment.getType() == PaymentType.MONTHLY_RENT
+                && (request == null || request.expectedAmount() == null
+                || request.expectedAmount().compareTo(payment.getTotalAmount()) != 0)) {
+            throw new AppException(PaymentErrorCode.MONTHLY_AMOUNT_CHANGED);
         }
 
         // Chấp nhận 1 trong 2 nguồn chứng từ: mobile session hoặc web proofStorageId

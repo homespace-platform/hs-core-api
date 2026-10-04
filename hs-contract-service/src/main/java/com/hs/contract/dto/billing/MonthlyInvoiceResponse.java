@@ -12,4 +12,7 @@ public record MonthlyInvoiceResponse(String id, String contractId, int periodInd
                                      BigDecimal electricityEnd, BigDecimal waterStart,
                                      BigDecimal waterEnd, List<InvoiceLine> lines,
                                      BigDecimal totalAmount, String paymentRequestId,
-                                     Instant issuedAt, Instant dueAt, Instant paidAt) {}
+                                     Instant issuedAt, Instant dueAt, Instant paidAt,
+                                     BigDecimal lateFeeAmount, Instant serverNow,
+                                     Instant meterDeadlineAt, String workflowState,
+                                     List<IssueMonthlyInvoiceRequest.ExtraCharge> draftExtraCharges) {}
