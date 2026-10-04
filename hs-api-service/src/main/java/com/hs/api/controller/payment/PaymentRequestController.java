@@ -44,6 +44,13 @@ public class PaymentRequestController {
                 .build();
     }
 
+    @GetMapping("/contracts/{contractId}")
+    public ApiResponse<List<PaymentRequestResponse>> getContractPayments(@PathVariable String contractId) {
+        return ApiResponse.<List<PaymentRequestResponse>>builder()
+                .result(paymentRequestService.getContractPaymentRequests(contractId, requireUserId()))
+                .build();
+    }
+
     @PostMapping("/{id}/report-transfer")
     public ApiResponse<PaymentRequestResponse> reportTransfer(
             @PathVariable String id,

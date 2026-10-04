@@ -30,7 +30,14 @@ public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, 
 
     List<PaymentRequest> findByPayerIdOrPayeeIdOrderByCreatedAtDesc(String payerId, String payeeId);
 
+    @Query("SELECT p FROM PaymentRequest p WHERE p.contractId = :contractId "
+            + "AND (p.payerId = :actorId OR p.payeeId = :actorId) ORDER BY p.createdAt DESC")
+    List<PaymentRequest> findForContractAndActor(@Param("contractId") String contractId,
+                                                 @Param("actorId") String actorId);
+
     Optional<PaymentRequest> findByTransferReference(String transferReference);
+
+    Optional<PaymentRequest> findByInvoiceId(String invoiceId);
 
     boolean existsByTransferReference(String transferReference);
 

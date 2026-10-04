@@ -773,6 +773,8 @@ public class ContractDataBuilder {
                     row.put("amountAndMethod", amountAndMethod);
                     row.put("note", firstNonBlank(item.note(), "-"));
                     row.put("estimatedMonthlyAmount", item.amount() != null ? item.amount().toPlainString() : null);
+                    row.put("unitAmount", item.unitAmount() != null ? item.unitAmount().toPlainString() : null);
+                    row.put("includedInRent", item.includedInRent());
                     row.put("chargeType", item.chargeType());
                     row.put("billingMethod", item.billingMethod());
                     rows.add(row);
@@ -784,6 +786,8 @@ public class ContractDataBuilder {
                     row.put("amountAndMethod", firstNonBlank(item.reason(), "Chưa bao gồm trong giá thuê"));
                     row.put("note", "Chưa bao gồm");
                     row.put("estimatedMonthlyAmount", null);
+                    row.put("unitAmount", item.unitAmount() != null ? item.unitAmount().toPlainString() : null);
+                    row.put("includedInRent", false);
                     row.put("chargeType", item.chargeType());
                     row.put("billingMethod", item.billingMethod());
                     rows.add(row);
@@ -817,6 +821,8 @@ public class ContractDataBuilder {
 
             BigDecimal estimated = estimateMonthlyAmountStr(charge, occupants, motorbikes, cars, snapshot.getAreaM2());
             row.put("estimatedMonthlyAmount", estimated == null ? null : estimated.toPlainString());
+            row.put("unitAmount", charge.getAmount() == null ? null : charge.getAmount().toPlainString());
+            row.put("includedInRent", charge.isIncludedInRent());
             row.put("chargeType", charge.getChargeType());
             row.put("billingMethod", charge.getBillingMethod());
             row.put("billingMethodText", billingMethodUnitLabel(charge.getBillingMethod()));
@@ -845,6 +851,8 @@ public class ContractDataBuilder {
 
             BigDecimal estimated = estimateMonthlyAmount(charge, occupants, motorbikes, cars, listing.getAreaM2());
             row.put("estimatedMonthlyAmount", estimated == null ? null : estimated.toPlainString());
+            row.put("unitAmount", charge.getAmount() == null ? null : charge.getAmount().toPlainString());
+            row.put("includedInRent", charge.isIncludedInRent());
             String method = charge.getBillingMethod() == null ? null : charge.getBillingMethod().name();
             row.put("chargeType", charge.getChargeType() == null ? null : charge.getChargeType().name());
             row.put("billingMethod", method);
@@ -1074,11 +1082,8 @@ public class ContractDataBuilder {
 
         BigDecimal monthlyRent = (request != null && request.getEffectiveMonthlyRent() != null) ? request.getEffectiveMonthlyRent()
                 : ((request != null && request.getMonthlyRentPrice() != null) ? request.getMonthlyRentPrice() : BigDecimal.ZERO);
-        BigDecimal deposit = (request != null && request.getDepositAmount() != null) ? request.getDepositAmount() : monthlyRent;
-        BigDecimal monthlyCharges = (request != null && request.getEstimatedMonthlyCharges() != null) ? request.getEstimatedMonthlyCharges()
-                : BigDecimal.ZERO;
-        BigDecimal total = (request != null && request.getEstimatedInitialTotal() != null) ? request.getEstimatedInitialTotal()
-                : monthlyRent.add(deposit).add(monthlyCharges);
+        BigDecimal deposit = (request != null && request.getDepositAmount() != null) ? request.getDepositAmount() : BigDecimal.ZERO;
+        BigDecimal total = monthlyRent.add(deposit);
 
         if (payment != null) {
             if (payment.getStatus() != null) {
@@ -1114,6 +1119,9 @@ public class ContractDataBuilder {
             }
         }
 
+        // Historical payments may include prepaid fees; new payments contain rent + deposit only.
+        BigDecimal upfrontCharges = total.subtract(monthlyRent).subtract(deposit).max(BigDecimal.ZERO);
+
         map.put("status", status);
         map.put("paidAt", paidAt);
         map.put("payerReportedAt", payerReportedAt);
@@ -1123,7 +1131,7 @@ public class ContractDataBuilder {
         map.put("bankTransactionReference", bankTxnRef);
         map.put("transactionCode", !transferRef.isBlank() ? transferRef : (!bankTxnRef.isBlank() ? bankTxnRef : "HS-DIRECT"));
         map.put("monthlyRent", ContractRenderService.formatVND(monthlyRent));
-        map.put("monthlyCharges", ContractRenderService.formatVND(monthlyCharges));
+        map.put("monthlyCharges", ContractRenderService.formatVND(upfrontCharges));
         map.put("depositAmount", ContractRenderService.formatVND(deposit));
         map.put("totalAmount", ContractRenderService.formatVND(total));
         map.put("currency", "VND");
@@ -1132,8 +1140,8 @@ public class ContractDataBuilder {
         List<Map<String, String>> rows = new ArrayList<>();
         rows.add(createPaymentRow("Tiền thuê kỳ đầu", ContractRenderService.formatVND(monthlyRent),
                 "Chuyển khoản trực tiếp vào tài khoản Bên A"));
-        if (monthlyCharges.compareTo(BigDecimal.ZERO) > 0) {
-            rows.add(createPaymentRow("Chi phí cố định kỳ đầu", ContractRenderService.formatVND(monthlyCharges),
+        if (upfrontCharges.compareTo(BigDecimal.ZERO) > 0) {
+            rows.add(createPaymentRow("Chi phí cố định kỳ đầu", ContractRenderService.formatVND(upfrontCharges),
                     "Khoản phí dịch vụ cố định tháng đầu"));
         }
         rows.add(createPaymentRow("Tiền đặt cọc", ContractRenderService.formatVND(deposit),

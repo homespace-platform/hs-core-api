@@ -8,6 +8,7 @@ import com.hs.payment.dto.UploadSessionStatusResponse;
 import com.hs.payment.model.PaymentProofUploadSession;
 import com.hs.payment.model.PaymentRequest;
 import com.hs.payment.model.constant.PaymentStatus;
+import com.hs.payment.model.constant.PaymentType;
 import com.hs.payment.model.constant.UploadSessionStatus;
 import com.hs.payment.model.PaymentEvidence;
 import com.hs.payment.model.PaymentEvent;
@@ -81,7 +82,8 @@ public class PaymentProofUploadSessionService {
             throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);
         }
 
-        if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED) {
+        if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED
+                && !(payment.getType() == PaymentType.MONTHLY_RENT && payment.getStatus() == PaymentStatus.OVERDUE)) {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
         }
 
@@ -273,7 +275,8 @@ public class PaymentProofUploadSessionService {
             return uploadSessionRepository.save(session);
         }
 
-        if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED) {
+        if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED
+                && !(payment.getType() == PaymentType.MONTHLY_RENT && payment.getStatus() == PaymentStatus.OVERDUE)) {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS, "Trạng thái thanh toán không hợp lệ.");
         }
 

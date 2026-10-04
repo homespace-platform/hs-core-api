@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 import java.util.List;
 import java.util.Optional;
@@ -34,6 +36,8 @@ public interface ContractRepository extends JpaRepository<Contract, String>, Jpa
     List<Contract> findAllByOrderByCreatedAtDesc();
 
     List<Contract> findByStatusOrderByCreatedAtDesc(ContractStatus status);
+
+    Page<Contract> findByStatus(ContractStatus status, Pageable pageable);
 
     boolean existsByRentalRequestId(String rentalRequestId);
 

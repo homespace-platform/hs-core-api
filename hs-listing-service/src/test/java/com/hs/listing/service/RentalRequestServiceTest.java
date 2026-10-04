@@ -175,6 +175,9 @@ class RentalRequestServiceTest {
                 .status(RentalRequestStatus.PENDING)
                 .moveInDate(LocalDate.now().plusDays(1))
                 .leaseMonths(6)
+                .effectiveMonthlyRent(new BigDecimal("5000000"))
+                .depositAmount(new BigDecimal("5000000"))
+                .estimatedInitialTotal(new BigDecimal("10300000"))
                 .motorbikeCount(2)
                 .carCount(1)
                 .build();
@@ -200,6 +203,7 @@ class RentalRequestServiceTest {
         assertEquals(RentalRequestStatus.ACCEPTED, res.status());
         assertNotNull(res.acceptedAt());
         assertNotNull(res.holdExpiresAt());
+        assertEquals(new BigDecimal("10000000"), res.estimatedInitialTotal());
 
         // Verify listing marked reserved
         verify(listingStatusService, times(1)).markReserved(listing, "owner-1");

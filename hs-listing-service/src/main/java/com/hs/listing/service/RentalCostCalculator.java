@@ -120,12 +120,13 @@ public class RentalCostCalculator {
         // 7. Tiền cọc
         BigDecimal depositAmount = calculateDeposit(listing, effectiveMonthlyRent, negotiatedDepositAmount);
 
-        // 8. Tổng dự kiến ban đầu và toàn thời hạn thuê
-        BigDecimal estimatedInitialTotal = estimatedMonthlyTotal.add(depositAmount);
+        // 8. Khoản ban đầu chỉ thu tiền thuê kỳ đầu và cọc. Phí dịch vụ thu cuối kỳ.
+        BigDecimal estimatedInitialTotal = effectiveMonthlyRent.add(depositAmount);
         BigDecimal estimatedLeaseTotal = estimatedMonthlyTotal.multiply(BigDecimal.valueOf(leaseMonths)).add(depositAmount);
 
-        String disclaimer = "Ước tính chỉ bao gồm các khoản chi phí cố định có thể dự kiến trước. " +
-                "Chi phí điện, nước theo đồng hồ và các chi phí phát sinh thực tế chưa được bao gồm.";
+        String disclaimer = "Khoản ban đầu chỉ gồm tiền thuê kỳ đầu và tiền cọc (nếu có). " +
+                "Phí dịch vụ cố định, điện, nước và chi phí phát sinh được quyết toán cuối kỳ; " +
+                "ước tính hàng tháng chưa bao gồm các khoản theo mức sử dụng thực tế.";
 
         return RentalEstimateResponse.builder()
                 .listingId(listing.getId())

@@ -8,5 +8,6 @@ public enum PaymentEventType {
     DISPUTED,
     EXPIRED,
     CANCELLED,
-    REFUND_OBLIGATION_CREATED
+    REFUND_OBLIGATION_CREATED,
+    OVERDUE
 }

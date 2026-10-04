@@ -2,6 +2,7 @@ package com.hs.payment.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.common.advice.entity.AppException;
+import com.hs.common.time.BillingTime;
 import com.hs.payment.advice.PaymentErrorCode;
 import com.hs.payment.dto.PaymentRequestResponse;
 import com.hs.payment.dto.RejectReceiptRequest;
@@ -55,6 +56,8 @@ class PaymentRequestServiceTest {
     private com.hs.storage.repository.StorageObjectRepository storageObjectRepository;
     @Mock
     private PaymentProofUploadSessionService paymentProofUploadSessionService;
+    @Mock
+    private BillingTime billingTime;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -115,9 +118,7 @@ class PaymentRequestServiceTest {
                 "tenant-1",
                 "landlord-1",
                 new BigDecimal("10000000"),
-                BigDecimal.ZERO,
                 new BigDecimal("5000000"),
-                new BigDecimal("15000000"),
                 "[]",
                 "[]",
                 Instant.now().plusSeconds(86400)
@@ -127,8 +128,55 @@ class PaymentRequestServiceTest {
         assertEquals("HS12345678", result.getTransferReference());
         assertEquals(PaymentStatus.AWAITING_TRANSFER, result.getStatus());
         assertEquals(new BigDecimal("15000000"), result.getTotalAmount());
+        verify(paymentLineItemRepository, never()).save(argThat(item -> "SERVICE_FEE".equals(item.getType())));
         verify(paymentLineItemRepository, atLeastOnce()).save(any());
         verify(paymentEventRepository, atLeastOnce()).save(any());
+    }
+
+    @Test
+    void monthlyPaymentIsIdempotentAndHasItemizedVietQr() {
+        when(paymentRequestRepository.findByInvoiceId("invoice-1")).thenReturn(Optional.empty());
+        when(bankAccountService.getDefaultIncomingAccount("landlord-1")).thenReturn(landlordAccount);
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HS87654321");
+        when(vietQrProvider.generateQrImageUrl(anyString(), anyString(), anyString(), any(), anyString()))
+                .thenReturn("https://vietqr.test/monthly");
+        when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> {
+            PaymentRequest p = i.getArgument(0); p.setId("monthly-1"); return p;
+        });
+        PaymentRequest created = paymentRequestService.createMonthlyPayment("invoice-1", "contract-1",
+                "req-1", "listing-1", "tenant-1", "landlord-1", new BigDecimal("210000"),
+                "[{\"type\":\"ELECTRICITY\",\"description\":\"Tiền điện\",\"quantity\":\"60\",\"unitPrice\":\"3500\",\"amount\":\"210000\"}]",
+                Instant.parse("2026-11-05T16:59:59Z"));
+        assertEquals("invoice-1", created.getInvoiceId());
+        assertEquals(PaymentType.MONTHLY_RENT, created.getType());
+        assertEquals("https://vietqr.test/monthly", created.getQrImageUrl());
+        verify(paymentLineItemRepository).save(argThat(item -> "ELECTRICITY".equals(item.getType())
+                && item.getAmount().compareTo(new BigDecimal("210000")) == 0));
+
+        when(paymentRequestRepository.findByInvoiceId("invoice-1")).thenReturn(Optional.of(created));
+        assertSame(created, paymentRequestService.createMonthlyPayment("invoice-1", "contract-1",
+                "req-1", "listing-1", "tenant-1", "landlord-1", new BigDecimal("210000"), "[]",
+                Instant.parse("2026-11-05T16:59:59Z")));
+        verify(paymentRequestRepository, times(1)).save(any(PaymentRequest.class));
+    }
+
+    @Test
+    void monthlyOverdueCanStillReportTransferAndConfirmationDoesNotOpenContractWindow() {
+        PaymentRequest monthly = PaymentRequest.builder().id("monthly-1").type(PaymentType.MONTHLY_RENT)
+                .rentalRequestId("req-1").payerId("tenant-1").payeeId("landlord-1")
+                .status(PaymentStatus.OVERDUE).build();
+        when(paymentRequestRepository.findByIdForUpdate("monthly-1")).thenReturn(Optional.of(monthly));
+        when(paymentRequestRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(paymentProofUploadSessionService.consumeSession("session-1", "monthly-1", "tenant-1"))
+                .thenReturn("proof-1");
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-07T00:00:00Z"));
+        paymentRequestService.reportTransfer("monthly-1", "tenant-1",
+                ReportTransferRequest.builder().evidenceUploadSessionId("session-1").build());
+        assertEquals(PaymentStatus.TRANSFER_REPORTED, monthly.getStatus());
+        paymentRequestService.confirmReceipt("monthly-1", "landlord-1");
+        assertEquals(PaymentStatus.CONFIRMED, monthly.getStatus());
+        assertEquals(Instant.parse("2026-11-07T00:00:00Z"), monthly.getConfirmedAt());
+        assertNull(monthly.getContractDueAt());
     }
 
     @Test

@@ -14,6 +14,7 @@ public record PaymentRequestResponse(
         String id,
         String rentalRequestId,
         String contractId,
+        String invoiceId,
         String listingId,
         String payerId,
         String payeeId,

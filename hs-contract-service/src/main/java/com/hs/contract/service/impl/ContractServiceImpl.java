@@ -908,7 +908,8 @@ public class ContractServiceImpl implements ContractService {
                 .deposit(deposit)
                 .charges(includedCharges)
                 .chargesTotal(chargesTotal)
-                .totalAmount(monthlyRent.add(deposit).add(chargesTotal))
+                .totalAmount(monthlyRent.add(deposit).add(
+                        contract.getRentalPaymentId() == null ? chargesTotal : BigDecimal.ZERO))
                 .excludedMeterCharges(excludedMeterCharges)
                 .paymentStatus(paymentStatusOf(contract))
                 .paidAt(contract.getPaidAt())

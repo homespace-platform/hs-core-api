@@ -273,6 +273,11 @@ public class RentalRequestService {
         req.setAcceptedAt(now);
         req.setHoldExpiresAt(holdExpiresAt);
         req.setListingSnapshot(buildListingSnapshotJson(listing));
+        // Pending requests created before the billing change must match the new initial payment.
+        BigDecimal initialRent = req.getEffectiveMonthlyRent() != null
+                ? req.getEffectiveMonthlyRent() : req.getMonthlyRentPrice();
+        req.setEstimatedInitialTotal((initialRent != null ? initialRent : BigDecimal.ZERO)
+                .add(req.getDepositAmount() != null ? req.getDepositAmount() : BigDecimal.ZERO));
         RentalRequest saved = rentalRequestRepository.save(req);
 
         // Tạo HELD reservation cho xe máy và ô tô (nếu có số lượng > 0)

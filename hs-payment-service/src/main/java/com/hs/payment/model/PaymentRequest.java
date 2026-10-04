@@ -23,7 +23,8 @@ import java.util.UUID;
                 @Index(name = "idx_payment_request_ref", columnList = "transfer_reference")
         },
         uniqueConstraints = {
-                @UniqueConstraint(name = "uk_payment_request_transfer_ref", columnNames = {"transfer_reference"})
+                @UniqueConstraint(name = "uk_payment_request_transfer_ref", columnNames = {"transfer_reference"}),
+                @UniqueConstraint(name = "uk_payment_request_invoice", columnNames = {"invoice_id"})
         }
 )
 @Getter
@@ -43,6 +44,9 @@ public class PaymentRequest extends BaseEntity {
 
     @Column(name = "contract_id", length = 36)
     String contractId;
+
+    @Column(name = "invoice_id", length = 36)
+    String invoiceId;
 
     @Column(name = "listing_id", length = 36)
     String listingId;

@@ -1,7 +1,9 @@
 package com.hs.payment.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.hs.common.advice.entity.AppException;
+import com.hs.common.time.BillingTime;
 import com.hs.payment.advice.PaymentErrorCode;
 import com.hs.payment.dto.*;
 import com.hs.payment.model.*;
@@ -44,6 +46,7 @@ public class PaymentRequestService {
     private final ObjectMapper objectMapper;
     private final StorageObjectRepository storageObjectRepository;
     private final PaymentProofUploadSessionService proofUploadSessionService;
+    private final BillingTime billingTime;
 
     @Value("${homespace.payment.confirmation-window-hours:24}")
     private long confirmationWindowHours = 24;
@@ -58,9 +61,7 @@ public class PaymentRequestService {
             String payerId,
             String payeeId,
             BigDecimal monthlyRent,
-            BigDecimal monthlyCharges,
             BigDecimal depositAmount,
-            BigDecimal totalAmount,
             String breakdownSnapshot,
             String excludedChargesSnapshot,
             Instant holdExpiresAt
@@ -71,6 +72,9 @@ public class PaymentRequestService {
         if (existing.isPresent()) {
             return existing.get();
         }
+
+        BigDecimal totalAmount = (monthlyRent != null ? monthlyRent : BigDecimal.ZERO)
+                .add(depositAmount != null ? depositAmount : BigDecimal.ZERO);
 
         // Validate bank accounts of both parties
         BankAccount payeeAccount = bankAccountService.getDefaultIncomingAccount(payeeId);
@@ -138,17 +142,6 @@ public class PaymentRequestService {
                     .sortOrder(sort++)
                     .build());
         }
-        if (monthlyCharges != null && monthlyCharges.compareTo(BigDecimal.ZERO) > 0) {
-            paymentLineItemRepository.save(PaymentLineItem.builder()
-                    .paymentRequestId(saved.getId())
-                    .type("SERVICE_FEE")
-                    .displayName("Chi phí cố định kỳ đầu")
-                    .amount(monthlyCharges)
-                    .quantity(1)
-                    .unitPrice(monthlyCharges)
-                    .sortOrder(sort++)
-                    .build());
-        }
         if (depositAmount != null && depositAmount.compareTo(BigDecimal.ZERO) > 0) {
             paymentLineItemRepository.save(PaymentLineItem.builder()
                     .paymentRequestId(saved.getId())
@@ -184,6 +177,57 @@ public class PaymentRequestService {
         return saved;
     }
 
+    /** One direct-transfer request per immutable issued invoice. */
+    @Transactional
+    public PaymentRequest createMonthlyPayment(String invoiceId, String contractId,
+            String rentalRequestId, String listingId, String payerId, String payeeId,
+            BigDecimal totalAmount, String breakdownSnapshot, Instant dueAt) {
+        if (totalAmount == null || totalAmount.signum() <= 0) {
+            throw new IllegalArgumentException("A monthly payment must have a positive amount");
+        }
+        Optional<PaymentRequest> existing = paymentRequestRepository.findByInvoiceId(invoiceId);
+        if (existing.isPresent()) return existing.get();
+
+        BankAccount payeeAccount = bankAccountService.getDefaultIncomingAccount(payeeId);
+        String reference = transferReferenceGenerator.generateUniqueReference();
+        PaymentRequest payment = paymentRequestRepository.save(PaymentRequest.builder()
+                .invoiceId(invoiceId).contractId(contractId).rentalRequestId(rentalRequestId)
+                .listingId(listingId).payerId(payerId).payeeId(payeeId)
+                .type(PaymentType.MONTHLY_RENT).direction(PaymentDirection.TENANT_TO_LANDLORD)
+                .status(PaymentStatus.AWAITING_TRANSFER).currency("VND")
+                .totalAmount(totalAmount).transferReference(reference)
+                .payeeBankAccountSnapshot(toJson(new BankAccountSnapshotDto(
+                        payeeAccount.getBankBin(), payeeAccount.getBankCode(), payeeAccount.getBankName(),
+                        payeeAccount.getAccountNumber(), payeeAccount.getAccountHolderName())))
+                .breakdownSnapshot(breakdownSnapshot).dueAt(dueAt)
+                .qrProvider("VIETQR_QUICK_LINK")
+                .qrImageUrl(vietQrProvider.generateQrImageUrl(payeeAccount.getBankBin(),
+                        payeeAccount.getAccountNumber(), payeeAccount.getAccountHolderName(), totalAmount, reference))
+                .build());
+        try {
+            List<Map<String, Object>> rows = objectMapper.readValue(breakdownSnapshot,
+                    new TypeReference<List<Map<String, Object>>>() {});
+            int sort = 0;
+            for (Map<String, Object> row : rows) {
+                BigDecimal amount = new BigDecimal(String.valueOf(row.get("amount")));
+                paymentLineItemRepository.save(PaymentLineItem.builder()
+                        .paymentRequestId(payment.getId())
+                        .type(String.valueOf(row.get("type")))
+                        .displayName(String.valueOf(row.get("description")))
+                        .amount(amount)
+                        .quantity(1)
+                        .unitPrice(amount)
+                        .calculationDescription(row.get("quantity") + " × " + row.get("unitPrice"))
+                        .sortOrder(sort++).build());
+            }
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Invalid monthly invoice line item snapshot", ex);
+        }
+        recordEvent(payment.getId(), PaymentEventType.CREATED, null,
+                PaymentStatus.AWAITING_TRANSFER, "SYSTEM", "SYSTEM", "Tạo thanh toán hóa đơn tháng", null);
+        return payment;
+    }
+
     @Transactional
     public PaymentRequestResponse reportTransfer(String paymentRequestId, String actorId, ReportTransferRequest request) {
         PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)
@@ -202,7 +246,8 @@ public class PaymentRequestService {
             return toResponse(payment, actorId);
         }
 
-        if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED) {
+        if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED
+                && !(payment.getType() == PaymentType.MONTHLY_RENT && payment.getStatus() == PaymentStatus.OVERDUE)) {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
         }
 
@@ -258,7 +303,7 @@ public class PaymentRequestService {
         }
 
         PaymentStatus oldStatus = payment.getStatus();
-        Instant now = Instant.now();
+        Instant now = payment.getType() == PaymentType.MONTHLY_RENT ? billingTime.now() : Instant.now();
 
         payment.setStatus(PaymentStatus.TRANSFER_REPORTED);
         payment.setPayerReportedAt(now);
@@ -306,11 +351,13 @@ public class PaymentRequestService {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
         }
 
-        Instant now = Instant.now();
+        Instant now = payment.getType() == PaymentType.MONTHLY_RENT ? billingTime.now() : Instant.now();
         payment.setStatus(PaymentStatus.CONFIRMED);
         payment.setPayeeConfirmedAt(now);
         payment.setConfirmedAt(now);
-        payment.setContractDueAt(now.plus(Duration.ofHours(contractDueHours)));
+        if (payment.getType() == PaymentType.INITIAL) {
+            payment.setContractDueAt(now.plus(Duration.ofHours(contractDueHours)));
+        }
 
         PaymentRequest saved = paymentRequestRepository.save(payment);
 
@@ -346,7 +393,7 @@ public class PaymentRequestService {
             throw new AppException(PaymentErrorCode.REJECTION_REASON_REQUIRED);
         }
 
-        Instant now = Instant.now();
+        Instant now = payment.getType() == PaymentType.MONTHLY_RENT ? billingTime.now() : Instant.now();
         payment.setStatus(PaymentStatus.REJECTED);
         payment.setRejectedAt(now);
         payment.setRejectedReason(request.reason().trim());
@@ -565,6 +612,31 @@ public class PaymentRequestService {
                 .orElse(false);
     }
 
+    @Transactional(readOnly = true)
+    public List<PaymentRequestResponse> getContractPaymentRequests(String contractId, String actorId) {
+        return paymentRequestRepository.findForContractAndActor(contractId, actorId).stream()
+                .map(payment -> toResponse(payment, actorId)).toList();
+    }
+
+    @Transactional
+    public void markMonthlyOverdue(String invoiceId, Instant now) {
+        paymentRequestRepository.findByInvoiceId(invoiceId).ifPresent(payment -> {
+            if (payment.getDueAt() != null && payment.getDueAt().isBefore(now)
+                    && payment.getStatus() == PaymentStatus.AWAITING_TRANSFER) {
+                payment.setStatus(PaymentStatus.OVERDUE);
+                paymentRequestRepository.save(payment);
+                recordEvent(payment.getId(), PaymentEventType.OVERDUE,
+                        PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE,
+                        "SYSTEM", "SYSTEM", "Hóa đơn tháng đã quá hạn", null);
+            }
+        });
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<PaymentRequest> findByInvoiceId(String invoiceId) {
+        return paymentRequestRepository.findByInvoiceId(invoiceId);
+    }
+
     public PaymentRequestResponse toResponse(PaymentRequest payment, String actorId) {
         List<PaymentLineItemResponse> lineItems = paymentLineItemRepository
                 .findByPaymentRequestIdOrderBySortOrderAsc(payment.getId()).stream()
@@ -599,6 +671,7 @@ public class PaymentRequestService {
                 .id(payment.getId())
                 .rentalRequestId(payment.getRentalRequestId())
                 .contractId(payment.getContractId())
+                .invoiceId(payment.getInvoiceId())
                 .listingId(payment.getListingId())
                 .payerId(payment.getPayerId())
                 .payeeId(payment.getPayeeId())

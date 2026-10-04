@@ -299,8 +299,8 @@ class RentalCostCalculatorTest {
         assertEquals(new BigDecimal("10500000"), res.estimatedMonthlyTotal());
         // depositAmount = 20,000,000
         assertEquals(new BigDecimal("20000000"), res.depositAmount());
-        // estimatedInitialTotal = 10,500,000 + 20,000,000 = 30,500,000
-        assertEquals(new BigDecimal("30500000"), res.estimatedInitialTotal());
+        // Khoản ban đầu chỉ gồm tiền thuê kỳ đầu + tiền cọc; phí cố định thu cuối kỳ.
+        assertEquals(new BigDecimal("30000000"), res.estimatedInitialTotal());
         // estimatedLeaseTotal = 10,500,000 * 12 + 20,000,000 = 126,000,000 + 20,000,000 = 146,000,000
         assertEquals(new BigDecimal("146000000"), res.estimatedLeaseTotal());
     }

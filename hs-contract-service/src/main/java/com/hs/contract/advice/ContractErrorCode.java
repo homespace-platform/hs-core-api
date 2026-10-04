@@ -45,7 +45,13 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     SYSTEM_TEMPLATE_NOT_AVAILABLE(6040, "HomeSpace chưa có mẫu hợp đồng cho loại hình bất động sản này. Vui lòng liên hệ quản trị viên để được hỗ trợ.", HttpStatus.CONFLICT),
     SYSTEM_TEMPLATE_ALREADY_EXISTS(6041, "Loại hình này đã có mẫu hợp đồng hệ thống. Vui lòng cập nhật bằng phiên bản mới trong mẫu hiện có.", HttpStatus.CONFLICT),
     SYSTEM_TEMPLATE_CONFIGURATION_INVALID(6042, "Cấu hình mẫu hợp đồng hệ thống chưa hợp lệ. Vui lòng liên hệ quản trị viên.", HttpStatus.CONFLICT),
-    SYSTEM_TEMPLATE_CATEGORY_INVALID(6043, "Mẫu hợp đồng chỉ áp dụng cho nhà nguyên căn, căn hộ chung cư hoặc phòng trọ.", HttpStatus.BAD_REQUEST);
+    SYSTEM_TEMPLATE_CATEGORY_INVALID(6043, "Mẫu hợp đồng chỉ áp dụng cho nhà nguyên căn, căn hộ chung cư hoặc phòng trọ.", HttpStatus.BAD_REQUEST),
+    INVOICE_NOT_FOUND(6050, "Không tìm thấy hóa đơn tháng", HttpStatus.NOT_FOUND),
+    INVOICE_NOT_READY(6051, "Kỳ thuê chưa kết thúc, kỳ trước chưa chốt hoặc hóa đơn đã phát hành", HttpStatus.CONFLICT),
+    INVOICE_METER_INVALID(6052, "Chỉ số công tơ thiếu hoặc thấp hơn chỉ số đầu kỳ", HttpStatus.BAD_REQUEST),
+    INVOICE_TERMS_INCOMPLETE(6053, "Thiếu dữ liệu biểu phí hoặc chỉ số đầu kỳ trong hợp đồng; vui lòng liên hệ quản trị viên", HttpStatus.CONFLICT),
+    INVOICE_NOT_ACTIVE(6054, "Chỉ hợp đồng đang hiệu lực mới phát sinh hóa đơn", HttpStatus.CONFLICT),
+    INVOICE_AMOUNT_INVALID(6055, "Số tiền hoặc phí phát sinh không hợp lệ", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

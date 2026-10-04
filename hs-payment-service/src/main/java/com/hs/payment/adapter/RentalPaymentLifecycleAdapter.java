@@ -30,10 +30,7 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
         String listingId = req.getListing() != null ? req.getListing().getId() : null;
         BigDecimal monthlyRent = req.getEffectiveMonthlyRent() != null ? req.getEffectiveMonthlyRent()
                 : (req.getMonthlyRentPrice() != null ? req.getMonthlyRentPrice() : BigDecimal.ZERO);
-        BigDecimal monthlyCharges = req.getEstimatedMonthlyCharges() != null ? req.getEstimatedMonthlyCharges() : BigDecimal.ZERO;
         BigDecimal deposit = req.getDepositAmount() != null ? req.getDepositAmount() : BigDecimal.ZERO;
-        BigDecimal total = req.getEstimatedInitialTotal() != null ? req.getEstimatedInitialTotal()
-                : monthlyRent.add(monthlyCharges).add(deposit);
 
         paymentRequestService.createInitialPayment(
                 req.getId(),
@@ -41,9 +38,7 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
                 req.getRenterId(),
                 req.getOwnerId(),
                 monthlyRent,
-                monthlyCharges,
                 deposit,
-                total,
                 req.getCostBreakdownSnapshot(),
                 req.getExcludedChargesSnapshot(),
                 holdExpiresAt
