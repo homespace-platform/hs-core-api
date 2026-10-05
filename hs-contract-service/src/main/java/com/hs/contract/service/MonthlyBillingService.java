@@ -60,6 +60,8 @@ public class MonthlyBillingService {
     public List<MonthlyInvoiceResponse> list(String contractId, String actorId) {
         Contract contract = requireParty(contractId, actorId);
         if (contract.getStatus() == ContractStatus.ACTIVE) syncContract(contractId);
+        else if (contract.getStatus() == ContractStatus.TERMINATED)
+            invoices.findByContractIdOrderByPeriodIndexDesc(contractId).forEach(this::reconcile);
         return invoices.findByContractIdOrderByPeriodIndexDesc(contractId).stream()
                 .filter(invoice -> actorId.equals(contract.getLandlordId())
                         || invoice.getStatus() != MonthlyInvoiceStatus.DRAFT)
@@ -617,6 +619,8 @@ public class MonthlyBillingService {
             }
         } else if (payment.isPresent() && payment.get().getStatus() != PaymentStatus.TRANSFER_REPORTED
                 && payment.get().getStatus() != PaymentStatus.DISPUTED
+                && contracts.findById(invoice.getContractId())
+                    .map(contract -> contract.getStatus() == ContractStatus.ACTIVE).orElse(false)
                 && invoice.getDueAt() != null && invoice.getDueAt().isBefore(time.now())) {
             if (invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE) {
                 invoice.setStatus(MonthlyInvoiceStatus.OVERDUE);

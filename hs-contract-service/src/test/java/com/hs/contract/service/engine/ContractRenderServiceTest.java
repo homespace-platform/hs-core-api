@@ -24,6 +24,11 @@ class ContractRenderServiceTest {
         assertEquals("HD-20260905-DEMO", ContractRenderService.resolvePath(dummy, "contract.number"));
         assertEquals("Căn hộ chung cư", ContractRenderService.resolvePath(dummy, "property.propertyType"));
         assertNotNull(ContractRenderService.resolvePath(dummy, "rent.amountNumber"));
+        assertEquals("3", ContractRenderService.resolvePath(dummy, "contract.schemaVersion"));
+        assertTrue(String.valueOf(ContractRenderService.resolvePath(dummy, "rent.paymentMethod"))
+                .contains("Chuyển khoản trực tiếp"));
+        assertTrue(String.valueOf(ContractRenderService.resolvePath(dummy, "contract.specialTerms"))
+                .contains("ngày quá hạn thứ 05"));
 
         // Must not contain rentalMode or B2B tenant fields
         assertNull(ContractRenderService.resolvePath(dummy, "lease.rentalMode"));

@@ -76,9 +76,11 @@ class ContractDataBuilderTest {
                 .contains("ngày thứ 4 sau khi kết thúc mỗi kỳ thuê"));
         assertEquals(snapshots.getFinancial().get("paymentDueDay"),
                 snapshots.getPolicies().get("paymentDueDay"));
-        assertTrue(snapshots.getSpecialTerms().contains("quá 05 ngày liên tiếp"));
+        assertTrue(snapshots.getSpecialTerms().contains("ngày quá hạn thứ 05"));
         assertTrue(snapshots.getSpecialTerms().contains("bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận"));
         assertEquals(true, snapshots.getPolicies().get("overdueLandlordTerminationAfterFiveDays"));
+        assertTrue(String.valueOf(snapshots.getFinancial().get("depositDescription"))
+                .contains("điều khoản vi phạm hoặc chấm dứt"));
 
         // Verify rentalMode and B2B tenant fields are absent
         org.junit.jupiter.api.Assertions.assertFalse(snapshots.getLease().containsKey("rentalMode"),

@@ -178,11 +178,11 @@ public class ContractRenderService {
                 "amountWords", "Mười lăm triệu đồng chẵn",
                 "paymentCycle", "Hàng tháng",
                 "paymentDueDay", MonthlyBillingSchedule.paymentDueDescription(),
-                "paymentMethod", "Thanh toán trực tuyến qua hệ thống HomeSpace",
+                "paymentMethod", "Chuyển khoản trực tiếp vào tài khoản ngân hàng của Bên A chỉ định trong Hợp đồng này",
                 "depositAmountValue", "15000000",
                 "depositAmountNumber", "15.000.000 VNĐ",
                 "depositAmountWords", "Mười lăm triệu đồng chẵn",
-                "depositDescription", "Tiền đặt cọc tương đương 01 tháng tiền thuê nhà. Khoản tiền cọc này được bên A hoàn trả đầy đủ cho bên B ngay sau khi chấm dứt hợp đồng sau khi đã khấu trừ các chi phí sinh hoạt phát sinh chưa thanh toán (nếu có)."
+                "depositDescription", "Khi hết hạn và hoàn tất bàn giao, Bên A hoàn cho Bên B phần cọc còn phải hoàn sau quyết toán, trừ trường hợp xử lý cọc theo điều khoản vi phạm hoặc chấm dứt đã ký."
         );
 
         Map<String, Object> initialPayment = Map.of(
@@ -226,7 +226,9 @@ public class ContractRenderService {
 
         return buildDataModelFromSnapshots(
                 landlord, tenant, property, lease, financial, charges, equipments, meters,
-                initialPayment, amenities, Map.of(), "Bên B giữ gìn an ninh trật tự sau 23h.", 2, 1,
+                initialPayment, amenities,
+                Map.of("latePaymentFeeMode", "NONE", "overdueLandlordTerminationAfterFiveDays", true),
+                ContractDataBuilder.DEFAULT_OVERDUE_TERMS, 3, 1,
                 "HD-20260905-DEMO", LocalDate.now(), "Thành phố Hồ Chí Minh"
         );
     }
@@ -299,7 +301,7 @@ public class ContractRenderService {
         rent.put("amountNumber", getStr(src, "amountNumber", ""));
         rent.put("amountWords", getStr(src, "amountWords", ""));
         rent.put("paymentCycle", getStr(src, "paymentCycle", "Hàng tháng"));
-        rent.put("paymentDueDay", getStr(src, "paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng"));
+        rent.put("paymentDueDay", getStr(src, "paymentDueDay", MonthlyBillingSchedule.paymentDueDescription()));
         rent.put("paymentMethod", getStr(src, "paymentMethod", "Chuyển khoản trực tiếp vào tài khoản ngân hàng của Bên A"));
         model.put("rent", rent);
 

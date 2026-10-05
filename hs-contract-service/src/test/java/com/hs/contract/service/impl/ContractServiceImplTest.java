@@ -68,13 +68,18 @@ class ContractServiceImplTest {
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
         UpdateContractRevisionRequest request = new UpdateContractRevisionRequest();
         request.setFinancial(Map.of("paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng"));
-        request.setPolicies(Map.of("latePaymentFeeMode", "NONE"));
+        request.setPolicies(Map.of("latePaymentFeeMode", "NONE",
+                "overdueLandlordTerminationAfterFiveDays", true));
 
         var updated = service.updateRevision("contract-1", request);
 
         assertEquals(4, updated.getFinancial().get("paymentDueOffsetDays"));
         assertEquals(updated.getFinancial().get("paymentDueDay"),
                 updated.getPolicies().get("paymentDueDay"));
+        assertEquals(false, updated.getPolicies().get("overdueLandlordTerminationAfterFiveDays"));
+        request.setSpecialTerms("bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận");
+        var withClause = service.updateRevision("contract-1", request);
+        assertEquals(true, withClause.getPolicies().get("overdueLandlordTerminationAfterFiveDays"));
     }
 
     @Test

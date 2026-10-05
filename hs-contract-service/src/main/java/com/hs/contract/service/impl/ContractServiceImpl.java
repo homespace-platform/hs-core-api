@@ -445,8 +445,13 @@ public class ContractServiceImpl implements ContractService {
         }
         Map<String, Object> policies = request.getPolicies() == null ? null
                 : new LinkedHashMap<>(request.getPolicies());
-        if (policies != null)
+        if (policies != null) {
             policies.put("paymentDueDay", MonthlyBillingSchedule.paymentDueDescription());
+            // A removed clause cannot remain enabled through an old structured draft flag.
+            if (request.getSpecialTerms() == null || !request.getSpecialTerms()
+                    .contains("bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận"))
+                policies.put("overdueLandlordTerminationAfterFiveDays", false);
+        }
 
         ContractRevision newRevision = ContractRevision.builder()
                 .contract(contract)

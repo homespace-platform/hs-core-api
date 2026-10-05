@@ -69,7 +69,7 @@ public class ContractFieldCatalog {
         add("rent.paymentMethod", "Phương thức thanh toán", "Giá thuê & Cọc", "TEXT", "Kênh thanh toán tiền thuê, chuyển khoản trực tiếp vào tài khoản ngân hàng của Bên A", "Chuyển khoản trực tiếp vào tài khoản ngân hàng của Bên A chỉ định trong Hợp đồng này", OPTIONAL);
         add("deposit.amountNumber", "Tiền cọc bằng số", "Giá thuê & Cọc", "NUMBER", "Số tiền đặt cọc", "10.000.000 VNĐ", ALL);
         add("deposit.amountWords", "Tiền cọc bằng chữ", "Giá thuê & Cọc", "TEXT", "Số tiền đặt cọc viết bằng chữ tiếng Việt", "Mười triệu đồng chẵn", ALL);
-        add("deposit.description", "Nội dung quy định cọc", "Giá thuê & Cọc", "TEXT", "Chi tiết điều khoản cọc và hoàn trả tiền cọc", "Tiền cọc được hoàn lại sau khi hết hạn hợp đồng và trừ các chi phí chưa thanh toán (nếu có).", OPTIONAL);
+        add("deposit.description", "Nội dung quy định cọc", "Giá thuê & Cọc", "TEXT", "Chi tiết điều khoản cọc và hoàn trả tiền cọc, đọc cùng điều khoản xử lý vi phạm", "Phần cọc còn phải hoàn được chuyển cho bên thuê sau khi bàn giao và quyết toán, trừ trường hợp xử lý theo điều khoản vi phạm đã ký.", OPTIONAL);
 
         // --- Chỉ số điện nước ban đầu ---
         add("meters.electricityInitial", "Chỉ số điện ban đầu", "Chỉ số bàn giao", "NUMBER", "Bắt buộc khi tiền điện tính theo kWh; không áp dụng khi điện không tính theo công tơ", "1250 kWh", OPTIONAL);
@@ -81,7 +81,7 @@ public class ContractFieldCatalog {
         add("contract.signingCity", "Địa điểm ký", "Pháp lý hợp đồng", "TEXT", "Tỉnh/Thành phố lập hợp đồng", "Thành phố Hồ Chí Minh", OPTIONAL);
         add("contract.schemaVersion", "Phiên bản schema hợp đồng", "Pháp lý hợp đồng", "NUMBER", "Phiên bản cấu trúc dữ liệu hợp đồng (mặc định 3)", "3", OPTIONAL);
         add("contract.revisionNumber", "Số lần sửa đổi hợp đồng", "Pháp lý hợp đồng", "NUMBER", "Số thứ tự phiên bản sửa đổi của hợp đồng", "1", OPTIONAL);
-        add("contract.specialTerms", "Điều khoản đặc biệt / Thỏa thuận riêng", "Pháp lý hợp đồng", "TEXT", "Nội dung điều khoản thỏa thuận bổ sung giữa hai bên", "Bên B không được gây ồn sau 23h.", OPTIONAL);
+        add("contract.specialTerms", "Điều khoản đặc biệt / Thỏa thuận riêng", "Pháp lý hợp đồng", "TEXT", "Điều khoản quá hạn/chấm dứt theo revision và phí chậm trả theo cấu hình; đặt một lần trong điều xử lý vi phạm", "Quá hạn đến mốc xử lý, hai bên đối soát công nợ và thực hiện phương án theo điều khoản đã ký.", OPTIONAL);
 
         // --- Bất động sản ---
         add("property.listingCode", "Mã tin đăng", "Bất động sản", "TEXT", "Mã hiệu quản lý của tin đăng", "HS-2026-001", OPTIONAL);

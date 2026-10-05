@@ -47,6 +47,15 @@ import java.util.*;
 @Component
 public class ContractDataBuilder {
 
+    public static final String DEFAULT_OVERDUE_TERMS = "Kể từ 00:00 ngày quá hạn thứ 05 tính theo giờ Việt Nam sau hạn ghi trên hóa đơn, "
+            + "bên cho thuê được chọn chuyển công nợ sang kỳ sau hoặc thông báo chấm dứt hợp đồng "
+            + "do bên thuê vi phạm nghĩa vụ thanh toán. Hai bên có thể thỏa thuận chấm dứt sớm; "
+            + "nếu bên thuê không đồng ý, bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận "
+            + "sau khi thông báo và thực tế nhận lại phòng, chìa khóa, tài sản cho thuê. "
+            + "Khi hoàn tất bàn giao theo nhánh vi phạm này, toàn bộ tiền cọc đã nhận được ghi nhận "
+            + "thuộc bên cho thuê; công nợ hóa đơn chưa thanh toán tiếp tục được theo dõi riêng. "
+            + "Phí chậm trả chỉ áp dụng khi được ghi rõ trong hợp đồng.";
+
     private final UserRepository userRepository;
     private final AddressRepository addressRepository;
     private final ObjectMapper objectMapper;
@@ -113,14 +122,7 @@ public class ContractDataBuilder {
         Map<String, Object> policies = buildPolicies(listingSnapshot, request);
         Map<String, Object> meters = buildMeters(listingSnapshot, listing, occupants);
 
-        String specialTerms = "Nếu khoản thanh toán quá hạn quá 05 ngày liên tiếp sau hạn ghi trên hóa đơn, "
-                + "bên cho thuê được chọn chuyển công nợ sang kỳ sau hoặc thông báo chấm dứt hợp đồng "
-                + "do bên thuê vi phạm nghĩa vụ thanh toán. Hai bên có thể thỏa thuận chấm dứt sớm; "
-                + "nếu bên thuê không đồng ý, bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận "
-                + "sau khi thông báo và thực tế nhận lại phòng, chìa khóa, tài sản cho thuê. "
-                + "Khi hoàn tất bàn giao theo nhánh vi phạm này, toàn bộ tiền cọc đã nhận được ghi nhận "
-                + "thuộc bên cho thuê; công nợ hóa đơn chưa thanh toán tiếp tục được theo dõi riêng. "
-                + "Phí chậm trả chỉ áp dụng khi được ghi rõ trong hợp đồng.";
+        String specialTerms = DEFAULT_OVERDUE_TERMS;
 
         return ContractSnapshots.builder()
                 .landlord(landlord)
@@ -734,8 +736,9 @@ public class ContractDataBuilder {
         map.put("depositAmountValue", deposit.toPlainString());
         map.put("depositAmountNumber", ContractRenderService.formatVND(deposit));
         map.put("depositAmountWords", VietnameseCurrencyTextConverter.toWords(deposit));
-        map.put("depositDescription", "Tiền đặt cọc được Bên A hoàn trả cho Bên B sau khi hết hạn hợp đồng, "
-                + "sau khi đã khấu trừ các khoản chi phí phát sinh chưa thanh toán (nếu có).");
+        map.put("depositDescription", "Khi hết hạn và hoàn tất bàn giao, Bên A hoàn cho Bên B phần cọc còn phải hoàn "
+                + "sau khi quyết toán các khoản phát sinh chưa thanh toán, trừ trường hợp xử lý cọc theo "
+                + "điều khoản vi phạm hoặc chấm dứt đã được hai bên ký trong hợp đồng.");
         return map;
     }
 

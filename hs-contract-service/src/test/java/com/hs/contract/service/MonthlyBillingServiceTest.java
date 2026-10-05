@@ -563,6 +563,7 @@ class MonthlyBillingServiceTest {
         when(contracts.findByIdForUpdate("contract")).thenReturn(Optional.of(contract));
         invoice.setStatus(MonthlyInvoiceStatus.OVERDUE);
         invoice.setDueAt(Instant.parse("2026-11-05T16:59:59Z"));
+        invoice.setPaymentRequestId("monthly-payment");
         when(time.now()).thenReturn(Instant.parse("2026-11-13T17:01:00Z"));
         when(time.today()).thenReturn(LocalDate.of(2026, 11, 14));
         when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder()
@@ -595,6 +596,11 @@ class MonthlyBillingServiceTest {
         assertEquals(DepositStatus.RETAINED_BY_LANDLORD, deposit.getStatus());
         verify(listingStatusService).releaseRentedAfterTermination("listing", "landlord");
         verify(parkingReservations).releaseReservationsForContract("contract");
+        when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(invoice));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder()
+                .status(PaymentStatus.CONFIRMED).confirmedAt(Instant.parse("2026-11-14T01:00:00Z")).build()));
+        service.list("contract", "tenant");
+        assertEquals(MonthlyInvoiceStatus.PAID, invoice.getStatus());
     }
 
     @Test
