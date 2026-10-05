@@ -30,6 +30,23 @@ class LatePaymentPolicyTest {
     }
 
     @Test
+    void simplePoliciesChargeOnceOrPerDayStartingTheDayAfterDue() {
+        LatePaymentPolicy once = LatePaymentPolicy.from(Map.of(
+                "latePaymentFeeMode", "FIXED_ONCE", "latePaymentFeeAmount", 100000,
+                "latePaymentFeeGraceDays", 0));
+        LatePaymentPolicy daily = LatePaymentPolicy.from(Map.of(
+                "latePaymentFeeMode", "FIXED_PER_DAY", "latePaymentFeeAmount", 100000,
+                "latePaymentFeeGraceDays", 0));
+        Instant firstLateDay = Instant.parse("2026-11-05T17:00:00Z");
+        Instant fifthLateDay = Instant.parse("2026-11-09T17:00:00Z");
+
+        assertEquals(new BigDecimal("100000"), once.accrued(DUE, firstLateDay, BillingTime.ZONE));
+        assertEquals(new BigDecimal("100000"), once.accrued(DUE, fifthLateDay, BillingTime.ZONE));
+        assertEquals(new BigDecimal("100000"), daily.accrued(DUE, firstLateDay, BillingTime.ZONE));
+        assertEquals(new BigDecimal("500000"), daily.accrued(DUE, fifthLateDay, BillingTime.ZONE));
+    }
+
+    @Test
     void dailyPenaltyAccruesExactlyOncePerLocalDayAndStopsAtCap() {
         LatePaymentPolicy policy = LatePaymentPolicy.from(Map.of(
                 "latePaymentFeeMode", "FIXED_PER_DAY", "latePaymentFeeAmount", 20000,

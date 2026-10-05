@@ -3,7 +3,7 @@
 ## Luồng đang triển khai
 
 1. Chỉ hợp đồng `ACTIVE` được đồng bộ. Mỗi kỳ tính từ `moveInDate.plusMonths(n)` đến `moveInDate.plusMonths(n + 1)` (ngày cuối không bao gồm). Job chạy mỗi phút và tạo **nháp từ ngày cuối cùng của kỳ**. Khóa duy nhất `(contract_id, period_index)` tránh tạo trùng sau restart hoặc nhiều instance.
-2. Ngày cuối kỳ, backend ghi log nhắc chủ nhà chốt chỉ số. Chủ nhà lưu chỉ số điện/nước cuối kỳ và khoản phát sinh (nếu có) qua `prepare`. Hạn lưu là 10:00 sáng ngày kế tiếp (giờ Việt Nam). Sau mốc này job tự phát hành nếu dữ liệu hợp lệ. Nếu thiếu chỉ số hoặc thiếu đơn giá số, job ghi log cần xử lý và giữ nháp, tuyệt đối không ước tính. Chủ nhà vẫn có thể bổ sung rồi phát hành thủ công. Đơn giá lấy từ bản phí đã ký; hợp đồng cũ thiếu đơn giá số chỉ được đối chiếu bằng snapshot bất biến nếu nội dung bản ký khớp chính xác. Nếu không đối chiếu được, API chặn phát hành thay vì đoán giá.
+2. Ngày cuối kỳ, backend ghi log nhắc chủ nhà chốt chỉ số. Chủ nhà có thể dùng `issue` để chốt chỉ số điện/nước và phí phát sinh rồi **phát hành ngay trong ngày cuối kỳ**; người thuê thấy hóa đơn và QR để thanh toán ngay. Nếu chỉ dùng `prepare`, dữ liệu còn là nháp, không hiển thị cho người thuê; job tự phát hành từ 10:00 sáng ngày kế tiếp (giờ Việt Nam) khi đã đủ dữ liệu hợp lệ. Nếu thiếu chỉ số hoặc thiếu đơn giá số, job ghi log cần xử lý và giữ nháp, tuyệt đối không ước tính. Chủ nhà vẫn có thể bổ sung rồi phát hành thủ công. Đơn giá lấy từ bản phí đã ký; hợp đồng cũ thiếu đơn giá số chỉ được đối chiếu bằng snapshot bất biến nếu nội dung bản ký khớp chính xác. Nếu không đối chiếu được, API chặn phát hành thay vì đoán giá.
    - `STATE_WATER_RATE` chưa có đơn giá số bất biến nên hiện chặn phát hành tự động; cần chuẩn hóa điều khoản/đơn giá trước khi hỗ trợ. Các khoản không có công thức (giờ dùng, thỏa thuận riêng…) chỉ được tính khi chủ nhà khai minh bạch vào dòng phát sinh.
 3. Khoản ban đầu chỉ gồm tiền thuê kỳ đầu và tiền cọc (nếu có). Hóa đơn cuối kỳ đầu **không thu lại** tiền thuê, nhưng gồm phí dịch vụ cố định, điện/nước thực dùng và khoản phát sinh. Với hợp đồng cũ đã trả trước phí cố định, kỳ đầu không thu lại khoản đó. Kỳ sau gồm tiền thuê, phí cố định theo snapshot hợp đồng, điện/nước và khoản phát sinh.
 4. Hóa đơn có tổng dương tạo đúng một `PaymentRequest` loại `MONTHLY_RENT`, VietQR chuyển trực tiếp người thuê → chủ nhà. Người thuê gửi chứng từ, chủ nhà xác nhận hoặc từ chối. Chỉ xác nhận mới chuyển bill thành `PAID`. Hóa đơn 0 đồng được đóng `PAID` mà không tạo yêu cầu chuyển khoản.
@@ -14,22 +14,22 @@ Chưa làm: tự trích tiền ngân hàng, thanh toán từng phần, chấm d�
 
 ## Dev test thời gian
 
-Trong `.env.dev` của core API:
+Trong `.env` của core API khi chạy bằng cấu hình VS Code của dự án:
 
 ```properties
-HOMESPACE_TIME_SIMULATED_AT=2026-11-01T03:00:00Z
+HOMESPACE_TIME_SIMULATED_AT=2026-11-01T10:00:00
 ```
 
-Để trống để dùng giờ thực. Chỉ cho phép giá trị khác rỗng ở profile `dev`/`test`. Sau khi đổi giá trị, khởi động lại core API; job đồng bộ trong vòng một phút hoặc tải lại trang chi tiết hợp đồng để đồng bộ ngay. Chỉ đồng hồ của nghiệp vụ hóa đơn/thanh toán tháng được giả lập; OTP, SmartCA, lưu trữ và audit dùng giờ thực.
+Giá trị không có `Z`/offset được hiểu là **giờ Việt Nam** (`Asia/Ho_Chi_Minh`), không cần tự đổi sang UTC. Giá trị ISO-8601 có `Z` hoặc offset vẫn được hỗ trợ để tương thích với cấu hình cũ. Để trống để dùng giờ thực. Chỉ cho phép giá trị khác rỗng ở profile `dev`/`test`. Sau khi đổi giá trị, khởi động lại core API; log khởi động sẽ hiện giờ Việt Nam và UTC đã áp dụng. Job đồng bộ trong vòng một phút hoặc tải lại trang chi tiết hợp đồng để đồng bộ ngay. Chỉ đồng hồ của nghiệp vụ hóa đơn/thanh toán tháng được giả lập; OTP, SmartCA, lưu trữ và audit dùng giờ thực.
 
 Ví dụ hợp đồng bắt đầu 01/10/2026, ban đầu đã thanh toán tháng 10:
 
-- `2026-10-30T17:00:00Z` (31/10 00:00): nháp xuất hiện, log nhắc chủ nhà chốt công tơ.
-- `2026-11-01T03:00:00Z` (01/11 10:00): tự phát hành nếu đã lưu chỉ số. Bill tháng 10 không có dòng tiền thuê.
-- `2026-11-02T17:00:00Z` (03/11 00:00): log nhắc người thuê thanh toán.
-- `2026-11-05T17:00:00Z` (06/11 00:00): bill chưa trả chuyển `OVERDUE`, bắt đầu tính phí nếu hợp đồng đã ký có điều khoản. Người thuê vẫn có thể gửi chứng từ.
-- `2026-11-09T17:00:00Z` (10/11 00:00): log chủ nhà cần xử lý quá hạn; không tự chấm dứt.
-- `2026-12-01T03:00:00Z`: kỳ 01/11–01/12 tạo nháp riêng, bill tháng 10 giữ nguyên công nợ.
+- `2026-10-31T00:00:00` (31/10 00:00): nháp xuất hiện cho chủ nhà; có thể chốt và phát hành ngay, người thuê chỉ thấy sau khi phát hành.
+- `2026-11-01T10:00:00` (01/11 10:00): tự phát hành nếu đã lưu chỉ số. Bill tháng 10 không có dòng tiền thuê.
+- `2026-11-03T00:00:00` (03/11 00:00): log nhắc người thuê thanh toán.
+- `2026-11-06T00:00:00` (06/11 00:00): bill chưa trả chuyển `OVERDUE`, bắt đầu tính phí nếu hợp đồng đã ký có điều khoản. Người thuê vẫn có thể gửi chứng từ.
+- `2026-11-10T00:00:00` (10/11 00:00): log chủ nhà cần xử lý quá hạn; không tự chấm dứt.
+- `2026-11-30T00:00:00`: kỳ 01/11–01/12 tạo nháp riêng; nếu chủ nhà đã chốt chỉ số, có thể tự phát hành từ `2026-12-01T10:00:00`. Bill tháng 10 giữ nguyên công nợ.
 
 ## API qua gateway
 

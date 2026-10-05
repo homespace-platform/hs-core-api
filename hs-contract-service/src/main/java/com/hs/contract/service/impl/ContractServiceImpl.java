@@ -30,6 +30,7 @@ import com.hs.contract.repository.ContractRevisionRepository;
 import com.hs.contract.repository.ContractTemplateVersionRepository;
 import com.hs.contract.service.ContractService;
 import com.hs.contract.service.LatePaymentPolicy;
+import com.hs.contract.service.MonthlyBillingSchedule;
 import com.hs.contract.service.converter.DocumentConversionService;
 import com.hs.contract.service.engine.ContractDataBuilder;
 import com.hs.contract.service.engine.ContractFieldCatalog;
@@ -432,6 +433,20 @@ public class ContractServiceImpl implements ContractService {
 
         int nextRev = revisionRepository.findMaxRevisionNumberByContractId(contractId) + 1;
 
+        // An unsigned draft may predate the lease-anchored billing schedule.
+        // Move it to the new rule when the landlord creates its next revision;
+        // signed revisions are immutable and retain their original due date.
+        Map<String, Object> financial = request.getFinancial() == null ? null
+                : new LinkedHashMap<>(request.getFinancial());
+        if (financial != null) {
+            financial.put("paymentDueDay", MonthlyBillingSchedule.paymentDueDescription());
+            financial.put("paymentDueOffsetDays", MonthlyBillingSchedule.PAYMENT_WINDOW_DAYS);
+        }
+        Map<String, Object> policies = request.getPolicies() == null ? null
+                : new LinkedHashMap<>(request.getPolicies());
+        if (policies != null)
+            policies.put("paymentDueDay", MonthlyBillingSchedule.paymentDueDescription());
+
         ContractRevision newRevision = ContractRevision.builder()
                 .contract(contract)
                 .revisionNumber(nextRev)
@@ -441,13 +456,13 @@ public class ContractServiceImpl implements ContractService {
                 .tenantSnapshot(toJson(request.getTenant()))
                 .propertySnapshot(toJson(request.getProperty()))
                 .leaseSnapshot(toJson(request.getLease()))
-                .financialSnapshot(toJson(request.getFinancial()))
+                .financialSnapshot(toJson(financial))
                 .chargesSnapshot(toJson(request.getCharges()))
                 .equipmentSnapshot(toJson(request.getEquipments()))
                 .initialMetersSnapshot(toJson(request.getMeters()))
                 .initialPaymentSnapshot(toJson(request.getInitialPayment()))
                 .amenitiesSnapshot(toJson(request.getAmenities()))
-                .policiesSnapshot(toJson(request.getPolicies()))
+                .policiesSnapshot(toJson(policies))
                 .specialTerms(request.getSpecialTerms())
                 .revisionNote(request.getRevisionNote() != null ? request.getRevisionNote() : "Cập nhật thỏa thuận hợp đồng (Revision " + nextRev + ")")
                 .build();

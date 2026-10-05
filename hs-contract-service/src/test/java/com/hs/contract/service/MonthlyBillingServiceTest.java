@@ -95,6 +95,65 @@ class MonthlyBillingServiceTest {
                 result.lines().stream().map(l -> l.type()).toList());
         assertEquals("monthly-payment", result.paymentRequestId());
         assertEquals(MonthlyInvoiceStatus.UNPAID, result.status());
+        assertEquals(Instant.parse("2026-11-05T16:59:59Z"), result.dueAt());
+    }
+
+    @Test
+    void landlordCanIssueOnFinalDaySoTenantCanPayImmediately() {
+        invoice.setPeriodStart(LocalDate.of(2026, 10, 5));
+        invoice.setPeriodEndExclusive(LocalDate.of(2026, 11, 5));
+        when(time.today()).thenReturn(LocalDate.of(2026, 11, 4));
+        when(time.now()).thenReturn(Instant.parse("2026-11-03T17:01:00Z"));
+        ContractRevision revision = revisions.findById("revision").orElseThrow();
+        revision.setFinancialSnapshot("{\"amountValue\":\"5000000\",\"amountNumber\":\"5.000.000 VNĐ/tháng\",\"paymentDueOffsetDays\":4}");
+
+        MonthlyInvoiceResponse result = service.issue("invoice", "landlord",
+                new IssueMonthlyInvoiceRequest(new BigDecimal("150"), new BigDecimal("12"), List.of()));
+
+        assertEquals(MonthlyInvoiceStatus.UNPAID, result.status());
+        assertEquals("monthly-payment", result.paymentRequestId());
+        assertEquals(Instant.parse("2026-11-09T16:59:59Z"), result.dueAt());
+    }
+
+    @Test
+    void landlordCannotIssueBeforeFinalDay() {
+        invoice.setPeriodEndExclusive(LocalDate.of(2026, 11, 5));
+        when(time.today()).thenReturn(LocalDate.of(2026, 11, 3));
+
+        assertThrows(AppException.class, () -> service.issue("invoice", "landlord",
+                new IssueMonthlyInvoiceRequest(new BigDecimal("150"), new BigDecimal("12"), List.of())));
+        verify(payments, never()).createMonthlyPayment(anyString(), anyString(), anyString(),
+                anyString(), anyString(), anyString(), any(), anyString(), any());
+    }
+
+    @Test
+    void tenantCannotSeeLandlordDraftButSeesIssuedInvoice() {
+        Contract contract = contracts.findById("contract").orElseThrow();
+        when(contracts.findByIdForUpdate("contract")).thenReturn(Optional.of(contract));
+        when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(invoice));
+
+        assertTrue(service.list("contract", "tenant").isEmpty());
+        assertEquals(1, service.list("contract", "landlord").size());
+
+        invoice.setStatus(MonthlyInvoiceStatus.UNPAID);
+        assertEquals(1, service.list("contract", "tenant").size());
+    }
+
+    @Test
+    void newContractPaymentWindowFollowsLeasePeriodRatherThanCalendarFifth() {
+        invoice.setPeriodStart(LocalDate.of(2026, 10, 10));
+        invoice.setPeriodEndExclusive(LocalDate.of(2026, 11, 10));
+        when(time.today()).thenReturn(LocalDate.of(2026, 11, 10));
+        when(time.now()).thenReturn(Instant.parse("2026-11-10T03:00:00Z"));
+        ContractRevision revision = revisions.findById("revision").orElseThrow();
+        revision.setFinancialSnapshot("{\"amountValue\":\"5000000\",\"amountNumber\":\"5.000.000 VNĐ/tháng\",\"paymentDueOffsetDays\":4}");
+
+        MonthlyInvoiceResponse result = service.issue("invoice", "landlord",
+                new IssueMonthlyInvoiceRequest(new BigDecimal("150"), new BigDecimal("12"), List.of()));
+
+        assertEquals(Instant.parse("2026-11-14T16:59:59Z"), result.dueAt());
+        assertEquals(Instant.parse("2026-11-18T17:00:00Z"),
+                MonthlyBillingSchedule.actionRequiredAt(result.dueAt()));
     }
 
     @Test

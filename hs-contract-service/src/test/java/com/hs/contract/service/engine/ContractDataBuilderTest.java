@@ -71,6 +71,11 @@ class ContractDataBuilderTest {
         assertEquals(3, snapshots.getTenant().get("occupantCount"));
         assertEquals(0, snapshots.getTenant().get("motorbikeCount"));
         assertEquals(0, snapshots.getTenant().get("carCount"));
+        assertEquals(4, snapshots.getFinancial().get("paymentDueOffsetDays"));
+        assertTrue(String.valueOf(snapshots.getFinancial().get("paymentDueDay"))
+                .contains("ngày thứ 4 sau khi kết thúc mỗi kỳ thuê"));
+        assertEquals(snapshots.getFinancial().get("paymentDueDay"),
+                snapshots.getPolicies().get("paymentDueDay"));
 
         // Verify rentalMode and B2B tenant fields are absent
         org.junit.jupiter.api.Assertions.assertFalse(snapshots.getLease().containsKey("rentalMode"),

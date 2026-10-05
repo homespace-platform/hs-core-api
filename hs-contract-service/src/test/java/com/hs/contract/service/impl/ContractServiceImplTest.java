@@ -26,6 +26,7 @@ import com.hs.payment.model.constant.PaymentStatus;
 import com.hs.payment.model.constant.PaymentType;
 import com.hs.payment.repository.PaymentRequestRepository;
 import com.hs.contract.dto.request.CreateContractDraftRequest;
+import com.hs.contract.dto.request.UpdateContractRevisionRequest;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.RentalRequest;
@@ -50,6 +51,30 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ContractServiceImplTest {
+
+    @Test
+    void editingUnsignedDraftReplacesOldCalendarFifthWithLeaseAnchoredDueDate() {
+        ContractRepository contracts = mock(ContractRepository.class);
+        ContractRevisionRepository revisions = mock(ContractRevisionRepository.class);
+        ContractDocumentRepository documents = mock(ContractDocumentRepository.class);
+        ContractServiceImpl service = createService(contracts, revisions, documents,
+                mock(ContractTemplateVersionRepository.class));
+        Contract contract = Contract.builder().id("contract-1").landlordId("landlord-1")
+                .tenantId("tenant-1").status(ContractStatus.DRAFT).build();
+        when(contracts.findById("contract-1")).thenReturn(Optional.of(contract));
+        when(revisions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(documents.findByContractIdOrderByGeneratedAtDesc("contract-1")).thenReturn(List.of());
+        UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
+        UpdateContractRevisionRequest request = new UpdateContractRevisionRequest();
+        request.setFinancial(Map.of("paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng"));
+        request.setPolicies(Map.of("latePaymentFeeMode", "NONE"));
+
+        var updated = service.updateRevision("contract-1", request);
+
+        assertEquals(4, updated.getFinancial().get("paymentDueOffsetDays"));
+        assertEquals(updated.getFinancial().get("paymentDueDay"),
+                updated.getPolicies().get("paymentDueDay"));
+    }
 
     @Test
     void lateFeeCannotBeSavedWhenWordTemplateCannotShowSignedClause() {

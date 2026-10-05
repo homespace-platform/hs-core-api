@@ -4,6 +4,7 @@ import com.deepoove.poi.XWPFTemplate;
 import com.deepoove.poi.data.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hs.contract.service.MonthlyBillingSchedule;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -176,7 +177,7 @@ public class ContractRenderService {
                 "amountNumber", "15.000.000 VNĐ/tháng",
                 "amountWords", "Mười lăm triệu đồng chẵn",
                 "paymentCycle", "Hàng tháng",
-                "paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng",
+                "paymentDueDay", MonthlyBillingSchedule.paymentDueDescription(),
                 "paymentMethod", "Thanh toán trực tuyến qua hệ thống HomeSpace",
                 "depositAmountValue", "15000000",
                 "depositAmountNumber", "15.000.000 VNĐ",

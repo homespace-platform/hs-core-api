@@ -2,6 +2,7 @@ package com.hs.contract.service.engine;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hs.contract.service.MonthlyBillingSchedule;
 import com.hs.listing.dto.estimate.ExcludedChargeItem;
 import com.hs.listing.dto.estimate.PredictableChargeItem;
 import com.hs.listing.dto.snapshot.ListingSnapshotDto;
@@ -720,7 +721,8 @@ public class ContractDataBuilder {
         map.put("amountNumber", ContractRenderService.formatVND(rent) + "/tháng");
         map.put("amountWords", VietnameseCurrencyTextConverter.toWords(rent));
         map.put("paymentCycle", paymentCycle);
-        map.put("paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng");
+        map.put("paymentDueDay", MonthlyBillingSchedule.paymentDueDescription());
+        map.put("paymentDueOffsetDays", MonthlyBillingSchedule.PAYMENT_WINDOW_DAYS);
         map.put("paymentMethod", "Chuyển khoản trực tiếp vào tài khoản ngân hàng của Bên A chỉ định trong Hợp đồng này");
         map.put("depositAmountValue", deposit.toPlainString());
         map.put("depositAmountNumber", ContractRenderService.formatVND(deposit));
@@ -1171,7 +1173,7 @@ public class ContractDataBuilder {
 
     private Map<String, Object> buildPolicies(ListingSnapshotDto snapshot, RentalRequest request) {
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("paymentDueDay", "Từ ngày 01 đến ngày 05 hàng tháng");
+        map.put("paymentDueDay", MonthlyBillingSchedule.paymentDueDescription());
         map.put("paymentCycle",
                 snapshot.getPaymentCycle() != null ? paymentCycleLabelStr(snapshot.getPaymentCycle()) : "Hàng tháng");
         map.put("latePaymentPolicy",

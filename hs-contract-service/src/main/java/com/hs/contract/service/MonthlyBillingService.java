@@ -51,6 +51,8 @@ public class MonthlyBillingService {
         Contract contract = requireParty(contractId, actorId);
         if (contract.getStatus() == ContractStatus.ACTIVE) syncContract(contractId);
         return invoices.findByContractIdOrderByPeriodIndexDesc(contractId).stream()
+                .filter(invoice -> actorId.equals(contract.getLandlordId())
+                        || invoice.getStatus() != MonthlyInvoiceStatus.DRAFT)
                 .map(this::response).toList();
     }
 
@@ -94,7 +96,9 @@ public class MonthlyBillingService {
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         if (!contract.getLandlordId().equals(landlordId)) throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         if (contract.getStatus() != ContractStatus.ACTIVE) throw new AppException(ContractErrorCode.INVOICE_NOT_ACTIVE);
-        if (invoice.getStatus() != MonthlyInvoiceStatus.DRAFT || invoice.getPeriodEndExclusive().isAfter(time.today()))
+        // The landlord may close the meters and publish on the final day of the period.
+        if (invoice.getStatus() != MonthlyInvoiceStatus.DRAFT
+                || time.today().isBefore(invoice.getPeriodEndExclusive().minusDays(1)))
             throw new AppException(ContractErrorCode.INVOICE_NOT_READY);
         if (invoice.getPeriodIndex() > 0) {
             MonthlyInvoice previous = invoices.findByContractIdAndPeriodIndex(
@@ -182,10 +186,21 @@ public class MonthlyBillingService {
         invoice.setBaseAmount(total);
         invoice.setLateFeeAmount(BigDecimal.ZERO);
         invoice.setIssuedAt(time.now());
-        // Existing signed HomeSpace templates say payment by the 5th of each month.
-        LocalDate fifth = invoice.getPeriodEndExclusive().withDayOfMonth(5);
-        if (fifth.isBefore(invoice.getPeriodEndExclusive())) fifth = fifth.plusMonths(1);
-        Instant scheduledDue = fifth.atTime(23, 59, 59).atZone(BillingTime.ZONE).toInstant();
+        // Preserve the fifth-day term on already-signed contracts; new revisions
+        // explicitly anchor the payment window to the end of each lease period.
+        Instant scheduledDue;
+        if (financial.get("paymentDueOffsetDays") != null) {
+            int offset;
+            try { offset = Integer.parseInt(String.valueOf(financial.get("paymentDueOffsetDays"))); }
+            catch (NumberFormatException ex) { throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE); }
+            if (offset != MonthlyBillingSchedule.PAYMENT_WINDOW_DAYS)
+                throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
+            scheduledDue = MonthlyBillingSchedule.dueAt(invoice.getPeriodEndExclusive());
+        } else {
+            LocalDate fifth = invoice.getPeriodEndExclusive().withDayOfMonth(5);
+            if (fifth.isBefore(invoice.getPeriodEndExclusive())) fifth = fifth.plusMonths(1);
+            scheduledDue = fifth.atTime(23, 59, 59).atZone(BillingTime.ZONE).toInstant();
+        }
         invoice.setDueAt(scheduledDue.isAfter(time.now().plus(Duration.ofDays(1)))
                 ? scheduledDue : time.now().plus(Duration.ofDays(1)));
         if (total.signum() == 0) {
@@ -384,8 +399,7 @@ public class MonthlyBillingService {
     }
 
     private Instant actionRequiredAt(MonthlyInvoice invoice) {
-        return invoice.getDueAt().atZone(BillingTime.ZONE).toLocalDate()
-                .plusDays(5).atStartOfDay(BillingTime.ZONE).toInstant();
+        return MonthlyBillingSchedule.actionRequiredAt(invoice.getDueAt());
     }
 
     private void validateExtras(List<IssueMonthlyInvoiceRequest.ExtraCharge> extras) {
