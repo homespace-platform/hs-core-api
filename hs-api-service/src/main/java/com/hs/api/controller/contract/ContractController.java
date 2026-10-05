@@ -18,6 +18,7 @@ import com.hs.contract.dto.response.ContractRevisionResponse;
 import com.hs.contract.dto.response.ContractTemplateResponse;
 import com.hs.contract.dto.response.ContractTemplateVersionResponse;
 import com.hs.contract.model.constant.ContractStatus;
+import com.hs.contract.model.constant.ContractPartyRole;
 import com.hs.contract.model.constant.ContractTemplateStatus;
 import com.hs.contract.service.ContractService;
 import com.hs.contract.service.ContractTemplateService;
@@ -149,10 +150,12 @@ public class ContractController {
     @GetMapping
     public PageResponse<ContractResponse> getMyContracts(
             @RequestParam(required = false) ContractStatus status,
+            @RequestParam(required = false) ContractPartyRole role,
+            @RequestParam(defaultValue = "false") boolean billableOnly,
             @RequestParam(defaultValue = "1") @Min(1) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size
     ) {
-        return contractService.getContractsForCurrentUser(requireUserId(), status, page, size);
+        return contractService.getContractsForCurrentUser(requireUserId(), status, role, billableOnly, page, size);
     }
 
     @GetMapping("/{contractId}")

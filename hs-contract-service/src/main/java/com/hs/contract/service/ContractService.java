@@ -9,6 +9,7 @@ import com.hs.contract.dto.response.ContractPaymentBreakdownResponse;
 import com.hs.contract.dto.response.ContractResponse;
 import com.hs.contract.dto.response.ContractRevisionResponse;
 import com.hs.contract.model.constant.ContractStatus;
+import com.hs.contract.model.constant.ContractPartyRole;
 
 import java.util.List;
 
@@ -21,7 +22,7 @@ public interface ContractService {
     /** Trả về hợp đồng gắn với yêu cầu thuê (nếu có), null nếu chưa tạo. */
     ContractResponse findByRentalRequestId(String rentalRequestId);
 
-    PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, int page, int size);
+    PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size);
 
     List<ContractResponse> getContractsForCurrentUser(ContractStatus status);
 

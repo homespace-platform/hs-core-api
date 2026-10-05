@@ -10,6 +10,7 @@ import com.hs.contract.model.ContractRevision;
 import com.hs.contract.model.ContractTemplateVersion;
 import com.hs.contract.model.constant.ContractDocumentType;
 import com.hs.contract.model.constant.ContractPaymentStatus;
+import com.hs.contract.model.constant.ContractPartyRole;
 import com.hs.contract.model.constant.ContractStatus;
 import com.hs.contract.model.constant.DocumentGenerationStatus;
 import com.hs.contract.model.constant.DocumentPurpose;
@@ -37,6 +38,12 @@ import com.hs.storage.service.StorageService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.Path;
+import jakarta.persistence.criteria.Root;
 
 import java.util.List;
 import java.util.Optional;
@@ -49,9 +56,31 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 class ContractServiceImplTest {
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void invoiceContractListIsScopedToTenantAndBillableStatusesBeforePagination() {
+        ContractRepository contracts = mock(ContractRepository.class);
+        ContractServiceImpl service = createService(contracts, mock(ContractRevisionRepository.class),
+                mock(ContractDocumentRepository.class), mock(ContractTemplateVersionRepository.class));
+        when(contracts.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
+
+        service.getContractsForCurrentUser("tenant-1", null, ContractPartyRole.TENANT, true, 1, 12);
+
+        ArgumentCaptor<Specification> specCaptor = ArgumentCaptor.forClass(Specification.class);
+        verify(contracts).findAll(specCaptor.capture(), any(Pageable.class));
+        Root<Contract> root = mock(Root.class);
+        Path statusPath = mock(Path.class);
+        when(root.get("status")).thenReturn(statusPath);
+        specCaptor.getValue().toPredicate(root, null, mock(CriteriaBuilder.class));
+        verify(root).get("tenantId");
+        verify(root, never()).get("landlordId");
+        verify(statusPath).in(ContractStatus.ACTIVE, ContractStatus.TERMINATED);
+    }
 
     @Test
     void editingUnsignedDraftReplacesOldCalendarFifthWithLeaseAnchoredDueDate() {

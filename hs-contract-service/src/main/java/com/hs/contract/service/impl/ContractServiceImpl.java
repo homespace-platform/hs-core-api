@@ -21,6 +21,7 @@ import com.hs.contract.model.ContractRevision;
 import com.hs.contract.model.ContractTemplateVersion;
 import com.hs.contract.model.constant.ContractDocumentType;
 import com.hs.contract.model.constant.ContractPaymentStatus;
+import com.hs.contract.model.constant.ContractPartyRole;
 import com.hs.contract.model.constant.ContractStatus;
 import com.hs.contract.model.constant.DocumentGenerationStatus;
 import com.hs.contract.model.constant.DocumentPurpose;
@@ -289,7 +290,7 @@ public class ContractServiceImpl implements ContractService {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, int page, int size) {
+    public PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size) {
         String currentUserId = (userId != null && !userId.isBlank()) ? userId : getCurrentUserId();
         if (currentUserId == null || currentUserId.isBlank() || "system".equals(currentUserId)) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
@@ -297,16 +298,26 @@ public class ContractServiceImpl implements ContractService {
 
         Specification<Contract> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
-            predicates.add(cb.or(
-                    cb.equal(root.get("landlordId"), currentUserId),
-                    cb.and(
-                            cb.equal(root.get("tenantId"), currentUserId),
-                            cb.notEqual(root.get("status"), ContractStatus.DRAFT)
-                    )
-            ));
+            if (role == ContractPartyRole.LANDLORD) {
+                predicates.add(cb.equal(root.get("landlordId"), currentUserId));
+            } else if (role == ContractPartyRole.TENANT) {
+                predicates.add(cb.equal(root.get("tenantId"), currentUserId));
+                predicates.add(cb.notEqual(root.get("status"), ContractStatus.DRAFT));
+            } else {
+                predicates.add(cb.or(
+                        cb.equal(root.get("landlordId"), currentUserId),
+                        cb.and(
+                                cb.equal(root.get("tenantId"), currentUserId),
+                                cb.notEqual(root.get("status"), ContractStatus.DRAFT)
+                        )
+                ));
+            }
             predicates.add(cb.isTrue(root.get("active")));
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
+            }
+            if (billableOnly) {
+                predicates.add(root.get("status").in(ContractStatus.ACTIVE, ContractStatus.TERMINATED));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };
