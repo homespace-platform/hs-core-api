@@ -7,5 +7,6 @@ public enum DepositStatus {
     REFUND_DUE,
     REFUND_REPORTED,
     REFUNDED,
-    DISPUTED
+    DISPUTED,
+    RETAINED_BY_LANDLORD
 }

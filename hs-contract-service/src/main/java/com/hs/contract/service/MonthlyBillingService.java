@@ -11,10 +11,15 @@ import com.hs.contract.model.constant.ContractStatus;
 import com.hs.contract.repository.*;
 import com.hs.listing.dto.estimate.ExcludedChargeItem;
 import com.hs.listing.service.RentalCostCalculator;
+import com.hs.listing.service.ListingStatusService;
+import com.hs.listing.service.ParkingReservationService;
 import com.hs.contract.service.engine.ContractRenderService;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.payment.model.PaymentRequest;
+import com.hs.payment.model.DepositRecord;
+import com.hs.payment.model.constant.DepositStatus;
+import com.hs.payment.repository.DepositRecordRepository;
 import com.hs.payment.model.constant.PaymentStatus;
 import com.hs.payment.model.constant.PaymentType;
 import com.hs.payment.dto.PaymentRequestResponse;
@@ -31,11 +36,13 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.*;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.math.RoundingMode;
 
 @Service @RequiredArgsConstructor @Slf4j
 public class MonthlyBillingService {
+    private static final DateTimeFormatter BILLING_DATE = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private final ContractRepository contracts;
     private final ContractRevisionRepository revisions;
     private final RentalRequestRepository rentalRequests;
@@ -44,6 +51,9 @@ public class MonthlyBillingService {
     private final ObjectMapper mapper;
     private final BillingTime time;
     private final PlatformTransactionManager transactionManager;
+    private final ListingStatusService listingStatusService;
+    private final DepositRecordRepository deposits;
+    private final ParkingReservationService parkingReservations;
 
     /** Restart-safe: unique (contract, period) plus a contract row lock on manual and scheduled sync. */
     @Transactional
@@ -54,6 +64,298 @@ public class MonthlyBillingService {
                 .filter(invoice -> actorId.equals(contract.getLandlordId())
                         || invoice.getStatus() != MonthlyInvoiceStatus.DRAFT)
                 .map(this::response).toList();
+    }
+
+    /** Record an escalation after five overdue days; this never changes the lease or payment terms. */
+    @Transactional
+    public MonthlyInvoiceResponse recordOverdueAction(String invoiceId, String landlordId,
+                                                       CreateOverdueActionRequest request) {
+        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        Contract contract = requireParty(invoice.getContractId(), landlordId);
+        if (!landlordId.equals(contract.getLandlordId()))
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        if (contract.getStatus() != ContractStatus.ACTIVE || invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE
+                || invoice.getDueAt() == null || time.now().isBefore(actionRequiredAt(invoice))
+                || payments.findByInvoiceId(invoiceId).map(p -> p.getStatus() == PaymentStatus.TRANSFER_REPORTED
+                    || p.getStatus() == PaymentStatus.DISPUTED || p.getStatus() == PaymentStatus.CONFIRMED)
+                    .orElse(true))
+            throw new AppException(ContractErrorCode.OVERDUE_ACTION_NOT_ALLOWED);
+        if (request == null || request.type() == null || request.note() == null
+                || request.note().trim().length() < 10 || request.note().trim().length() > 1000
+                || request.type() == OverdueAction.Type.EXTENSION_PROPOSAL && request.proposedDate() == null
+                || request.proposedDate() != null && request.type() != OverdueAction.Type.EXTENSION_PROPOSAL
+                    && request.type() != OverdueAction.Type.MUTUAL_TERMINATION_PROPOSAL
+                || request.proposedDate() != null && !request.proposedDate().isAfter(time.today()))
+            throw new AppException(ContractErrorCode.OVERDUE_ACTION_INVALID);
+        List<OverdueAction> history = new ArrayList<>(overdueActions(invoice));
+        if (history.size() >= 100) throw new AppException(ContractErrorCode.OVERDUE_ACTION_INVALID);
+        OverdueAction action = new OverdueAction(UUID.randomUUID().toString(), request.type(),
+                request.note().trim(), request.proposedDate(), time.now(), landlordId, null, null);
+        history.add(action);
+        invoice.setOverdueActionsSnapshot(write(history));
+        log.info("BILLING_OVERDUE_ACTION_RECORDED contract={} invoice={} action={} type={}",
+                contract.getId(), invoiceId, action.id(), action.type());
+        return response(invoices.save(invoice));
+    }
+
+    /** Tenant acknowledgement is evidence of viewing, not acceptance of a new signed agreement. */
+    @Transactional
+    public MonthlyInvoiceResponse acknowledgeOverdueAction(String invoiceId, String actionId,
+                                                             String tenantId, AcknowledgeOverdueActionRequest request) {
+        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        Contract contract = requireParty(invoice.getContractId(), tenantId);
+        if (!tenantId.equals(contract.getTenantId())) throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        if (request == null || request.note() == null || request.note().trim().length() > 1000)
+            throw new AppException(ContractErrorCode.OVERDUE_ACTION_INVALID);
+        List<OverdueAction> history = new ArrayList<>(overdueActions(invoice));
+        int index = -1;
+        for (int i = 0; i < history.size(); i++) if (history.get(i).id().equals(actionId)) { index = i; break; }
+        if (index < 0) throw new AppException(ContractErrorCode.OVERDUE_ACTION_NOT_FOUND);
+        OverdueAction action = history.get(index);
+        if (action.acknowledgedAt() != null) throw new AppException(ContractErrorCode.OVERDUE_ACTION_NOT_ALLOWED);
+        history.set(index, new OverdueAction(action.id(), action.type(), action.note(), action.proposedDate(),
+                action.createdAt(), action.createdBy(), request.note().trim(), time.now()));
+        invoice.setOverdueActionsSnapshot(write(history));
+        log.info("BILLING_OVERDUE_ACTION_ACKNOWLEDGED contract={} invoice={} action={}",
+                contract.getId(), invoiceId, actionId);
+        return response(invoices.save(invoice));
+    }
+
+    /** Freeze the currently accrued balance and carry it exactly once when the next bill is issued. */
+    @Transactional
+    public MonthlyInvoiceResponse deferToNextPeriod(String invoiceId, String landlordId) {
+        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        Contract contract = requireParty(invoice.getContractId(), landlordId);
+        if (!landlordId.equals(contract.getLandlordId()))
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        RentalRequest rental = rentalRequests.findById(contract.getRentalRequestId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
+        if (contract.getStatus() != ContractStatus.ACTIVE || activeTerminationProposal(contract)
+                || rental.getLeaseMonths() == null
+                || invoice.getPeriodIndex() + 1 >= rental.getLeaseMonths()
+                || invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE || invoice.getDueAt() == null
+                || time.now().isBefore(actionRequiredAt(invoice)))
+            throw new AppException(ContractErrorCode.OVERDUE_DEFERRAL_NOT_ALLOWED);
+        if (invoices.findByContractIdAndPeriodIndex(contract.getId(), invoice.getPeriodIndex() + 1)
+                .filter(next -> next.getStatus() != MonthlyInvoiceStatus.DRAFT).isPresent())
+            throw new AppException(ContractErrorCode.OVERDUE_DEFERRAL_NOT_ALLOWED);
+        if (invoice.getDeferredAt() != null) return response(invoice);
+        reconcile(invoice);
+        PaymentStatus paymentStatus = payments.findByInvoiceId(invoiceId)
+                .map(PaymentRequest::getStatus).orElse(null);
+        if (invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE || paymentStatus == null
+                || !List.of(PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE,
+                    PaymentStatus.REJECTED).contains(paymentStatus))
+            throw new AppException(ContractErrorCode.OVERDUE_DEFERRAL_NOT_ALLOWED);
+        invoice.setDeferredAt(time.now());
+        log.warn("BILLING_DEFERRED landlord={} tenant={} contract={} invoice={} amount={}",
+                landlordId, contract.getTenantId(), contract.getId(), invoiceId, invoice.getTotalAmount());
+        return response(invoices.save(invoice));
+    }
+
+    /** Proposal alone has no legal or inventory effect. */
+    @Transactional
+    public MonthlyInvoiceResponse proposeMutualTermination(String invoiceId, String landlordId) {
+        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if (!landlordId.equals(contract.getLandlordId()))
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        if (contract.getStatus() != ContractStatus.ACTIVE || invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE
+                || invoice.getDueAt() == null
+                || invoice.getDeferredAt() != null || time.now().isBefore(actionRequiredAt(invoice))
+                || activeTerminationProposal(contract))
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        PaymentStatus status = payments.findByInvoiceId(invoiceId).map(PaymentRequest::getStatus).orElse(null);
+        if (status == null || !List.of(PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE,
+                PaymentStatus.REJECTED).contains(status))
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        DepositRecord deposit = deposits.findByRentalRequestId(contract.getRentalRequestId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY));
+        if (deposit.getStatus() != DepositStatus.HELD || deposit.getHeldAmount() == null
+                || deposit.getHeldAmount().compareTo(deposit.getOriginalAmount()) != 0)
+            throw new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY);
+        contract.setTerminationProposalInvoiceId(invoiceId);
+        contract.setTerminationProposedAt(time.now());
+        contract.setTerminationAcceptedAt(null);
+        contract.setTerminationDeclinedAt(null);
+        contract.setTerminationCancelledAt(null);
+        contracts.save(contract);
+        log.warn("BILLING_TERMINATION_PROPOSED landlord={} tenant={} contract={} invoice={}",
+                landlordId, contract.getTenantId(), contract.getId(), invoiceId);
+        return response(invoice);
+    }
+
+    /** Explicit tenant agreement includes full retention of the deposit after handover. */
+    @Transactional
+    public MonthlyInvoiceResponse acceptMutualTermination(String invoiceId, String tenantId,
+                                                           AcceptTerminationRequest request) {
+        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if (!tenantId.equals(contract.getTenantId()))
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        if (request == null || !request.acceptEarlyTermination() || !request.acceptDepositRetention()
+                || !request.acknowledgeOutstandingDebt())
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        if (contract.getStatus() != ContractStatus.ACTIVE
+                || !invoiceId.equals(contract.getTerminationProposalInvoiceId())
+                || contract.getTerminationAcceptedAt() != null
+                || contract.getTerminationDeclinedAt() != null
+                || contract.getTerminationCancelledAt() != null
+                || invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE
+                || !unsettledAndUnreported(invoiceId))
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        reconcile(invoice);
+        if (invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE || !unsettledAndUnreported(invoiceId))
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        contract.setTerminationAcceptedAt(time.now());
+        contracts.save(contract);
+        log.warn("BILLING_TERMINATION_ACCEPTED landlord={} tenant={} contract={} invoice={}",
+                contract.getLandlordId(), tenantId, contract.getId(), invoiceId);
+        return response(invoice);
+    }
+
+    @Transactional
+    public MonthlyInvoiceResponse declineMutualTermination(String invoiceId, String tenantId) {
+        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if (!tenantId.equals(contract.getTenantId()))
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        if (contract.getStatus() != ContractStatus.ACTIVE
+                || !invoiceId.equals(contract.getTerminationProposalInvoiceId())
+                || contract.getTerminationAcceptedAt() != null || contract.getTerminationDeclinedAt() != null
+                || contract.getTerminationCancelledAt() != null)
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        contract.setTerminationDeclinedAt(time.now());
+        contracts.save(contract);
+        log.warn("BILLING_TERMINATION_DECLINED tenant={} contract={} invoice={}",
+                tenantId, contract.getId(), invoiceId);
+        return response(invoice);
+    }
+
+    @Transactional
+    public MonthlyInvoiceResponse withdrawMutualTermination(String invoiceId, String landlordId) {
+        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if (!landlordId.equals(contract.getLandlordId()))
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        if (contract.getStatus() != ContractStatus.ACTIVE
+                || !invoiceId.equals(contract.getTerminationProposalInvoiceId())
+                || contract.getTerminationProposedAt() == null
+                || contract.getTerminationCancelledAt() != null
+                || contract.getTerminationCompletedAt() != null
+                || contract.getTerminationAcceptedAt() != null)
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        contract.setTerminationCancelledAt(time.now());
+        contracts.save(contract);
+        log.warn("BILLING_TERMINATION_WITHDRAWN landlord={} contract={} invoice={}",
+                landlordId, contract.getId(), invoiceId);
+        return response(invoice);
+    }
+
+    /** Complete only after bilateral agreement and actual return of the property. */
+    @Transactional
+    public MonthlyInvoiceResponse completeMutualTermination(String invoiceId, String landlordId,
+                                                             CompleteTerminationRequest request) {
+        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if (!landlordId.equals(contract.getLandlordId()))
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        if (request == null || !request.vacantPossessionConfirmed() || !request.keysAndAssetsReturned())
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        if (contract.getStatus() != ContractStatus.ACTIVE
+                || !invoiceId.equals(contract.getTerminationProposalInvoiceId())
+                || contract.getTerminationAcceptedAt() == null
+                || contract.getTerminationDeclinedAt() != null
+                || contract.getTerminationCancelledAt() != null
+                || invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE
+                || !unsettledAndUnreported(invoiceId))
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        DepositRecord deposit = deposits.findByRentalRequestIdForUpdate(contract.getRentalRequestId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY));
+        if (deposit.getStatus() != DepositStatus.HELD || deposit.getHeldAmount() == null
+                || deposit.getHeldAmount().compareTo(deposit.getOriginalAmount()) != 0)
+            throw new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY);
+        finalizeTermination(contract, deposit, landlordId,
+                "Hai bên đồng ý chấm dứt sớm, đã bàn giao; cọc thuộc chủ nhà", false);
+        log.warn("BILLING_CONTRACT_TERMINATED landlord={} tenant={} contract={} invoice={} depositRetained={}",
+                landlordId, contract.getTenantId(), contract.getId(), invoiceId, deposit.getOriginalAmount());
+        return response(invoice);
+    }
+
+    /** Owner-initiated branch only for an explicitly signed five-day clause and after a declined proposal. */
+    @Transactional
+    public MonthlyInvoiceResponse forceTerminationAfterDecline(String invoiceId, String landlordId,
+                                                               ForceTerminationRequest request) {
+        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if (!landlordId.equals(contract.getLandlordId()))
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        if (request == null || !request.signedClauseAcknowledged() || !request.tenantNotified()
+                || !request.vacantPossessionConfirmed() || !request.keysAndAssetsReturned()
+                || contract.getStatus() != ContractStatus.ACTIVE || contract.getSignedAt() == null
+                || !invoiceId.equals(contract.getTerminationProposalInvoiceId())
+                || contract.getTerminationDeclinedAt() == null || contract.getTerminationCancelledAt() != null
+                || contract.getTerminationAcceptedAt() != null || contract.getTerminationCompletedAt() != null
+                || invoice.getDeferredAt() != null || invoice.getDueAt() == null
+                || time.now().isBefore(actionRequiredAt(invoice)) || !signedLandlordTerminationClause(contract))
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        reconcile(invoice);
+        if (invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE || !unsettledAndUnreported(invoiceId))
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
+        DepositRecord deposit = deposits.findByRentalRequestIdForUpdate(contract.getRentalRequestId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY));
+        if (deposit.getStatus() != DepositStatus.HELD || deposit.getHeldAmount() == null
+                || deposit.getHeldAmount().compareTo(deposit.getOriginalAmount()) != 0)
+            throw new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY);
+        finalizeTermination(contract, deposit, landlordId,
+                "Chủ nhà chấm dứt theo điều khoản quá hạn trong hợp đồng đã ký sau khi người thuê từ chối đề nghị; đã nhận lại phòng", true);
+        log.warn("BILLING_CONTRACT_FORCED_TERMINATION landlord={} tenant={} contract={} invoice={} "
+                        + "proposalDeclinedAt={} signedClause=true tenantNotified=true vacantPossession=true depositRetained={}",
+                landlordId, contract.getTenantId(), contract.getId(), invoiceId,
+                contract.getTerminationDeclinedAt(), deposit.getOriginalAmount());
+        return response(invoice);
+    }
+
+    private void finalizeTermination(Contract contract, DepositRecord deposit,
+                                     String landlordId, String reason, boolean forced) {
+        listingStatusService.releaseRentedAfterTermination(contract.getListingId(), landlordId);
+        parkingReservations.releaseReservationsForContract(contract.getId());
+        deposit.setStatus(DepositStatus.RETAINED_BY_LANDLORD);
+        deposit.setHeldAmount(BigDecimal.ZERO);
+        deposit.setRefundableAmount(BigDecimal.ZERO);
+        deposit.setRetainedAt(time.now());
+        deposit.setRetainedReason(reason);
+        deposits.save(deposit);
+        contract.setStatus(ContractStatus.TERMINATED);
+        contract.setTerminationCompletedAt(time.now());
+        if (forced) contract.setTerminationForcedAt(time.now());
+        contracts.save(contract);
+    }
+
+    private boolean signedLandlordTerminationClause(Contract contract) {
+        if (contract.getCurrentRevisionId() == null) return false;
+        return revisions.findById(contract.getCurrentRevisionId()).map(revision -> {
+            Map<String, Object> policy = read(revision.getPoliciesSnapshot(),
+                    new TypeReference<Map<String, Object>>() {});
+            return policy != null && Boolean.TRUE.equals(policy.get("overdueLandlordTerminationAfterFiveDays"))
+                    && revision.getSpecialTerms() != null
+                    && revision.getSpecialTerms().contains("bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận");
+        }).orElse(false);
     }
 
     /** Landlord records readings and optional charges before the 10:00 automatic issue cutoff. */
@@ -125,12 +427,20 @@ public class MonthlyBillingService {
         boolean firstPeriodFeesPrepaid = invoice.getPeriodIndex() == 0
                 && verifyInitialPeriodSettled(contract, financial, signedCharges);
 
-        if (invoice.getPeriodIndex() > 0) {
+        // The first lease period was paid upfront. At the end of period N, collect
+        // its actual expenses and the rent for period N+1, if the lease continues.
+        if (rental.getLeaseMonths() == null || rental.getLeaseMonths() <= invoice.getPeriodIndex()
+                || rental.getMoveInDate() == null)
+            throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
+        if (invoice.getPeriodIndex() + 1 < rental.getLeaseMonths()) {
             BigDecimal rent = decimal(financial.get("amountValue"));
             if (rent == null || rent.signum() <= 0) throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
             if (!String.valueOf(financial.get("amountNumber")).contains(ContractRenderService.formatVND(rent)))
                 throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
-            lines.add(new InvoiceLine("RENT", "Tiền thuê kỳ " + (invoice.getPeriodIndex() + 1),
+            LocalDate nextStart = invoice.getPeriodEndExclusive();
+            LocalDate nextEnd = rental.getMoveInDate().plusMonths(invoice.getPeriodIndex() + 2L).minusDays(1);
+            lines.add(new InvoiceLine("RENT", "Tiền thuê kỳ " + (invoice.getPeriodIndex() + 2)
+                    + " (" + nextStart.format(BILLING_DATE) + "–" + nextEnd.format(BILLING_DATE) + ")",
                     BigDecimal.ONE, rent, rent));
         }
         if (!firstPeriodFeesPrepaid) {
@@ -178,6 +488,24 @@ public class MonthlyBillingService {
                         extra.amount(), extra.amount()));
             }
         }
+        MonthlyInvoice carryFrom = null;
+        if (invoice.getPeriodIndex() > 0) {
+            MonthlyInvoice previous = invoices.findByContractIdAndPeriodIndex(
+                    contract.getId(), invoice.getPeriodIndex() - 1).orElseThrow();
+            reconcile(previous);
+            if (previous.getDeferredAt() != null && previous.getStatus() != MonthlyInvoiceStatus.PAID
+                    && previous.getStatus() != MonthlyInvoiceStatus.ROLLED_OVER) {
+                PaymentStatus oldStatus = payments.findByInvoiceId(previous.getId())
+                        .map(PaymentRequest::getStatus).orElse(null);
+                if (oldStatus == null || !List.of(PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE,
+                        PaymentStatus.REJECTED).contains(oldStatus))
+                    throw new AppException(ContractErrorCode.OVERDUE_DEFERRAL_NOT_ALLOWED);
+                lines.add(new InvoiceLine("BALANCE_FORWARD", "Công nợ hóa đơn kỳ "
+                        + (previous.getPeriodIndex() + 1) + " (gồm phí phạt đã chốt)", BigDecimal.ONE,
+                        previous.getTotalAmount(), previous.getTotalAmount()));
+                carryFrom = previous;
+            }
+        }
         BigDecimal total = lines.stream().map(InvoiceLine::amount).reduce(BigDecimal.ZERO, BigDecimal::add);
         if (total.signum() < 0 || total.scale() > 2 && total.stripTrailingZeros().scale() > 2)
             throw new AppException(ContractErrorCode.INVOICE_AMOUNT_INVALID);
@@ -203,6 +531,17 @@ public class MonthlyBillingService {
         }
         invoice.setDueAt(scheduledDue.isAfter(time.now().plus(Duration.ofDays(1)))
                 ? scheduledDue : time.now().plus(Duration.ofDays(1)));
+        if (carryFrom != null) {
+            try { payments.cancelMonthlyForRollover(carryFrom.getId()); }
+            catch (IllegalStateException ex) {
+                throw new AppException(ContractErrorCode.OVERDUE_DEFERRAL_NOT_ALLOWED);
+            }
+            carryFrom.setStatus(MonthlyInvoiceStatus.ROLLED_OVER);
+            carryFrom.setRolledToInvoiceId(invoice.getId());
+            invoices.save(carryFrom);
+            log.info("BILLING_BALANCE_ROLLED contract={} from={} to={} amount={}",
+                    contract.getId(), carryFrom.getId(), invoice.getId(), carryFrom.getTotalAmount());
+        }
         if (total.signum() == 0) {
             invoice.setStatus(MonthlyInvoiceStatus.PAID);
             invoice.setPaidAt(time.now());
@@ -260,13 +599,22 @@ public class MonthlyBillingService {
     }
 
     private void reconcile(MonthlyInvoice invoice) {
-        if (invoice.getStatus() == MonthlyInvoiceStatus.PAID || invoice.getStatus() == MonthlyInvoiceStatus.DRAFT) return;
+        if (invoice.getStatus() == MonthlyInvoiceStatus.PAID || invoice.getStatus() == MonthlyInvoiceStatus.DRAFT
+                || invoice.getStatus() == MonthlyInvoiceStatus.ROLLED_OVER) return;
         if (invoice.getPaymentRequestId() == null) return;
         Optional<PaymentRequest> payment = payments.findByInvoiceId(invoice.getId());
         if (payment.isPresent() && payment.get().getStatus() == PaymentStatus.CONFIRMED) {
             invoice.setStatus(MonthlyInvoiceStatus.PAID);
             invoice.setPaidAt(payment.get().getConfirmedAt());
             invoices.save(invoice);
+            Contract contract = contracts.findById(invoice.getContractId()).orElse(null);
+            if (contract != null && invoice.getId().equals(contract.getTerminationProposalInvoiceId())
+                    && activeTerminationProposal(contract)) {
+                contract.setTerminationCancelledAt(time.now());
+                contracts.save(contract);
+                log.info("BILLING_TERMINATION_CANCELLED_BY_PAYMENT contract={} invoice={}",
+                        contract.getId(), invoice.getId());
+            }
         } else if (payment.isPresent() && payment.get().getStatus() != PaymentStatus.TRANSFER_REPORTED
                 && payment.get().getStatus() != PaymentStatus.DISPUTED
                 && invoice.getDueAt() != null && invoice.getDueAt().isBefore(time.now())) {
@@ -364,10 +712,12 @@ public class MonthlyBillingService {
     }
 
     private void accrueLateFee(MonthlyInvoice invoice, PaymentRequest payment) {
+        if (invoice.getDeferredAt() != null) return;
         if (!List.of(PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE,
                 PaymentStatus.REJECTED).contains(payment.getStatus())) return;
         Contract contract = contracts.findById(invoice.getContractId()).orElse(null);
         if (contract == null) return;
+        if (contract.getTerminationAcceptedAt() != null && contract.getTerminationCompletedAt() == null) return;
         ContractRevision revision = revisions.findById(contract.getCurrentRevisionId()).orElse(null);
         if (revision == null) return;
         Map<String, Object> policies = read(revision.getPoliciesSnapshot(), new TypeReference<Map<String, Object>>() {});
@@ -499,6 +849,18 @@ public class MonthlyBillingService {
     }
 
     private MonthlyInvoiceResponse response(MonthlyInvoice i) {
+        Contract contract = contracts.findById(i.getContractId()).orElse(null);
+        boolean canDefer = contract != null && rentalRequests.findById(contract.getRentalRequestId())
+                .map(r -> r.getLeaseMonths() != null && i.getPeriodIndex() + 1 < r.getLeaseMonths())
+                .orElse(false)
+                && invoices.findByContractIdAndPeriodIndex(i.getContractId(), i.getPeriodIndex() + 1)
+                    .map(next -> next.getStatus() == MonthlyInvoiceStatus.DRAFT).orElse(true);
+        DepositRecord depositRecord = contract == null ? null : deposits.findByRentalRequestId(
+                contract.getRentalRequestId()).orElse(null);
+        BigDecimal originalDeposit = depositRecord == null ? null : depositRecord.getOriginalAmount();
+        BigDecimal retainedDeposit = depositRecord != null
+                && depositRecord.getStatus() == DepositStatus.RETAINED_BY_LANDLORD
+                ? depositRecord.getOriginalAmount() : null;
         return new MonthlyInvoiceResponse(i.getId(), i.getContractId(), i.getPeriodIndex(),
                 i.getPeriodStart(), i.getPeriodEndExclusive(), i.getStatus(), i.getElectricityStart(),
                 i.getElectricityEnd(), i.getWaterStart(), i.getWaterEnd(),
@@ -507,12 +869,38 @@ public class MonthlyBillingService {
                 i.getLateFeeAmount() == null ? BigDecimal.ZERO : i.getLateFeeAmount(),
                 time.now(), meterDeadline(i), workflowState(i),
                 readList(i.getDraftExtraChargesSnapshot(),
-                        new TypeReference<List<IssueMonthlyInvoiceRequest.ExtraCharge>>() {}));
+                        new TypeReference<List<IssueMonthlyInvoiceRequest.ExtraCharge>>() {}), overdueActions(i),
+                i.getDeferredAt(), i.getRolledToInvoiceId(),
+                contract == null ? null : contract.getTerminationProposalInvoiceId(),
+                contract == null ? null : contract.getTerminationProposedAt(),
+                contract == null ? null : contract.getTerminationAcceptedAt(),
+                contract == null ? null : contract.getTerminationDeclinedAt(),
+                contract == null ? null : contract.getTerminationCancelledAt(),
+                contract == null ? null : contract.getTerminationCompletedAt(), originalDeposit,
+                retainedDeposit, canDefer,
+                contract != null && signedLandlordTerminationClause(contract),
+                contract == null ? null : contract.getTerminationForcedAt());
+    }
+
+    private List<OverdueAction> overdueActions(MonthlyInvoice invoice) {
+        return readList(invoice.getOverdueActionsSnapshot(), new TypeReference<List<OverdueAction>>() {});
+    }
+
+    private boolean unsettledAndUnreported(String invoiceId) {
+        return payments.findByInvoiceId(invoiceId).map(p -> List.of(
+                PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE, PaymentStatus.REJECTED)
+                .contains(p.getStatus())).orElse(false);
+    }
+
+    private boolean activeTerminationProposal(Contract contract) {
+        return contract.getTerminationProposedAt() != null && contract.getTerminationDeclinedAt() == null
+                && contract.getTerminationCancelledAt() == null && contract.getTerminationCompletedAt() == null;
     }
 
     private String workflowState(MonthlyInvoice i) {
         Instant now = time.now();
         if (i.getStatus() == MonthlyInvoiceStatus.PAID) return "PAID";
+        if (i.getStatus() == MonthlyInvoiceStatus.ROLLED_OVER) return "ROLLED_OVER";
         if (i.getStatus() == MonthlyInvoiceStatus.DRAFT) {
             if (now.isBefore(i.getPeriodEndExclusive().minusDays(1)
                     .atStartOfDay(BillingTime.ZONE).toInstant())) return "UPCOMING";
@@ -523,6 +911,7 @@ public class MonthlyBillingService {
         }
         if (payments.findByInvoiceId(i.getId()).map(p -> p.getStatus() == PaymentStatus.TRANSFER_REPORTED
                 || p.getStatus() == PaymentStatus.DISPUTED).orElse(false)) return "UNDER_REVIEW";
+        if (i.getDeferredAt() != null) return "DEFERRED";
         if (i.getStatus() == MonthlyInvoiceStatus.OVERDUE)
             return !now.isBefore(actionRequiredAt(i)) ? "OVERDUE_ACTION_REQUIRED" : "OVERDUE";
         if (i.getDueAt() != null && !now.isBefore(i.getDueAt().atZone(BillingTime.ZONE)

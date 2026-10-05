@@ -64,6 +64,12 @@ public class MonthlyInvoice extends BaseEntity {
     private Instant paymentReminderLoggedAt;
     @Column(name = "overdue_action_logged_at")
     private Instant overdueActionLoggedAt;
+    @Column(name = "overdue_actions_snapshot", columnDefinition = "TEXT")
+    private String overdueActionsSnapshot;
+    @Column(name = "deferred_at")
+    private Instant deferredAt;
+    @Column(name = "rolled_to_invoice_id", length = 36)
+    private String rolledToInvoiceId;
 
     @PrePersist
     void initialize() {

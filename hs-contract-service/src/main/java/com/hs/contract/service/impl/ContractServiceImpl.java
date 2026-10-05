@@ -244,6 +244,7 @@ public class ContractServiceImpl implements ContractService {
                 .initialPaymentSnapshot(toJson(snapshots.getInitialPayment()))
                 .amenitiesSnapshot(toJson(snapshots.getAmenities()))
                 .policiesSnapshot(toJson(snapshots.getPolicies()))
+                .specialTerms(snapshots.getSpecialTerms())
                 .revisionNote("Bản chụp dữ liệu khởi tạo từ hồ sơ hai bên, tin đăng và khoản thanh toán ban đầu.")
                 .build();
 

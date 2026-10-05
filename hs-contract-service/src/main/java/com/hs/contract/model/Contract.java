@@ -79,6 +79,21 @@ public class Contract extends BaseEntity {
     @Column(name = "signed_at")
     private Instant signedAt;
 
+    @Column(name = "termination_proposal_invoice_id", length = 36)
+    private String terminationProposalInvoiceId;
+    @Column(name = "termination_proposed_at")
+    private Instant terminationProposedAt;
+    @Column(name = "termination_accepted_at")
+    private Instant terminationAcceptedAt;
+    @Column(name = "termination_declined_at")
+    private Instant terminationDeclinedAt;
+    @Column(name = "termination_cancelled_at")
+    private Instant terminationCancelledAt;
+    @Column(name = "termination_completed_at")
+    private Instant terminationCompletedAt;
+    @Column(name = "termination_forced_at")
+    private Instant terminationForcedAt;
+
     @Builder.Default
     @OneToMany(mappedBy = "contract", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("revisionNumber DESC")

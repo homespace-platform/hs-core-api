@@ -53,7 +53,13 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     INVOICE_NOT_ACTIVE(6054, "Chỉ hợp đồng đang hiệu lực mới phát sinh hóa đơn", HttpStatus.CONFLICT),
     INVOICE_AMOUNT_INVALID(6055, "Số tiền hoặc phí phát sinh không hợp lệ", HttpStatus.BAD_REQUEST),
     CONTRACT_LATE_FEE_INVALID(6056, "Cấu hình phí chậm thanh toán không hợp lệ", HttpStatus.BAD_REQUEST),
-    CONTRACT_LATE_FEE_TEMPLATE_REQUIRED(6057, "Mẫu hợp đồng chưa có trường điều khoản thỏa thuận riêng để ghi phí chậm thanh toán. Vui lòng liên hệ quản trị viên.", HttpStatus.CONFLICT);
+    CONTRACT_LATE_FEE_TEMPLATE_REQUIRED(6057, "Mẫu hợp đồng chưa có trường điều khoản thỏa thuận riêng để ghi phí chậm thanh toán. Vui lòng liên hệ quản trị viên.", HttpStatus.CONFLICT),
+    OVERDUE_ACTION_NOT_ALLOWED(6058, "Chỉ xử lý sau 5 ngày quá hạn khi hóa đơn chưa thanh toán và không trong đối soát", HttpStatus.CONFLICT),
+    OVERDUE_ACTION_INVALID(6059, "Phương án xử lý quá hạn hoặc nội dung ghi chú không hợp lệ", HttpStatus.BAD_REQUEST),
+    OVERDUE_ACTION_NOT_FOUND(6060, "Không tìm thấy phương án xử lý quá hạn", HttpStatus.NOT_FOUND),
+    OVERDUE_DEFERRAL_NOT_ALLOWED(6061, "Không thể chuyển nợ: hóa đơn đang đối soát, đã thanh toán hoặc không còn kỳ thuê tiếp theo", HttpStatus.CONFLICT),
+    TERMINATION_NOT_ALLOWED(6062, "Chưa đủ điều kiện chấm dứt: kiểm tra mốc quá hạn, điều khoản đã ký, trạng thái thanh toán, phản hồi người thuê và bàn giao phòng", HttpStatus.CONFLICT),
+    TERMINATION_DEPOSIT_NOT_READY(6063, "Không thể quyết toán cọc khi khoản cọc chưa được chủ nhà xác nhận hoặc đang tranh chấp", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

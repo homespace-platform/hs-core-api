@@ -270,6 +270,27 @@ public class PaymentRequestService {
         }
     }
 
+    /** Retire the old QR before carrying its full balance to the next invoice. */
+    @Transactional
+    public void cancelMonthlyForRollover(String invoiceId) {
+        PaymentRequest found = paymentRequestRepository.findByInvoiceId(invoiceId)
+                .orElseThrow(() -> new IllegalStateException("Monthly payment missing for rollover"));
+        PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(found.getId())
+                .orElseThrow(() -> new IllegalStateException("Monthly payment missing for rollover"));
+        if (payment.getType() != PaymentType.MONTHLY_RENT || !List.of(
+                PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE, PaymentStatus.REJECTED)
+                .contains(payment.getStatus()))
+            throw new IllegalStateException("Monthly payment cannot be rolled over while under review or settled");
+        PaymentStatus old = payment.getStatus();
+        payment.setStatus(PaymentStatus.CANCELLED);
+        payment.setCancelledAt(billingTime.now());
+        payment.setCancelledReason("Công nợ đã chuyển sang hóa đơn kỳ kế tiếp");
+        payment.setQrImageUrl(null);
+        paymentRequestRepository.save(payment);
+        recordEvent(payment.getId(), PaymentEventType.CANCELLED, old, PaymentStatus.CANCELLED,
+                "SYSTEM", "SYSTEM", payment.getCancelledReason(), null);
+    }
+
     @Transactional
     public PaymentRequestResponse reportTransfer(String paymentRequestId, String actorId, ReportTransferRequest request) {
         PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)

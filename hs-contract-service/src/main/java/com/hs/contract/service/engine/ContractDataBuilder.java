@@ -113,7 +113,14 @@ public class ContractDataBuilder {
         Map<String, Object> policies = buildPolicies(listingSnapshot, request);
         Map<String, Object> meters = buildMeters(listingSnapshot, listing, occupants);
 
-        String specialTerms = "";
+        String specialTerms = "Nếu khoản thanh toán quá hạn quá 05 ngày liên tiếp sau hạn ghi trên hóa đơn, "
+                + "bên cho thuê được chọn chuyển công nợ sang kỳ sau hoặc thông báo chấm dứt hợp đồng "
+                + "do bên thuê vi phạm nghĩa vụ thanh toán. Hai bên có thể thỏa thuận chấm dứt sớm; "
+                + "nếu bên thuê không đồng ý, bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận "
+                + "sau khi thông báo và thực tế nhận lại phòng, chìa khóa, tài sản cho thuê. "
+                + "Khi hoàn tất bàn giao theo nhánh vi phạm này, toàn bộ tiền cọc đã nhận được ghi nhận "
+                + "thuộc bên cho thuê; công nợ hóa đơn chưa thanh toán tiếp tục được theo dõi riêng. "
+                + "Phí chậm trả chỉ áp dụng khi được ghi rõ trong hợp đồng.";
 
         return ContractSnapshots.builder()
                 .landlord(landlord)
@@ -1179,6 +1186,7 @@ public class ContractDataBuilder {
         map.put("latePaymentPolicy",
                 "Nếu quá hạn, hai bên xử lý theo điều khoản thỏa thuận riêng (nếu có); HomeSpace không tự áp dụng phí khi chưa có thỏa thuận.");
         map.put("latePaymentFeeMode", "NONE");
+        map.put("overdueLandlordTerminationAfterFiveDays", true);
         map.put("noticeDaysBeforeMoveOut", 30);
         map.put("noticeDaysBeforeTermination", 30);
         map.put("depositRefundDays", 15);

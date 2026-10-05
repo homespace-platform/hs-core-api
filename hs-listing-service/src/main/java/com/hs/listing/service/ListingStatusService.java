@@ -184,6 +184,21 @@ public class ListingStatusService {
                 ListingStatusActorType.USER, true);
     }
 
+    /** Re-publish only after the contract service has completed a verified handover. */
+    @Transactional
+    public void releaseRentedAfterTermination(String listingId, String ownerId) {
+        Listing listing = requireOwned(ownerId, listingId);
+        if (listing.getStatus() != ListingStatus.RENTED)
+            throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
+        change(listing, ListingStatus.PUBLISHED, "Đã chấm dứt hợp đồng và xác nhận bàn giao phòng",
+                ownerId, ListingStatusActorType.SYSTEM, true);
+        Instant now = Instant.now();
+        listing.setPublishedAt(now);
+        listing.setExpiresAt(now.plus(publicationDurationDays, ChronoUnit.DAYS));
+        listing.setAvailableFrom(java.time.LocalDate.now());
+        listingRepository.save(listing);
+    }
+
     private void change(Listing listing, ListingStatus target, String reason, String actorId,
                         ListingStatusActorType actorType, boolean validateExisting) {
         ListingStatus previous = listing.getStatus();

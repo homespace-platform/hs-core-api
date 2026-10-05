@@ -36,6 +36,7 @@ import com.hs.listing.service.ListingStatusService;
 import com.hs.storage.service.StorageService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Optional;
@@ -394,7 +395,8 @@ class ContractServiceImplTest {
         when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
         when(templateVersionRepository.findCurrentPublishedSystemVersions(com.hs.listing.model.constant.ListingCategory.ROOM))
                 .thenReturn(java.util.List.of(tplVer));
-        when(dataBuilder.build(any(), any(), any())).thenReturn(ContractDataBuilder.ContractSnapshots.builder().build());
+        when(dataBuilder.build(any(), any(), any())).thenReturn(ContractDataBuilder.ContractSnapshots.builder()
+                .specialTerms("Mốc 5 ngày mở hồ sơ xử lý quá hạn, không tự chấm dứt.").build());
         when(contractRepository.save(any(Contract.class))).thenAnswer(inv -> inv.getArgument(0));
         when(revisionRepository.save(any(ContractRevision.class))).thenAnswer(inv -> {
             ContractRevision r = inv.getArgument(0);
@@ -408,6 +410,10 @@ class ContractServiceImplTest {
         org.junit.jupiter.api.Assertions.assertNotNull(response);
         assertEquals("pay-1", response.getRentalPaymentId());
         assertEquals(ContractPaymentStatus.PAID, response.getPaymentStatus());
+        ArgumentCaptor<ContractRevision> revisionCaptor = ArgumentCaptor.forClass(ContractRevision.class);
+        verify(revisionRepository).save(revisionCaptor.capture());
+        assertEquals("Mốc 5 ngày mở hồ sơ xử lý quá hạn, không tự chấm dứt.",
+                revisionCaptor.getValue().getSpecialTerms());
     }
 
     @Test

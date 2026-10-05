@@ -134,6 +134,25 @@ class PaymentRequestServiceTest {
     }
 
     @Test
+    void rolloverCancelsOldMonthlyQrButRefusesReportedTransfer() {
+        PaymentRequest payment = PaymentRequest.builder().id("monthly-1")
+                .invoiceId("invoice-1").type(PaymentType.MONTHLY_RENT)
+                .status(PaymentStatus.OVERDUE).qrImageUrl("old-qr").build();
+        when(paymentRequestRepository.findByInvoiceId("invoice-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findByIdForUpdate("monthly-1")).thenReturn(Optional.of(payment));
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-10T03:00:00Z"));
+
+        paymentRequestService.cancelMonthlyForRollover("invoice-1");
+        assertEquals(PaymentStatus.CANCELLED, payment.getStatus());
+        assertNull(payment.getQrImageUrl());
+        verify(paymentRequestRepository).save(payment);
+
+        payment.setStatus(PaymentStatus.TRANSFER_REPORTED);
+        assertThrows(IllegalStateException.class,
+                () -> paymentRequestService.cancelMonthlyForRollover("invoice-1"));
+    }
+
+    @Test
     void monthlyPaymentIsIdempotentAndHasItemizedVietQr() {
         when(paymentRequestRepository.findByInvoiceId("invoice-1")).thenReturn(Optional.empty());
         when(bankAccountService.getDefaultIncomingAccount("landlord-1")).thenReturn(landlordAccount);

@@ -15,4 +15,14 @@ public record MonthlyInvoiceResponse(String id, String contractId, int periodInd
                                      Instant issuedAt, Instant dueAt, Instant paidAt,
                                      BigDecimal lateFeeAmount, Instant serverNow,
                                      Instant meterDeadlineAt, String workflowState,
-                                     List<IssueMonthlyInvoiceRequest.ExtraCharge> draftExtraCharges) {}
+                                     List<IssueMonthlyInvoiceRequest.ExtraCharge> draftExtraCharges,
+                                     List<OverdueAction> overdueActions,
+                                     Instant deferredAt, String rolledToInvoiceId,
+                                     String terminationProposalInvoiceId, Instant terminationProposedAt, Instant terminationAcceptedAt,
+                                     Instant terminationDeclinedAt,
+                                     Instant terminationCancelledAt,
+                                     Instant terminationCompletedAt, BigDecimal originalDepositAmount,
+                                     BigDecimal retainedDepositAmount,
+                                     boolean canDeferToNextPeriod,
+                                     boolean landlordTerminationClauseSigned,
+                                     Instant terminationForcedAt) {}

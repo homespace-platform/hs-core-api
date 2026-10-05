@@ -12,6 +12,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 
@@ -68,6 +69,19 @@ class ListingStatusServiceTest {
 
         assertThrows(AppException.class, () -> service.applySubmission(
                 listing, ListingSubmissionAction.SAVE_DRAFT, "owner-1", ListingStatusActorType.USER));
+    }
+
+    @Test
+    void verifiedTerminationRestoresRentedListingWithFreshPublicationWindow() {
+        Listing listing = listing(ListingStatus.RENTED);
+        when(listings.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+
+        service.releaseRentedAfterTermination("listing-1", "owner-1");
+
+        assertEquals(ListingStatus.PUBLISHED, listing.getStatus());
+        assertEquals(LocalDate.now(), listing.getAvailableFrom());
+        assertEquals(30, ChronoUnit.DAYS.between(listing.getPublishedAt(), listing.getExpiresAt()));
+        verify(history).save(any(ListingStatusHistory.class));
     }
 
     @Test
