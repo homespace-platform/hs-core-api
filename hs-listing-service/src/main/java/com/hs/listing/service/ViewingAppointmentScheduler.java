@@ -17,7 +17,7 @@ public class ViewingAppointmentScheduler {
      * và các lịch hẹn CONFIRMED đã qua giờ để chuyển thành COMPLETED.
      * Mặc định chạy mỗi 15 phút.
      */
-    @Scheduled(cron = "${listing.appointment-cleanup-cron}")
+    @Scheduled(cron = "${listing.appointment-cleanup-cron}", zone = "Asia/Ho_Chi_Minh")
     public void processAppointmentLifecycle() {
         try {
             int expiredCount = appointmentService.autoExpirePendingAppointments();

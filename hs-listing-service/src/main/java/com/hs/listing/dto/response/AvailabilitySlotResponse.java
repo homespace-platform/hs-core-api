@@ -10,5 +10,6 @@ public record AvailabilitySlotResponse(
         LocalTime startTime,
         LocalTime endTime,
         ViewingSlot slotType,
-        String status // AVAILABLE, LOCKED, PENDING_YOU, CONFIRMED_YOU, UNAVAILABLE
+        String status, // AVAILABLE, PENDING_YOU, CONFIRMED_YOU, UNAVAILABLE
+        int bookingCount
 ) {}

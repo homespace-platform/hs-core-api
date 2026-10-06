@@ -125,7 +125,7 @@ public class ViewingAppointmentController {
             @RequestBody(required = false) ApproveAppointmentRequest req) {
         String ownerId = requireUserId();
         return ApiResponse.<AppointmentResponse>builder()
-                .message("Đã chấp nhận lịch xem nhà. Khung giờ này đã được khóa lại.")
+                .message("Đã chấp nhận lịch xem nhà.")
                 .result(appointmentService.approveAppointment(ownerId, id, req))
                 .build();
     }
@@ -145,7 +145,7 @@ public class ViewingAppointmentController {
     public ApiResponse<AppointmentResponse> approveReschedule(@PathVariable String id) {
         String ownerId = requireUserId();
         return ApiResponse.<AppointmentResponse>builder()
-                .message("Đã chấp nhận thay đổi thời gian xem nhà. Khung giờ mới đã được khóa.")
+                .message("Đã chấp nhận thay đổi thời gian xem nhà.")
                 .result(appointmentService.approveReschedule(ownerId, id))
                 .build();
     }

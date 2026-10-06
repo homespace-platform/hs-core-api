@@ -37,12 +37,15 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.*;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ViewingAppointmentService {
+
+    public static final ZoneId VIETNAM_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
 
     private final ViewingAppointmentRepository appointmentRepository;
     private final ListingRepository listingRepository;
@@ -81,7 +84,9 @@ public class ViewingAppointmentService {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
 
-        LocalDate queryDate = date != null ? date : LocalDate.now();
+        LocalDate today = LocalDate.now(VIETNAM_ZONE);
+        LocalTime now = LocalTime.now(VIETNAM_ZONE);
+        LocalDate queryDate = date != null ? date : today;
         DayOfWeek dayOfWeek = queryDate.getDayOfWeek();
 
         List<DayOfWeek> allowedDays = listing.getViewingDays() != null
@@ -94,7 +99,7 @@ public class ViewingAppointmentService {
 
         boolean isDayAvailable = allowedDays.contains(dayOfWeek)
                 && listing.getStatus() == ListingStatus.PUBLISHED
-                && !queryDate.isBefore(LocalDate.now());
+                && !queryDate.isBefore(today);
 
         // Kiểm tra xem user hiện tại đã có lịch hẹn nào đang active (PENDING/CONFIRMED) cho bài này chưa
         boolean hasExistingActiveBooking = false;
@@ -114,19 +119,10 @@ public class ViewingAppointmentService {
             List<ViewingAppointment> appointmentsOnDate = appointmentRepository.findByListingIdAndDateAndStatusIn(
                     listingId, queryDate, Set.of(AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED));
 
-            Map<LocalTime, ViewingAppointment> confirmedMap = new HashMap<>();
-            Map<LocalTime, List<ViewingAppointment>> pendingMap = new HashMap<>();
-
+            Map<LocalTime, List<ViewingAppointment>> slotAppointments = new HashMap<>();
             for (ViewingAppointment apt : appointmentsOnDate) {
-                if (apt.getStatus() == AppointmentStatus.CONFIRMED) {
-                    confirmedMap.put(apt.getStartTime(), apt);
-                } else if (apt.getStatus() == AppointmentStatus.PENDING) {
-                    pendingMap.computeIfAbsent(apt.getStartTime(), k -> new ArrayList<>()).add(apt);
-                }
+                slotAppointments.computeIfAbsent(apt.getStartTime(), k -> new ArrayList<>()).add(apt);
             }
-
-            LocalDate today = LocalDate.now();
-            LocalTime now = LocalTime.now();
 
             List<TimeSlotDef> candidateSlots = new ArrayList<>();
             if (allowedSlots.contains(ViewingSlot.MORNING)) candidateSlots.addAll(MORNING_SLOTS);
@@ -134,26 +130,24 @@ public class ViewingAppointmentService {
             if (allowedSlots.contains(ViewingSlot.EVENING)) candidateSlots.addAll(EVENING_SLOTS);
 
             for (TimeSlotDef def : candidateSlots) {
+                List<ViewingAppointment> aptsInSlot = slotAppointments.getOrDefault(def.start(), List.of());
+                int bookingCount = aptsInSlot.size();
                 String slotStatus = "AVAILABLE";
 
                 // Nếu là ngày hôm nay và khung giờ quá sát hiện tại (dưới 1 tiếng) -> UNAVAILABLE
                 if (queryDate.equals(today) && def.start().isBefore(now.plusHours(1))) {
                     slotStatus = "UNAVAILABLE";
-                } else if (confirmedMap.containsKey(def.start())) {
-                    ViewingAppointment confirmedApt = confirmedMap.get(def.start());
-                    if (currentUserId != null && currentUserId.equals(confirmedApt.getRenterId())) {
+                } else if (currentUserId != null && !currentUserId.isBlank()) {
+                    boolean youConfirmed = aptsInSlot.stream()
+                            .anyMatch(a -> a.getStatus() == AppointmentStatus.CONFIRMED && currentUserId.equals(a.getRenterId()));
+                    if (youConfirmed) {
                         slotStatus = "CONFIRMED_YOU";
                     } else {
-                        slotStatus = "LOCKED"; // Đã có khách khác được duyệt -> Khóa khung giờ
-                    }
-                } else if (pendingMap.containsKey(def.start())) {
-                    List<ViewingAppointment> pendings = pendingMap.get(def.start());
-                    boolean youPending = currentUserId != null && pendings.stream()
-                            .anyMatch(p -> currentUserId.equals(p.getRenterId()));
-                    if (youPending) {
-                        slotStatus = "PENDING_YOU";
-                    } else {
-                        slotStatus = "AVAILABLE"; // Khách khác pending nhưng chưa duyệt nên vẫn cho gửi yêu cầu
+                        boolean youPending = aptsInSlot.stream()
+                                .anyMatch(a -> a.getStatus() == AppointmentStatus.PENDING && currentUserId.equals(a.getRenterId()));
+                        if (youPending) {
+                            slotStatus = "PENDING_YOU";
+                        }
                     }
                 }
 
@@ -162,6 +156,7 @@ public class ViewingAppointmentService {
                         .endTime(def.end())
                         .slotType(def.slot())
                         .status(slotStatus)
+                        .bookingCount(bookingCount)
                         .build());
             }
         }
@@ -209,12 +204,12 @@ public class ViewingAppointmentService {
         }
 
         // 4. Kiểm tra ngày giờ hợp lệ
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(VIETNAM_ZONE);
         if (req.appointmentDate().isBefore(today)) {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_TIME);
         }
         // Đặt trước tối thiểu 1 tiếng nếu chọn lịch trong ngày hôm nay (khớp rule availability UI)
-        if (req.appointmentDate().equals(today) && req.startTime().isBefore(LocalTime.now().plusHours(1))) {
+        if (req.appointmentDate().equals(today) && req.startTime().isBefore(LocalTime.now(VIETNAM_ZONE).plusHours(1))) {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_TIME);
         }
 
@@ -227,11 +222,6 @@ public class ViewingAppointmentService {
         ViewingSlot slotType = resolveSlotType(req.startTime(), req.endTime());
         if (slotType == null || listing.getViewingSlots() == null || !listing.getViewingSlots().contains(slotType)) {
             throw new AppException(ListingErrorCode.SLOT_NOT_AVAILABLE);
-        }
-
-        // 7. Kiểm tra khung giờ này đã bị ai đó khóa (CONFIRMED) chưa
-        if (appointmentRepository.isSlotConfirmed(req.listingId(), req.appointmentDate(), req.startTime())) {
-            throw new AppException(ListingErrorCode.SLOT_ALREADY_BOOKED);
         }
 
         ViewingAppointment appointment = ViewingAppointment.builder()
@@ -261,7 +251,7 @@ public class ViewingAppointmentService {
     }
 
     // =========================================================================
-    // 3. CHỦ NHÀ CHẤP NHẬN LỊCH HẸN (APPROVE) -> KHÓA KHUNG GIỜ ĐÓ LẠI
+    // 3. CHỦ NHÀ CHẤP NHẬN LỊCH HẸN (APPROVE)
     // =========================================================================
     @Transactional
     public AppointmentResponse approveAppointment(String ownerId, String appointmentId, ApproveAppointmentRequest req) {
@@ -275,11 +265,6 @@ public class ViewingAppointmentService {
             throw new AppException(ListingErrorCode.LISTING_NOT_AVAILABLE_FOR_VIEWING);
         }
 
-        // Kiểm tra xem trong thời gian chờ duyệt, có slot nào khác cùng giờ đã bị confirmed chưa
-        if (appointmentRepository.isSlotConfirmed(apt.getListing().getId(), apt.getAppointmentDate(), apt.getStartTime())) {
-            throw new AppException(ListingErrorCode.SLOT_ALREADY_BOOKED);
-        }
-
         apt.setStatus(AppointmentStatus.CONFIRMED);
         if (req != null && req.ownerNote() != null && !req.ownerNote().isBlank()) {
             apt.setOwnerNote(req.ownerNote().trim());
@@ -287,18 +272,6 @@ public class ViewingAppointmentService {
         ViewingAppointment confirmedApt = appointmentRepository.save(apt);
         log.info("Owner {} APPROVED viewing appointment {} for listing {} on {} at {}-{}",
                 ownerId, appointmentId, apt.getListing().getId(), apt.getAppointmentDate(), apt.getStartTime(), apt.getEndTime());
-
-        // XỬ LÝ XUNG ĐỘT (Race Condition):
-        // Tự động từ chối các yêu cầu PENDING khác của cùng bài đăng, cùng ngày và khung giờ này
-        List<ViewingAppointment> conflicts = appointmentRepository.findConflictingPendingAppointments(
-                apt.getListing().getId(), apt.getAppointmentDate(), apt.getStartTime(), apt.getId());
-        for (ViewingAppointment conflict : conflicts) {
-            conflict.setStatus(AppointmentStatus.REJECTED);
-            conflict.setRejectReason("Khung giờ này đã được xác nhận cho một khách hàng khác. Vui lòng chọn khung giờ khác.");
-            appointmentRepository.save(conflict);
-            log.info("Auto-rejected conflicting pending appointment {} for listing {} on {} slot {}",
-                    conflict.getId(), apt.getListing().getId(), apt.getAppointmentDate(), apt.getStartTime());
-        }
 
         return toResponse(confirmedApt);
     }
@@ -348,11 +321,11 @@ public class ViewingAppointmentService {
         }
 
         // Validate ngày giờ mới
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(VIETNAM_ZONE);
         if (req.proposedDate().isBefore(today)) {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_TIME);
         }
-        if (req.proposedDate().equals(today) && req.proposedStartTime().isBefore(LocalTime.now().plusHours(1))) {
+        if (req.proposedDate().equals(today) && req.proposedStartTime().isBefore(LocalTime.now(VIETNAM_ZONE).plusHours(1))) {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_TIME);
         }
         if (listing.getViewingDays() == null || !listing.getViewingDays().contains(req.proposedDate().getDayOfWeek())) {
@@ -361,9 +334,6 @@ public class ViewingAppointmentService {
         ViewingSlot proposedSlotType = resolveSlotType(req.proposedStartTime(), req.proposedEndTime());
         if (proposedSlotType == null || listing.getViewingSlots() == null || !listing.getViewingSlots().contains(proposedSlotType)) {
             throw new AppException(ListingErrorCode.SLOT_NOT_AVAILABLE);
-        }
-        if (appointmentRepository.isSlotConfirmed(listing.getId(), req.proposedDate(), req.proposedStartTime())) {
-            throw new AppException(ListingErrorCode.SLOT_ALREADY_BOOKED);
         }
 
         apt.setRescheduleRequested(true);
@@ -391,17 +361,12 @@ public class ViewingAppointmentService {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_STATUS);
         }
 
-        // Kiểm tra khung giờ mới xem có bị ai confirmed chưa
-        if (appointmentRepository.isSlotConfirmed(apt.getListing().getId(), apt.getProposedDate(), apt.getProposedStartTime())) {
-            throw new AppException(ListingErrorCode.SLOT_ALREADY_BOOKED);
-        }
-
         LocalDate newDate = apt.getProposedDate();
         LocalTime newStart = apt.getProposedStartTime();
         LocalTime newEnd = apt.getProposedEndTime();
         ViewingSlot newSlotType = apt.getProposedSlotType();
 
-        // Áp dụng lịch mới và khóa khung giờ mới, mở lại khung giờ cũ
+        // Áp dụng lịch mới và cập nhật trạng thái
         apt.setAppointmentDate(newDate);
         apt.setStartTime(newStart);
         apt.setEndTime(newEnd);
@@ -417,15 +382,6 @@ public class ViewingAppointmentService {
         ViewingAppointment saved = appointmentRepository.save(apt);
         log.info("Owner {} APPROVED reschedule for appointment {}. New schedule: {} {}-{}",
                 ownerId, appointmentId, newDate, newStart, newEnd);
-
-        // Tự động từ chối các yêu cầu PENDING khác trùng khung giờ mới
-        List<ViewingAppointment> conflicts = appointmentRepository.findConflictingPendingAppointments(
-                apt.getListing().getId(), newDate, newStart, apt.getId());
-        for (ViewingAppointment conflict : conflicts) {
-            conflict.setStatus(AppointmentStatus.REJECTED);
-            conflict.setRejectReason("Khung giờ này đã được xác nhận cho một khách hàng khác. Vui lòng chọn khung giờ khác.");
-            appointmentRepository.save(conflict);
-        }
 
         return toResponse(saved);
     }
@@ -526,8 +482,8 @@ public class ViewingAppointmentService {
     public void cancelActiveAppointmentsForListing(String listingId, ListingStatus newStatus) {
         if (listingId == null || listingId.isBlank()) return;
 
-        LocalDate today = LocalDate.now();
-        LocalTime now = LocalTime.now();
+        LocalDate today = LocalDate.now(VIETNAM_ZONE);
+        LocalTime now = LocalTime.now(VIETNAM_ZONE);
 
         List<ViewingAppointment> activeAppointments = appointmentRepository.findActiveFutureAppointmentsByListing(
                 listingId, Set.of(AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED), today, now);
@@ -642,8 +598,8 @@ public class ViewingAppointmentService {
     // =========================================================================
     @Transactional
     public int autoExpirePendingAppointments() {
-        LocalDate today = LocalDate.now();
-        LocalTime now = LocalTime.now();
+        LocalDate today = LocalDate.now(VIETNAM_ZONE);
+        LocalTime now = LocalTime.now(VIETNAM_ZONE);
         List<ViewingAppointment> expiredList = appointmentRepository.findExpiredPendingAppointments(today, now);
         for (ViewingAppointment apt : expiredList) {
             apt.setStatus(AppointmentStatus.EXPIRED);
@@ -654,8 +610,8 @@ public class ViewingAppointmentService {
 
     @Transactional
     public int autoCompleteConfirmedAppointments() {
-        LocalDate today = LocalDate.now();
-        LocalTime now = LocalTime.now();
+        LocalDate today = LocalDate.now(VIETNAM_ZONE);
+        LocalTime now = LocalTime.now(VIETNAM_ZONE);
         List<ViewingAppointment> pastList = appointmentRepository.findPastConfirmedAppointments(today, now);
         for (ViewingAppointment apt : pastList) {
             apt.setStatus(AppointmentStatus.COMPLETED);
