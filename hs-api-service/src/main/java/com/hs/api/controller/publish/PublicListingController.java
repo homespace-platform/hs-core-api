@@ -10,6 +10,9 @@ import com.hs.listing.model.constant.ListingCategory;
 import com.hs.listing.dto.response.ListingDetailResponse;
 import com.hs.listing.service.ListingPublicService;
 import com.hs.listing.service.ListingQueryService;
+import com.hs.listing.service.AiListingSearchService;
+import com.hs.listing.dto.request.AiListingSearchRequest;
+import com.hs.listing.dto.response.AiListingSearchResponse;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +34,35 @@ public class PublicListingController {
     private final ListingPublicService listingPublicService;
     private final ListingQueryService listingQueryService;
     private final com.hs.listing.service.ListingViewService listingViewService;
+    private final AiListingSearchService aiListingSearchService;
+
+    @GetMapping("/ai/fields")
+    public com.hs.common.dto.ApiResponse<java.util.Map<String, String>> aiSearchFields() {
+        return com.hs.common.dto.ApiResponse.<java.util.Map<String, String>>builder()
+                .result(aiListingSearchService.fields()).build();
+    }
+
+    @org.springframework.web.bind.annotation.PostMapping("/ai/search")
+    public com.hs.common.dto.ApiResponse<AiListingSearchResponse> aiSearch(
+            @org.springframework.web.bind.annotation.RequestBody AiListingSearchRequest request) {
+        try {
+            return com.hs.common.dto.ApiResponse.<AiListingSearchResponse>builder()
+                    .result(aiListingSearchService.search(request)).build();
+        } catch (IllegalArgumentException error) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, error.getMessage());
+        }
+    }
+
+    @GetMapping("/ai/{listingId}")
+    public com.hs.common.dto.ApiResponse<ListingDetailResponse> aiDetail(@PathVariable String listingId) {
+        var detail = listingQueryService.getById(null, listingId);
+        if (detail.status() != com.hs.listing.model.constant.ListingStatus.PUBLISHED ||
+                (detail.expiresAt() != null && !detail.expiresAt().isAfter(java.time.Instant.now()))) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND);
+        }
+        return com.hs.common.dto.ApiResponse.<ListingDetailResponse>builder().result(detail).build();
+    }
 
     @GetMapping("/{listingId}")
     public com.hs.common.dto.ApiResponse<ListingDetailResponse> getPublicListingDetail(@PathVariable String listingId) {
