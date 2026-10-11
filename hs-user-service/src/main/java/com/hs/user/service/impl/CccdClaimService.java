@@ -20,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class CccdClaimService {
 
     private final UserRepository userRepository;
-    private final CccdTestSharingPolicy cccdTestSharingPolicy;
 
     /**
      * @return true if this user now owns the CCCD; false if already taken by another account
@@ -30,11 +29,11 @@ public class CccdClaimService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
 
-        if (!cccdTestSharingPolicy.mayClaim(user, cccd)) {
-            return false;
-        }
         if (cccd.equals(user.getCccd())) {
             return true;
+        }
+        if (userRepository.existsByCccdAndIdNot(cccd, userId)) {
+            return false;
         }
 
         user.setCccd(cccd);

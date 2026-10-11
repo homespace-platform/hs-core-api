@@ -58,9 +58,7 @@ public class User extends BaseEntity {
     @Column(length = 15, unique = true)
     String phone;
 
-    /** Citizen ID (CCCD) filled from Didit KYC when Approved. */
-    // Uniqueness is enforced by the database index initialized by CccdUniquenessInitializer.
-    // In dev test mode only, that index allows the two bootstrap admins to share one CCCD.
+    /** Citizen ID (CCCD) filled from Didit KYC when Approved. Unique across users. */
     @Column(name = "cccd", length = 20)
     String cccd;
 

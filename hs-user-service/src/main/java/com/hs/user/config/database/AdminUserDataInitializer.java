@@ -19,7 +19,6 @@ import com.hs.user.model.Role;
 import com.hs.user.model.User;
 import com.hs.user.repository.RoleRepository;
 import com.hs.user.repository.UserRepository;
-import com.hs.user.service.impl.CccdTestSharingPolicy;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +37,6 @@ public class AdminUserDataInitializer implements CommandLineRunner {
     private final RoleRepository roleRepository;
     private final RealmResource keycloakRealm;
     private final BootstrapAdminProperties properties;
-    private final CccdTestSharingPolicy cccdTestSharingPolicy;
 
     @Override
     public void run(String... args) {
@@ -161,7 +159,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         admin.setLastName(account.lastName());
         admin.setPhone(account.phoneNumber());
         admin.setRole(adminRole);
-        if (cccd != null && cccdTestSharingPolicy.mayClaim(admin, cccd)) {
+        if (cccd != null && !userRepository.existsByCccdAndIdNot(cccd, userId)) {
             admin.setCccd(cccd);
         }
         admin.setActive(true);
@@ -225,12 +223,8 @@ public class AdminUserDataInitializer implements CommandLineRunner {
                 if (cccd.equals(admin.getCccd())) {
                     return;
                 }
-                if (!cccdTestSharingPolicy.isEnabled()
-                        && admin.getCccd() != null && !admin.getCccd().isBlank()) {
-                    return;
-                }
-                if (!cccdTestSharingPolicy.mayClaim(admin, cccd)) {
-                    log.warn("Cannot sync bootstrap admin CCCD — already used or not allowed for this account");
+                if (userRepository.existsByCccdAndIdNot(cccd, userId)) {
+                    log.warn("Cannot sync bootstrap admin CCCD — already used by another account");
                     return;
                 }
 

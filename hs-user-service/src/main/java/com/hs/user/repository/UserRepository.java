@@ -1,11 +1,11 @@
 package com.hs.user.repository;
 
-import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import com.hs.user.model.User;
+
 
 public interface UserRepository extends JpaRepository<User, String> {
     Optional<User> findByEmail(String email);
@@ -19,7 +19,4 @@ public interface UserRepository extends JpaRepository<User, String> {
     boolean existsByPhoneAndIdNot(String phone, String id);
 
     boolean existsByCccdAndIdNot(String cccd, String id);
-
-    List<User> findAllByCccd(String cccd);
 }
-
