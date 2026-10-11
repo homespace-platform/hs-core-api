@@ -11,6 +11,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import java.time.Duration;
 
 import java.util.Optional;
 
@@ -24,7 +27,21 @@ public class DocumentConversionService {
     @Value("${contract.gotenberg.enabled:false}")
     private boolean gotenbergEnabled;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
+
+    @Autowired
+    public DocumentConversionService(
+            @Value("${contract.gotenberg.connect-timeout-seconds:5}") int connectTimeout,
+            @Value("${contract.gotenberg.read-timeout-seconds:45}") int readTimeout) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(Math.max(1, connectTimeout)));
+        factory.setReadTimeout(Duration.ofSeconds(Math.max(1, readTimeout)));
+        this.restTemplate = new RestTemplate(factory);
+    }
+
+    DocumentConversionService(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     /**
      * Chuyển đổi mảng byte của file DOCX sang PDF thông qua Gotenberg (LibreOffice container)
@@ -57,7 +74,7 @@ public class DocumentConversionService {
 
             ResponseEntity<byte[]> response = restTemplate.postForEntity(convertEndpoint, requestEntity, byte[].class);
 
-            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null && response.getBody().length > 0) {
                 log.info("Successfully converted DOCX to PDF ({} bytes)", response.getBody().length);
                 return Optional.of(response.getBody());
             } else {
@@ -65,7 +82,7 @@ public class DocumentConversionService {
                 return Optional.empty();
             }
         } catch (Exception e) {
-            log.warn("Failed to convert DOCX to PDF via Gotenberg: {}. Preview will fallback to DOCX.", e.getMessage());
+            log.warn("Failed to convert DOCX to PDF via Gotenberg: {}. No PDF is available.", e.getMessage());
             return Optional.empty();
         }
     }

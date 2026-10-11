@@ -35,6 +35,10 @@ public class ContractDocument extends BaseEntity {
     @Column(name = "template_version_id", nullable = false, length = 36)
     private String templateVersionId;
 
+    /** Renderer/mode/revision identity. Null on legacy documents; never rewrites signed PDFs. */
+    @Column(name = "render_fingerprint", length = 64)
+    private String renderFingerprint;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "document_type", nullable = false, length = 20)
     private ContractDocumentType documentType;

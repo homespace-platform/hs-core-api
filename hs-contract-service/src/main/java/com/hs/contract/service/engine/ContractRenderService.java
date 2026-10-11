@@ -5,6 +5,7 @@ import com.deepoove.poi.data.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.contract.service.MonthlyBillingSchedule;
+import com.hs.contract.service.ContractPolicyTerms;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -90,6 +91,7 @@ public class ContractRenderService {
         putFinancialFields(model, financial);
         putMeterFields(model, meters);
         putInitialPaymentFields(model, initialPayment, financial);
+        model.put("policies", policies != null ? new LinkedHashMap<>(policies) : Map.of());
 
         Map<String, Object> contract = new LinkedHashMap<>();
         contract.put("number", contractNumber != null ? contractNumber : "HD-" + System.currentTimeMillis());
@@ -97,7 +99,10 @@ public class ContractRenderService {
         contract.put("signingCity", signingCity != null ? signingCity : "Thành phố Hồ Chí Minh");
         contract.put("schemaVersion", schemaVersion != null ? String.valueOf(schemaVersion) : "2");
         contract.put("revisionNumber", revisionNumber != null ? String.valueOf(revisionNumber) : "1");
-        contract.put("specialTerms", specialTerms != null ? specialTerms : "");
+        String terms = specialTerms == null ? "" : specialTerms.trim();
+        String policyClause = ContractPolicyTerms.clause(policies);
+        if (!policyClause.isBlank()) terms = terms.isEmpty() ? policyClause : terms + "\n" + policyClause;
+        contract.put("specialTerms", terms);
         model.put("contract", contract);
 
         // Bảng động

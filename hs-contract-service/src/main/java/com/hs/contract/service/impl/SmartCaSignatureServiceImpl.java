@@ -15,6 +15,8 @@ import com.hs.contract.pdf.PdfSignatureEngine;
 import com.hs.contract.pdf.PdfSignatureEngine.*;
 import com.hs.contract.repository.ContractDocumentRepository;
 import com.hs.contract.repository.ContractRepository;
+import com.hs.contract.repository.ContractRevisionRepository;
+import com.hs.contract.service.ContractPreviewIdentity;
 import com.hs.contract.repository.SignatureRequestRepository;
 import com.hs.contract.service.SmartCaSignatureService;
 import com.hs.storage.model.constant.StoragePurpose;
@@ -66,6 +68,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     private final SignatureRequestRepository requestRepository;
     private final ContractRepository contractRepository;
     private final ContractDocumentRepository documentRepository;
+    private final ContractRevisionRepository revisionRepository;
     private final StorageService storageService;
     private final SmartCaClient smartCaClient;
     private final SmartCaProperties properties;
@@ -897,14 +900,19 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         }
 
         // Landlord ký vào PDF PREVIEW hoặc OFFICIAL
-        Optional<ContractDocument> pdf = documentRepository
-                .findFirstByContractIdAndRevisionIdAndDocumentTypeOrderByGeneratedAtDesc(
-                        contract.getId(), revisionId, ContractDocumentType.PDF);
-        return pdf.filter(d -> d.getStatus() == DocumentGenerationStatus.READY
-                && (d.getPurpose() == DocumentPurpose.PREVIEW || d.getPurpose() == DocumentPurpose.OFFICIAL))
+        var revision = revisionRepository.findById(revisionId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_REVISION_NOT_FOUND));
+        String fingerprint = ContractPreviewIdentity.fingerprint(revision, signatureMode);
+        return documentRepository.findByContractIdAndRevisionId(contract.getId(), revisionId).stream()
+                .filter(d -> d.getDocumentType() == ContractDocumentType.PDF
+                        && d.getStatus() == DocumentGenerationStatus.READY
+                        && d.getStorageObjectId() != null && !d.getStorageObjectId().isBlank()
+                        && fingerprint.equals(d.getRenderFingerprint())
+                        && (d.getPurpose() == DocumentPurpose.PREVIEW || d.getPurpose() == DocumentPurpose.OFFICIAL))
+                .findFirst()
                 .orElseThrow(() ->
                 new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY,
-                        "Hợp đồng chưa có PDF — vui lòng kết xuất tài liệu trước khi ký số."));
+                        "Chưa có PDF hợp lệ cho bản sửa đổi hiện tại — vui lòng kết xuất lại trước khi ký số."));
     }
 
     private SignatureRequest loadRequest(String requestId, String contractId, String currentUserId) {

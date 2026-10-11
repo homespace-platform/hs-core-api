@@ -31,6 +31,8 @@ import com.hs.contract.repository.ContractRevisionRepository;
 import com.hs.contract.repository.ContractTemplateVersionRepository;
 import com.hs.contract.service.ContractService;
 import com.hs.contract.service.LatePaymentPolicy;
+import com.hs.contract.service.ContractPolicyTerms;
+import com.hs.contract.service.ContractPreviewIdentity;
 import com.hs.contract.service.MonthlyBillingSchedule;
 import com.hs.contract.service.converter.DocumentConversionService;
 import com.hs.contract.service.engine.ContractDataBuilder;
@@ -421,7 +423,7 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional
     public ContractRevisionResponse updateRevision(String contractId, UpdateContractRevisionRequest request) {
-        Contract contract = findContractAndCheckAccess(contractId);
+        Contract contract = findContractForUpdateAndCheckAccess(contractId);
         String currentUserId = getCurrentUserId();
 
         // Chỉ chủ nhà mới được cập nhật bản nháp
@@ -602,6 +604,14 @@ public class ContractServiceImpl implements ContractService {
             }
         }
 
+        if (!seen.contains("contract.specialTerms")
+                && (!ContractPolicyTerms.clause(fromJson(revision.getPoliciesSnapshot(), MAP_TYPE)).isBlank()
+                || !LatePaymentPolicy.from(fromJson(revision.getPoliciesSnapshot(), MAP_TYPE)).clause().isBlank()
+                || (revision.getSpecialTerms() != null && !revision.getSpecialTerms().isBlank()))) {
+            total++;
+            missing.add(toMissingField("contract.specialTerms"));
+        }
+
         if (dynamicTables.contains("#chargesTable")
                 && isEmptyList(fromJson(revision.getChargesSnapshot(), CHARGE_LIST_TYPE))) {
             warnings.add("Tin đăng chưa khai báo khoản phí dịch vụ nào nên bảng biểu phí trong hợp đồng sẽ để trống.");
@@ -663,7 +673,8 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional
     public ContractDocumentResponse triggerPreview(String contractId) {
-        Contract contract = findContractAndCheckAccess(contractId);
+        // Database lock serializes duplicate clicks across Core instances and revision edits.
+        Contract contract = findContractForUpdateAndCheckAccess(contractId);
         requireLandlord(contract);
         if (contract.getStatus() != ContractStatus.DRAFT) {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
@@ -674,6 +685,10 @@ public class ContractServiceImpl implements ContractService {
         if (!completeness.isComplete()) {
             throw new AppException(ContractErrorCode.CONTRACT_DATA_INCOMPLETE);
         }
+
+        String fingerprint = ContractPreviewIdentity.fingerprint(revision, signatureMode);
+        Optional<ContractDocument> existing = currentPreview(contractId, revision, fingerprint);
+        if (existing.isPresent()) return toDocumentResponse(existing.get());
 
         ContractTemplateVersion templateVersion = templateVersionRepository.findById(contract.getTemplateVersionId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
@@ -691,8 +706,24 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.CONTRACT_RENDER_FAILED);
         }
 
-        // Upload file DOCX vào storage
         String docxName = contract.getContractNumber() + "_rev" + revision.getRevisionNumber() + ".docx";
+        // Complete conversion/signature preparation before uploading. A real PDF failure
+        // must not leave a ready DOCX (or an orphan upload) in the SmartCA workflow.
+        Optional<byte[]> pdfBytesOpt = conversionService.convertDocxToPdf(renderedDocx, docxName);
+        if ("SMARTCA".equalsIgnoreCase(signatureMode)) {
+            if (pdfBytesOpt.isEmpty() || pdfSignatureEngine == null) {
+                throw new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY,
+                        "Không thể chuyển Word sang PDF; cần PDF trước khi ký số.");
+            }
+            try {
+                pdfBytesOpt = Optional.of(pdfSignatureEngine.addSignaturePage(pdfBytesOpt.get()));
+            } catch (Exception e) {
+                log.error("Unable to prepare signature page for contract {}", contractId, e);
+                throw new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY);
+            }
+        }
+
+        // Upload file DOCX vào storage
         StorageObjectResponse docxStorage = storageService.uploadDirect(
                 renderedDocx,
                 docxName,
@@ -708,6 +739,7 @@ public class ContractServiceImpl implements ContractService {
                 .revisionId(revision.getId())
                 .templateVersionId(templateVersion.getId())
                 .documentType(ContractDocumentType.DOCX)
+                .renderFingerprint(fingerprint)
                 .purpose(DocumentPurpose.PREVIEW)
                 .storageObjectId(docxStorage.id())
                 .fileName(docxName)
@@ -717,20 +749,8 @@ public class ContractServiceImpl implements ContractService {
                 .build();
         documentRepository.save(docxDoc);
 
-        // Thử chuyển sang PDF qua Gotenberg
-        Optional<byte[]> pdfBytesOpt = conversionService.convertDocxToPdf(renderedDocx, docxName);
-
         if (pdfBytesOpt.isPresent()) {
             byte[] pdfBytes = pdfBytesOpt.get();
-            if ("SMARTCA".equalsIgnoreCase(signatureMode)) {
-                if (pdfSignatureEngine == null) throw new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY);
-                try {
-                    pdfBytes = pdfSignatureEngine.addSignaturePage(pdfBytes);
-                } catch (Exception e) {
-                    log.error("Unable to prepare signature page for contract {}", contractId, e);
-                    throw new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY);
-                }
-            }
             String pdfName = contract.getContractNumber() + "_rev" + revision.getRevisionNumber() + ".pdf";
 
             StorageObjectResponse pdfStorage = storageService.uploadDirect(
@@ -748,6 +768,7 @@ public class ContractServiceImpl implements ContractService {
                     .revisionId(revision.getId())
                     .templateVersionId(templateVersion.getId())
                     .documentType(ContractDocumentType.PDF)
+                    .renderFingerprint(fingerprint)
                     .purpose(DocumentPurpose.PREVIEW)
                     .storageObjectId(pdfStorage.id())
                     .fileName(pdfName)
@@ -757,15 +778,43 @@ public class ContractServiceImpl implements ContractService {
                     .build();
 
             pdfDoc = documentRepository.save(pdfDoc);
+            stalePreviousPreviews(contractId, revision.getId(), fingerprint);
             log.info("Successfully generated and saved PDF document id={} for contract id={}", pdfDoc.getId(), contractId);
             return toDocumentResponse(pdfDoc);
         } else {
-            if ("SMARTCA".equalsIgnoreCase(signatureMode)) {
-                throw new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY,
-                        "Không thể chuyển Word sang PDF; cần PDF trước khi ký số.");
-            }
             log.info("PDF conversion was skipped or failed. Returning DOCX document id={}", docxDoc.getId());
+            stalePreviousPreviews(contractId, revision.getId(), fingerprint);
             return toDocumentResponse(docxDoc);
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ContractDocumentResponse getPreviewStatus(String contractId) {
+        Contract contract = findContractAndCheckAccess(contractId);
+        ContractRevision revision = requireCurrentRevision(contract);
+        return currentPreview(contractId, revision, ContractPreviewIdentity.fingerprint(revision, signatureMode))
+                .map(this::toDocumentResponse).orElse(null);
+    }
+
+    private Optional<ContractDocument> currentPreview(String contractId, ContractRevision revision, String fingerprint) {
+        return documentRepository.findByContractIdAndRevisionId(contractId, revision.getId()).stream()
+                .filter(doc -> doc.getStatus() == DocumentGenerationStatus.READY
+                        && doc.getStorageObjectId() != null && !doc.getStorageObjectId().isBlank())
+                .filter(doc -> doc.getPurpose() == DocumentPurpose.PREVIEW || doc.getPurpose() == DocumentPurpose.OFFICIAL)
+                .filter(doc -> fingerprint.equals(doc.getRenderFingerprint()))
+                .filter(doc -> !"SMARTCA".equalsIgnoreCase(signatureMode) || doc.getDocumentType() == ContractDocumentType.PDF)
+                .sorted(Comparator.comparingInt(doc -> doc.getDocumentType() == ContractDocumentType.PDF ? 0 : 1))
+                .findFirst();
+    }
+
+    private void stalePreviousPreviews(String contractId, String revisionId, String fingerprint) {
+        for (ContractDocument doc : documentRepository.findByContractIdAndRevisionId(contractId, revisionId)) {
+            if (doc.getPurpose() == DocumentPurpose.PREVIEW && doc.getStatus() == DocumentGenerationStatus.READY
+                    && !fingerprint.equals(doc.getRenderFingerprint())) {
+                doc.setStatus(DocumentGenerationStatus.STALE);
+                documentRepository.save(doc);
+            }
         }
     }
 
@@ -776,7 +825,7 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED,
                     "Trong chế độ SmartCA, chủ nhà phải ký số trước khi hợp đồng được gửi cho người thuê.");
         }
-        Contract contract = findContractAndCheckAccess(contractId);
+        Contract contract = findContractForUpdateAndCheckAccess(contractId);
         requireLandlord(contract);
         if (contract.getStatus() != ContractStatus.DRAFT) {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
@@ -788,11 +837,14 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.CONTRACT_DATA_INCOMPLETE);
         }
 
-        List<ContractDocument> readyDocuments = readyDocumentsForRevision(contractId, revision.getId());
-        if (readyDocuments.isEmpty()) {
+        String fingerprint = ContractPreviewIdentity.fingerprint(revision, signatureMode);
+        if (currentPreview(contractId, revision, fingerprint).isEmpty()) {
             triggerPreview(contractId);
-            readyDocuments = readyDocumentsForRevision(contractId, revision.getId());
         }
+        List<ContractDocument> readyDocuments = readyDocumentsForRevision(contractId, revision.getId()).stream()
+                .filter(doc -> fingerprint.equals(doc.getRenderFingerprint()))
+                .filter(doc -> doc.getPurpose() == DocumentPurpose.PREVIEW || doc.getPurpose() == DocumentPurpose.OFFICIAL)
+                .toList();
         if (readyDocuments.isEmpty()) {
             throw new AppException(ContractErrorCode.CONTRACT_DOCUMENT_REQUIRED);
         }

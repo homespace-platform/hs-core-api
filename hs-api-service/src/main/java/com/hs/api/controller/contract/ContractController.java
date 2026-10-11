@@ -198,6 +198,13 @@ public class ContractController {
                 .build();
     }
 
+    @GetMapping("/{contractId}/preview-status")
+    public ApiResponse<ContractDocumentResponse> getPreviewStatus(@PathVariable String contractId) {
+        return ApiResponse.<ContractDocumentResponse>builder()
+                .result(contractService.getPreviewStatus(contractId))
+                .build();
+    }
+
     @PostMapping("/{contractId}/send")
     public ApiResponse<ContractResponse> sendToTenant(@PathVariable String contractId) {
         kycGateService.requireVerifiedIdentity(requireUserContext().userId());

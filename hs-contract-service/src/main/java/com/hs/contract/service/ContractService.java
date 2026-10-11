@@ -35,6 +35,9 @@ public interface ContractService {
 
     ContractDocumentResponse triggerPreview(String contractId);
 
+    /** Only a committed result for the current renderer/revision, null otherwise. */
+    ContractDocumentResponse getPreviewStatus(String contractId);
+
     /** Chốt tài liệu hiện tại và gửi bản hợp đồng hoàn chỉnh cho người thuê xem. */
     ContractResponse sendToTenant(String contractId);
 

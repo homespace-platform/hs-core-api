@@ -92,6 +92,7 @@ class ContractServiceImplTest {
         Contract contract = Contract.builder().id("contract-1").landlordId("landlord-1")
                 .tenantId("tenant-1").status(ContractStatus.DRAFT).build();
         when(contracts.findById("contract-1")).thenReturn(Optional.of(contract));
+        when(contracts.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
         when(revisions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(documents.findByContractIdOrderByGeneratedAtDesc("contract-1")).thenReturn(List.of());
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
@@ -121,6 +122,7 @@ class ContractServiceImplTest {
                 .tenantId("tenant-1").templateVersionId("template-version-1")
                 .status(ContractStatus.DRAFT).build();
         when(contracts.findById("contract-1")).thenReturn(Optional.of(contract));
+        when(contracts.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
         when(templates.findById("template-version-1")).thenReturn(Optional.of(
                 ContractTemplateVersion.builder().id("template-version-1").placeholdersJson("[]").build()));
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
@@ -169,6 +171,7 @@ class ContractServiceImplTest {
                 .build();
         ContractDocument document = ContractDocument.builder()
                 .id("document-1")
+                .renderFingerprint(com.hs.contract.service.ContractPreviewIdentity.fingerprint(revision, "INTERNAL"))
                 .contractId("contract-1")
                 .revisionId("revision-1")
                 .documentType(ContractDocumentType.DOCX)
@@ -179,6 +182,7 @@ class ContractServiceImplTest {
 
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
         when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
+        when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
         when(revisionRepository.findById("revision-1")).thenReturn(Optional.of(revision));
         when(templateVersionRepository.findById("template-version-1")).thenReturn(Optional.of(templateVersion));
         when(documentRepository.findByContractIdAndRevisionId("contract-1", "revision-1"))
@@ -213,6 +217,7 @@ class ContractServiceImplTest {
         UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
         when(contractRepository.findByRentalRequestId("request-1")).thenReturn(Optional.of(draft));
         when(contractRepository.findById("contract-1")).thenReturn(Optional.of(draft));
+        when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(draft));
 
         assertNull(service.findByRentalRequestId("request-1"));
         assertThrows(AppException.class, () -> service.getContract("contract-1"));
@@ -694,6 +699,7 @@ class ContractServiceImplTest {
                 .build();
 
         when(contractRepository.findById("contract-complete-1")).thenReturn(Optional.of(contract));
+        when(contractRepository.findByIdForUpdate("contract-complete-1")).thenReturn(Optional.of(contract));
         when(revisionRepository.findById("rev-1")).thenReturn(Optional.of(revision));
         when(templateVersionRepository.findById("tpl-v1")).thenReturn(Optional.of(tplVer));
 
@@ -792,6 +798,7 @@ class ContractServiceImplTest {
 
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
         when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
+        when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
 
         assertThrows(AppException.class, () -> service.updateRevision("contract-1", new com.hs.contract.dto.request.UpdateContractRevisionRequest()));
     }
