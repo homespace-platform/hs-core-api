@@ -33,6 +33,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.math.BigDecimal;
 import java.time.*;
@@ -54,14 +55,153 @@ public class MonthlyBillingService {
     private final ListingStatusService listingStatusService;
     private final DepositRecordRepository deposits;
     private final ParkingReservationService parkingReservations;
+    @Value("${homespace.billing.extension-response-hours:48}")
+    private int extensionResponseHours = 48;
+
+    @Transactional
+    public MonthlyInvoiceResponse requestPaymentExtension(String invoiceId, String tenantId, PaymentExtensionPayload payload) {
+        validateExtension(payload);
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
+        Contract contract = requireParty(invoice.getContractId(), tenantId);
+        if (!tenantId.equals(contract.getTenantId())) throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        reconcile(invoice);
+        if (!canRequestExtension(contract, invoice)) throw new AppException(ContractErrorCode.PAYMENT_EXTENSION_NOT_ALLOWED);
+        // Reconcile settles fees up to the request instant BEFORE the pause starts.
+        List<PaymentExtension> history = new ArrayList<>(extensions(invoice));
+        history.add(new PaymentExtension(UUID.randomUUID().toString(), payload.days(), payload.note().trim(),
+                PaymentExtension.Status.PENDING, time.now(), time.now().plus(Duration.ofHours(Math.max(1, extensionResponseHours))),
+                tenantId, invoice.getDueAt(), fee(invoice), null, null, null));
+        invoice.setExtensionRequestsSnapshot(write(history));
+        invoices.save(invoice);
+        return response(invoice);
+    }
+
+    @Transactional
+    public MonthlyInvoiceResponse decidePaymentExtension(String invoiceId, String requestId, String landlordId, boolean approve) {
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
+        Contract contract = requireParty(invoice.getContractId(), landlordId);
+        requireLandlord(contract, landlordId);
+        reconcile(invoice); // Expire pending requests even if the scheduler has not run.
+        PaymentExtension pending = pendingExtension(invoice).filter(r -> r.id().equals(requestId))
+                .orElseThrow(() -> new AppException(ContractErrorCode.PAYMENT_EXTENSION_NOT_FOUND));
+        if (contract.getStatus() != ContractStatus.ACTIVE || !unsettledAndUnreported(invoiceId)
+                || invoice.getDeferredAt() != null || activeTerminationProposal(contract) || extensionActive(invoice))
+            throw new AppException(ContractErrorCode.PAYMENT_EXTENSION_NOT_ALLOWED);
+        if (approve) approveExtension(invoice, pending, landlordId);
+        else {
+            replaceExtension(invoice, pending.decide(PaymentExtension.Status.REJECTED, time.now(), landlordId, null));
+            reconcile(invoice); // Catch up from original deadline; never add the full fee twice.
+        }
+        invoices.save(invoice);
+        return response(invoice);
+    }
+
+    /** Third overdue option, independent of whether the tenant has sent a request. */
+    @Transactional
+    public MonthlyInvoiceResponse extendPaymentDirectly(String invoiceId, String landlordId, PaymentExtensionPayload payload) {
+        validateExtension(payload);
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
+        Contract contract = requireParty(invoice.getContractId(), landlordId);
+        requireLandlord(contract, landlordId);
+        reconcile(invoice);
+        if (!canResolveOverdue(contract, invoice)) throw new AppException(ContractErrorCode.PAYMENT_EXTENSION_NOT_ALLOWED);
+        PaymentExtension pending = pendingExtension(invoice).orElse(null);
+        if (pending != null) {
+            if (payload.days() != pending.days()) throw new AppException(ContractErrorCode.PAYMENT_EXTENSION_NOT_ALLOWED,
+                    "Hãy duyệt hoặc từ chối yêu cầu đang chờ trước khi chọn số ngày khác.");
+            approveExtension(invoice, pending, landlordId);
+        } else {
+            PaymentExtension direct = new PaymentExtension(UUID.randomUUID().toString(), payload.days(), payload.note().trim(),
+                    PaymentExtension.Status.PENDING, time.now(), time.now(), landlordId, invoice.getDueAt(), fee(invoice), null, null, null);
+            List<PaymentExtension> history = new ArrayList<>(extensions(invoice));
+            history.add(direct); invoice.setExtensionRequestsSnapshot(write(history));
+            approveExtension(invoice, direct, landlordId);
+        }
+        invoices.save(invoice);
+        return response(invoice);
+    }
+
+    private void approveExtension(MonthlyInvoice invoice, PaymentExtension request, String landlordId) {
+        Instant approvedAt = time.now();
+        Instant newDue = approvedAt.plus(Duration.ofDays(request.days()));
+        // Never let an early request shorten the current payment window.
+        if (!newDue.isAfter(invoice.getDueAt())) throw new AppException(ContractErrorCode.PAYMENT_EXTENSION_NOT_ALLOWED,
+                "Hạn mới phải sau hạn hiện tại; chọn số ngày lớn hơn hoặc duyệt gần hạn thanh toán.");
+        if (invoice.getOriginalDueAt() == null) invoice.setOriginalDueAt(invoice.getDueAt());
+        payments.extendMonthlyDueDate(invoice.getId(), newDue, landlordId);
+        replaceExtension(invoice, request.decide(PaymentExtension.Status.APPROVED, approvedAt, landlordId, newDue));
+        invoice.setLateFeeExempt(true); // Sticky for THIS bill, even after the extended deadline.
+        invoice.setDueAt(newDue); invoice.setStatus(MonthlyInvoiceStatus.UNPAID);
+        invoice.setResolutionMode("PAYMENT_EXTENSION");
+        invoice.setPaymentReminderLoggedAt(null); invoice.setOverdueActionLoggedAt(null);
+        log.info("BILLING_EXTENSION_APPROVED invoice={} newDue={} frozenFee={}", invoice.getId(), newDue, fee(invoice));
+    }
+
+    private void validateExtension(PaymentExtensionPayload payload) {
+        if (payload == null || payload.days() < 1 || payload.days() > 30 || payload.note() == null
+                || payload.note().trim().length() < 10 || payload.note().trim().length() > 1000)
+            throw new AppException(ContractErrorCode.PAYMENT_EXTENSION_INVALID);
+    }
+
+    private List<PaymentExtension> extensions(MonthlyInvoice invoice) {
+        return readList(invoice.getExtensionRequestsSnapshot(), new TypeReference<List<PaymentExtension>>() {});
+    }
+    private Optional<PaymentExtension> pendingExtension(MonthlyInvoice invoice) {
+        return extensions(invoice).stream().filter(r -> r.status() == PaymentExtension.Status.PENDING).findFirst();
+    }
+    private void replaceExtension(MonthlyInvoice invoice, PaymentExtension changed) {
+        invoice.setExtensionRequestsSnapshot(write(extensions(invoice).stream()
+                .map(r -> r.id().equals(changed.id()) ? changed : r).toList()));
+    }
+    private BigDecimal fee(MonthlyInvoice invoice) { return invoice.getLateFeeAmount() == null ? BigDecimal.ZERO : invoice.getLateFeeAmount(); }
+    private boolean extensionActive(MonthlyInvoice invoice) {
+        return "PAYMENT_EXTENSION".equals(invoice.getResolutionMode()) && invoice.getDueAt() != null
+                && !time.now().isAfter(invoice.getDueAt());
+    }
+    private boolean canRequestExtension(Contract contract, MonthlyInvoice invoice) {
+        return contract != null && contract.getStatus() == ContractStatus.ACTIVE && invoice.getDueAt() != null
+                && List.of(MonthlyInvoiceStatus.UNPAID, MonthlyInvoiceStatus.OVERDUE).contains(invoice.getStatus())
+                && invoice.getDeferredAt() == null && !activeTerminationProposal(contract) && !extensionActive(invoice)
+                && unsettledAndUnreported(invoice.getId()) && pendingExtension(invoice).isEmpty()
+                && extensions(invoice).size() < 100
+                && extensions(invoice).stream().noneMatch(r -> Objects.equals(r.baseDueAt(), invoice.getDueAt()));
+    }
+    private boolean canResolveOverdue(Contract contract, MonthlyInvoice invoice) {
+        return contract != null && contract.getStatus() == ContractStatus.ACTIVE
+                && invoice.getStatus() == MonthlyInvoiceStatus.OVERDUE && invoice.getDueAt() != null
+                && !time.now().isBefore(actionRequiredAt(invoice)) && invoice.getDeferredAt() == null
+                && !activeTerminationProposal(contract) && !extensionActive(invoice) && unsettledAndUnreported(invoice.getId());
+    }
+    private void requireLandlord(Contract contract, String actorId) {
+        if (!actorId.equals(contract.getLandlordId())) throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+    }
+    private void rejectPendingForOtherDecision(MonthlyInvoice invoice, String actorId) {
+        pendingExtension(invoice).ifPresent(r -> replaceExtension(invoice,
+                r.decide(PaymentExtension.Status.REJECTED, time.now(), actorId, null)));
+        reconcile(invoice);
+    }
+    /** Lock order shared with scheduler: contract -> invoice -> payment. */
+    private MonthlyInvoice lockInvoice(String invoiceId) {
+        String contractId = invoices.findContractIdByInvoiceId(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        contracts.findByIdForUpdate(contractId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        MonthlyInvoice locked = invoices.findByIdForUpdate(invoiceId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        payments.lockMonthlyPayment(invoiceId);
+        return locked;
+    }
 
     /** Restart-safe: unique (contract, period) plus a contract row lock on manual and scheduled sync. */
     @Transactional
     public List<MonthlyInvoiceResponse> list(String contractId, String actorId) {
-        Contract contract = requireParty(contractId, actorId);
+        Contract contract = contracts.findByIdForUpdate(contractId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if (!actorId.equals(contract.getLandlordId()) && !actorId.equals(contract.getTenantId()))
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         if (contract.getStatus() == ContractStatus.ACTIVE) syncContract(contractId);
         else if (contract.getStatus() == ContractStatus.TERMINATED)
-            invoices.findByContractIdOrderByPeriodIndexDesc(contractId).forEach(this::reconcile);
+            invoices.findByContractIdOrderByPeriodIndexDesc(contractId).forEach(i -> reconcile(lockInvoice(i.getId())));
         return invoices.findByContractIdOrderByPeriodIndexDesc(contractId).stream()
                 .filter(invoice -> actorId.equals(contract.getLandlordId())
                         || invoice.getStatus() != MonthlyInvoiceStatus.DRAFT)
@@ -72,8 +212,7 @@ public class MonthlyBillingService {
     @Transactional
     public MonthlyInvoiceResponse recordOverdueAction(String invoiceId, String landlordId,
                                                        CreateOverdueActionRequest request) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = requireParty(invoice.getContractId(), landlordId);
         if (!landlordId.equals(contract.getLandlordId()))
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
@@ -84,6 +223,7 @@ public class MonthlyBillingService {
                     .orElse(true))
             throw new AppException(ContractErrorCode.OVERDUE_ACTION_NOT_ALLOWED);
         if (request == null || request.type() == null || request.note() == null
+                || request.type() == OverdueAction.Type.AUTOMATIC_ROLLOVER
                 || request.note().trim().length() < 10 || request.note().trim().length() > 1000
                 || request.type() == OverdueAction.Type.EXTENSION_PROPOSAL && request.proposedDate() == null
                 || request.proposedDate() != null && request.type() != OverdueAction.Type.EXTENSION_PROPOSAL
@@ -91,6 +231,9 @@ public class MonthlyBillingService {
                 || request.proposedDate() != null && !request.proposedDate().isAfter(time.today()))
             throw new AppException(ContractErrorCode.OVERDUE_ACTION_INVALID);
         List<OverdueAction> history = new ArrayList<>(overdueActions(invoice));
+        if (request.type() == OverdueAction.Type.EXTENSION_PROPOSAL
+                && request.proposedDate().isAfter(time.today().plusDays(30)))
+            throw new AppException(ContractErrorCode.OVERDUE_ACTION_INVALID);
         if (history.size() >= 100) throw new AppException(ContractErrorCode.OVERDUE_ACTION_INVALID);
         OverdueAction action = new OverdueAction(UUID.randomUUID().toString(), request.type(),
                 request.note().trim(), request.proposedDate(), time.now(), landlordId, null, null);
@@ -105,8 +248,7 @@ public class MonthlyBillingService {
     @Transactional
     public MonthlyInvoiceResponse acknowledgeOverdueAction(String invoiceId, String actionId,
                                                              String tenantId, AcknowledgeOverdueActionRequest request) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = requireParty(invoice.getContractId(), tenantId);
         if (!tenantId.equals(contract.getTenantId())) throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         if (request == null || request.note() == null || request.note().trim().length() > 1000)
@@ -128,14 +270,14 @@ public class MonthlyBillingService {
     /** Freeze the currently accrued balance and carry it exactly once when the next bill is issued. */
     @Transactional
     public MonthlyInvoiceResponse deferToNextPeriod(String invoiceId, String landlordId) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = requireParty(invoice.getContractId(), landlordId);
         if (!landlordId.equals(contract.getLandlordId()))
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         RentalRequest rental = rentalRequests.findById(contract.getRentalRequestId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
-        if (contract.getStatus() != ContractStatus.ACTIVE || activeTerminationProposal(contract)
+        reconcile(invoice);
+        if (contract.getStatus() != ContractStatus.ACTIVE || activeTerminationProposal(contract) || extensionActive(invoice)
                 || rental.getLeaseMonths() == null
                 || invoice.getPeriodIndex() + 1 >= rental.getLeaseMonths()
                 || invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE || invoice.getDueAt() == null
@@ -152,7 +294,9 @@ public class MonthlyBillingService {
                 || !List.of(PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE,
                     PaymentStatus.REJECTED).contains(paymentStatus))
             throw new AppException(ContractErrorCode.OVERDUE_DEFERRAL_NOT_ALLOWED);
+        rejectPendingForOtherDecision(invoice, landlordId);
         invoice.setDeferredAt(time.now());
+        invoice.setResolutionMode("ROLLOVER");
         log.warn("BILLING_DEFERRED landlord={} tenant={} contract={} invoice={} amount={}",
                 landlordId, contract.getTenantId(), contract.getId(), invoiceId, invoice.getTotalAmount());
         return response(invoices.save(invoice));
@@ -161,13 +305,13 @@ public class MonthlyBillingService {
     /** Proposal alone has no legal or inventory effect. */
     @Transactional
     public MonthlyInvoiceResponse proposeMutualTermination(String invoiceId, String landlordId) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         if (!landlordId.equals(contract.getLandlordId()))
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
-        if (contract.getStatus() != ContractStatus.ACTIVE || invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE
+        reconcile(invoice);
+        if (extensionActive(invoice) || contract.getStatus() != ContractStatus.ACTIVE || invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE
                 || invoice.getDueAt() == null
                 || invoice.getDeferredAt() != null || time.now().isBefore(actionRequiredAt(invoice))
                 || activeTerminationProposal(contract))
@@ -181,6 +325,8 @@ public class MonthlyBillingService {
         if (deposit.getStatus() != DepositStatus.HELD || deposit.getHeldAmount() == null
                 || deposit.getHeldAmount().compareTo(deposit.getOriginalAmount()) != 0)
             throw new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY);
+        rejectPendingForOtherDecision(invoice, landlordId);
+        invoice.setResolutionMode("TERMINATION"); invoices.save(invoice);
         contract.setTerminationProposalInvoiceId(invoiceId);
         contract.setTerminationProposedAt(time.now());
         contract.setTerminationAcceptedAt(null);
@@ -196,8 +342,7 @@ public class MonthlyBillingService {
     @Transactional
     public MonthlyInvoiceResponse acceptMutualTermination(String invoiceId, String tenantId,
                                                            AcceptTerminationRequest request) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         if (!tenantId.equals(contract.getTenantId()))
@@ -225,8 +370,7 @@ public class MonthlyBillingService {
 
     @Transactional
     public MonthlyInvoiceResponse declineMutualTermination(String invoiceId, String tenantId) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         if (!tenantId.equals(contract.getTenantId()))
@@ -237,6 +381,7 @@ public class MonthlyBillingService {
                 || contract.getTerminationCancelledAt() != null)
             throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
         contract.setTerminationDeclinedAt(time.now());
+        invoice.setResolutionMode(null); invoices.save(invoice);
         contracts.save(contract);
         log.warn("BILLING_TERMINATION_DECLINED tenant={} contract={} invoice={}",
                 tenantId, contract.getId(), invoiceId);
@@ -245,8 +390,7 @@ public class MonthlyBillingService {
 
     @Transactional
     public MonthlyInvoiceResponse withdrawMutualTermination(String invoiceId, String landlordId) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         if (!landlordId.equals(contract.getLandlordId()))
@@ -259,6 +403,7 @@ public class MonthlyBillingService {
                 || contract.getTerminationAcceptedAt() != null)
             throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
         contract.setTerminationCancelledAt(time.now());
+        invoice.setResolutionMode(null); invoices.save(invoice);
         contracts.save(contract);
         log.warn("BILLING_TERMINATION_WITHDRAWN landlord={} contract={} invoice={}",
                 landlordId, contract.getId(), invoiceId);
@@ -269,8 +414,7 @@ public class MonthlyBillingService {
     @Transactional
     public MonthlyInvoiceResponse completeMutualTermination(String invoiceId, String landlordId,
                                                              CompleteTerminationRequest request) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         if (!landlordId.equals(contract.getLandlordId()))
@@ -301,8 +445,7 @@ public class MonthlyBillingService {
     @Transactional
     public MonthlyInvoiceResponse forceTerminationAfterDecline(String invoiceId, String landlordId,
                                                                ForceTerminationRequest request) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = contracts.findByIdForUpdate(invoice.getContractId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         if (!landlordId.equals(contract.getLandlordId()))
@@ -314,6 +457,7 @@ public class MonthlyBillingService {
                 || contract.getTerminationDeclinedAt() == null || contract.getTerminationCancelledAt() != null
                 || contract.getTerminationAcceptedAt() != null || contract.getTerminationCompletedAt() != null
                 || invoice.getDeferredAt() != null || invoice.getDueAt() == null
+                || extensionActive(invoice) || pendingExtension(invoice).isPresent()
                 || time.now().isBefore(actionRequiredAt(invoice)) || !signedLandlordTerminationClause(contract))
             throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
         reconcile(invoice);
@@ -363,14 +507,14 @@ public class MonthlyBillingService {
     /** Landlord records readings and optional charges before the 10:00 automatic issue cutoff. */
     @Transactional
     public MonthlyInvoiceResponse prepare(String invoiceId, String landlordId, IssueMonthlyInvoiceRequest request) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = contracts.findById(invoice.getContractId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         if (!contract.getLandlordId().equals(landlordId)) throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         if (contract.getStatus() != ContractStatus.ACTIVE) throw new AppException(ContractErrorCode.INVOICE_NOT_ACTIVE);
         if (invoice.getStatus() != MonthlyInvoiceStatus.DRAFT
-                || time.today().isBefore(invoice.getPeriodEndExclusive().minusDays(1)))
+                || time.today().isBefore(invoice.getPeriodEndExclusive().minusDays(1))
+                || !time.now().isBefore(meterDeadline(invoice)))
             throw new AppException(ContractErrorCode.INVOICE_NOT_READY);
         ContractRevision revision = revisions.findById(contract.getCurrentRevisionId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
@@ -394,8 +538,7 @@ public class MonthlyBillingService {
 
     @Transactional
     public MonthlyInvoiceResponse issue(String invoiceId, String landlordId, IssueMonthlyInvoiceRequest request) {
-        MonthlyInvoice invoice = invoices.findByIdForUpdate(invoiceId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_NOT_FOUND));
+        MonthlyInvoice invoice = lockInvoice(invoiceId);
         Contract contract = contracts.findById(invoice.getContractId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         if (!contract.getLandlordId().equals(landlordId)) throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
@@ -495,6 +638,7 @@ public class MonthlyBillingService {
             MonthlyInvoice previous = invoices.findByContractIdAndPeriodIndex(
                     contract.getId(), invoice.getPeriodIndex() - 1).orElseThrow();
             reconcile(previous);
+            autoDeferIdleInvoice(previous);
             if (previous.getDeferredAt() != null && previous.getStatus() != MonthlyInvoiceStatus.PAID
                     && previous.getStatus() != MonthlyInvoiceStatus.ROLLED_OVER) {
                 PaymentStatus oldStatus = payments.findByInvoiceId(previous.getId())
@@ -533,6 +677,7 @@ public class MonthlyBillingService {
         }
         invoice.setDueAt(scheduledDue.isAfter(time.now().plus(Duration.ofDays(1)))
                 ? scheduledDue : time.now().plus(Duration.ofDays(1)));
+        invoice.setOriginalDueAt(invoice.getDueAt());
         if (carryFrom != null) {
             try { payments.cancelMonthlyForRollover(carryFrom.getId()); }
             catch (IllegalStateException ex) {
@@ -576,8 +721,10 @@ public class MonthlyBillingService {
             }
         }
         for (MonthlyInvoice invoice : invoices.findByContractIdOrderByPeriodIndexDesc(contractId)) {
-            reconcile(invoice);
-            processMilestones(contract, invoice);
+            MonthlyInvoice locked = lockInvoice(invoice.getId());
+            reconcile(locked);
+            autoDeferIdleInvoice(locked);
+            processMilestones(contract, locked);
         }
     }
 
@@ -604,10 +751,24 @@ public class MonthlyBillingService {
         if (invoice.getStatus() == MonthlyInvoiceStatus.PAID || invoice.getStatus() == MonthlyInvoiceStatus.DRAFT
                 || invoice.getStatus() == MonthlyInvoiceStatus.ROLLED_OVER) return;
         if (invoice.getPaymentRequestId() == null) return;
+        // Also needed when reconciling the previous bill during next-period issue.
+        payments.lockMonthlyPayment(invoice.getId());
         Optional<PaymentRequest> payment = payments.findByInvoiceId(invoice.getId());
+        pendingExtension(invoice).ifPresent(request -> {
+            boolean settled = payment.map(p -> p.getStatus() == PaymentStatus.CONFIRMED).orElse(false);
+            if (settled || !time.now().isBefore(request.respondBy())) {
+                replaceExtension(invoice, request.decide(settled ? PaymentExtension.Status.CLOSED : PaymentExtension.Status.EXPIRED,
+                        time.now(), "SYSTEM", null));
+                invoices.save(invoice);
+            }
+        });
+        if ("PAYMENT_EXTENSION".equals(invoice.getResolutionMode()) && !extensionActive(invoice)) {
+            invoice.setResolutionMode(null); invoices.save(invoice);
+        }
         if (payment.isPresent() && payment.get().getStatus() == PaymentStatus.CONFIRMED) {
             invoice.setStatus(MonthlyInvoiceStatus.PAID);
             invoice.setPaidAt(payment.get().getConfirmedAt());
+            invoice.setResolutionMode(null);
             invoices.save(invoice);
             Contract contract = contracts.findById(invoice.getContractId()).orElse(null);
             if (contract != null && invoice.getId().equals(contract.getTerminationProposalInvoiceId())
@@ -631,16 +792,47 @@ public class MonthlyBillingService {
         }
     }
 
+    /** Same contract/invoice/payment locks as manual decisions; no consent is invented. */
+    private void autoDeferIdleInvoice(MonthlyInvoice invoice) {
+        if (invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE
+                || invoice.getDueAt() == null || time.now().isBefore(MonthlyBillingSchedule.autoRolloverAt(invoice.getDueAt()))
+                || invoice.getDeferredAt() != null || pendingExtension(invoice).isPresent()) return;
+        Contract contract = contracts.findById(invoice.getContractId()).orElse(null);
+        if (!canResolveOverdue(contract, invoice)) return;
+        RentalRequest rental = rentalRequests.findById(contract.getRentalRequestId()).orElse(null);
+        // Never manufacture a fourth bill or rewrite an already issued next bill.
+        if (rental == null || rental.getLeaseMonths() == null
+                || invoice.getPeriodIndex() + 1 >= rental.getLeaseMonths()
+                || invoices.findByContractIdAndPeriodIndex(contract.getId(), invoice.getPeriodIndex() + 1)
+                    .filter(next -> next.getStatus() != MonthlyInvoiceStatus.DRAFT).isPresent()) return;
+
+        invoice.setDeferredAt(time.now());
+        invoice.setResolutionMode("ROLLOVER");
+        List<OverdueAction> history = new ArrayList<>(overdueActions(invoice));
+        history.add(new OverdueAction(UUID.randomUUID().toString(), OverdueAction.Type.AUTOMATIC_ROLLOVER,
+                "Hệ thống tự chốt công nợ để cộng dồn sang kỳ sau sau 10 ngày quá hạn chưa có phương án xử lý. "
+                        + "Phí phạt dừng tăng; QR cũ chỉ hủy khi hóa đơn kỳ sau phát hành.",
+                null, time.now(), "SYSTEM", null, null));
+        invoice.setOverdueActionsSnapshot(write(history));
+        invoices.save(invoice);
+        log.info("BILLING_AUTO_DEFERRED contract={} invoice={} amount={} fee={}",
+                invoice.getContractId(), invoice.getId(), invoice.getTotalAmount(), fee(invoice));
+    }
+
     private void autoIssueDue(String contractId) {
         Contract contract = contracts.findById(contractId).orElse(null);
         if (contract == null || contract.getStatus() != ContractStatus.ACTIVE) return;
-        for (MonthlyInvoice invoice : invoices.findByContractIdOrderByPeriodIndexDesc(contractId)) {
+        List<MonthlyInvoice> ordered = new ArrayList<>(invoices.findByContractIdOrderByPeriodIndexDesc(contractId));
+        ordered.sort(Comparator.comparingInt(MonthlyInvoice::getPeriodIndex));
+        for (MonthlyInvoice invoice : ordered) {
             if (invoice.getStatus() != MonthlyInvoiceStatus.DRAFT
                     || time.now().isBefore(meterDeadline(invoice))) continue;
             try {
                 new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-                    MonthlyInvoice draft = invoices.findByIdForUpdate(invoice.getId()).orElse(null);
-                    if (draft == null || draft.getStatus() != MonthlyInvoiceStatus.DRAFT || !autoReady(contract, draft)) return;
+                    MonthlyInvoice draft = lockInvoice(invoice.getId());
+                    if (draft.getStatus() != MonthlyInvoiceStatus.DRAFT) return;
+                    fillMissingMeters(contract, draft);
+                    if (!autoReady(contract, draft)) return;
                     List<IssueMonthlyInvoiceRequest.ExtraCharge> extras = readList(draft.getDraftExtraChargesSnapshot(),
                             new TypeReference<List<IssueMonthlyInvoiceRequest.ExtraCharge>>() {});
                     issue(draft.getId(), contract.getLandlordId(),
@@ -716,7 +908,7 @@ public class MonthlyBillingService {
     }
 
     private void accrueLateFee(MonthlyInvoice invoice, PaymentRequest payment) {
-        if (invoice.getDeferredAt() != null) return;
+        if (invoice.getDeferredAt() != null || invoice.isLateFeeExempt() || pendingExtension(invoice).isPresent()) return;
         if (!List.of(PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE,
                 PaymentStatus.REJECTED).contains(payment.getStatus())) return;
         Contract contract = contracts.findById(invoice.getContractId()).orElse(null);
@@ -726,7 +918,9 @@ public class MonthlyBillingService {
         if (revision == null) return;
         Map<String, Object> policies = read(revision.getPoliciesSnapshot(), new TypeReference<Map<String, Object>>() {});
         LatePaymentPolicy policy = LatePaymentPolicy.from(policies);
-        BigDecimal accrued = policy.accrued(invoice.getDueAt(), time.now(), BillingTime.ZONE);
+        Instant feeDueAt = invoice.getOriginalDueAt() == null ? invoice.getDueAt() : invoice.getOriginalDueAt();
+        Instant feeAsOf = time.now();
+        BigDecimal accrued = policy.accrued(feeDueAt, feeAsOf, BillingTime.ZONE);
         BigDecimal previous = invoice.getLateFeeAmount() == null ? BigDecimal.ZERO : invoice.getLateFeeAmount();
         if (accrued.compareTo(previous) <= 0) return;
         BigDecimal base = invoice.getBaseAmount() == null
@@ -734,7 +928,10 @@ public class MonthlyBillingService {
         List<InvoiceLine> lines = new ArrayList<>(readList(invoice.getLineItemsSnapshot(),
                 new TypeReference<List<InvoiceLine>>() {}));
         lines.removeIf(line -> "LATE_FEE".equals(line.type()));
-        lines.add(new InvoiceLine("LATE_FEE", "Phí chậm thanh toán", BigDecimal.ONE, accrued, accrued));
+        boolean perDay = policy.mode() == LatePaymentPolicy.Mode.FIXED_PER_DAY;
+        lines.add(new InvoiceLine("LATE_FEE", "Phí chậm thanh toán",
+                perDay ? BigDecimal.valueOf(policy.chargedDays(feeDueAt, feeAsOf, BillingTime.ZONE)) : BigDecimal.ONE,
+                policy.amount(), accrued, perDay ? "ngày" : "lần"));
         BigDecimal newTotal = base.add(accrued);
         String snapshot = write(lines);
         if (payments.increaseMonthlyPayment(invoice.getId(), newTotal, snapshot)) {
@@ -749,7 +946,23 @@ public class MonthlyBillingService {
     }
 
     private Instant meterDeadline(MonthlyInvoice invoice) {
-        return invoice.getPeriodEndExclusive().atTime(10, 0).atZone(BillingTime.ZONE).toInstant();
+        return invoice.getPeriodEndExclusive().atStartOfDay(BillingTime.ZONE).toInstant();
+    }
+
+    private void fillMissingMeters(Contract contract, MonthlyInvoice invoice) {
+        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
+        RentalRequest rental = rentalRequests.findById(contract.getRentalRequestId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
+        List<Map<String, Object>> charges = readList(revision.getChargesSnapshot(), new TypeReference<List<Map<String, Object>>>() {});
+        if (invoice.getElectricityEnd() == null && meterRate(charges, rental, "PER_KWH") != null) {
+            BigDecimal start = meterStart(contract, invoice, "electricityInitial", true);
+            validateReading(start, start); invoice.setElectricityEnd(start); invoice.setElectricityAutoFilled(true);
+        }
+        if (invoice.getWaterEnd() == null && meterRate(charges, rental, "PER_M3") != null) {
+            BigDecimal start = meterStart(contract, invoice, "waterInitial", false);
+            validateReading(start, start); invoice.setWaterEnd(start); invoice.setWaterAutoFilled(true);
+        }
     }
 
     private Instant actionRequiredAt(MonthlyInvoice invoice) {
@@ -868,7 +1081,7 @@ public class MonthlyBillingService {
         return new MonthlyInvoiceResponse(i.getId(), i.getContractId(), i.getPeriodIndex(),
                 i.getPeriodStart(), i.getPeriodEndExclusive(), i.getStatus(), i.getElectricityStart(),
                 i.getElectricityEnd(), i.getWaterStart(), i.getWaterEnd(),
-                readList(i.getLineItemsSnapshot(), new TypeReference<List<InvoiceLine>>() {}),
+                displayInvoiceLines(i, contract),
                 i.getTotalAmount(), i.getPaymentRequestId(), i.getIssuedAt(), i.getDueAt(), i.getPaidAt(),
                 i.getLateFeeAmount() == null ? BigDecimal.ZERO : i.getLateFeeAmount(),
                 time.now(), meterDeadline(i), workflowState(i),
@@ -883,7 +1096,40 @@ public class MonthlyBillingService {
                 contract == null ? null : contract.getTerminationCompletedAt(), originalDeposit,
                 retainedDeposit, canDefer,
                 contract != null && signedLandlordTerminationClause(contract),
-                contract == null ? null : contract.getTerminationForcedAt());
+                contract == null ? null : contract.getTerminationForcedAt(),
+                i.getOriginalDueAt() == null ? i.getDueAt() : i.getOriginalDueAt(), i.isLateFeeExempt(),
+                i.isElectricityAutoFilled(), i.isWaterAutoFilled(), extensions(i), activeResolution(contract, i),
+                canRequestExtension(contract, i), canResolveOverdue(contract, i));
+    }
+
+    /** Read-only presentation of old lump-sum fee rows. Never recalculate settled amounts or use today's clock. */
+    private List<InvoiceLine> displayInvoiceLines(MonthlyInvoice invoice, Contract contract) {
+        List<InvoiceLine> lines = readList(invoice.getLineItemsSnapshot(), new TypeReference<List<InvoiceLine>>() {});
+        if (contract == null || lines.stream().noneMatch(line -> "LATE_FEE".equals(line.type()) && line.quantityUnit() == null))
+            return lines;
+        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId()).orElse(null);
+        if (revision == null) return lines;
+        LatePaymentPolicy policy;
+        try {
+            policy = LatePaymentPolicy.from(read(revision.getPoliciesSnapshot(), new TypeReference<Map<String, Object>>() {}));
+        } catch (RuntimeException ex) {
+            log.warn("BILLING_FEE_DISPLAY_UNAVAILABLE invoice={}", invoice.getId());
+            return lines;
+        }
+        return lines.stream().map(line -> {
+            if (!"LATE_FEE".equals(line.type()) || line.quantityUnit() != null || line.amount() == null
+                    || line.amount().signum() <= 0 || policy.mode() == LatePaymentPolicy.Mode.NONE
+                    || line.quantity() == null || line.quantity().compareTo(BigDecimal.ONE) != 0
+                    || line.unitPrice() == null || line.unitPrice().compareTo(line.amount()) != 0) return line;
+            if (policy.mode() == LatePaymentPolicy.Mode.FIXED_ONCE && line.amount().compareTo(policy.amount()) == 0)
+                return new InvoiceLine(line.type(), line.description(), BigDecimal.ONE, policy.amount(), line.amount(), "lần");
+            // A capped legacy amount does not prove how many days were billed; do not invent a count.
+            if (policy.mode() != LatePaymentPolicy.Mode.FIXED_PER_DAY
+                    || policy.cap() != null && line.amount().compareTo(policy.cap()) >= 0) return line;
+            BigDecimal[] division = line.amount().divideAndRemainder(policy.amount());
+            if (division[1].signum() != 0) return line;
+            return new InvoiceLine(line.type(), line.description(), division[0], policy.amount(), line.amount(), "ngày");
+        }).toList();
     }
 
     private List<OverdueAction> overdueActions(MonthlyInvoice invoice) {
@@ -901,6 +1147,15 @@ public class MonthlyBillingService {
                 && contract.getTerminationCancelledAt() == null && contract.getTerminationCompletedAt() == null;
     }
 
+    private String activeResolution(Contract contract, MonthlyInvoice invoice) {
+        if (invoice.getStatus() == MonthlyInvoiceStatus.PAID) return "NONE";
+        if (invoice.getDeferredAt() != null) return "ROLLOVER";
+        if (contract != null && activeTerminationProposal(contract)) return "TERMINATION";
+        if (extensionActive(invoice)) return "PAYMENT_EXTENSION";
+        if (pendingExtension(invoice).isPresent()) return "EXTENSION_REQUEST";
+        return "NONE";
+    }
+
     private String workflowState(MonthlyInvoice i) {
         Instant now = time.now();
         if (i.getStatus() == MonthlyInvoiceStatus.PAID) return "PAID";
@@ -916,6 +1171,8 @@ public class MonthlyBillingService {
         if (payments.findByInvoiceId(i.getId()).map(p -> p.getStatus() == PaymentStatus.TRANSFER_REPORTED
                 || p.getStatus() == PaymentStatus.DISPUTED).orElse(false)) return "UNDER_REVIEW";
         if (i.getDeferredAt() != null) return "DEFERRED";
+        if (pendingExtension(i).isPresent()) return "EXTENSION_PENDING";
+        if (extensionActive(i)) return "PAYMENT_EXTENDED";
         if (i.getStatus() == MonthlyInvoiceStatus.OVERDUE)
             return !now.isBefore(actionRequiredAt(i)) ? "OVERDUE_ACTION_REQUIRED" : "OVERDUE";
         if (i.getDueAt() != null && !now.isBefore(i.getDueAt().atZone(BillingTime.ZONE)

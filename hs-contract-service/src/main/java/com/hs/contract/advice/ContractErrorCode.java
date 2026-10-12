@@ -59,7 +59,10 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     OVERDUE_ACTION_NOT_FOUND(6060, "Không tìm thấy phương án xử lý quá hạn", HttpStatus.NOT_FOUND),
     OVERDUE_DEFERRAL_NOT_ALLOWED(6061, "Không thể chuyển nợ: hóa đơn đang đối soát, đã thanh toán hoặc không còn kỳ thuê tiếp theo", HttpStatus.CONFLICT),
     TERMINATION_NOT_ALLOWED(6062, "Chưa đủ điều kiện chấm dứt: kiểm tra mốc quá hạn, điều khoản đã ký, trạng thái thanh toán, phản hồi người thuê và bàn giao phòng", HttpStatus.CONFLICT),
-    TERMINATION_DEPOSIT_NOT_READY(6063, "Không thể quyết toán cọc khi khoản cọc chưa được chủ nhà xác nhận hoặc đang tranh chấp", HttpStatus.CONFLICT);
+    TERMINATION_DEPOSIT_NOT_READY(6063, "Không thể quyết toán cọc khi khoản cọc chưa được chủ nhà xác nhận hoặc đang tranh chấp", HttpStatus.CONFLICT),
+    PAYMENT_EXTENSION_INVALID(6064, "Gia hạn cần từ 1 đến 30 ngày và lý do từ 10 đến 1000 ký tự", HttpStatus.BAD_REQUEST),
+    PAYMENT_EXTENSION_NOT_ALLOWED(6065, "Không thể gia hạn: kiểm tra yêu cầu hiện tại, phương án xử lý và trạng thái thanh toán", HttpStatus.CONFLICT),
+    PAYMENT_EXTENSION_NOT_FOUND(6066, "Yêu cầu gia hạn không tồn tại hoặc không còn chờ duyệt", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

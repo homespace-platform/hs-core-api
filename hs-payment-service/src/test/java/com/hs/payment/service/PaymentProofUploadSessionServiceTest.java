@@ -52,6 +52,8 @@ class PaymentProofUploadSessionServiceTest {
 
     @Mock
     private StorageService storageService;
+    @Mock
+    private com.hs.common.time.BillingTime billingTime;
 
     @InjectMocks
     private PaymentProofUploadSessionService sessionService;
@@ -194,6 +196,20 @@ class PaymentProofUploadSessionServiceTest {
     @Test
     @DisplayName("7. Upload thanh cong tao PaymentEvidence, chuyen PaymentRequest sang TRANSFER_REPORTED va session sang CONSUMED")
     void handleMobileUpload_Success() {
+        successfulUpload();
+    }
+
+    @Test
+    void monthlyProofUsesSimulatedBusinessTimeButRealSessionTime() {
+        Instant simulated = Instant.parse("2027-01-19T03:00:00Z");
+        paymentRequest.setType(com.hs.payment.model.constant.PaymentType.MONTHLY_RENT);
+        when(billingTime.now()).thenReturn(simulated);
+        successfulUpload();
+        assertEquals(simulated, paymentRequest.getPayerReportedAt());
+        assertEquals(simulated.plusSeconds(24 * 3600), paymentRequest.getConfirmationDueAt());
+    }
+
+    private void successfulUpload() {
         PaymentProofUploadSession session = PaymentProofUploadSession.builder()
                 .id("sess-valid")
                 .paymentRequestId("pay-123")

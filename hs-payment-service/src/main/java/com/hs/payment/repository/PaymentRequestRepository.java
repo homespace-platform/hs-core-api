@@ -38,6 +38,9 @@ public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, 
     Optional<PaymentRequest> findByTransferReference(String transferReference);
 
     Optional<PaymentRequest> findByInvoiceId(String invoiceId);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM PaymentRequest p WHERE p.invoiceId = :invoiceId")
+    Optional<PaymentRequest> findByInvoiceIdForUpdate(@Param("invoiceId") String invoiceId);
 
     boolean existsByTransferReference(String transferReference);
 

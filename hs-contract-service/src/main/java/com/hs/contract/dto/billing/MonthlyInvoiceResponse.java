@@ -25,4 +25,8 @@ public record MonthlyInvoiceResponse(String id, String contractId, int periodInd
                                      BigDecimal retainedDepositAmount,
                                      boolean canDeferToNextPeriod,
                                      boolean landlordTerminationClauseSigned,
-                                     Instant terminationForcedAt) {}
+                                     Instant terminationForcedAt,
+                                     Instant originalDueAt, boolean lateFeeExempt,
+                                     boolean electricityAutoFilled, boolean waterAutoFilled,
+                                     List<PaymentExtension> paymentExtensions, String activeResolution,
+                                     boolean canRequestExtension, boolean canResolveOverdue) {}

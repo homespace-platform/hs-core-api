@@ -15,6 +15,9 @@ import java.util.Optional;
 public interface MonthlyInvoiceRepository extends JpaRepository<MonthlyInvoice, String> {
     List<MonthlyInvoice> findByContractIdOrderByPeriodIndexDesc(String contractId);
     Optional<MonthlyInvoice> findByContractIdAndPeriodIndex(String contractId, int periodIndex);
+    // Scalar lookup avoids caching a stale invoice before waiting for the contract lock.
+    @Query("select i.contractId from MonthlyInvoice i where i.id = :id")
+    Optional<String> findContractIdByInvoiceId(@Param("id") String id);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select i from MonthlyInvoice i where i.id = :id")
     Optional<MonthlyInvoice> findByIdForUpdate(@Param("id") String id);

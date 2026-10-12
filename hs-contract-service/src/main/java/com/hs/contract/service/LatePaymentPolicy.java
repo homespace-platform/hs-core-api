@@ -39,13 +39,18 @@ public record LatePaymentPolicy(Mode mode, BigDecimal amount, int graceDays, Big
     }
 
     public BigDecimal accrued(Instant dueAt, Instant asOf, ZoneId zone) {
-        if (mode == Mode.NONE || dueAt == null || asOf == null || !asOf.isAfter(dueAt)) return BigDecimal.ZERO;
-        LocalDate dueDate = dueAt.atZone(zone).toLocalDate();
-        LocalDate currentDate = asOf.atZone(zone).toLocalDate();
-        long chargeableDays = Math.max(0, ChronoUnit.DAYS.between(dueDate, currentDate) - graceDays);
+        long chargeableDays = chargedDays(dueAt, asOf, zone);
         if (chargeableDays == 0) return BigDecimal.ZERO;
         BigDecimal fee = mode == Mode.FIXED_ONCE ? amount : amount.multiply(BigDecimal.valueOf(chargeableDays));
         return cap == null ? fee : fee.min(cap);
+    }
+
+    public long chargedDays(Instant dueAt, Instant asOf, ZoneId zone) {
+        if (mode == Mode.NONE || dueAt == null || asOf == null || !asOf.isAfter(dueAt)) return 0;
+        LocalDate dueDate = dueAt.atZone(zone).toLocalDate();
+        LocalDate currentDate = asOf.atZone(zone).toLocalDate();
+        long chargeableDays = Math.max(0, ChronoUnit.DAYS.between(dueDate, currentDate) - graceDays);
+        return Math.min(chargeableDays, MonthlyBillingSchedule.AUTO_ROLLOVER_DAYS);
     }
 
     public String clause() {
@@ -54,9 +59,9 @@ public record LatePaymentPolicy(Mode mode, BigDecimal amount, int graceDays, Big
         String timing = graceDays == 0 ? "từ ngày đầu tiên sau hạn thanh toán"
                 : "sau " + graceDays + " ngày kể từ hạn thanh toán";
         String rule = mode == Mode.FIXED_ONCE ? "một lần " + price
-                : price + " cho mỗi ngày chậm trả";
+                : price + " cho mỗi ngày chậm trả, tối đa " + MonthlyBillingSchedule.AUTO_ROLLOVER_DAYS + " ngày tính phạt trên mỗi hóa đơn";
         return "Phí chậm thanh toán: Bên B trả thêm " + rule + " " + timing
                 + (cap == null ? "" : ", tổng phí tối đa " + ContractRenderService.formatVND(cap))
-                + ". Chỉ tính trên hóa đơn chưa thanh toán và thể hiện riêng trên hóa đơn. Hệ thống tạm ngừng cập nhật phí khi Bên B báo đã chuyển khoản để đối soát; nếu chứng từ bị từ chối, phí được tính lại theo toàn bộ số ngày chậm trả.";
+                + ". Chỉ tính trên hóa đơn chưa thanh toán và thể hiện riêng trên hóa đơn. Hệ thống tạm ngừng cập nhật phí khi Bên B báo đã chuyển khoản để đối soát; nếu chứng từ bị từ chối, phí được tính lại theo số ngày chậm trả và các giới hạn nêu trên.";
     }
 }

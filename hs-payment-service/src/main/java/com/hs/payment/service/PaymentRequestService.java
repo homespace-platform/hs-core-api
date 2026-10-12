@@ -705,6 +705,29 @@ public class PaymentRequestService {
         return paymentRequestRepository.findByInvoiceId(invoiceId);
     }
 
+    /** Serialize billing decisions against proof submission/receipt confirmation. */
+    @Transactional
+    public Optional<PaymentRequest> lockMonthlyPayment(String invoiceId) {
+        return paymentRequestRepository.findByInvoiceIdForUpdate(invoiceId);
+    }
+
+    @Transactional
+    public void extendMonthlyDueDate(String invoiceId, Instant newDueAt, String actorId) {
+        PaymentRequest payment = lockMonthlyPayment(invoiceId)
+                .orElseThrow(() -> new IllegalStateException("Monthly payment missing"));
+        if (payment.getType() != PaymentType.MONTHLY_RENT || !List.of(PaymentStatus.AWAITING_TRANSFER,
+                PaymentStatus.OVERDUE, PaymentStatus.REJECTED).contains(payment.getStatus())) {
+            throw new IllegalStateException("Payment is already reported, disputed or settled");
+        }
+        Instant previousDue = payment.getDueAt();
+        PaymentStatus previousStatus = payment.getStatus();
+        payment.setDueAt(newDueAt);
+        payment.setStatus(PaymentStatus.AWAITING_TRANSFER);
+        paymentRequestRepository.save(payment);
+        recordEvent(payment.getId(), PaymentEventType.DUE_DATE_EXTENDED, previousStatus,
+                payment.getStatus(), actorId, "LANDLORD", "Dời hạn thanh toán: " + previousDue + " -> " + newDueAt, null);
+    }
+
     public PaymentRequestResponse toResponse(PaymentRequest payment, String actorId) {
         List<PaymentLineItemResponse> lineItems = paymentLineItemRepository
                 .findByPaymentRequestIdOrderBySortOrderAsc(payment.getId()).stream()

@@ -61,6 +61,7 @@ public class PaymentProofUploadSessionService {
     private final PaymentEvidenceRepository paymentEvidenceRepository;
     private final PaymentEventRepository paymentEventRepository;
     private final StorageService storageService;
+    private final com.hs.common.time.BillingTime billingTime;
 
     @Value("${homespace.payment.confirmation-window-hours:24}")
     private long confirmationWindowHours = 24;
@@ -314,7 +315,9 @@ public class PaymentProofUploadSessionService {
             throw e;
         }
 
-        Instant now = Instant.now();
+        Instant realNow = Instant.now();
+        Instant now = payment.getType() == com.hs.payment.model.constant.PaymentType.MONTHLY_RENT
+                ? billingTime.now() : realNow;
         PaymentStatus oldStatus = payment.getStatus();
 
         // 1. Tạo PaymentEvidence
@@ -345,8 +348,8 @@ public class PaymentProofUploadSessionService {
         session.setContentType(contentType);
         session.setFileSize((long) fileBytes.length);
         session.setStatus(UploadSessionStatus.CONSUMED);
-        session.setUploadedAt(now);
-        session.setConsumedAt(now);
+        session.setUploadedAt(realNow);
+        session.setConsumedAt(realNow);
         PaymentProofUploadSession savedSession = uploadSessionRepository.save(session);
 
         // 4. Tạo audit event

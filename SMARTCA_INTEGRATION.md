@@ -8,7 +8,7 @@ Copy the SmartCA section of `.env.dev.example` into the local `.env.dev`. Keep `
 
 `SMARTCA_WEBHOOK_ENABLED` must remain `false`. No public callback is registered: the backend scheduler polls VNPT using `transaction_id`. `SMARTCA_WEBHOOK_PUBLIC_URL` is reserved for a future authenticated webhook integration.
 
-Development uses `JPA_DDL_AUTO=update`. For a deployment with schema validation, apply `hs-contract-service/src/main/resources/db/migration/V20260923_01__create_signature_requests.sql` using the project's database deployment process; this repository does not auto-run Flyway.
+Development uses `JPA_DDL_AUTO=update`. On a fresh local database, start Core to create the current schema from JPA entities, including signature requests; no separate patch SQL is needed. Schema validation (`validate`/`none`) requires an already provisioned schema and cannot initialize an empty database. This repository does not auto-run Flyway.
 
 ## Signing sequence
 

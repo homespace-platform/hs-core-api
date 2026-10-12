@@ -7,14 +7,16 @@ import java.time.LocalDate;
 
 /** Payment dates for contracts whose billing periods are anchored to the lease start. */
 public final class MonthlyBillingSchedule {
+    // Four days after the closing date = five payment calendar days INCLUDING the closing date.
     public static final int PAYMENT_WINDOW_DAYS = 4;
     public static final int OVERDUE_ACTION_DAYS = 5;
+    public static final int AUTO_ROLLOVER_DAYS = 10;
 
     private MonthlyBillingSchedule() {}
 
     public static String paymentDueDescription() {
-        return "Chậm nhất 23:59 ngày thứ " + PAYMENT_WINDOW_DAYS
-                + " sau khi kết thúc mỗi kỳ thuê; hạn cụ thể ghi trên hóa đơn";
+        return "Chậm nhất 23:59 ngày thứ " + (PAYMENT_WINDOW_DAYS + 1)
+                + " tính từ ngày chốt kỳ (tính ngày chốt kỳ là ngày thứ 1); hạn cụ thể ghi trên hóa đơn";
     }
 
     public static Instant dueAt(LocalDate periodEndExclusive) {
@@ -24,6 +26,12 @@ public final class MonthlyBillingSchedule {
 
     public static Instant actionRequiredAt(Instant dueAt) {
         return dueAt.atZone(BillingTime.ZONE).toLocalDate()
-                .plusDays(OVERDUE_ACTION_DAYS).atStartOfDay(BillingTime.ZONE).toInstant();
+                .plusDays(OVERDUE_ACTION_DAYS + 1L).atStartOfDay(BillingTime.ZONE).toInstant();
+    }
+
+    /** Allow ten complete overdue calendar days before the default decision. */
+    public static Instant autoRolloverAt(Instant dueAt) {
+        return dueAt.atZone(BillingTime.ZONE).toLocalDate()
+                .plusDays(AUTO_ROLLOVER_DAYS + 1L).atStartOfDay(BillingTime.ZONE).toInstant();
     }
 }

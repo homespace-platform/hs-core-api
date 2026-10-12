@@ -64,4 +64,27 @@ class LatePaymentPolicyTest {
                 "latePaymentFeeMode", "FIXED_PER_DAY", "latePaymentFeeAmount", -1,
                 "latePaymentFeeGraceDays", 0)));
     }
+
+    @Test
+    void dailyPenaltyNeverExceedsTenChargedDaysEvenWhenSchedulerWasOffline() {
+        LatePaymentPolicy policy = LatePaymentPolicy.from(Map.of(
+                "latePaymentFeeMode", "FIXED_PER_DAY", "latePaymentFeeAmount", 100000,
+                "latePaymentFeeGraceDays", 0));
+        assertEquals(new BigDecimal("1000000"), policy.accrued(DUE,
+                Instant.parse("2026-11-15T16:59:59Z"), BillingTime.ZONE));
+        assertEquals(new BigDecimal("1000000"), policy.accrued(DUE,
+                Instant.parse("2026-12-20T03:00:00Z"), BillingTime.ZONE));
+        assertTrue(policy.clause().contains("tối đa 10 ngày"));
+    }
+
+    @Test
+    void tenDayLimitStillHonorsGraceAndLowerMoneyCap() {
+        LatePaymentPolicy policy = LatePaymentPolicy.from(Map.of(
+                "latePaymentFeeMode", "FIXED_PER_DAY", "latePaymentFeeAmount", 100000,
+                "latePaymentFeeGraceDays", 2, "latePaymentFeeCap", 700000));
+        assertEquals(new BigDecimal("100000"), policy.accrued(DUE,
+                Instant.parse("2026-11-08T03:00:00Z"), BillingTime.ZONE));
+        assertEquals(new BigDecimal("700000"), policy.accrued(DUE,
+                Instant.parse("2026-12-20T03:00:00Z"), BillingTime.ZONE));
+    }
 }

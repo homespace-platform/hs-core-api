@@ -12,6 +12,7 @@ import com.hs.contract.dto.billing.AcknowledgeOverdueActionRequest;
 import com.hs.contract.dto.billing.AcceptTerminationRequest;
 import com.hs.contract.dto.billing.CompleteTerminationRequest;
 import com.hs.contract.dto.billing.ForceTerminationRequest;
+import com.hs.contract.dto.billing.PaymentExtensionPayload;
 import com.hs.contract.service.MonthlyBillingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,32 @@ import java.util.List;
 @RequiredArgsConstructor
 public class MonthlyInvoiceController {
     private final MonthlyBillingService billing;
+
+    @PostMapping("/{invoiceId}/extension-requests")
+    public ApiResponse<MonthlyInvoiceResponse> requestExtension(@PathVariable String invoiceId,
+            @RequestBody @Valid PaymentExtensionPayload request) {
+        return ApiResponse.<MonthlyInvoiceResponse>builder()
+                .result(billing.requestPaymentExtension(invoiceId, requireUserId(), request)).build();
+    }
+
+    @PostMapping("/{invoiceId}/extension-requests/{requestId}/approve")
+    public ApiResponse<MonthlyInvoiceResponse> approveExtension(@PathVariable String invoiceId, @PathVariable String requestId) {
+        return ApiResponse.<MonthlyInvoiceResponse>builder()
+                .result(billing.decidePaymentExtension(invoiceId, requestId, requireUserId(), true)).build();
+    }
+
+    @PostMapping("/{invoiceId}/extension-requests/{requestId}/reject")
+    public ApiResponse<MonthlyInvoiceResponse> rejectExtension(@PathVariable String invoiceId, @PathVariable String requestId) {
+        return ApiResponse.<MonthlyInvoiceResponse>builder()
+                .result(billing.decidePaymentExtension(invoiceId, requestId, requireUserId(), false)).build();
+    }
+
+    @PostMapping("/{invoiceId}/extend-payment")
+    public ApiResponse<MonthlyInvoiceResponse> extendPayment(@PathVariable String invoiceId,
+            @RequestBody @Valid PaymentExtensionPayload request) {
+        return ApiResponse.<MonthlyInvoiceResponse>builder()
+                .result(billing.extendPaymentDirectly(invoiceId, requireUserId(), request)).build();
+    }
 
     @GetMapping("/contracts/{contractId}")
     public ApiResponse<List<MonthlyInvoiceResponse>> list(@PathVariable String contractId) {

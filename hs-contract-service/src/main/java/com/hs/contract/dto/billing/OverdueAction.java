@@ -8,6 +8,7 @@ public record OverdueAction(String id, Type type, String note, LocalDate propose
                             Instant createdAt, String createdBy,
                             String tenantAcknowledgment, Instant acknowledgedAt) {
     public enum Type {
-        PAYMENT_REQUEST, EXTENSION_PROPOSAL, MUTUAL_TERMINATION_PROPOSAL, LEGAL_REVIEW
+        PAYMENT_REQUEST, EXTENSION_PROPOSAL, MUTUAL_TERMINATION_PROPOSAL, LEGAL_REVIEW,
+        AUTOMATIC_ROLLOVER
     }
 }

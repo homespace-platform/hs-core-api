@@ -54,6 +54,24 @@ public class MonthlyInvoice extends BaseEntity {
     private Instant issuedAt;
     @Column(name = "due_at")
     private Instant dueAt;
+    @Column(name = "original_due_at")
+    private Instant originalDueAt;
+    @Builder.Default
+    @org.hibernate.annotations.ColumnDefault("false")
+    @Column(name = "late_fee_exempt", nullable = false)
+    private boolean lateFeeExempt = false;
+    @Column(name = "extension_requests_snapshot", columnDefinition = "TEXT")
+    private String extensionRequestsSnapshot;
+    @Column(name = "resolution_mode", length = 30)
+    private String resolutionMode;
+    @Builder.Default
+    @org.hibernate.annotations.ColumnDefault("false")
+    @Column(name = "electricity_auto_filled", nullable = false)
+    private boolean electricityAutoFilled = false;
+    @Builder.Default
+    @org.hibernate.annotations.ColumnDefault("false")
+    @Column(name = "water_auto_filled", nullable = false)
+    private boolean waterAutoFilled = false;
     @Column(name = "paid_at")
     private Instant paidAt;
     @Column(name = "meter_reminder_logged_at")
