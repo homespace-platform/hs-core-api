@@ -2,6 +2,8 @@
 
 ## Cách chạy để không nhầm hóa đơn hoặc lùi dữ liệu
 
+**Vị trí thao tác sau khi gom module thanh toán:** vào **Hóa đơn → chọn hợp đồng**. Hồ sơ có ba mục **Thanh toán ban đầu**, **Hóa đơn theo kỳ** và **Hoàn cọc**. Chọn đúng kỳ ở danh sách bên trái để nhập công tơ/thanh toán/xác nhận; mỗi lần chỉ mở chi tiết một hóa đơn. Đề xuất khấu trừ, khiếu nại, QR chuyển tiền hoàn và xác nhận nhận cọc đều nằm ở mục **Hoàn cọc**. Trong các bảng UC bên dưới, thao tác “mở hồ sơ/quyết toán cọc” dùng mục này, thay vì block quyết toán trong Chi tiết hợp đồng. **Gia hạn thời gian thuê và ký SmartCA vẫn ở Hợp đồng**. Các mốc thời gian và điều kiện xử lý tiền giữ nguyên.
+
 - **Mỗi UC là một hợp đồng MỚI, riêng biệt**, đều bắt đầu từ `2026-10-13T10:00:00`. Không chạy nhiều UC trên cùng ID hợp đồng.
 - Chọn một UC, thực hiện tuần tự từ hàng đầu xuống hàng cuối của chính UC đó. **Không cần ghép mốc từ UC khác.** Ca kết thúc khi đã kiểm tra đủ kết quả cuối bảng; không buộc chạy tiếp ca khác.
 - Ghi lại mã/ID hợp đồng và mở đúng trang hóa đơn của ID đó ở cả hai tài khoản. Kỳ thanh toán 2 thu vào tháng 11; kỳ thanh toán 3 thu vào tháng 12; quyết toán cuối hợp đồng vào tháng 01.
@@ -100,7 +102,7 @@ Hợp đồng 3 tháng không gia hạn có **3 kỳ thanh toán tiền phòng +
 
 ### Kết quả kiểm thử sau cập nhật hoàn cọc
 
-Đã chạy ngày 13/10/2026: **160 test backend** thuộc 10 suite billing/payment/lifecycle/storage đều đạt; **87 test frontend** đều đạt; TypeScript và ESLint các file frontend thay đổi không báo lỗi. Chưa kiểm thử tương tác trình duyệt end-to-end hay giao dịch SmartCA/chuyển khoản thực tế. Test tổng tiền phòng chạy xuyên suốt riêng hợp đồng 3 tháng và 12 tháng.
+Đã chạy ngày 13/10/2026: **160 test backend** thuộc 10 suite billing/payment/lifecycle/storage đều đạt ở lần kiểm tra backend trước; sau khi gom module thanh toán, **99 test frontend** đều đạt; TypeScript và ESLint các file frontend thay đổi không báo lỗi. Đã kiểm tra mở thanh toán ban đầu, chọn đúng kỳ hóa đơn và hồ sơ hoàn cọc trên Chrome bằng hợp đồng demo hiện có. Chưa thực hiện giao dịch SmartCA/chuyển khoản mới hoặc xác nhận tiền tự động khi kiểm tra giao diện. Test tổng tiền phòng chạy xuyên suốt riêng hợp đồng 3 tháng và 12 tháng.
 
 Test tự động bao phủ cách đánh số 1/3/12/36 tháng, tổng tiền phòng đúng thời hạn 3/12 tháng (kể cả INITIAL), không thu tiền phòng tháng kế tiếp ở quyết toán cuối, gia hạn đã ký, biên mở nút trước 30 ngày cho 12 tháng và khóa cọc khi thiếu bill cuối/chứng từ chưa xác nhận. Các UC bên dưới là kịch bản test thủ công; chưa thay cho xác minh SmartCA/ngân hàng thực tế.
 
