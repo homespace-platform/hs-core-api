@@ -67,6 +67,47 @@ class ParkingReservationServiceTest {
         assertEquals(2, peak, "Hai reservation không overlap chỉ chiếm tối đa 2 slot tại một thời điểm");
     }
 
+    @Test void renewalHoldsOnlyAdditionalDatesAndConnectsThemToRootAfterSigning() {
+        LocalDate start=LocalDate.of(2027,1,12),end=LocalDate.of(2027,4,12);
+        ParkingReservation original=ParkingReservation.builder().contractId("root").listingId("listing").rentalRequestId("rental")
+                .vehicleType(VehicleType.MOTORBIKE).quantity(2).status(ParkingReservationStatus.ACTIVE).endDateExclusive(start).build();
+        when(parkingReservationRepository.findByContractId("root")).thenReturn(List.of(original));
+        when(listingRepository.findByIdForUpdate("listing")).thenReturn(java.util.Optional.of(Listing.builder().id("listing").maxMotorbikeCount(2).build()));
+        when(parkingReservationRepository.findOverlappingListingReservations(any(),any(),any(),any(),any())).thenReturn(List.of());
+        Instant deadline=Instant.parse("2027-01-10T17:00:00Z");
+        service.holdForRenewal("root","agreement",start,end,deadline);
+        ArgumentCaptor<ParkingReservation> capture=ArgumentCaptor.forClass(ParkingReservation.class);
+        verify(parkingReservationRepository).save(capture.capture());
+        ParkingReservation held=capture.getValue();
+        assertEquals("agreement",held.getContractId());assertEquals(start,held.getStartDate());assertEquals(end,held.getEndDateExclusive());
+        assertEquals(2,held.getQuantity());assertEquals(ParkingReservationStatus.HELD,held.getStatus());assertEquals(deadline,held.getHoldExpiresAt());
+        when(parkingReservationRepository.findByContractId("agreement")).thenReturn(List.of(held));
+        service.activateRenewalHold("agreement","root");
+        assertEquals("root",held.getContractId());assertEquals(ParkingReservationStatus.ACTIVE,held.getStatus());assertNull(held.getHoldExpiresAt());
+        assertEquals(start,original.getEndDateExclusive());
+    }
+
+    @Test void conflictingParkingCapacityRejectsRenewalWithoutMutatingOriginalBooking() {
+        LocalDate start=LocalDate.of(2027,1,12),end=LocalDate.of(2027,4,12);
+        var original=ParkingReservation.builder().contractId("root").listingId("listing").vehicleType(VehicleType.MOTORBIKE)
+                .quantity(2).status(ParkingReservationStatus.ACTIVE).endDateExclusive(start).build();
+        var other=ParkingReservation.builder().quantity(1).startDate(start).endDateExclusive(end).build();
+        when(parkingReservationRepository.findByContractId("root")).thenReturn(List.of(original));
+        when(listingRepository.findByIdForUpdate("listing")).thenReturn(java.util.Optional.of(Listing.builder().id("listing").maxMotorbikeCount(2).build()));
+        when(parkingReservationRepository.findOverlappingListingReservations(any(),any(),any(),any(),any())).thenReturn(List.of(other));
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->service.holdForRenewal("root","agreement",start,end,Instant.now()));
+        verify(parkingReservationRepository,never()).save(any());assertEquals(ParkingReservationStatus.ACTIVE,original.getStatus());
+    }
+
+    @Test void expiredRenewalReleasesOnlyItsHeldSlotsNotOriginalActiveSlots() {
+        var held=ParkingReservation.builder().contractId("agreement").status(ParkingReservationStatus.HELD).build();
+        var active=ParkingReservation.builder().contractId("agreement").status(ParkingReservationStatus.ACTIVE).build();
+        when(parkingReservationRepository.findByContractId("agreement")).thenReturn(List.of(held,active));
+        service.releaseRenewalHold("agreement");
+        assertEquals(ParkingReservationStatus.RELEASED,held.getStatus());assertEquals(ParkingReservationStatus.ACTIVE,active.getStatus());
+        verify(parkingReservationRepository).save(held);verify(parkingReservationRepository,never()).findByContractId("root");
+    }
+
     @Test
     @DisplayName("7. Hai reservation overlap phải cộng dồn peak usage")
     void testOverlappingReservationsAccumulateUsage() {

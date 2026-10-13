@@ -79,7 +79,8 @@ class ContractServiceImplTest {
         specCaptor.getValue().toPredicate(root, null, mock(CriteriaBuilder.class));
         verify(root).get("tenantId");
         verify(root, never()).get("landlordId");
-        verify(statusPath).in(ContractStatus.ACTIVE, ContractStatus.TERMINATED);
+        verify(statusPath).in(ContractStatus.ACTIVE, ContractStatus.EXPIRED, ContractStatus.CLOSED, ContractStatus.TERMINATED);
+        verify(root).get("parentContractId");
     }
 
     @Test

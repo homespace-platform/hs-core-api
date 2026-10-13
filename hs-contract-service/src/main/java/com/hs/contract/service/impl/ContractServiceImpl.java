@@ -315,11 +315,12 @@ public class ContractServiceImpl implements ContractService {
                 ));
             }
             predicates.add(cb.isTrue(root.get("active")));
+            predicates.add(cb.isNull(root.get("parentContractId")));
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
             if (billableOnly) {
-                predicates.add(root.get("status").in(ContractStatus.ACTIVE, ContractStatus.TERMINATED));
+                predicates.add(root.get("status").in(ContractStatus.ACTIVE, ContractStatus.EXPIRED, ContractStatus.CLOSED, ContractStatus.TERMINATED));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };
@@ -339,6 +340,7 @@ public class ContractServiceImpl implements ContractService {
                 : contractRepository.findByUserInvolved(userId);
 
         return list.stream()
+                .filter(contract -> contract.getParentContractId() == null)
                 .filter(contract -> userId.equals(contract.getLandlordId())
                         || contract.getStatus() != ContractStatus.DRAFT)
                 .map(this::toContractResponse)
@@ -424,6 +426,8 @@ public class ContractServiceImpl implements ContractService {
     @Transactional
     public ContractRevisionResponse updateRevision(String contractId, UpdateContractRevisionRequest request) {
         Contract contract = findContractForUpdateAndCheckAccess(contractId);
+        if(contract.getParentContractId()!=null) throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,
+                "Văn bản gia hạn giữ nguyên điều kiện đã chốt; không sửa riêng bản nháp sau khi duyệt yêu cầu.");
         String currentUserId = getCurrentUserId();
 
         // Chỉ chủ nhà mới được cập nhật bản nháp
@@ -905,6 +909,8 @@ public class ContractServiceImpl implements ContractService {
                     "Hãy ký trên ứng dụng VNPT SmartCA thay vì xác nhận ký nội bộ.");
         }
         Contract contract = findContractForUpdateAndCheckAccess(contractId);
+        if(contract.getParentContractId()!=null) throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED,
+                "Văn bản gia hạn cần chữ ký SmartCA hợp lệ của cả hai bên.");
         requireTenant(contract);
         if (contract.getStatus() != ContractStatus.PENDING_REVIEW) {
             throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
@@ -1198,6 +1204,8 @@ public class ContractServiceImpl implements ContractService {
                 .templateId(c.getTemplateId())
                 .templateVersionId(c.getTemplateVersionId())
                 .currentRevisionId(c.getCurrentRevisionId())
+                .parentContractId(c.getParentContractId())
+                .effectiveLeaseMonths(c.getEffectiveLeaseMonths())
                 .status(c.getStatus())
                 .rentalPaymentId(c.getRentalPaymentId())
                 .paymentStatus(paymentStatusOf(c))

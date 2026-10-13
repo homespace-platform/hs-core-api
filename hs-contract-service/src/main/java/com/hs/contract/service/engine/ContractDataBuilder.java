@@ -47,14 +47,20 @@ import java.util.*;
 @Component
 public class ContractDataBuilder {
 
-    public static final String DEFAULT_OVERDUE_TERMS = "Kể từ 00:00 ngày quá hạn thứ 05 tính theo giờ Việt Nam sau hạn ghi trên hóa đơn, "
-            + "bên cho thuê được chọn chuyển công nợ sang kỳ sau hoặc thông báo chấm dứt hợp đồng "
+    public static final String DEFAULT_OVERDUE_TERMS = "Sau khi hết 05 ngày quá hạn tính theo giờ Việt Nam sau hạn ghi trên hóa đơn, "
+            + "bên cho thuê được chọn một phương án đang có hiệu lực: chuyển công nợ sang kỳ sau, gia hạn thanh toán "
+            + "từ 01 đến 30 ngày tính từ lúc đồng ý (hạn mới phải sau hạn hiện tại), hoặc thông báo chấm dứt hợp đồng "
             + "do bên thuê vi phạm nghĩa vụ thanh toán. Hai bên có thể thỏa thuận chấm dứt sớm; "
             + "nếu bên thuê không đồng ý, bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận "
             + "sau khi thông báo và thực tế nhận lại phòng, chìa khóa, tài sản cho thuê. "
             + "Khi hoàn tất bàn giao theo nhánh vi phạm này, toàn bộ tiền cọc đã nhận được ghi nhận "
             + "thuộc bên cho thuê; công nợ hóa đơn chưa thanh toán tiếp tục được theo dõi riêng. "
-            + "Phí chậm trả chỉ áp dụng khi được ghi rõ trong hợp đồng.";
+            + "Phí chậm trả chỉ áp dụng khi được ghi rõ trong hợp đồng, tính tối đa 10 ngày trên mỗi hóa đơn. "
+            + "Yêu cầu gia hạn đang chờ duyệt tạm dừng tăng phí; từ chối hoặc hết hạn phản hồi sẽ tính bù. "
+            + "Khi được đồng ý gia hạn, giữ phí đã chốt và không tăng thêm trên hóa đơn đó. "
+            + "Sau hết 10 ngày quá hạn chưa chọn phương án, hệ thống chốt cộng dồn nếu còn kỳ sau chưa phát hành "
+            + "và không đang chờ duyệt gia hạn, đối soát hoặc xử lý chấm dứt. Kỳ cuối giữ nghĩa vụ thanh toán riêng; "
+            + "QR cũ chỉ hủy khi hóa đơn kỳ sau thực sự nhận công nợ.";
 
     private final UserRepository userRepository;
     private final AddressRepository addressRepository;

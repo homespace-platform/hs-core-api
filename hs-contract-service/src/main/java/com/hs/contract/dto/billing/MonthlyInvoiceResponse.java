@@ -29,4 +29,6 @@ public record MonthlyInvoiceResponse(String id, String contractId, int periodInd
                                      Instant originalDueAt, boolean lateFeeExempt,
                                      boolean electricityAutoFilled, boolean waterAutoFilled,
                                      List<PaymentExtension> paymentExtensions, String activeResolution,
-                                     boolean canRequestExtension, boolean canResolveOverdue) {}
+                                     boolean canRequestExtension, boolean canResolveOverdue,
+                                     boolean finalCostSupplement, String sourceInvoiceId,
+                                     BillingPeriodView billingPeriod) {}

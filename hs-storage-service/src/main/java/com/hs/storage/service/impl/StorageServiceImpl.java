@@ -257,6 +257,9 @@ public class StorageServiceImpl implements StorageService {
     @Transactional
     public void delete(String storageId) {
         StorageObject object = getOwnedObject(storageId);
+        if (accessCheckers.stream().anyMatch(checker -> checker.preventsDeletion(object))) {
+            throw new AppException(StorageErrorCode.STORAGE_ACCESS_DENIED);
+        }
         object.setStatus(StorageStatus.DELETED);
         object.setActive(false);
         repository.save(object);

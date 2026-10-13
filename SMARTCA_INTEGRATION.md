@@ -4,9 +4,9 @@ The SmartCA integration runs inside `hs-contract-service` (loaded by `hs-api-ser
 
 ## Configuration
 
-Copy the SmartCA section of `.env.dev.example` into the local `.env.dev`. Keep `CONTRACT_SIGNATURE_MODE=INTERNAL` and `SMARTCA_ENABLED=false` until a live sandbox test passes. Then set both to `SMARTCA` / `true` and restart the backend. Fill `SMARTCA_SP_ID` and `SMARTCA_SP_PASSWORD` only in the local secret file or deployment secret manager. `SMARTCA_BASE_URL` is the UAT SP769 endpoint by default; use the production endpoint only when VNPT provisions production access. Do not put secrets in Next.js `NEXT_PUBLIC_*` variables.
+Copy the SmartCA connection/credential section of `.env.example` into the local `.env`. Configure signing in `hs-api-service/src/main/resources/application.properties`: `homespace.signature.mode=SMARTCA` and `homespace.smartca.enabled=true` match the current development setup. To use the legacy signing mode, set `homespace.signature.mode=INTERNAL` and `homespace.smartca.enabled=false`, then restart Core. Timeouts, polling intervals and PDF signature labels are also configured directly in properties. Fill `SMARTCA_SP_ID` and `SMARTCA_SP_PASSWORD` only in the local secret file or deployment secret manager. `SMARTCA_BASE_URL` selects the endpoint provisioned by VNPT. Do not put secrets in Next.js `NEXT_PUBLIC_*` variables.
 
-`SMARTCA_WEBHOOK_ENABLED` must remain `false`. No public callback is registered: the backend scheduler polls VNPT using `transaction_id`. `SMARTCA_WEBHOOK_PUBLIC_URL` is reserved for a future authenticated webhook integration.
+`homespace.smartca.webhook-enabled=false` in properties keeps the current polling flow. No public callback is registered: the backend scheduler polls VNPT using `transaction_id`. `SMARTCA_WEBHOOK_PUBLIC_URL` stays in `.env` as the reserved address for a future authenticated webhook integration.
 
 Development uses `JPA_DDL_AUTO=update`. On a fresh local database, start Core to create the current schema from JPA entities, including signature requests; no separate patch SQL is needed. Schema validation (`validate`/`none`) requires an already provisioned schema and cannot initialize an empty database. This repository does not auto-run Flyway.
 

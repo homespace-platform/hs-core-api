@@ -179,6 +179,42 @@ public class PaymentRequestService {
 
     /** One direct-transfer request per immutable issued invoice. */
     @Transactional
+    public PaymentRequest createContractSettlement(String contractId,String rentalId,String listingId,String payerId,String payeeId,
+            BigDecimal amount,Instant dueAt,boolean refund,String description) {
+        if(amount==null || amount.signum()<=0 || amount.stripTrailingZeros().scale()>2 || dueAt==null) throw new IllegalArgumentException("Invalid settlement");
+        PaymentType type=refund?PaymentType.DEPOSIT_REFUND:PaymentType.OTHER_CHARGE;
+        Optional<PaymentRequest> existing=paymentRequestRepository.findByContractIdAndType(contractId,type);
+        if(existing.isPresent()) {
+            PaymentRequest old=existing.get();
+            if(!payerId.equals(old.getPayerId()) || !payeeId.equals(old.getPayeeId()) || old.getTotalAmount().compareTo(amount)!=0)
+                throw new IllegalStateException("Settlement already frozen");
+            return old;
+        }
+        BankAccount bank=refund?bankAccountService.getDefaultRefundAccount(payeeId):bankAccountService.getDefaultIncomingAccount(payeeId);
+        String reference=transferReferenceGenerator.generateUniqueReference();
+        PaymentRequest payment=paymentRequestRepository.save(PaymentRequest.builder().contractId(contractId).rentalRequestId(rentalId).listingId(listingId)
+                .payerId(payerId).payeeId(payeeId).type(type).direction(refund?PaymentDirection.LANDLORD_TO_TENANT:PaymentDirection.TENANT_TO_LANDLORD)
+                .status(PaymentStatus.AWAITING_TRANSFER).currency("VND").totalAmount(amount).transferReference(reference).dueAt(dueAt)
+                .payeeBankAccountSnapshot(toJson(new BankAccountSnapshotDto(bank.getBankBin(),bank.getBankCode(),bank.getBankName(),bank.getAccountNumber(),bank.getAccountHolderName())))
+                .qrProvider("VIETQR_QUICK_LINK").qrImageUrl(vietQrProvider.generateQrImageUrl(bank.getBankBin(),bank.getAccountNumber(),bank.getAccountHolderName(),amount,reference))
+                .build());
+        paymentLineItemRepository.save(PaymentLineItem.builder().paymentRequestId(payment.getId()).type(type.name()).displayName(description)
+                .quantity(1).unitPrice(amount).amount(amount).calculationDescription("Quyết toán được cả hai bên xác nhận").sortOrder(0).build());
+        recordEvent(payment.getId(),PaymentEventType.CREATED,null,PaymentStatus.AWAITING_TRANSFER,"SYSTEM","SYSTEM",description,null);
+        return payment;
+    }
+
+    @Transactional public void syncContractSettlementDeadline(String id,Instant now) {
+        PaymentRequest p=paymentRequestRepository.findByIdForUpdate(id).orElseThrow();
+        if((p.getType()==PaymentType.DEPOSIT_REFUND || p.getType()==PaymentType.OTHER_CHARGE && p.getContractId()!=null)
+                && p.getDueAt()!=null && now.isAfter(p.getDueAt())
+                && (p.getStatus()==PaymentStatus.AWAITING_TRANSFER || p.getStatus()==PaymentStatus.REJECTED)) {
+            PaymentStatus before=p.getStatus(); p.setStatus(PaymentStatus.OVERDUE); paymentRequestRepository.save(p);
+            recordEvent(id,PaymentEventType.OVERDUE,before,PaymentStatus.OVERDUE,"SYSTEM","SYSTEM","Khoản quyết toán/hoàn cọc quá hạn, nghĩa vụ thanh toán vẫn còn",null);
+        }
+    }
+
+    @Transactional
     public PaymentRequest createMonthlyPayment(String invoiceId, String contractId,
             String rentalRequestId, String listingId, String payerId, String payeeId,
             BigDecimal totalAmount, String breakdownSnapshot, Instant dueAt) {
@@ -310,10 +346,10 @@ public class PaymentRequestService {
         }
 
         if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED
-                && !(payment.getType() == PaymentType.MONTHLY_RENT && payment.getStatus() == PaymentStatus.OVERDUE)) {
+                && !(PaymentTimePolicy.usesBillingTime(payment) && payment.getStatus() == PaymentStatus.OVERDUE)) {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
         }
-        if (payment.getType() == PaymentType.MONTHLY_RENT
+        if (PaymentTimePolicy.usesBillingTime(payment)
                 && (request == null || request.expectedAmount() == null
                 || request.expectedAmount().compareTo(payment.getTotalAmount()) != 0)) {
             throw new AppException(PaymentErrorCode.MONTHLY_AMOUNT_CHANGED);
@@ -371,7 +407,7 @@ public class PaymentRequestService {
         }
 
         PaymentStatus oldStatus = payment.getStatus();
-        Instant now = payment.getType() == PaymentType.MONTHLY_RENT ? billingTime.now() : Instant.now();
+        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? billingTime.now() : Instant.now();
 
         payment.setStatus(PaymentStatus.TRANSFER_REPORTED);
         payment.setPayerReportedAt(now);
@@ -395,9 +431,13 @@ public class PaymentRequestService {
         PaymentRequest saved = paymentRequestRepository.save(payment);
 
         recordEvent(saved.getId(), PaymentEventType.TRANSFER_REPORTED, oldStatus, PaymentStatus.TRANSFER_REPORTED,
-                actorId, "TENANT", "Người thuê đã gửi chứng từ chuyển khoản.", null);
+                actorId, payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"LANDLORD":"TENANT",
+                payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"Chủ nhà đã gửi chứng từ hoàn tiền":"Người thuê đã gửi chứng từ chuyển khoản.", null);
+        if(payment.getType()==PaymentType.DEPOSIT_REFUND) depositRecordRepository.findByRefundPaymentRequestId(saved.getId()).ifPresent(d->{
+            d.setStatus(DepositStatus.REFUND_REPORTED); depositRecordRepository.save(d);
+        });
 
-        log.info("Tenant [{}] reported transfer for PaymentRequest [{}] with proof [{}]",
+        log.info("Payer [{}] reported transfer for PaymentRequest [{}] with proof [{}]",
                 actorId, paymentRequestId, proofStorageId);
         return toResponse(saved, actorId);
     }
@@ -419,7 +459,7 @@ public class PaymentRequestService {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
         }
 
-        Instant now = payment.getType() == PaymentType.MONTHLY_RENT ? billingTime.now() : Instant.now();
+        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? billingTime.now() : Instant.now();
         payment.setStatus(PaymentStatus.CONFIRMED);
         payment.setPayeeConfirmedAt(now);
         payment.setConfirmedAt(now);
@@ -437,10 +477,16 @@ public class PaymentRequestService {
             depositRecordRepository.save(record);
         });
 
-        recordEvent(saved.getId(), PaymentEventType.RECEIPT_CONFIRMED, PaymentStatus.TRANSFER_REPORTED,
-                PaymentStatus.CONFIRMED, actorId, "LANDLORD", "Chủ nhà xác nhận đã nhận đủ tiền", null);
+        depositRecordRepository.findByRefundPaymentRequestId(saved.getId()).ifPresent(record -> {
+            record.setStatus(DepositStatus.REFUNDED); record.setHeldAmount(BigDecimal.ZERO); record.setRefundableAmount(BigDecimal.ZERO);
+            depositRecordRepository.save(record);
+        });
 
-        log.info("Landlord [{}] CONFIRMED receipt for PaymentRequest [{}]", actorId, paymentRequestId);
+        recordEvent(saved.getId(), PaymentEventType.RECEIPT_CONFIRMED, PaymentStatus.TRANSFER_REPORTED,
+                PaymentStatus.CONFIRMED, actorId, payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"TENANT":"LANDLORD",
+                payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"Người thuê xác nhận đã nhận tiền hoàn":"Chủ nhà xác nhận đã nhận đủ tiền", null);
+
+        log.info("Payee [{}] CONFIRMED receipt for PaymentRequest [{}]", actorId, paymentRequestId);
         return toResponse(saved, actorId);
     }
 
@@ -461,7 +507,7 @@ public class PaymentRequestService {
             throw new AppException(PaymentErrorCode.REJECTION_REASON_REQUIRED);
         }
 
-        Instant now = payment.getType() == PaymentType.MONTHLY_RENT ? billingTime.now() : Instant.now();
+        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? billingTime.now() : Instant.now();
         payment.setStatus(PaymentStatus.REJECTED);
         payment.setRejectedAt(now);
         payment.setRejectedReason(request.reason().trim());
@@ -469,9 +515,12 @@ public class PaymentRequestService {
         PaymentRequest saved = paymentRequestRepository.save(payment);
 
         recordEvent(saved.getId(), PaymentEventType.RECEIPT_REJECTED, PaymentStatus.TRANSFER_REPORTED,
-                PaymentStatus.REJECTED, actorId, "LANDLORD", request.reason().trim(), null);
+                PaymentStatus.REJECTED, actorId, payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"TENANT":"LANDLORD", request.reason().trim(), null);
+        if(payment.getType()==PaymentType.DEPOSIT_REFUND) depositRecordRepository.findByRefundPaymentRequestId(saved.getId()).ifPresent(d->{
+            d.setStatus(DepositStatus.REFUND_DUE); depositRecordRepository.save(d);
+        });
 
-        log.info("Landlord [{}] REJECTED receipt for PaymentRequest [{}]: {}", actorId, paymentRequestId, request.reason());
+        log.info("Payee [{}] REJECTED receipt for PaymentRequest [{}]: {}", actorId, paymentRequestId, request.reason());
         return toResponse(saved, actorId);
     }
 
@@ -492,9 +541,13 @@ public class PaymentRequestService {
         payment.setStatus(PaymentStatus.DISPUTED);
         PaymentRequest saved = paymentRequestRepository.save(payment);
 
-        String role = actorId.equals(payment.getPayerId()) ? "TENANT" : "LANDLORD";
+        boolean reverse=payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT;
+        String role = actorId.equals(payment.getPayerId()) ? (reverse?"LANDLORD":"TENANT") : (reverse?"TENANT":"LANDLORD");
         recordEvent(saved.getId(), PaymentEventType.DISPUTED, oldStatus, PaymentStatus.DISPUTED,
                 actorId, role, request.reason().trim(), null);
+        if(payment.getType()==PaymentType.DEPOSIT_REFUND) depositRecordRepository.findByRefundPaymentRequestId(saved.getId()).ifPresent(d->{
+            d.setStatus(DepositStatus.DISPUTED); depositRecordRepository.save(d);
+        });
 
         log.info("Actor [{}] [{}] opened DISPUTE on PaymentRequest [{}]", actorId, role, paymentRequestId);
         return toResponse(saved, actorId);

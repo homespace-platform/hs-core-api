@@ -42,6 +42,8 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class PaymentProofUploadSessionService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.payment.repository.DepositRecordRepository refundDeposits;
 
     private static final int TOKEN_BYTE_LENGTH = 32;
     private static final Duration SESSION_TTL = Duration.ofMinutes(10);
@@ -84,7 +86,7 @@ public class PaymentProofUploadSessionService {
         }
 
         if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED
-                && !(payment.getType() == PaymentType.MONTHLY_RENT && payment.getStatus() == PaymentStatus.OVERDUE)) {
+                && !(PaymentTimePolicy.usesBillingTime(payment) && payment.getStatus() == PaymentStatus.OVERDUE)) {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
         }
 
@@ -277,7 +279,7 @@ public class PaymentProofUploadSessionService {
         }
 
         if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED
-                && !(payment.getType() == PaymentType.MONTHLY_RENT && payment.getStatus() == PaymentStatus.OVERDUE)) {
+                && !(PaymentTimePolicy.usesBillingTime(payment) && payment.getStatus() == PaymentStatus.OVERDUE)) {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS, "Trạng thái thanh toán không hợp lệ.");
         }
 
@@ -316,7 +318,7 @@ public class PaymentProofUploadSessionService {
         }
 
         Instant realNow = Instant.now();
-        Instant now = payment.getType() == com.hs.payment.model.constant.PaymentType.MONTHLY_RENT
+        Instant now = PaymentTimePolicy.usesBillingTime(payment)
                 ? billingTime.now() : realNow;
         PaymentStatus oldStatus = payment.getStatus();
 
@@ -343,6 +345,9 @@ public class PaymentProofUploadSessionService {
         paymentRequestRepository.save(payment);
 
         // 3. Chuyển session sang CONSUMED
+        if(payment.getType()==PaymentType.DEPOSIT_REFUND && refundDeposits!=null) refundDeposits.findByRefundPaymentRequestId(payment.getId()).ifPresent(d->{
+            d.setStatus(com.hs.payment.model.constant.DepositStatus.REFUND_REPORTED); refundDeposits.save(d);
+        });
         session.setStorageId(uploaded.id());
         session.setOriginalFileName(originalFileName);
         session.setContentType(contentType);
@@ -359,8 +364,8 @@ public class PaymentProofUploadSessionService {
                 .fromStatus(oldStatus)
                 .toStatus(PaymentStatus.TRANSFER_REPORTED)
                 .actorId(session.getTenantUserId())
-                .actorRole("TENANT")
-                .reason("Người thuê đã gửi chứng từ chuyển khoản.")
+                .actorRole(payment.getDirection()==com.hs.payment.model.constant.PaymentDirection.LANDLORD_TO_TENANT?"LANDLORD":"TENANT")
+                .reason(payment.getDirection()==com.hs.payment.model.constant.PaymentDirection.LANDLORD_TO_TENANT?"Chủ nhà đã gửi chứng từ hoàn tiền":"Người thuê đã gửi chứng từ chuyển khoản.")
                 .createdAt(now)
                 .build();
         paymentEventRepository.save(event);

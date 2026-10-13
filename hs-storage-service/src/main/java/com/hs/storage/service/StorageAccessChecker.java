@@ -8,4 +8,7 @@ import com.hs.storage.model.StorageObject;
 public interface StorageAccessChecker {
 
     boolean canAccess(String userId, StorageObject object);
+
+    /** Business records can retain attached evidence even when its uploader owns the file. */
+    default boolean preventsDeletion(StorageObject object) { return false; }
 }

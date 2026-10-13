@@ -20,6 +20,7 @@ public interface DepositRecordRepository extends JpaRepository<DepositRecord, St
     Optional<DepositRecord> findByRentalRequestIdForUpdate(@Param("rentalRequestId") String rentalRequestId);
 
     Optional<DepositRecord> findByInitialPaymentRequestId(String initialPaymentRequestId);
+    Optional<DepositRecord> findByRefundPaymentRequestId(String refundPaymentRequestId);
 
     Optional<DepositRecord> findByContractId(String contractId);
 }

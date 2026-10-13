@@ -68,6 +68,68 @@ class PaymentRequestServiceTest {
     private BankAccount landlordAccount;
     private BankAccount tenantAccount;
 
+    @Test
+    void settlementRefundUsesTenantBankAndNeverCollectsInitialPaymentAgain() {
+        when(bankAccountService.getDefaultRefundAccount("tenant-1")).thenReturn(tenantAccount);
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSREFUND1");
+        when(vietQrProvider.generateQrImageUrl(anyString(),anyString(),anyString(),any(),anyString())).thenReturn("https://vietqr.test/refund");
+        when(paymentRequestRepository.save(any())).thenAnswer(i->{PaymentRequest p=i.getArgument(0);p.setId("refund");return p;});
+        Instant due=Instant.parse("2027-01-29T03:00:00Z");
+        PaymentRequest p=paymentRequestService.createContractSettlement("contract","rental","listing","landlord-1","tenant-1",
+                new BigDecimal("20000000"),due,true,"Hoàn cọc");
+        assertEquals(PaymentType.DEPOSIT_REFUND,p.getType());
+        assertEquals(com.hs.payment.model.constant.PaymentDirection.LANDLORD_TO_TENANT,p.getDirection());
+        assertEquals(due,p.getDueAt());
+        assertTrue(p.getPayeeBankAccountSnapshot().contains("1234567890"));
+        verify(bankAccountService,never()).getDefaultIncomingAccount(anyString());
+        verify(paymentLineItemRepository).save(argThat(i->i.getType().equals("DEPOSIT_REFUND")));
+        when(paymentRequestRepository.findByContractIdAndType("contract",PaymentType.DEPOSIT_REFUND)).thenReturn(Optional.of(p));
+        assertSame(p,paymentRequestService.createContractSettlement("contract","rental","listing","landlord-1","tenant-1",
+                new BigDecimal("20000000"),due,true,"Hoàn cọc"));
+        assertThrows(IllegalStateException.class,()->paymentRequestService.createContractSettlement("contract","rental","listing","landlord-1","tenant-1",
+                new BigDecimal("1"),due,true,"Sửa số tiền"));
+        verify(paymentRequestRepository,times(1)).save(any());
+    }
+
+    @Test
+    void refundProofDoesNotReleaseDepositUntilTenantExplicitlyConfirmsReceipt() {
+        PaymentRequest p=PaymentRequest.builder().id("refund").contractId("contract").rentalRequestId("rental")
+                .type(PaymentType.DEPOSIT_REFUND).direction(com.hs.payment.model.constant.PaymentDirection.LANDLORD_TO_TENANT)
+                .payerId("landlord-1").payeeId("tenant-1").status(PaymentStatus.OVERDUE).totalAmount(new BigDecimal("20000000")).build();
+        var deposit=com.hs.payment.model.DepositRecord.builder().refundPaymentRequestId("refund")
+                .status(com.hs.payment.model.constant.DepositStatus.REFUND_DUE).heldAmount(p.getTotalAmount()).refundableAmount(p.getTotalAmount()).build();
+        when(paymentRequestRepository.findByIdForUpdate("refund")).thenReturn(Optional.of(p));
+        when(paymentRequestRepository.save(any())).thenAnswer(i->i.getArgument(0));
+        when(depositRecordRepository.findByRefundPaymentRequestId("refund")).thenReturn(Optional.of(deposit));
+        when(billingTime.now()).thenReturn(Instant.parse("2027-01-30T03:00:00Z"));
+        when(paymentProofUploadSessionService.consumeSession("session","refund","landlord-1")).thenReturn("proof");
+        assertThrows(AppException.class,()->paymentRequestService.reportTransfer("refund","tenant-1",ReportTransferRequest.builder().build()));
+        paymentRequestService.reportTransfer("refund","landlord-1",ReportTransferRequest.builder().evidenceUploadSessionId("session").expectedAmount(p.getTotalAmount()).build());
+        assertEquals(com.hs.payment.model.constant.DepositStatus.REFUND_REPORTED,deposit.getStatus());
+        assertEquals(new BigDecimal("20000000"),deposit.getHeldAmount());
+        assertThrows(AppException.class,()->paymentRequestService.confirmReceipt("refund","landlord-1"));
+        paymentRequestService.confirmReceipt("refund","tenant-1");
+        assertEquals(PaymentStatus.CONFIRMED,p.getStatus());
+        assertEquals(com.hs.payment.model.constant.DepositStatus.REFUNDED,deposit.getStatus());
+        assertEquals(BigDecimal.ZERO,deposit.getHeldAmount());
+        assertNull(p.getContractDueAt());
+        assertEquals(Instant.parse("2027-01-30T03:00:00Z"),p.getConfirmedAt());
+    }
+
+    @Test
+    void expiredRefundRemainsPayableAndReportedProofIsNotAutoConfirmed() {
+        PaymentRequest p=PaymentRequest.builder().id("refund").contractId("contract").type(PaymentType.DEPOSIT_REFUND)
+                .status(PaymentStatus.AWAITING_TRANSFER).dueAt(Instant.parse("2027-01-29T03:00:00Z")).qrImageUrl("refund-qr").build();
+        when(paymentRequestRepository.findByIdForUpdate("refund")).thenReturn(Optional.of(p));
+        paymentRequestService.syncContractSettlementDeadline("refund",Instant.parse("2027-01-30T03:00:00Z"));
+        assertEquals(PaymentStatus.OVERDUE,p.getStatus());
+        assertEquals("refund-qr",p.getQrImageUrl());
+        p.setStatus(PaymentStatus.TRANSFER_REPORTED);
+        paymentRequestService.syncContractSettlementDeadline("refund",Instant.parse("2027-02-01T03:00:00Z"));
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,p.getStatus());
+        verify(paymentRequestRepository,times(1)).save(p);
+    }
+
     @BeforeEach
     void setUp() {
         landlordAccount = BankAccount.builder()

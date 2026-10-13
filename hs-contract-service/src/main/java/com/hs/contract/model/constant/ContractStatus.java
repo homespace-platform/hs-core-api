@@ -8,6 +8,8 @@ public enum ContractStatus {
     /** Chủ nhà đã ký, đang chờ người thuê ký SmartCA. */
     TENANT_SIGNATURE_PENDING,
     ACTIVE,
+    EXPIRED,
+    CLOSED,
     TERMINATED,
     CANCELLED
 }

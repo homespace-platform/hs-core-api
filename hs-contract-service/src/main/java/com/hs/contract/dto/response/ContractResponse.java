@@ -23,6 +23,8 @@ public class ContractResponse {
     private String templateId;
     private String templateVersionId;
     private String currentRevisionId;
+    private String parentContractId;
+    private Integer effectiveLeaseMonths;
     private ContractStatus status;
     private ContractPaymentStatus paymentStatus;
     private String rentalPaymentId;

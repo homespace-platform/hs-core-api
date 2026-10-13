@@ -24,6 +24,12 @@ public class MonthlyInvoice extends BaseEntity {
     private String contractId;
     @Column(name = "period_index", nullable = false)
     private int periodIndex;
+    /** Extra costs of the final lease period, not a new rent period. */
+    @Builder.Default @org.hibernate.annotations.ColumnDefault("false")
+    @Column(name="final_cost_supplement",nullable=false) private boolean finalCostSupplement=false;
+    @Column(name="source_invoice_id",length=36) private String sourceInvoiceId;
+    @Column(name="supplement_request_id",length=36) private String supplementRequestId;
+    @Column(name="supplement_request_snapshot",columnDefinition="TEXT") private String supplementRequestSnapshot;
     @Column(name = "period_start", nullable = false)
     private LocalDate periodStart;
     @Column(name = "period_end_exclusive", nullable = false)

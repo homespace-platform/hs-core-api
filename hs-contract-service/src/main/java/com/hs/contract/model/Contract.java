@@ -79,6 +79,12 @@ public class Contract extends BaseEntity {
     @Column(name = "signed_at")
     private Instant signedAt;
 
+    /** Document-only renewal agreement; billing and deposit stay on the root contract. */
+    @Column(name = "parent_contract_id", length = 36)
+    private String parentContractId;
+    @Column(name = "effective_lease_months")
+    private Integer effectiveLeaseMonths;
+
     @Column(name = "termination_proposal_invoice_id", length = 36)
     private String terminationProposalInvoiceId;
     @Column(name = "termination_proposed_at")

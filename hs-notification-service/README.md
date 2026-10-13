@@ -50,10 +50,11 @@ SMTP_PORT=587
 SMTP_USERNAME=homespace.platform@gmail.com
 SMTP_PASSWORD=your-16-character-google-app-password
 SMTP_FROM=homespace.platform@gmail.com
-SMTP_FROM_NAME=HomeSpace
 ```
 
 Khởi động lại `hs-api-service` sau khi đổi profile hoặc biến môi trường.
+
+Tên người gửi `notification.mail.from-name=HomeSpace` và các quy định OTP (độ dài, hạn dùng, thời gian gửi lại, số lần thử/gửi) cấu hình trực tiếp trong `hs-api-service/src/main/resources/application.properties`. `.env` giữ kết nối SMTP/Redis và `OTP_HASH_SECRET`.
 
 ## SMS
 

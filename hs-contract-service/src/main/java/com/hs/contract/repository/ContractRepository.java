@@ -19,7 +19,15 @@ import jakarta.persistence.LockModeType;
 @Repository
 public interface ContractRepository extends JpaRepository<Contract, String>, JpaSpecificationExecutor<Contract> {
 
-    Optional<Contract> findByRentalRequestId(String rentalRequestId);
+    @Query("select c from Contract c where c.rentalRequestId = :rentalRequestId and c.parentContractId is null")
+    Optional<Contract> findByRentalRequestId(@Param("rentalRequestId") String rentalRequestId);
+
+    Page<Contract> findByParentContractIdIsNullAndStatusIn(java.util.Collection<ContractStatus> statuses, Pageable pageable);
+
+    @Query("select c.id from Contract c where c.parentContractId is null and c.status in :statuses "
+            + "and (:afterId is null or c.id > :afterId) order by c.id")
+    List<String> findLifecycleIdsAfter(@Param("statuses") java.util.Collection<ContractStatus> statuses,
+                                      @Param("afterId") String afterId, Pageable pageable);
 
     Optional<Contract> findByContractNumber(String contractNumber);
 

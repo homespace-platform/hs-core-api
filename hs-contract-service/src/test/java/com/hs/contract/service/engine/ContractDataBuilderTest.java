@@ -73,10 +73,11 @@ class ContractDataBuilderTest {
         assertEquals(0, snapshots.getTenant().get("carCount"));
         assertEquals(4, snapshots.getFinancial().get("paymentDueOffsetDays"));
         assertTrue(String.valueOf(snapshots.getFinancial().get("paymentDueDay"))
-                .contains("ngày thứ 4 sau khi kết thúc mỗi kỳ thuê"));
+                .contains("ngày thứ 5 tính từ ngày chốt kỳ"));
         assertEquals(snapshots.getFinancial().get("paymentDueDay"),
                 snapshots.getPolicies().get("paymentDueDay"));
-        assertTrue(snapshots.getSpecialTerms().contains("ngày quá hạn thứ 05"));
+        assertTrue(snapshots.getSpecialTerms().contains("Sau khi hết 05 ngày quá hạn"));
+        assertTrue(snapshots.getSpecialTerms().contains("tối đa 10 ngày"));
         assertTrue(snapshots.getSpecialTerms().contains("bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận"));
         assertEquals(true, snapshots.getPolicies().get("overdueLandlordTerminationAfterFiveDays"));
         assertTrue(String.valueOf(snapshots.getFinancial().get("depositDescription"))

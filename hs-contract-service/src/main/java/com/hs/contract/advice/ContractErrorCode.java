@@ -62,7 +62,9 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     TERMINATION_DEPOSIT_NOT_READY(6063, "Không thể quyết toán cọc khi khoản cọc chưa được chủ nhà xác nhận hoặc đang tranh chấp", HttpStatus.CONFLICT),
     PAYMENT_EXTENSION_INVALID(6064, "Gia hạn cần từ 1 đến 30 ngày và lý do từ 10 đến 1000 ký tự", HttpStatus.BAD_REQUEST),
     PAYMENT_EXTENSION_NOT_ALLOWED(6065, "Không thể gia hạn: kiểm tra yêu cầu hiện tại, phương án xử lý và trạng thái thanh toán", HttpStatus.CONFLICT),
-    PAYMENT_EXTENSION_NOT_FOUND(6066, "Yêu cầu gia hạn không tồn tại hoặc không còn chờ duyệt", HttpStatus.CONFLICT);
+    PAYMENT_EXTENSION_NOT_FOUND(6066, "Yêu cầu gia hạn không tồn tại hoặc không còn chờ duyệt", HttpStatus.CONFLICT),
+    LIFECYCLE_NOT_ALLOWED(6067, "Chưa đủ điều kiện gia hạn/bàn giao: kiểm tra thời hạn, chữ ký, công nợ và trạng thái quyết toán", HttpStatus.CONFLICT),
+    LIFECYCLE_INVALID(6068, "Dữ liệu gia hạn/quyết toán không hợp lệ hoặc bản xác nhận đã thay đổi", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

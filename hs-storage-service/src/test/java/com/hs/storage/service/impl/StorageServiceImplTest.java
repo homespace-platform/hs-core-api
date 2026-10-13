@@ -68,6 +68,20 @@ class StorageServiceImplTest {
     }
 
     @Test
+    void retainedBusinessEvidenceCannotBeDeletedEvenByOwner() {
+        StorageObject object=StorageObject.builder().id("proof").ownerId("test-user-id").status(StorageStatus.READY).build();
+        object.setActive(true);
+        when(repository.findById("proof")).thenReturn(Optional.of(object));
+        var checker=mock(com.hs.storage.service.StorageAccessChecker.class);
+        storageService.setAccessCheckers(java.util.List.of(checker));
+        when(checker.preventsDeletion(object)).thenReturn(true);
+        assertThrows(AppException.class,()->storageService.delete("proof"));
+        assertEquals(StorageStatus.READY,object.getStatus());verify(repository,never()).save(any());
+        when(checker.preventsDeletion(object)).thenReturn(false);
+        storageService.delete("proof");assertEquals(StorageStatus.DELETED,object.getStatus());
+    }
+
+    @Test
     void uploadDirect_validJpegProof_success() {
         byte[] validJpeg = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0x00, 0x10};
         when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));

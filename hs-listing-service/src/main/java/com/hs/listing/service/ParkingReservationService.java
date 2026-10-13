@@ -267,6 +267,38 @@ public class ParkingReservationService {
         }
     }
 
+    @Transactional
+    public void holdForRenewal(String rootId,String agreementId,LocalDate start,LocalDate end,Instant deadline) {
+        var current=parkingReservationRepository.findByContractId(rootId).stream()
+                .filter(r->r.getStatus()==ParkingReservationStatus.ACTIVE && start.equals(r.getEndDateExclusive())).toList();
+        if(current.isEmpty()) return;
+        String listingId=current.get(0).getListingId(), branchId=current.get(0).getBranchId();
+        PropertyBranch branch=branchId==null?null:propertyBranchRepository.findByIdForUpdate(branchId).orElseThrow();
+        Listing listing=listingRepository.findByIdForUpdate(listingId).orElseThrow();
+        Map<VehicleType,Integer> counts=new EnumMap<>(VehicleType.class);
+        current.forEach(r->counts.merge(r.getVehicleType(),r.getQuantity(),Integer::sum));
+        for(var item:counts.entrySet()) {
+            if(getAvailability(branch,listing,item.getKey(),start,end).available()<item.getValue())
+                throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,"Không đủ chỗ xe trong thời gian gia hạn; cần đối soát trước khi duyệt.");
+            parkingReservationRepository.save(ParkingReservation.builder().branchId(branchId).listingId(listingId)
+                    .rentalRequestId(current.get(0).getRentalRequestId()).contractId(agreementId)
+                    .vehicleType(item.getKey()).quantity(item.getValue()).startDate(start).endDateExclusive(end)
+                    .status(ParkingReservationStatus.HELD).holdExpiresAt(deadline).build());
+        }
+    }
+    @Transactional public void activateRenewalHold(String agreementId,String rootId) {
+        for(var r:parkingReservationRepository.findByContractId(agreementId)) {
+            if(r.getStatus()!=ParkingReservationStatus.HELD) throw new IllegalStateException("Renewal parking hold no longer valid");
+            r.setContractId(rootId); r.setStatus(ParkingReservationStatus.ACTIVE); r.setHoldExpiresAt(null);
+            parkingReservationRepository.save(r);
+        }
+    }
+    @Transactional public void releaseRenewalHold(String agreementId) {
+        for(var r:parkingReservationRepository.findByContractId(agreementId)) {
+            if(r.getStatus()==ParkingReservationStatus.HELD) { r.setStatus(ParkingReservationStatus.RELEASED); parkingReservationRepository.save(r); }
+        }
+    }
+
     /**
      * Expire các reservation ACTIVE đã qua ngày kết thúc.
      */
