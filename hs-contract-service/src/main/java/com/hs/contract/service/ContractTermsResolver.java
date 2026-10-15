@@ -16,12 +16,21 @@ public class ContractTermsResolver {
     private final ContractRevisionRepository revisions;
 
     public ContractRevision at(Contract root, LocalDate periodStart) {
-        return amendments.findByContractIdOrderByCreatedAtDesc(root.getId()).stream()
-                .filter(a -> Set.of("SCHEDULED", "APPLIED").contains(a.getStatus()) && a.getSignedAt() != null
-                        && a.getTermsRevisionId() != null && !a.getEffectiveOn().isAfter(periodStart))
-                .max(Comparator.comparing(ContractAmendment::getEffectiveOn)
-                        .thenComparing(ContractAmendment::getSignedAt))
+        return selectAmendment(amendments.findByContractIdOrderByCreatedAtDesc(root.getId()), periodStart)
                 .map(a -> require(a.getTermsRevisionId())).orElseGet(() -> require(root.getCurrentRevisionId()));
+    }
+
+    /**
+     * Pure selection rule shared with read-only consumers: the signed, scheduled/applied amendment with the
+     * latest effective date that is not after {@code date}. Status labels that a scheduler has not refreshed yet
+     * do not matter; only signature and effective date do. Superseded/rejected/unsigned proposals never qualify.
+     */
+    public static Optional<ContractAmendment> selectAmendment(Collection<ContractAmendment> history, LocalDate date) {
+        return history.stream()
+                .filter(a -> Set.of("SCHEDULED", "APPLIED").contains(a.getStatus()) && a.getSignedAt() != null
+                        && a.getTermsRevisionId() != null && !a.getEffectiveOn().isAfter(date))
+                .max(Comparator.comparing(ContractAmendment::getEffectiveOn)
+                        .thenComparing(ContractAmendment::getSignedAt));
     }
 
     public ContractRevision require(String id) {

@@ -404,10 +404,10 @@ public class ContractLifecycleService {
     }
     @Transactional public void cancelPendingRenewalsForClosedParent(Contract c) { syncLocked(c); }
     private boolean terminationActive(Contract c) { return c.getTerminationProposedAt()!=null && c.getTerminationCancelledAt()==null && c.getTerminationDeclinedAt()==null && c.getTerminationCompletedAt()==null; }
-    private LocalDate end(Contract c) { return rental(c).getMoveInDate().plusMonths(months(c)); }
-    private Instant opens(Contract c) { return end(c).minusDays(30).atStartOfDay(BillingTime.ZONE).toInstant(); }
-    private Instant signBy(Contract c) { return end(c).minusDays(1).atStartOfDay(BillingTime.ZONE).toInstant(); }
-    private int months(Contract c) { return c.getEffectiveLeaseMonths()!=null?c.getEffectiveLeaseMonths():rental(c).getLeaseMonths(); }
+    private LocalDate end(Contract c) { return ContractLeaseCalc.end(rental(c).getMoveInDate(), months(c)); }
+    private Instant opens(Contract c) { return ContractLeaseCalc.renewalOpens(end(c)); }
+    private Instant signBy(Contract c) { return ContractLeaseCalc.renewalSignBy(end(c)); }
+    private int months(Contract c) { return ContractLeaseCalc.months(c, rental(c)); }
     private RentalRequest rental(Contract c) { return rentals.findById(c.getRentalRequestId()).orElseThrow(this::notAllowed); }
     private ContractRevision revision(Contract c) { return terms == null ? revisions.findById(c.getCurrentRevisionId()).orElseThrow(this::notAllowed) : terms.at(c,time.today()); }
     private DepositRecord deposit(Contract c) { return deposits.findByRentalRequestIdForUpdate(c.getRentalRequestId()).orElseThrow(this::notAllowed); }

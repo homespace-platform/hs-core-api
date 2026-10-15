@@ -6,6 +6,7 @@ import java.util.*;
 
 public interface ContractAmendmentRepository extends JpaRepository<ContractAmendment, String> {
     List<ContractAmendment> findByContractIdOrderByCreatedAtDesc(String contractId);
+    List<ContractAmendment> findByContractIdInOrderByCreatedAtDesc(Collection<String> contractIds);
     Optional<ContractAmendment> findByAgreementContractId(String agreementContractId);
     List<ContractAmendment> findByStatusIn(Collection<String> statuses);
 }

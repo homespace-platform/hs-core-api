@@ -51,6 +51,23 @@ public interface ContractRepository extends JpaRepository<Contract, String>, Jpa
 
     boolean existsByRentalRequestIdAndStatusIn(String rentalRequestId, Set<ContractStatus> statuses);
 
+    /**
+     * Root contracts visible to {@code userId} (same visibility as the contract list: landlords see their own
+     * drafts, tenants never see drafts). Used by read-only AI queries; bounded by {@code limit}.
+     */
+    @Query("select new com.hs.contract.dto.ai.ContractLeaseRow(c.id, c.contractNumber, c.status, c.landlordId, "
+            + "c.tenantId, c.createdAt, c.signedAt, c.effectiveLeaseMonths, r.moveInDate, r.leaseMonths, "
+            + "c.currentRevisionId) from Contract c, RentalRequest r where r.id = c.rentalRequestId "
+            + "and c.parentContractId is null and c.active = true and (c.landlordId = :userId or "
+            + "(c.tenantId = :userId and c.status <> com.hs.contract.model.constant.ContractStatus.DRAFT)) "
+            + "order by c.createdAt desc")
+    List<com.hs.contract.dto.ai.ContractLeaseRow> findLeaseRowsForUser(@Param("userId") String userId, Pageable limit);
+
+    /** Text match on contract number or the current revision's property snapshot, within already-authorized ids. */
+    @Query("select c.id from Contract c, ContractRevision v where v.id = c.currentRevisionId and c.id in :ids "
+            + "and (lower(c.contractNumber) like :pattern or lower(v.propertySnapshot) like :pattern)")
+    List<String> findIdsMatchingText(@Param("ids") java.util.Collection<String> ids, @Param("pattern") String pattern);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT c FROM Contract c WHERE c.id = :id")
     Optional<Contract> findByIdForUpdate(@Param("id") String id);
