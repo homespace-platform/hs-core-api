@@ -33,6 +33,7 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     INVALID_APPOINTMENT_STATUS(4028, "Invalid appointment status for this action", HttpStatus.CONFLICT),
     RESCHEDULE_ALREADY_REQUESTED(4029, "A reschedule request is already pending review", HttpStatus.CONFLICT),
     LISTING_NOT_AVAILABLE_FOR_VIEWING(4030, "This listing is not currently available for viewing appointments", HttpStatus.BAD_REQUEST),
+    APPOINTMENT_AI_QUERY_INVALID(4031, "Invalid appointment query parameters", HttpStatus.BAD_REQUEST),
     RENTAL_REQUEST_NOT_FOUND(4040, "Rental request not found", HttpStatus.NOT_FOUND),
     RENTAL_REQUEST_FORBIDDEN(4041, "You do not have permission to access this rental request", HttpStatus.FORBIDDEN),
     CANNOT_RENT_OWN_LISTING(4042, "You cannot submit a rental request for your own listing", HttpStatus.BAD_REQUEST),
