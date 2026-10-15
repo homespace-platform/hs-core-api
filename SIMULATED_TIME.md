@@ -10,23 +10,29 @@
 - Không lùi giờ để chạy lại một nhánh trên HĐ đã tiến tới tháng 12 hoặc tháng 01. Đổi giờ giả lập **không hoàn tác** hóa đơn, phí phạt, yêu cầu, công nợ hoặc chữ ký.
 - Khi chuyển UC, có thể đặt lại 15/10 để **tạo HĐ mới với tin/chỗ thuê khác**, nhưng mọi dữ liệu HĐ cũ vẫn còn. Không tái sử dụng HĐ cũ làm fixture mới.
 - Scheduler xử lý **tất cả HĐ gốc ACTIVE/EXPIRED**, không chỉ HĐ đang mở. **Không tạo sẵn toàn bộ HĐ các UC rồi chạy một UC tới tháng 01**: các HĐ kia cũng sẽ bị tiến lịch. Tạo HĐ của ca sắp chạy; muốn cách ly hoàn toàn thì dùng dữ liệu/CSDL dev riêng hoặc snapshot dev riêng, không reset CSDL thật.
-- Mỗi hàng: sửa đúng `homespace.time.simulated-at`, restart Core, chờ khoảng 1 phút, làm mới cả hai tài khoản rồi mới thao tác. Các hàng cùng ngày nhưng khác giờ vẫn là các bước riêng.
+- Mỗi hàng: sửa `HOMESPACE_TIME_SIMULATED_AT` trong `hs-core-api/.env` theo mốc `homespace.time.simulated-at` của bảng, dừng/chạy lại Core để nạp lại biến môi trường, chờ khoảng 1 phút, làm mới cả hai tài khoản rồi mới thao tác. Các hàng cùng ngày nhưng khác giờ vẫn là các bước riêng.
 - Giờ trong file là **giờ Việt Nam UTC+7**, không có `Z`. Đồng hồ đứng yên ở mốc đã đặt; chờ ngoài đời không tự tăng giờ giả lập. Job chạy ở lượt đầu sau mốc, không bảo đảm đúng từng giây.
 - Không thực hiện thao tác thanh toán, giữ cọc/chấm dứt/bàn giao giả trên hợp đồng thật. Các ca đó chỉ dành cho dữ liệu demo.
-- Cuối buổi để `homespace.time.simulated-at=` rỗng và restart.
+- Cuối buổi để `HOMESPACE_TIME_SIMULATED_AT=` rỗng trong `.env` và dừng/chạy lại Core. Không chỉ dựa vào DevTools reload vì môi trường của tiến trình Java cũ không tự cập nhật.
 
 ## Cấu hình test
 
-Trong `hs-api-service/src/main/resources/application.properties`, khi Core chạy profile dev/test:
+Riêng đồng hồ giả lập đặt trong `hs-core-api/.env`, khi Core chạy profile dev/test:
+
+```dotenv
+HOMESPACE_TIME_SIMULATED_AT=2026-10-15T10:00:00
+```
+
+`application.properties` chỉ ánh xạ biến (không ghi cứng ngày). Các cấu hình nghiệp vụ khác vẫn ở file này:
 
 ```properties
-homespace.time.simulated-at=2026-10-15T10:00:00
+homespace.time.simulated-at=${HOMESPACE_TIME_SIMULATED_AT:}
 homespace.billing.sync-delay-ms=60000
 homespace.billing.extension-response-hours=48
 homespace.closure.response-hours=48
 ```
 
-Các giá trị nghiệp vụ được ghi trực tiếp tại đây. `.env`/`.env.example` giữ bí mật, địa chỉ hạ tầng, thông tin tài khoản và cấu hình triển khai như profile/chế độ schema DB. Mốc giả lập hiện tại đã được chuyển từ `.env` sang properties; khi kết thúc test, để `homespace.time.simulated-at=` rỗng và restart.
+Các giá trị nghiệp vụ khác được ghi trực tiếp trong properties. Chỉ giá trị đồng hồ giả lập chuyển sang `.env`/`.env.example`. Cấu hình Run/Debug Core trong `.vscode/launch.json` đã nạp `hs-core-api/.env`; chạy bằng terminal/JAR cần truyền biến môi trường tương ứng qua launcher (Java không tự đọc `.env`). Khi kết thúc test, để `HOMESPACE_TIME_SIMULATED_AT=` rỗng rồi dừng/chạy lại Core; đổi giá trị này không cần build lại. Việc trở về giờ thực không xóa hóa đơn/công nợ đã tạo trước đó.
 
 Không cần SQL vá riêng. Nếu tạo lại DB dev, Hibernate với `JPA_DDL_AUTO=update` tạo schema; `validate/none` không tạo schema trên DB trống. Không drop DB khi Core đang chạy.
 

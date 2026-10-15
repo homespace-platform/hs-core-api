@@ -13,6 +13,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BillingTimeTest {
 
     @Test
+    void absentOrBlankSimulationUsesRealTimeEvenOutsideDev() {
+        for (String value : new String[]{null, "", "   "}) {
+            Instant before = Instant.now();
+            BillingTime time = new BillingTime(value, environment("prod"));
+            Instant actual = time.now();
+            Instant after = Instant.now();
+            assertTrue(!actual.isBefore(before) && !actual.isAfter(after));
+            assertEquals(LocalDate.ofInstant(actual, BillingTime.ZONE), time.today());
+        }
+    }
+
+    @Test
+    void environmentPlaceholderResolvesBlankDefaultAndVietnameseSimulation() {
+        MockEnvironment environment = environment("test");
+        String placeholder = "${HOMESPACE_TIME_SIMULATED_AT:}";
+        assertEquals("", environment.resolveRequiredPlaceholders(placeholder));
+        environment.setProperty("HOMESPACE_TIME_SIMULATED_AT", "");
+        assertEquals("", environment.resolveRequiredPlaceholders(placeholder));
+        environment.setProperty("HOMESPACE_TIME_SIMULATED_AT", "2026-11-15T10:00:00");
+        BillingTime time = new BillingTime(environment.resolveRequiredPlaceholders(placeholder), environment);
+        assertEquals(Instant.parse("2026-11-15T03:00:00Z"), time.now());
+    }
+
+    @Test
     void localVietnameseTimeUsesVietnameseZone() {
         BillingTime time = new BillingTime("2026-11-04T00:01:00", environment("dev"));
 

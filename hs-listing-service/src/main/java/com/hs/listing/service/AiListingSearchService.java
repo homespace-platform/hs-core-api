@@ -112,6 +112,15 @@ public class AiListingSearchService {
                 where.append(" AND ").append(predicate).append(")");
             }
         }
+        if (request.keyword() != null && !request.keyword().isBlank()) {
+            String keyword = request.keyword().trim();
+            if (keyword.length() > 160) throw new IllegalArgumentException("Keyword is too long");
+            params.addValue("kw", "%" + escapeLike(keyword.toLowerCase(Locale.ROOT)) + "%");
+            where.append(" AND (lower(l.title) LIKE :kw ESCAPE '\\' OR lower(coalesce(l.description,'')) LIKE :kw ESCAPE '\\'"
+                    + " OR EXISTS (SELECT 1 FROM addresses ka WHERE ka.listing_id = l.id AND ka.active = true AND ("
+                    + "lower(coalesce(ka.full_address,'')) LIKE :kw ESCAPE '\\' OR lower(coalesce(ka.street_line,'')) LIKE :kw ESCAPE '\\'"
+                    + " OR lower(coalesce(ka.ward_name,'')) LIKE :kw ESCAPE '\\' OR lower(coalesce(ka.province_name,'')) LIKE :kw ESCAPE '\\')))");
+        }
         String from = " FROM listings l WHERE " + where;
         long total = jdbc.queryForObject("SELECT count(*)" + from, params, Long.class);
         String order = switch (request.sort() == null ? "newest" : request.sort()) {
