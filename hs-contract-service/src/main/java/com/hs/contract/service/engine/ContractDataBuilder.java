@@ -11,6 +11,8 @@ import com.hs.listing.model.constant.ListingCategory;
 import com.hs.listing.model.constant.ListingEnums.BillingMethod;
 import com.hs.listing.model.constant.ListingEnums.ChargeType;
 import com.hs.listing.model.constant.PaymentCycle;
+import com.hs.listing.service.ListingAmenitySnapshots;
+import com.hs.listing.service.ListingPolicyService;
 import com.hs.payment.dto.BankAccountSnapshotDto;
 import com.hs.payment.model.PaymentRequest;
 import com.hs.user.model.Address;
@@ -111,6 +113,8 @@ public class ContractDataBuilder {
 
         // 1. Phân giải snapshot bất biến của Listing
         ListingSnapshotDto listingSnapshot = resolveListingSnapshot(request, listing);
+        // A captured rental agreement must never be patched with later edits of the live listing.
+        Listing source = request != null && isNotBlank(request.getListingSnapshot()) ? null : listing;
 
         BankAccountSnapshotDto payeeBank = parseBankSnapshot(payment != null ? payment.getPayeeBankAccountSnapshot() : null);
         BankAccountSnapshotDto payerBank = parseBankSnapshot(payment != null ? payment.getPayerBankAccountSnapshot() : null);
@@ -118,15 +122,15 @@ public class ContractDataBuilder {
         // 2. Build từng nhóm snapshot
         Map<String, Object> landlord = buildLandlord(request != null ? request.getOwnerId() : null, payeeBank);
         Map<String, Object> tenant = buildTenant(request, payerBank);
-        Map<String, Object> property = buildProperty(listingSnapshot, listing);
-        Map<String, Object> lease = buildLease(request, listingSnapshot, listing);
-        Map<String, Object> financial = buildFinancial(request, listingSnapshot, listing, payment);
-        List<Map<String, Object>> charges = buildCharges(request, listingSnapshot, listing, occupants);
-        List<Map<String, Object>> equipments = buildEquipments(listingSnapshot, listing);
-        List<Map<String, Object>> amenities = buildAmenities(listingSnapshot, listing, request, equipments);
+        Map<String, Object> property = buildProperty(listingSnapshot, source);
+        Map<String, Object> lease = buildLease(request, listingSnapshot, source);
+        Map<String, Object> financial = buildFinancial(request, listingSnapshot, source, payment);
+        List<Map<String, Object>> charges = buildCharges(request, listingSnapshot, source, occupants);
+        List<Map<String, Object>> equipments = buildEquipments(listingSnapshot, source);
+        List<Map<String, Object>> amenities = buildAmenities(listingSnapshot, source);
         Map<String, Object> initialPayment = buildInitialPayment(request, payment, financial, charges);
         Map<String, Object> policies = buildPolicies(listingSnapshot, request);
-        Map<String, Object> meters = buildMeters(listingSnapshot, listing, occupants);
+        Map<String, Object> meters = buildMeters(listingSnapshot, source, occupants);
 
         String specialTerms = DEFAULT_OVERDUE_TERMS;
 
@@ -162,10 +166,13 @@ public class ContractDataBuilder {
     private ListingSnapshotDto resolveListingSnapshot(RentalRequest request, Listing listing) {
         if (request != null && isNotBlank(request.getListingSnapshot())) {
             try {
-                return objectMapper.readValue(request.getListingSnapshot(), ListingSnapshotDto.class);
+                ListingSnapshotDto captured = objectMapper.readValue(request.getListingSnapshot(), ListingSnapshotDto.class);
+                if (captured == null || (listing != null && listing.getId() != null && captured.getListingId() != null
+                        && !listing.getId().equals(captured.getListingId()))) throw new IllegalArgumentException("Wrong listing snapshot");
+                return captured;
             } catch (Exception e) {
-                log.warn("Failed to parse listingSnapshot for rentalRequestId={}, falling back to live listing",
-                        request.getId(), e);
+                throw new com.hs.common.advice.entity.AppException(com.hs.contract.advice.ContractErrorCode.LIFECYCLE_INVALID,
+                        "Bản chụp bài đăng của yêu cầu thuê không hợp lệ; không thể thay bằng dữ liệu bài đăng hiện tại.");
             }
         }
 
@@ -185,6 +192,8 @@ public class ContractDataBuilder {
         String baseAddress = addressRepository.findByListingIdAndActiveTrue(listing.getId())
                 .map(Address::getFullAddress)
                 .orElse("");
+        if (baseAddress.isBlank() && listing.getBranch() != null && listing.getBranch().getAddress() != null)
+            baseAddress = nullToEmpty(listing.getBranch().getAddress().getFullAddress());
         String fullAddress = joinNonBlank(", ", unitNumber, floor, buildingName, baseAddress);
 
         ListingSnapshotDto.ApartmentDetailSnapshot aptSnapshot = null;
@@ -258,19 +267,7 @@ public class ContractDataBuilder {
                     .build();
         }
 
-        List<ListingSnapshotDto.AmenityItemSnapshot> amenitySnapshots = new ArrayList<>();
-        if (listing.getAmenities() != null) {
-            for (Amenity a : listing.getAmenities()) {
-                if (a != null && a.getName() != null) {
-                    amenitySnapshots.add(ListingSnapshotDto.AmenityItemSnapshot.builder()
-                            .code(a.getCode())
-                            .name(a.getName())
-                            .scope("Riêng trong căn/phòng/nhà")
-                            .sourceType("LISTING")
-                            .build());
-                }
-            }
-        }
+        List<ListingSnapshotDto.AmenityItemSnapshot> amenitySnapshots = ListingAmenitySnapshots.resolve(listing,listing.getBranch());
 
         List<String> customAmenities = new ArrayList<>();
         if (listing.getCustomAmenities() != null) {
@@ -306,9 +303,11 @@ public class ContractDataBuilder {
                             .billingMethod(c.getBillingMethod() != null ? c.getBillingMethod().name() : null)
                             .amount(c.getAmount())
                             .currency(c.getCurrency())
+                            .unit(c.getUnit())
                             .includedInRent(c.isIncludedInRent())
                             .customName(c.getCustomName())
                             .description(c.getDescription())
+                            .sortOrder(c.getSortOrder())
                             .build());
                 }
             }
@@ -343,11 +342,13 @@ public class ContractDataBuilder {
                 .maxMotorbikeCount(listing.getMaxMotorbikeCount())
                 .maxCarCount(listing.getMaxCarCount())
                 .rentalScopeDescription(resolveRentalScopeDescription(listing))
+                .buildingRules(listing.getBranch() == null ? null : listing.getBranch().getBuildingRules())
                 .apartmentDetail(aptSnapshot)
                 .houseDetail(houseSnapshot)
                 .roomDetail(roomSnapshot)
                 .amenities(amenitySnapshots)
                 .customAmenities(customAmenities)
+                .policies(ListingPolicyService.snapshot(listing))
                 .furnishings(furnishingSnapshots)
                 .charges(chargeSnapshots)
                 .capturedAt(Instant.now())
@@ -430,14 +431,17 @@ public class ContractDataBuilder {
         map.put("listingCode", listingCode);
         map.put("rentalScope", rentalScope);
         map.put("fullAddress", fullAddress);
-        map.put("areaText", areaM2 != null ? stripTrailingZeros(areaM2) + " m²" : "");
+        map.put("areaText", areaM2 != null ? stripTrailingZeros(areaM2) + " mét vuông" : "");
+        map.put("areaM2", areaM2 == null ? null : areaM2.toPlainString());
         map.put("propertyType", categoryLabel(category));
         map.put("category", category != null ? category.name() : "");
-        map.put("unitNumber", unitNumber);
+        map.put("unitNumber", isNotBlank(unitNumber) ? unitNumber : "Toàn bộ căn");
         map.put("floor", floor);
         map.put("buildingName", buildingName);
         map.put("maxOccupants", maxOccupants != null ? maxOccupants : "");
         map.put("maxVehicles", maxVehicles != null ? maxVehicles : "");
+        map.put("maxMotorbikeCount", snapshot.getMaxMotorbikeCount());
+        map.put("maxCarCount", snapshot.getMaxCarCount());
 
         if (snapshot.getApartmentDetail() != null) {
             var apt = snapshot.getApartmentDetail();
@@ -483,7 +487,7 @@ public class ContractDataBuilder {
             addFeature(rows, "Tình trạng pháp lý", apt.getLegalStatus());
         } else if (snapshot.getHouseDetail() != null) {
             var h = snapshot.getHouseDetail();
-            addFeature(rows, "Diện tích đất", h.getLandAreaM2() != null ? h.getLandAreaM2() + " m²" : null);
+            addFeature(rows, "Diện tích đất", h.getLandAreaM2() != null ? h.getLandAreaM2() + " mét vuông" : null);
             addFeature(rows, "Mặt tiền", h.getFrontageWidthM() != null ? h.getFrontageWidthM() + " m" : null);
             addFeature(rows, "Chiều dài", h.getLengthM() != null ? h.getLengthM() + " m" : null);
             addFeature(rows, "Độ rộng đường vào",
@@ -559,7 +563,7 @@ public class ContractDataBuilder {
         if (val != null && !String.valueOf(val).isBlank() && !"null".equalsIgnoreCase(String.valueOf(val))) {
             Map<String, String> row = new LinkedHashMap<>();
             row.put("featureName", name);
-            row.put("featureValue", String.valueOf(val).trim());
+            row.put("featureValue", ContractPropertyFeatureLabels.value(name, String.valueOf(val).trim()));
             rows.add(row);
         }
     }
@@ -725,6 +729,10 @@ public class ContractDataBuilder {
             deposit = request.getDepositAmount();
         } else if (snapshot != null && snapshot.getDepositAmount() != null) {
             deposit = snapshot.getDepositAmount();
+        } else if (snapshot != null && "NONE".equals(snapshot.getDepositType())) {
+            deposit = BigDecimal.ZERO;
+        } else if (snapshot != null && "MONTH_COUNT".equals(snapshot.getDepositType()) && snapshot.getDepositMonths() != null) {
+            deposit = rent.multiply(BigDecimal.valueOf(snapshot.getDepositMonths()));
         } else {
             deposit = rent;
         }
@@ -892,8 +900,9 @@ public class ContractDataBuilder {
                 row.put("index", index++);
                 row.put("name", nullToEmpty(asset.getAssetName()));
                 row.put("quantity", asset.getQuantity() != null ? String.valueOf(asset.getQuantity()) : "1");
-                row.put("condition", handoverConditionLabel(asset.getHandoverCondition(), asset.getConditionNote()));
+                row.put("condition", handoverConditionLabel(asset.getHandoverCondition(), null));
                 row.put("status", handoverConditionLabel(asset.getHandoverCondition(), null));
+                row.put("note", nullToEmpty(asset.getConditionNote()));
                 rows.add(row);
             }
             return rows;
@@ -912,7 +921,8 @@ public class ContractDataBuilder {
             row.put("index", index++);
             row.put("name", nullToEmpty(asset.getAssetName()));
             row.put("quantity", asset.getQuantity() != null ? String.valueOf(asset.getQuantity()) : "1");
-            row.put("condition", conditionText(asset));
+            row.put("condition", asset.getHandoverCondition() != null ? asset.getHandoverCondition().label() : "Chưa ghi nhận hiện trạng");
+            row.put("note", nullToEmpty(asset.getConditionNote()));
             row.put("status",
                     asset.getHandoverCondition() != null ? asset.getHandoverCondition().label() : "Bình thường");
             rows.add(row);
@@ -920,165 +930,36 @@ public class ContractDataBuilder {
         return rows;
     }
 
-    // --- Tiện ích & quyền sử dụng ({{#amenitiesTable}}) ---
-
-    private List<Map<String, Object>> buildAmenities(
-            ListingSnapshotDto snapshot,
-            Listing liveListing,
-            RentalRequest request,
-            List<Map<String, Object>> equipments) {
-        List<Map<String, Object>> rows = new ArrayList<>();
-        Set<String> seenNames = new HashSet<>();
-
-        // Thu thập tên các tài sản đã có trong equipmentTable để loại trừ (tránh trùng
-        // lặp tài sản với tiện ích)
-        Set<String> equipmentNames = new HashSet<>();
-        if (equipments != null) {
-            for (Map<String, Object> eq : equipments) {
-                String eqName = String.valueOf(eq.get("name")).trim().toLowerCase();
-                if (!eqName.isBlank()) {
-                    equipmentNames.add(eqName);
-                }
+    // Listing stores amenity names, not use restrictions or prices. Preserve exactly those names.
+    private List<Map<String, Object>> buildAmenities(ListingSnapshotDto snapshot, Listing liveListing) {
+        var rows = new ArrayList<Map<String,Object>>();
+        var seen = new HashSet<String>();
+        if (snapshot != null) {
+            if (snapshot.getAmenities() != null) for (var item : snapshot.getAmenities()) {
+                if (item != null) appendAmenity(rows, seen, item.getCode(), item.getName(), item.getSourceType());
+            }
+            if (snapshot.getCustomAmenities() != null) for (var name : snapshot.getCustomAmenities()) {
+                appendAmenity(rows, seen, "CUSTOM", name, "CUSTOM");
+            }
+        } else if (liveListing != null) {
+            for (var item : ListingAmenitySnapshots.resolve(liveListing, null)) {
+                appendAmenity(rows, seen, item.getCode(), item.getName(), item.getSourceType());
             }
         }
-
-        int index = 1;
-
-        // 1. Tiện ích từ snapshot hoặc live listing
-        if (snapshot != null && snapshot.getAmenities() != null) {
-            for (ListingSnapshotDto.AmenityItemSnapshot item : snapshot.getAmenities()) {
-                if (item == null || item.getName() == null)
-                    continue;
-                String normalized = item.getName().trim().toLowerCase();
-                if (isEquipmentDuplicate(normalized, equipmentNames)) {
-                    continue;
-                }
-                if (seenNames.add(normalized)) {
-                    rows.add(createAmenityRow(index++, item.getCode(), item.getName(),
-                            item.getScope(), "Đã bao gồm trong giá thuê",
-                            amenityConditionOf(item.getCode()), item.getSourceType()));
-                }
-            }
-        } else if (liveListing != null && liveListing.getAmenities() != null) {
-            for (Amenity a : liveListing.getAmenities()) {
-                if (a == null || a.getName() == null)
-                    continue;
-                String normalized = a.getName().trim().toLowerCase();
-                if (isEquipmentDuplicate(normalized, equipmentNames)) {
-                    continue;
-                }
-                if (seenNames.add(normalized)) {
-                    rows.add(createAmenityRow(index++, a.getCode(), a.getName(),
-                            "Riêng trong căn/phòng/nhà", "Đã bao gồm trong giá thuê",
-                            amenityConditionOf(a.getCode()), "LISTING"));
-                }
-            }
-        }
-
-        // 2. Custom amenities
-        if (snapshot != null && snapshot.getCustomAmenities() != null) {
-            for (String ca : snapshot.getCustomAmenities()) {
-                if (ca == null || ca.isBlank())
-                    continue;
-                String normalized = ca.trim().toLowerCase();
-                if (isEquipmentDuplicate(normalized, equipmentNames))
-                    continue;
-                if (seenNames.add(normalized)) {
-                    rows.add(createAmenityRow(index++, "CUSTOM", ca.trim(),
-                            "Riêng trong căn/phòng/nhà", "Đã bao gồm trong giá thuê",
-                            "Theo thỏa thuận", "CUSTOM"));
-                }
-            }
-        } else if (liveListing != null && liveListing.getCustomAmenities() != null) {
-            for (ListingCustomAmenity ca : liveListing.getCustomAmenities()) {
-                if (ca == null || ca.getName() == null || ca.getName().isBlank())
-                    continue;
-                String normalized = ca.getName().trim().toLowerCase();
-                if (isEquipmentDuplicate(normalized, equipmentNames))
-                    continue;
-                if (seenNames.add(normalized)) {
-                    rows.add(createAmenityRow(index++, "CUSTOM", ca.getName().trim(),
-                            "Riêng trong căn/phòng/nhà", "Đã bao gồm trong giá thuê",
-                            "Theo thỏa thuận", "CUSTOM"));
-                }
-            }
-        }
-
-        // 3. Quy tắc PETS_ALLOWED
-        boolean hasPetAmenity = rows.stream()
-                .anyMatch(r -> "PETS_ALLOWED".equalsIgnoreCase(String.valueOf(r.get("code"))));
-        if (hasPetAmenity) {
-            // Chuẩn hóa row PETS_ALLOWED
-            for (Map<String, Object> r : rows) {
-                if ("PETS_ALLOWED".equalsIgnoreCase(String.valueOf(r.get("code")))) {
-                    r.put("name", "Được phép nuôi thú cưng");
-                    r.put("scope", "Riêng trong căn/phòng/nhà");
-                    r.put("costText", "Miễn phí");
-                    r.put("conditionText",
-                            "Tuân thủ nội quy chung, Bên B chịu trách nhiệm giữ gìn vệ sinh, hạn chế tiếng ồn và bồi thường thiệt hại phát sinh (nếu có)");
-                }
-            }
-        }
-
-        // 4. Quyền gửi xe (PARKING)
-        int motorbikes = request != null && request.getMotorbikeCount() != null ? request.getMotorbikeCount() : 0;
-        int cars = request != null && request.getCarCount() != null ? request.getCarCount() : 0;
-        boolean hasParkingAmenity = rows.stream()
-                .anyMatch(r -> "PARKING".equalsIgnoreCase(String.valueOf(r.get("code")))
-                        || String.valueOf(r.get("name")).toLowerCase().contains("xe"));
-
-        if (!hasParkingAmenity && (motorbikes > 0 || cars > 0)) {
-            String condition = "Đăng ký " + motorbikes + " xe máy" + (cars > 0 ? ", " + cars + " ô tô" : "");
-            rows.add(createAmenityRow(index++, "PARKING", "Chỗ để xe", "Dùng chung",
-                    "Theo biểu phí dịch vụ gửi xe", condition, "DERIVED_POLICY"));
-        }
-
         return rows;
     }
 
-    private static boolean isEquipmentDuplicate(String amenityName, Set<String> equipmentNames) {
-        for (String eq : equipmentNames) {
-            if (eq.contains(amenityName) || amenityName.contains(eq)) {
-                // Nếu tên tiện ích chứa từ khóa thiết bị nội thất bàn giao cơ bản
-                if (amenityName.contains("máy lạnh") || amenityName.contains("điều hòa")
-                        || amenityName.contains("tủ lạnh") || amenityName.contains("máy giặt")
-                        || amenityName.contains("máy nước nóng") || amenityName.contains("giường")
-                        || amenityName.contains("bàn") || amenityName.contains("tủ quần áo")) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private static Map<String, Object> createAmenityRow(
-            int index, String code, String name, String scope, String costText, String conditionText,
-            String sourceType) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("index", index);
-        row.put("code", code != null ? code : "");
-        row.put("name", name != null ? name : "");
-        row.put("scope", scope != null ? scope : "Riêng trong căn/phòng/nhà");
-        row.put("costText", costText != null ? costText : "Đã bao gồm trong giá thuê");
-        row.put("conditionText", conditionText != null ? conditionText : "Theo quy chế vận hành và nội quy chung");
-        row.put("sourceType", sourceType != null ? sourceType : "LISTING");
-        return row;
-    }
-
-    private static String amenityConditionOf(String code) {
-        if ("PETS_ALLOWED".equalsIgnoreCase(code)) {
-            return "Tuân thủ nội quy chung, Bên B chịu trách nhiệm giữ gìn vệ sinh, hạn chế tiếng ồn và bồi thường thiệt hại phát sinh (nếu có)";
-        }
-        if ("PARKING".equalsIgnoreCase(code)) {
-            return "Theo nội quy bãi đỗ xe và biểu phí dịch vụ của đơn vị quản lý";
-        }
-        if ("ELEVATOR".equalsIgnoreCase(code)) {
-            return "Theo nội quy sử dụng thang máy và quy chuẩn an toàn chung";
-        }
-        if ("SWIMMING_POOL".equalsIgnoreCase(code) || "GYM".equalsIgnoreCase(code)) {
-            return "Theo khung giờ hoạt động và quy chế sử dụng của ban quản lý";
-        }
-        return "Theo nội quy, khung giờ và tình trạng vận hành của đơn vị quản lý";
+    private static void appendAmenity(List<Map<String,Object>> rows, Set<String> seen,
+            String code, String name, String source) {
+        if (name == null || name.isBlank() || "PETS_ALLOWED".equals(code)) return;
+        String key = "CUSTOM".equals(code) || code == null ? "CUSTOM:" + name : code;
+        if (!seen.add(key)) return; // Custom labels exist in both legacy snapshot arrays.
+        var row = new LinkedHashMap<String,Object>();
+        row.put("index", rows.size() + 1);
+        row.put("code", code == null ? "CUSTOM" : code);
+        row.put("name", name);
+        row.put("sourceType", source == null ? "LISTING" : source);
+        rows.add(row);
     }
 
     // --- Bảng phụ lục thanh toán ban đầu ({{#initialPaymentTable}}) ---
@@ -1196,6 +1077,10 @@ public class ContractDataBuilder {
                 "Nếu quá hạn, hai bên xử lý theo điều khoản thỏa thuận riêng (nếu có); HomeSpace không tự áp dụng phí khi chưa có thỏa thuận.");
         map.put("latePaymentFeeMode", "NONE");
         map.put("overdueLandlordTerminationAfterFiveDays", true);
+        if (snapshot.getPolicies() != null && !snapshot.getPolicies().isEmpty()) {
+            map.putAll(ContractListingPolicies.from(snapshot.getPolicies()));
+            return com.hs.contract.service.LatePaymentPolicy.forNewAgreement(map, Map.of());
+        }
         map.put("noticeDaysBeforeMoveOut", 30);
         map.put("noticeDaysBeforeTermination", 30);
         map.put("depositRefundDays", 15);
@@ -1203,6 +1088,9 @@ public class ContractDataBuilder {
                 "Khấu trừ chi phí dịch vụ chưa thanh toán hoặc bồi thường thiệt hại tài sản theo biên bản bàn giao");
         map.put("petPolicy",
                 "Tuân thủ nội quy khu vực; đảm bảo vệ sinh, tiếng ồn và bồi thường thiệt hại phát sinh (nếu có)");
+        boolean pets = snapshot.getAmenities() != null && snapshot.getAmenities().stream().anyMatch(a -> "PETS_ALLOWED".equals(a.getCode()));
+        map.put("petsAllowed",pets);
+        if (!pets) map.put("petPolicy","Chưa có thỏa thuận cho phép nuôi thú cưng trong bài đăng.");
         map.put("subleasePolicy",
                 "Không được tự ý cho thuê lại hoặc chuyển nhượng quyền thuê cho bên thứ ba khi chưa có chấp thuận bằng văn bản của Bên A");
         map.put("overnightGuestPolicy",
@@ -1216,7 +1104,7 @@ public class ContractDataBuilder {
         map.put("disputeResolution",
                 "Hai bên giải quyết tranh chấp thông qua thương lượng hòa giải; trường hợp không đạt thỏa thuận sẽ đưa ra Tòa án có thẩm quyền tại địa phương nơi có bất động sản");
         map.put("forceMajeure", "Thực hiện theo quy định của Bộ luật Dân sự 2015 về sự kiện bất khả kháng");
-        return map;
+        return com.hs.contract.service.LatePaymentPolicy.forNewAgreement(map, Map.of());
     }
 
     // --- Chỉ số công tơ bàn giao ---
@@ -1313,7 +1201,7 @@ public class ContractDataBuilder {
             case "PER_KWH" -> "kWh (theo công tơ)";
             case "PER_M3" -> "m³ (theo đồng hồ)";
             case "PER_PERSON_MONTH" -> "Người / tháng";
-            case "PER_M2_MONTH" -> "m² / tháng";
+            case "PER_M2_MONTH" -> "mét vuông / tháng";
             case "PER_HOUR" -> "Giờ";
             case "FREE" -> "Miễn phí";
             case "INCLUDED" -> "Đã bao gồm";
@@ -1505,9 +1393,9 @@ public class ContractDataBuilder {
                 if (amount == null)
                     yield "Theo diện tích";
                 if (areaM2 == null)
-                    yield price + " / m² / tháng";
+                    yield price + " / mét vuông / tháng";
                 BigDecimal total = amount.multiply(areaM2);
-                yield price + " / m² / tháng × " + stripTrailingZeros(areaM2) + " m² = "
+                yield price + " / mét vuông / tháng × " + stripTrailingZeros(areaM2) + " mét vuông = "
                         + ContractRenderService.formatVND(total) + " / tháng";
             }
             case CUSTOM, INCLUDED -> price != null
@@ -1558,9 +1446,9 @@ public class ContractDataBuilder {
                 if (amount == null)
                     yield "Theo diện tích";
                 if (areaM2 == null)
-                    yield price + " / m² / tháng";
+                    yield price + " / mét vuông / tháng";
                 BigDecimal total = amount.multiply(areaM2);
-                yield price + " / m² / tháng × " + stripTrailingZeros(areaM2) + " m² = "
+                yield price + " / mét vuông / tháng × " + stripTrailingZeros(areaM2) + " mét vuông = "
                         + ContractRenderService.formatVND(total) + " / tháng";
             }
             default -> price != null

@@ -71,4 +71,13 @@ class ContractStorageAccessCheckerTest {
                 .referenceId(contractId)
                 .build();
     }
+
+    @Test void tenantCanReadAgreedAmendmentBeforeLandlordSignature() {
+        var repository = mock(ContractRepository.class);
+        var checker = new ContractStorageAccessChecker(repository);
+        when(repository.findById("appendix")).thenReturn(Optional.of(Contract.builder().id("appendix")
+                .landlordId("owner").tenantId("tenant").parentContractId("root").agreementKind("AMENDMENT").status(ContractStatus.DRAFT).build()));
+        assertTrue(checker.canAccess("tenant",contractDocument("appendix")));
+        assertFalse(checker.canAccess("outsider",contractDocument("appendix")));
+    }
 }

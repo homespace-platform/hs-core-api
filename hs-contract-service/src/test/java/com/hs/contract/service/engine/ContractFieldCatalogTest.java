@@ -16,7 +16,8 @@ class ContractFieldCatalogTest {
 
     @Test
     void testCatalogDefinitionsCountAndFields() {
-        assertEquals(63, catalog.getAllDefinitions().size(), "Catalog must have exactly 63 field definitions");
+        assertEquals(64, catalog.getAllDefinitions().size(), "Catalog includes the dynamic listing policy table");
+        assertTrue(catalog.isValidPlaceholder("#policiesTable"));
 
         // Valid fields from CONTRACT_PROMPT.md
         assertTrue(catalog.isValidPlaceholder("contract.number"));

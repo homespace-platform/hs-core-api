@@ -27,6 +27,48 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class ContractDataBuilderTest {
+    @Test void capturedListingDoesNotImportLaterAmenitiesInventoryFeesOrOptionalCapacity() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+        var snapshot = com.hs.listing.dto.snapshot.ListingSnapshotDto.builder().listingId("listing")
+                .category(ListingCategory.ROOM).fullAddress("Địa chỉ đã chốt").areaM2(new BigDecimal("25"))
+                .priceAmount(new BigDecimal("2000000")).depositType("NONE")
+                .roomDetail(com.hs.listing.dto.snapshot.ListingSnapshotDto.RoomDetailSnapshot.builder()
+                        .roomCode("101").restroomType("SHARED").kitchenType("NONE").balconyType("SHARED")
+                        .electricMeterType("PRIVATE").waterMeterType("SHARED").build()).build();
+        var request = RentalRequest.builder().listingSnapshot(mapper.writeValueAsString(snapshot))
+                .occupantCount(1).moveInDate(java.time.LocalDate.of(2026,10,14)).leaseMonths(3).build();
+        var house = new com.hs.listing.model.ListingHouseDetail(); house.setMaxOccupants(20); house.setTotalFloors(5);
+        var laterAsset = new ListingFurnishingAsset(); laterAsset.setAssetName("Tủ lạnh mới"); laterAsset.setQuantity(2);
+        var listing = Listing.builder().category(ListingCategory.HOUSE).areaM2(new BigDecimal("300"))
+                .houseDetail(house).furnishings(List.of(laterAsset)).build();
+        var builder = new ContractDataBuilder(mock(UserRepository.class),mock(AddressRepository.class),mapper);
+        var result = builder.build(request,listing);
+        assertEquals("Phòng trọ",result.getProperty().get("propertyType"));
+        assertEquals("Địa chỉ đã chốt",result.getProperty().get("fullAddress"));
+        assertEquals("25",result.getProperty().get("areaM2")); assertEquals("",result.getProperty().get("maxOccupants"));
+        assertTrue(result.getEquipments().isEmpty()); assertTrue(result.getCharges().isEmpty());
+        assertEquals("0",result.getFinancial().get("depositAmountValue"));
+        assertEquals("13/01/2027",result.getLease().get("endDateText"));
+        request.setListingSnapshot("broken-json");
+        org.junit.jupiter.api.Assertions.assertThrows(com.hs.common.advice.entity.AppException.class,() -> builder.build(request,listing));
+    }
+    @Test void newContractUsesSameAmenitySourceAsAmendmentAndDoesNotClaimPaidWifiIsIncluded() {
+        var wifi = new Amenity(); wifi.setCode("WIFI"); wifi.setName("WiFi");
+        var dry = new com.hs.listing.model.ListingCustomAmenity(); dry.setName("Sân phơi chung");
+        var asset = new ListingFurnishingAsset(); asset.setAssetName("Giường"); asset.setQuantity(2);
+        asset.setHandoverCondition(HandoverCondition.GOOD); asset.setConditionNote("Xước đầu giường");
+        var fee = new ListingCharge(); fee.setChargeType(ChargeType.INTERNET); fee.setBillingMethod(BillingMethod.PER_MONTH); fee.setAmount(new BigDecimal("90000"));
+        var branch = PropertyBranch.builder().buildingAmenities(Set.of(wifi)).buildingRules("Không gây ồn sau 22 giờ").build();
+        var listing = Listing.builder().category(ListingCategory.APARTMENT).amenities(Set.of(wifi))
+                .branch(branch).customAmenities(List.of(dry)).furnishings(List.of(asset)).charges(List.of(fee)).build();
+        var result = new ContractDataBuilder(mock(UserRepository.class),mock(AddressRepository.class)).build(RentalRequest.builder().occupantCount(1).build(),listing);
+        var wifiRow = result.getAmenities().stream().filter(a -> "WIFI".equals(a.get("code"))).findFirst().orElseThrow();
+        assertEquals("LISTING",wifiRow.get("sourceType"));
+        assertEquals(Set.of("index","code","name","sourceType"),wifiRow.keySet());
+        assertTrue(result.getCharges().getFirst().get("amountAndMethod").toString().contains("90.000"));
+        assertEquals("2",result.getEquipments().getFirst().get("quantity"));
+        assertEquals("Xước đầu giường",result.getEquipments().getFirst().get("note"));
+    }
 
     @Test
     void waterPerPersonUsesOccupantCountAndDoesNotRequireInitialMeter() {
@@ -246,7 +288,7 @@ class ContractDataBuilderTest {
     }
 
     @Test
-    void furnishingAndAmenityDeduplication_movesToEquipmentAndDeduplicates() {
+    void furnishingAndAmenityKeepBothExplicitDatabaseSelections() {
         Listing listing = new Listing();
         listing.setId("listing-furn-1");
 
@@ -278,10 +320,10 @@ class ContractDataBuilderTest {
         assertEquals("Máy lạnh", snapshots.getEquipments().getFirst().get("name"));
         assertEquals("2", snapshots.getEquipments().getFirst().get("quantity"));
 
-        // Amenities table should NOT have Máy lạnh (deduplicated!)
+        // Both tables have their own database selections: do not silently drop either.
         boolean hasAcInAmenities = snapshots.getAmenities().stream()
                 .anyMatch(a -> "AIR_CONDITIONER".equals(a.get("code")));
-        org.junit.jupiter.api.Assertions.assertFalse(hasAcInAmenities, "Amenities must not duplicate equipment");
+        assertTrue(hasAcInAmenities, "Selected amenities must match the listing even when also inventoried");
     }
 
     @Test
@@ -293,6 +335,10 @@ class ContractDataBuilderTest {
         am.setCode("PETS_ALLOWED");
         am.setName("Cho phép nuôi thú cưng");
         listing.setAmenities(Set.of(am));
+        var policy = new com.hs.listing.model.ListingPolicyValue(); policy.setListing(listing);
+        policy.setDefinition(com.hs.listing.config.ListingPolicyCatalog.defaults().stream().filter(d -> d.getCode().equals("petPolicy")).findFirst().orElseThrow());
+        policy.setValue("ALLOWED"); policy.setNote("Giữ vệ sinh, hạn chế tiếng ồn và bồi thường thiệt hại.");
+        listing.setPolicies(List.of(policy));
 
         RentalRequest request = RentalRequest.builder()
                 .id("req-pets-1")
@@ -307,8 +353,9 @@ class ContractDataBuilderTest {
                 .filter(a -> "PETS_ALLOWED".equals(a.get("code")))
                 .findFirst();
 
-        assertTrue(petAmenity.isPresent(), "PETS_ALLOWED must be present in amenities snapshot");
-        String conditions = String.valueOf(petAmenity.get().get("conditionText"));
+        org.junit.jupiter.api.Assertions.assertFalse(petAmenity.isPresent(), "Pets must be a policy, not an amenity");
+        assertEquals(true,snapshots.getPolicies().get("petsAllowed"));
+        String conditions = String.valueOf(snapshots.getPolicies().get("petPolicy"));
         assertTrue(conditions.contains("vệ sinh"), "Condition must mention hygiene");
         assertTrue(conditions.contains("tiếng ồn"), "Condition must mention noise");
         assertTrue(conditions.contains("bồi thường"), "Condition must mention damage compensation");

@@ -37,6 +37,8 @@ import com.hs.payment.model.constant.PaymentType;
 import com.hs.payment.service.PaymentRequestService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.data.domain.PageImpl;
@@ -120,6 +122,44 @@ class MonthlyBillingServiceTest {
         assertEquals("monthly-payment", result.paymentRequestId());
         assertEquals(MonthlyInvoiceStatus.UNPAID, result.status());
         assertEquals(Instant.parse("2026-11-05T16:59:59Z"), result.dueAt());
+    }
+
+    @Test void threeMonthRentCycleStoresCoverageAndDoesNotCollectSameRentNextMonth() {
+        var revision=revisions.findById("revision").orElseThrow();
+        revision.setFinancialSnapshot("{\"amountValue\":\"5000000\",\"amountNumber\":\"5.000.000 VNĐ/tháng\",\"paymentCycleMonths\":3,\"paymentDueOffsetDays\":7}");
+        var first=service.issue("invoice","landlord",new IssueMonthlyInvoiceRequest(new BigDecimal("150"),new BigDecimal("12"),List.of()));
+        var rent=first.lines().stream().filter(l->l.type().equals("RENT")).findFirst().orElseThrow();
+        assertEquals(new BigDecimal("3"),rent.quantity());assertEquals(new BigDecimal("15000000"),rent.amount());
+        assertEquals(LocalDate.of(2026,11,1),invoice.getRentPeriodStart());assertEquals(LocalDate.of(2027,2,1),invoice.getRentPeriodEndExclusive());
+        assertEquals(Instant.parse("2026-11-08T16:59:59Z"),invoice.getDueAt());
+        var previous=MonthlyInvoice.builder().id("previous").contractId("contract").periodIndex(0).periodStart(LocalDate.of(2026,10,1)).periodEndExclusive(LocalDate.of(2026,11,1))
+                .rentPeriodStart(invoice.getRentPeriodStart()).rentPeriodEndExclusive(invoice.getRentPeriodEndExclusive()).status(MonthlyInvoiceStatus.PAID)
+                .electricityEnd(new BigDecimal("150")).waterEnd(new BigDecimal("12")).lineItemsSnapshot(invoice.getLineItemsSnapshot()).build();
+        invoice.setPeriodIndex(1);invoice.setPeriodStart(LocalDate.of(2026,11,1));invoice.setPeriodEndExclusive(LocalDate.of(2026,12,1));invoice.setStatus(MonthlyInvoiceStatus.DRAFT);
+        invoice.setRentPeriodStart(null);invoice.setRentPeriodEndExclusive(null);
+        when(invoices.findByContractIdAndPeriodIndex("contract",0)).thenReturn(Optional.of(previous));
+        when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(invoice,previous));
+        when(time.today()).thenReturn(LocalDate.of(2026,11,30));when(time.now()).thenReturn(Instant.parse("2026-11-30T03:00:00Z"));
+        var second=service.issue("invoice","landlord",new IssueMonthlyInvoiceRequest(new BigDecimal("150"),new BigDecimal("12"),List.of()));
+        assertTrue(second.lines().stream().noneMatch(l->l.type().equals("RENT")));assertEquals("COSTS_ONLY",second.billingPeriod().kind());
+    }
+
+    @Test void signedAppendixUsesNewNextRentButOldExpensesAndFreezesBothSources() {
+        ContractTermsResolver resolver = mock(ContractTermsResolver.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"terms",resolver);
+        Contract root = contracts.findById("contract").orElseThrow();
+        ContractRevision old = revisions.findById("revision").orElseThrow();
+        ContractRevision next = ContractRevision.builder().id("appendix-revision")
+                .financialSnapshot("{\"amountValue\":\"6000000\",\"amountNumber\":\"6.000.000 VNĐ/tháng\"}")
+                .chargesSnapshot(old.getChargesSnapshot().replace("3500","4000").replace("3.500","4.000"))
+                .initialMetersSnapshot(old.getInitialMetersSnapshot()).build();
+        when(resolver.at(root,invoice.getPeriodStart())).thenReturn(old);
+        when(resolver.at(root,invoice.getPeriodEndExclusive())).thenReturn(next);
+        var result = service.issue("invoice","landlord",new IssueMonthlyInvoiceRequest(new BigDecimal("150"),new BigDecimal("12"),List.of()));
+        assertEquals(new BigDecimal("6000000"),result.lines().getFirst().amount());
+        assertEquals(new BigDecimal("3500"),result.lines().stream().filter(l -> "ELECTRICITY".equals(l.type())).findFirst().orElseThrow().unitPrice());
+        assertEquals("revision",invoice.getCostTermsRevisionId()); assertEquals("appendix-revision",invoice.getRentTermsRevisionId());
+        assertEquals("revision",root.getCurrentRevisionId());
     }
 
     @Test void expiredContractStillIssuesItsFinalCostsButNotNextRent() {
@@ -972,6 +1012,84 @@ class MonthlyBillingServiceTest {
         assertEquals(new BigDecimal("100000"), line.unitPrice());
         assertEquals(new BigDecimal("100000"), line.amount());
         assertEquals("lần", line.quantityUnit());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"FIXED_PER_DAY,FIXED_ONCE,300000,100000,100000", "FIXED_ONCE,FIXED_PER_DAY,100000,300000,1000000",
+            "FIXED_PER_DAY,NONE,300000,0,0", "NONE,FIXED_PER_DAY,0,300000,1000000", "NONE,FIXED_ONCE,0,100000,100000"})
+    void signedFeeModeAmendmentChangesFuturePeriodCalculationWithoutRepricingIssuedBill(
+            String previousMode,String nextMode,String oldDayThree,String nextDayThree,String nextDayTen) throws Exception {
+        var mapper=new ObjectMapper();
+        var old=revisions.findById("revision").orElseThrow();
+        old.setPoliciesSnapshot(mapper.writeValueAsString(LatePaymentPolicy.forNewAgreement(
+                java.util.Map.of("latePaymentFeeMode",previousMode,"latePaymentFeeAmount",100000),java.util.Map.of())));
+        var signedPolicy=old.getPoliciesSnapshot();
+        var builder=new AmendmentTermsBuilder(mapper);
+        // Exercise the same mode-only payload as the dropdown: a kept rate must still recalculate the cap.
+        var proposed=builder.build(old,java.util.Map.of("freeForm",true,"fields",java.util.Map.of("policies",
+                java.util.Map.of("latePaymentFeeMode",nextMode,"latePaymentFeeAmount",100000))));
+        var next=ContractRevision.builder().id("fee-appendix").financialSnapshot(old.getFinancialSnapshot())
+                .chargesSnapshot(old.getChargesSnapshot()).initialMetersSnapshot(old.getInitialMetersSnapshot())
+                .policiesSnapshot(builder.write(proposed.terms().get("policies"))).build();
+        when(revisions.findById(next.getId())).thenReturn(Optional.of(next));
+        var history=mock(com.hs.contract.repository.ContractAmendmentRepository.class);
+        var appendix=com.hs.contract.model.ContractAmendment.builder().contractId("contract").status("REQUESTED")
+                .effectiveOn(LocalDate.of(2026,11,1)).termsRevisionId(next.getId()).build();
+        when(history.findByContractIdOrderByCreatedAtDesc("contract")).thenReturn(List.of(appendix));
+        var resolver=new ContractTermsResolver(history,revisions);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"terms",resolver);
+        var root=contracts.findById("contract").orElseThrow();
+        assertSame(old,resolver.at(root,LocalDate.of(2026,11,1)),"Proposal alone cannot change fees");
+        appendix.setStatus("APPROVED");
+        assertSame(old,resolver.at(root,LocalDate.of(2026,11,1)),"Consent without verified signatures is insufficient");
+        appendix.setSignedAt(Instant.parse("2026-10-20T03:00:00Z"));appendix.setStatus("SCHEDULED");
+        assertSame(old,resolver.at(root,LocalDate.of(2026,10,31)),"Signed future terms must not apply early");
+        assertSame(next,resolver.at(root,LocalDate.of(2026,11,1)));
+        appendix.setStatus("APPLIED");
+
+        // November's bill settles October expenses, so its frozen cost policy remains the old one.
+        var oldBill=invoice;
+        when(invoices.findByContractIdAndPeriodIndex("contract",0)).thenReturn(Optional.of(oldBill));
+        service.issue("invoice","landlord",new IssueMonthlyInvoiceRequest(new BigDecimal("150"),new BigDecimal("12"),List.of()));
+        assertEquals("revision",oldBill.getCostTermsRevisionId());
+        when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(oldBill));
+        when(payments.findByInvoiceId(anyString())).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.OVERDUE).build()));
+        when(payments.increaseMonthlyPayment(anyString(),any(),anyString())).thenReturn(true);
+        demoTime("2026-11-08T10:00:00");
+        var oldResponse=service.list("contract","tenant").getFirst();
+        assertEquals(0,new BigDecimal(oldDayThree).compareTo(oldResponse.lateFeeAmount()==null?BigDecimal.ZERO:oldResponse.lateFeeAmount()));
+        oldBill.setStatus(MonthlyInvoiceStatus.PAID);
+        var oldTotal=oldBill.getTotalAmount();var oldLines=oldBill.getLineItemsSnapshot();
+
+        // December's bill settles the period beginning on the effective date and uses the signed new mode.
+        var nextBill=MonthlyInvoice.builder().id("next-fee-invoice").contractId("contract").periodIndex(1)
+                .periodStart(LocalDate.of(2026,11,1)).periodEndExclusive(LocalDate.of(2026,12,1))
+                .status(MonthlyInvoiceStatus.DRAFT).totalAmount(BigDecimal.ZERO).build();
+        when(invoices.findByIdForUpdate(nextBill.getId())).thenReturn(Optional.of(nextBill));
+        when(invoices.findByContractIdAndPeriodIndex("contract",1)).thenReturn(Optional.of(nextBill));
+        when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(nextBill,oldBill));
+        demoTime("2026-12-01T10:00:00");
+        var issued=service.issue(nextBill.getId(),"landlord",new IssueMonthlyInvoiceRequest(new BigDecimal("200"),new BigDecimal("14"),List.of()));
+        assertEquals(next.getId(),nextBill.getCostTermsRevisionId());
+        var base=issued.totalAmount();
+        when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(nextBill));
+        for(var step:List.of(new String[]{"2026-12-08T10:00:00",nextDayThree},new String[]{"2026-12-15T23:59:59",nextDayTen})) {
+            demoTime(step[0]);var result=service.list("contract","tenant").getFirst();
+            assertEquals(0,new BigDecimal(step[1]).compareTo(result.lateFeeAmount()==null?BigDecimal.ZERO:result.lateFeeAmount()));
+            assertEquals(0,base.add(new BigDecimal(step[1])).compareTo(result.totalAmount()));
+            var fees=result.lines().stream().filter(l->"LATE_FEE".equals(l.type())).toList();
+            if(nextMode.equals("NONE"))assertTrue(fees.isEmpty());
+            else {
+                assertEquals(1,fees.size());assertEquals(nextMode.equals("FIXED_ONCE")?"lần":"ngày",fees.getFirst().quantityUnit());
+                if(nextMode.equals("FIXED_ONCE"))assertEquals(BigDecimal.ONE,fees.getFirst().quantity());
+            }
+            var total=result.totalAmount();
+            assertEquals(total,service.list("contract","landlord").getFirst().totalAmount(),"Repeated sync cannot add the fee twice");
+        }
+        if(nextMode.equals("FIXED_ONCE"))verify(payments,times(1)).increaseMonthlyPayment(eq(nextBill.getId()),any(),anyString());
+        if(nextMode.equals("NONE"))verify(payments,never()).increaseMonthlyPayment(eq(nextBill.getId()),any(),anyString());
+        assertEquals(oldTotal,oldBill.getTotalAmount());assertEquals(oldLines,oldBill.getLineItemsSnapshot());
+        assertEquals("revision",root.getCurrentRevisionId());assertEquals(signedPolicy,old.getPoliciesSnapshot());
     }
 
     @Test void requestAfterThreeDaysFreezesFeeAt300kAndApprovalNeverAddsMoreEvenAfterNewDeadline() {

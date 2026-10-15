@@ -46,6 +46,13 @@ public class MonthlyInvoice extends BaseEntity {
     private BigDecimal waterEnd;
     @Column(name = "line_items_snapshot", columnDefinition = "TEXT")
     private String lineItemsSnapshot;
+    @Column(name = "cost_terms_revision_id", length = 36)
+    private String costTermsRevisionId;
+    @Column(name = "rent_terms_revision_id", length = 36)
+    private String rentTermsRevisionId;
+    /** Immutable coverage of rent actually collected on this invoice (may span several months). */
+    @Column(name = "rent_period_start") private LocalDate rentPeriodStart;
+    @Column(name = "rent_period_end_exclusive") private LocalDate rentPeriodEndExclusive;
     @Column(name = "draft_extra_charges_snapshot", columnDefinition = "TEXT")
     private String draftExtraChargesSnapshot;
     @Column(name = "total_amount", nullable = false, precision = 18, scale = 2)

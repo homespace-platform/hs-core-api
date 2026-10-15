@@ -69,6 +69,8 @@ public class ListingSnapshotDto {
 
     @Builder.Default
     private List<String> customAmenities = new ArrayList<>();
+    @Builder.Default
+    private List<com.hs.listing.dto.response.ListingPolicyResponse> policies = new ArrayList<>();
 
     // Trang thiết bị / nội thất bàn giao
     @Builder.Default
@@ -155,11 +157,11 @@ public class ListingSnapshotDto {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"scope"})
     public static class AmenityItemSnapshot {
         private String code;
         private String name;
-        private String scope; // "Riêng trong căn/phòng/nhà" | "Dùng chung"
-        private String sourceType; // "LISTING" | "SHARED_PROPERTY" | "CUSTOM" | "DERIVED_POLICY"
+        private String sourceType; // Provenance only, never a contractual right or rendered column.
     }
 
     @Data

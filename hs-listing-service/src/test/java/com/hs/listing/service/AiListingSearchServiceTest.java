@@ -12,6 +12,14 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class AiListingSearchServiceTest {
+    @Test void petPermissionUsesPolicyValueAndCannotMatchAnotherPoliciesRow() {
+        when(jdbc.queryForObject(anyString(),any(MapSqlParameterSource.class),eq(Long.class))).thenReturn(0L);
+        when(jdbc.queryForList(anyString(),any(MapSqlParameterSource.class),eq(String.class))).thenReturn(List.of());
+        service.search(new AiListingSearchRequest(List.of(new AiListingSearchRequest.Filter("policy.petPolicy.value","eq","ALLOWED")),"newest",5));
+        var sql = ArgumentCaptor.forClass(String.class); verify(jdbc).queryForList(sql.capture(),any(MapSqlParameterSource.class),eq(String.class));
+        assertTrue(sql.getValue().contains("listing_policy_values")); assertTrue(sql.getValue().contains("t.policy_code = 'petPolicy'"));
+        assertFalse(sql.getValue().contains("PETS_ALLOWED"));
+    }
     private final NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
     private final AiListingSearchService service = new AiListingSearchService(jdbc);
 

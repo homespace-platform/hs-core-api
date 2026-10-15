@@ -36,6 +36,10 @@ import org.springframework.beans.factory.annotation.Value;
 /** Root lock serializes renewal signatures, expiration, settlement and creation of transfer obligations. */
 @Service @RequiredArgsConstructor @Slf4j
 public class ContractLifecycleService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ContractAmendmentService amendments;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ContractTermsResolver terms;
     private final ContractRepository contracts;
     private final ContractRevisionRepository revisions;
     private final ContractRenewalRepository renewals;
@@ -112,6 +116,7 @@ public class ContractLifecycleService {
 
     /** Called only by verified SmartCA embedding, not a public 'mark signed' endpoint. */
     @Transactional public void applyRenewalAfterSignatures(Contract agreement) {
+        if ("AMENDMENT".equals(agreement.getAgreementKind())) { amendments.signed(agreement); return; }
         Contract parent=contracts.findByIdForUpdate(agreement.getParentContractId()).orElseThrow(this::notAllowed);
         ContractRenewal r=renewals.findByAgreementContractId(agreement.getId()).orElseThrow(this::notAllowed);
         if("APPLIED".equals(r.getStatus())) return;
@@ -130,6 +135,7 @@ public class ContractLifecycleService {
     }
     public void validateAgreementSigning(Contract agreement) {
         if(agreement.getParentContractId()==null) return;
+        if ("AMENDMENT".equals(agreement.getAgreementKind())) { amendments.validateSigning(agreement); return; }
         ContractRenewal r=renewals.findByAgreementContractId(agreement.getId()).orElseThrow(this::notAllowed);
         Contract parent=contracts.findById(agreement.getParentContractId()).orElseThrow(this::notAllowed);
         if(!"APPROVED".equals(r.getStatus()) || parent.getStatus()!=ContractStatus.ACTIVE || terminationActive(parent) || !time.now().isBefore(r.getSignBy())) throw notAllowed();
@@ -275,6 +281,7 @@ public class ContractLifecycleService {
         }
     }
     private void syncLocked(Contract c) {
+        if (amendments != null) amendments.syncLocked(c);
         Instant now=time.now();
         // Payment confirmation is authoritative; avoid waiting for the next billing scheduler tick.
         if(c.getStatus()==ContractStatus.ACTIVE || c.getStatus()==ContractStatus.EXPIRED)
@@ -363,6 +370,8 @@ public class ContractLifecycleService {
                 && b.getRolledToInvoiceId()!=null && list.stream().anyMatch(next->b.getRolledToInvoiceId().equals(next.getId()) && next.getPeriodIndex()>b.getPeriodIndex()));
     }
     private void requirePaidBills(Contract c) {
+        if(paymentRepository.findAllByContractIdAndType(c.getId(),PaymentType.DEPOSIT_ADJUSTMENT).stream().anyMatch(p->p.getStatus()!=PaymentStatus.CONFIRMED))
+            throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Phải đối soát xong khoản chênh lệch cọc trước khi quyết toán/hoàn cọc.");
         if(!allBillsPaid(c)) throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Phải thanh toán và chủ nhà xác nhận tất cả hóa đơn kỳ cuối/bổ sung trước khi quyết toán cọc.");
     }
     private MonthlyInvoice lastCostsBill(Contract c) {
@@ -389,6 +398,7 @@ public class ContractLifecycleService {
     }
     private boolean canRequest(Contract c) {
         return c.getStatus()==ContractStatus.ACTIVE && !time.now().isBefore(opens(c)) && time.now().isBefore(signBy(c))
+                && (amendments == null || !amendments.hasPending(c))
                 && (c.getTerminationProposedAt()==null || c.getTerminationCancelledAt()!=null || c.getTerminationDeclinedAt()!=null)
                 && renewals.findByContractIdOrderByRequestedAtDesc(c.getId()).stream().noneMatch(r->end(c).equals(r.getStartsOn()));
     }
@@ -399,7 +409,7 @@ public class ContractLifecycleService {
     private Instant signBy(Contract c) { return end(c).minusDays(1).atStartOfDay(BillingTime.ZONE).toInstant(); }
     private int months(Contract c) { return c.getEffectiveLeaseMonths()!=null?c.getEffectiveLeaseMonths():rental(c).getLeaseMonths(); }
     private RentalRequest rental(Contract c) { return rentals.findById(c.getRentalRequestId()).orElseThrow(this::notAllowed); }
-    private ContractRevision revision(Contract c) { return revisions.findById(c.getCurrentRevisionId()).orElseThrow(this::notAllowed); }
+    private ContractRevision revision(Contract c) { return terms == null ? revisions.findById(c.getCurrentRevisionId()).orElseThrow(this::notAllowed) : terms.at(c,time.today()); }
     private DepositRecord deposit(Contract c) { return deposits.findByRentalRequestIdForUpdate(c.getRentalRequestId()).orElseThrow(this::notAllowed); }
     private Contract root(String id,String actor) {
         Contract c=contracts.findByIdForUpdate(id).orElseThrow(this::notAllowed);

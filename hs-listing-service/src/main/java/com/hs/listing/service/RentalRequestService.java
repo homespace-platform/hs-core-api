@@ -670,32 +670,7 @@ public class RentalRequestService {
             buildingRules = branch.getBuildingRules().trim();
         }
 
-        List<ListingSnapshotDto.AmenityItemSnapshot> amenitySnapshots = new ArrayList<>();
-        Set<String> seenAmenityCodes = new HashSet<>();
-        if (listing.getAmenities() != null) {
-            for (Amenity a : listing.getAmenities()) {
-                if (a != null && a.getCode() != null && seenAmenityCodes.add(a.getCode().toUpperCase())) {
-                    amenitySnapshots.add(ListingSnapshotDto.AmenityItemSnapshot.builder()
-                            .code(a.getCode())
-                            .name(a.getName())
-                            .scope("Riêng trong căn/phòng/nhà")
-                            .sourceType("LISTING")
-                            .build());
-                }
-            }
-        }
-        if (branch != null && branch.getBuildingAmenities() != null) {
-            for (Amenity a : branch.getBuildingAmenities()) {
-                if (a != null && a.getCode() != null && seenAmenityCodes.add(a.getCode().toUpperCase())) {
-                    amenitySnapshots.add(ListingSnapshotDto.AmenityItemSnapshot.builder()
-                            .code(a.getCode())
-                            .name(a.getName())
-                            .scope("Dùng chung")
-                            .sourceType("SHARED_PROPERTY")
-                            .build());
-                }
-            }
-        }
+        List<ListingSnapshotDto.AmenityItemSnapshot> amenitySnapshots = ListingAmenitySnapshots.resolve(listing, branch);
 
         List<String> customAmenities = new ArrayList<>();
         if (listing.getCustomAmenities() != null) {
@@ -869,6 +844,7 @@ public class RentalRequestService {
                 .buildingRules(buildingRules)
                 .amenities(amenitySnapshots)
                 .customAmenities(customAmenities)
+                .policies(ListingPolicyService.snapshot(listing))
                 .furnishings(furnishingSnapshots)
                 .charges(chargeSnapshots)
                 .capturedAt(Instant.now())

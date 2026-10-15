@@ -299,6 +299,104 @@ public class ParkingReservationService {
         }
     }
 
+    /** Listing limits initialize a rental; only a shared branch pool limits an amendment. */
+    @Transactional
+    public void validateAmendmentCapacity(String rootId, String agreementId, String listingId,
+            LocalDate start, LocalDate end, int motorbikes, int cars) {
+        var pool = lockAmendmentPool(listingId);
+        validateAmendmentCapacity(pool, rootId, agreementId, start, end, motorbikes, cars);
+    }
+
+    private record AmendmentPool(Listing listing, PropertyBranch branch) {}
+
+    private AmendmentPool lockAmendmentPool(String listingId) {
+        Listing candidate = listingRepository.findById(listingId).orElseThrow();
+        String branchId = candidate.getBranchId();
+        PropertyBranch branch = branchId == null ? null : propertyBranchRepository.findByIdForUpdate(branchId).orElseThrow();
+        Listing listing = listingRepository.findByIdForUpdate(listingId).orElseThrow();
+        if (!Objects.equals(branchId, listing.getBranchId()))
+            throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED, "Liên kết chi nhánh đã thay đổi; vui lòng kiểm tra lại phụ lục.");
+        return new AmendmentPool(listing, branch);
+    }
+
+    private void validateAmendmentCapacity(AmendmentPool pool, String rootId, String agreementId,
+            LocalDate start, LocalDate end, int motorbikes, int cars) {
+        if (start == null || end == null || !end.isAfter(start) || motorbikes < 0 || cars < 0 || motorbikes > 100 || cars > 100)
+            throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED, "Ngày hoặc số xe của phụ lục không hợp lệ.");
+        if (pool.branch() == null) return;
+        for (VehicleType type : VehicleType.values()) {
+            int desired = type == VehicleType.MOTORBIKE ? motorbikes : cars;
+            if (desired == 0) continue;
+            Integer capacity = type == VehicleType.MOTORBIKE ? pool.branch().getMotorbikeParkingCapacity() : pool.branch().getCarParkingCapacity();
+            var others = parkingReservationRepository.findOverlappingBranchReservations(pool.branch().getId(), type, ACTIVE_STATUSES, start, end).stream()
+                    // The root's future segment is replaced, not booked a second time.
+                    .filter(r -> !(Objects.equals(rootId, r.getContractId()) && r.getStatus() == ParkingReservationStatus.ACTIVE))
+                    .filter(r -> !(agreementId != null && Objects.equals(agreementId, r.getContractId()) && r.getStatus() == ParkingReservationStatus.HELD))
+                    .toList();
+            int available = Math.max(0, (capacity == null ? 0 : capacity) - calculatePeakUsage(others, start, end));
+            if (desired > available) throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,
+                    "Chi nhánh chỉ còn " + available + " chỗ " + (type == VehicleType.MOTORBIKE ? "xe máy" : "ô tô")
+                            + " trong thời gian áp dụng; phụ lục đề xuất " + desired + " chỗ.");
+        }
+    }
+
+    /** Hold the delta at EVERY root reservation boundary, including newly extended lease dates. */
+    @Transactional
+    public void holdForAmendment(String rootId, String agreementId, String rentalId, String listingId,
+            LocalDate start, LocalDate end, int motorbikes, int cars, Instant deadline) {
+        var pool = lockAmendmentPool(listingId);
+        validateAmendmentCapacity(pool, rootId, agreementId, start, end, motorbikes, cars);
+        Listing listing = pool.listing();
+        var existing = parkingReservationRepository.findByContractId(rootId).stream()
+                .filter(r -> r.getStatus() == ParkingReservationStatus.ACTIVE && r.getStartDate().isBefore(end) && r.getEndDateExclusive().isAfter(start)).toList();
+        for (VehicleType type : VehicleType.values()) {
+            int desired = type == VehicleType.MOTORBIKE ? motorbikes : cars;
+            if (desired == 0) continue;
+            var boundaries = new TreeSet<LocalDate>(List.of(start, end));
+            for (var r : existing) if (r.getVehicleType() == type) {
+                if (r.getStartDate().isAfter(start)) boundaries.add(r.getStartDate());
+                if (r.getEndDateExclusive().isBefore(end)) boundaries.add(r.getEndDateExclusive());
+            }
+            var dates = new ArrayList<>(boundaries);
+            for (int i = 0; i < dates.size() - 1; i++) {
+                LocalDate segmentStart = dates.get(i), segmentEnd = dates.get(i + 1);
+                int covered = existing.stream().filter(r -> r.getVehicleType() == type && !r.getStartDate().isAfter(segmentStart) && r.getEndDateExclusive().isAfter(segmentStart))
+                        .mapToInt(ParkingReservation::getQuantity).sum();
+                int increase = Math.max(0, desired - covered);
+                if (increase > 0) parkingReservationRepository.save(ParkingReservation.builder().contractId(agreementId)
+                        .branchId(listing.getBranchId()).listingId(listingId).rentalRequestId(rentalId).vehicleType(type)
+                        .quantity(increase).startDate(segmentStart).endDateExclusive(segmentEnd).status(ParkingReservationStatus.HELD).holdExpiresAt(deadline).build());
+            }
+        }
+    }
+
+    /** A fully signed appendix replaces only the future segment, keeping historical parking intact. */
+    @Transactional
+    public void activateAmendmentHold(String rootId, String agreementId, String rentalId, String listingId,
+            LocalDate start, LocalDate end, int motorbikes, int cars) {
+        var pool = lockAmendmentPool(listingId);
+        validateAmendmentCapacity(pool, rootId, agreementId, start, end, motorbikes, cars);
+        Listing listing = pool.listing();
+        var holds = parkingReservationRepository.findByContractId(agreementId);
+        if (holds.stream().anyMatch(h -> h.getStatus() != ParkingReservationStatus.HELD))
+            throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED, "Chỗ xe của phụ lục không còn được giữ.");
+        for (var hold : holds) {
+            hold.setStatus(ParkingReservationStatus.RELEASED); parkingReservationRepository.save(hold);
+        }
+        for (var r : parkingReservationRepository.findByContractId(rootId)) {
+            if (r.getStatus() != ParkingReservationStatus.ACTIVE || !r.getEndDateExclusive().isAfter(start)) continue;
+            if (!r.getStartDate().isBefore(start)) r.setStatus(ParkingReservationStatus.RELEASED);
+            else r.setEndDateExclusive(start);
+            parkingReservationRepository.save(r);
+        }
+        for (VehicleType type : VehicleType.values()) {
+            int quantity = type == VehicleType.MOTORBIKE ? motorbikes : cars;
+            if (quantity > 0) parkingReservationRepository.save(ParkingReservation.builder().contractId(rootId)
+                    .branchId(listing.getBranchId()).listingId(listingId).rentalRequestId(rentalId).vehicleType(type)
+                    .quantity(quantity).startDate(start).endDateExclusive(end).status(ParkingReservationStatus.ACTIVE).build());
+        }
+    }
+
     /**
      * Expire các reservation ACTIVE đã qua ngày kết thúc.
      */

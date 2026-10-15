@@ -204,9 +204,40 @@ public class PaymentRequestService {
         return payment;
     }
 
+    /** Separate, idempotent delta obligation. Creating/signing an appendix is not receipt confirmation. */
+    public void validateDepositAdjustmentRecipient(String payeeId,boolean refund) {
+        if(refund)bankAccountService.getDefaultRefundAccount(payeeId);else bankAccountService.getDefaultIncomingAccount(payeeId);
+    }
+
+    @Transactional public PaymentRequest createDepositAdjustment(String amendmentId,String contractId,String rentalId,String listingId,
+            String landlordId,String tenantId,BigDecimal delta,Instant dueAt) {
+        if(delta==null || delta.signum()==0 || delta.stripTrailingZeros().scale()>0 || delta.abs().compareTo(new BigDecimal("1000000000"))>0)throw new IllegalArgumentException("Invalid deposit delta");
+        var existing=paymentRequestRepository.findByInvoiceId(amendmentId);
+        if(existing.isPresent()) {
+            var p=existing.get();
+            if(p.getType()!=PaymentType.DEPOSIT_ADJUSTMENT || !contractId.equals(p.getContractId()) || p.getTotalAmount().compareTo(delta.abs())!=0
+                    || (p.getDirection()==PaymentDirection.TENANT_TO_LANDLORD)!=(delta.signum()>0))throw new IllegalStateException("Deposit adjustment already frozen");
+            return p;
+        }
+        boolean refund=delta.signum()<0;String payee=refund?tenantId:landlordId;
+        BankAccount bank=refund?bankAccountService.getDefaultRefundAccount(payee):bankAccountService.getDefaultIncomingAccount(payee);
+        String reference=transferReferenceGenerator.generateUniqueReference();
+        String description=refund?"Hoàn chênh lệch cọc theo phụ lục":"Nộp bổ sung cọc theo phụ lục";
+        var payment=paymentRequestRepository.save(PaymentRequest.builder().invoiceId(amendmentId).contractId(contractId).rentalRequestId(rentalId).listingId(listingId)
+                .payerId(refund?landlordId:tenantId).payeeId(payee).type(PaymentType.DEPOSIT_ADJUSTMENT)
+                .direction(refund?PaymentDirection.LANDLORD_TO_TENANT:PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.AWAITING_TRANSFER)
+                .currency("VND").totalAmount(delta.abs()).transferReference(reference).dueAt(dueAt)
+                .payeeBankAccountSnapshot(toJson(new BankAccountSnapshotDto(bank.getBankBin(),bank.getBankCode(),bank.getBankName(),bank.getAccountNumber(),bank.getAccountHolderName())))
+                .qrProvider("VIETQR_QUICK_LINK").qrImageUrl(vietQrProvider.generateQrImageUrl(bank.getBankBin(),bank.getAccountNumber(),bank.getAccountHolderName(),delta.abs(),reference)).build());
+        paymentLineItemRepository.save(PaymentLineItem.builder().paymentRequestId(payment.getId()).type("DEPOSIT_ADJUSTMENT").displayName(description)
+                .quantity(1).unitPrice(delta.abs()).amount(delta.abs()).calculationDescription("Phần chênh lệch cọc; không thu lại toàn bộ cọc").sortOrder(0).build());
+        recordEvent(payment.getId(),PaymentEventType.CREATED,null,PaymentStatus.AWAITING_TRANSFER,"SYSTEM","SYSTEM",description,null);
+        return payment;
+    }
+
     @Transactional public void syncContractSettlementDeadline(String id,Instant now) {
         PaymentRequest p=paymentRequestRepository.findByIdForUpdate(id).orElseThrow();
-        if((p.getType()==PaymentType.DEPOSIT_REFUND || p.getType()==PaymentType.OTHER_CHARGE && p.getContractId()!=null)
+        if((p.getType()==PaymentType.DEPOSIT_REFUND || p.getType()==PaymentType.DEPOSIT_ADJUSTMENT || p.getType()==PaymentType.OTHER_CHARGE && p.getContractId()!=null)
                 && p.getDueAt()!=null && now.isAfter(p.getDueAt())
                 && (p.getStatus()==PaymentStatus.AWAITING_TRANSFER || p.getStatus()==PaymentStatus.REJECTED)) {
             PaymentStatus before=p.getStatus(); p.setStatus(PaymentStatus.OVERDUE); paymentRequestRepository.save(p);
@@ -468,6 +499,15 @@ public class PaymentRequestService {
         }
 
         PaymentRequest saved = paymentRequestRepository.save(payment);
+
+        if(saved.getType()==PaymentType.DEPOSIT_ADJUSTMENT) {
+            var deposit=depositRecordRepository.findByRentalRequestIdForUpdate(saved.getRentalRequestId()).orElseThrow(()->new IllegalStateException("Deposit record missing"));
+            if(deposit.getStatus()!=DepositStatus.HELD)throw new IllegalStateException("Deposit is not held");
+            BigDecimal delta=saved.getDirection()==PaymentDirection.TENANT_TO_LANDLORD?saved.getTotalAmount():saved.getTotalAmount().negate();
+            BigDecimal held=deposit.getHeldAmount().add(delta);
+            if(held.signum()<0)throw new IllegalStateException("Deposit refund exceeds actual held deposit");
+            deposit.setHeldAmount(held);deposit.setRefundableAmount(held);depositRecordRepository.save(deposit);
+        }
 
         // Update DepositRecord to HELD
         depositRecordRepository.findByInitialPaymentRequestId(saved.getId()).ifPresent(record -> {

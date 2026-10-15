@@ -257,6 +257,13 @@ public class ContractController {
                 .build();
     }
 
+    @GetMapping("/{contractId}/effective-document")
+    public ApiResponse<ContractDocumentResponse> getEffectiveDocument(@PathVariable String contractId) {
+        return ApiResponse.<ContractDocumentResponse>builder()
+                .result(contractService.getEffectiveDocument(contractId))
+                .build();
+    }
+
     private UserContext requireUserContext() {
         UserContext context = UserContextHolder.get();
         if (context == null || context.userId() == null || context.userId().isBlank()) {

@@ -113,6 +113,9 @@ public class Listing extends BaseEntity {
     @OneToMany(mappedBy = "listing", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<ListingCustomAmenity> customAmenities = new ArrayList<>();
+    @OneToMany(mappedBy="listing",cascade=CascadeType.ALL,orphanRemoval=true)
+    @Builder.Default
+    private List<ListingPolicyValue> policies = new ArrayList<>();
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "listing_amenities", joinColumns = @JoinColumn(name = "listing_id"), inverseJoinColumns = @JoinColumn(name = "amenity_id"))
     @Builder.Default

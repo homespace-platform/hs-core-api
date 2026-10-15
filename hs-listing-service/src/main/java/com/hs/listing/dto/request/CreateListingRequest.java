@@ -35,7 +35,26 @@ public record CreateListingRequest(
         @NotNull @Valid ListingAddressSourceRequest addressSource,
         @NotEmpty List<@Valid ListingMediaRequest> media,
         List<DayOfWeek> viewingDays,
-        List<ViewingSlot> viewingSlots) {
+        List<ViewingSlot> viewingSlots,
+        List<@Valid ListingPolicyRequest> policies) {
+
+    public CreateListingRequest(String id,String duplicateSourceListingId,String branchId,ListingSubmissionAction submissionAction,
+            String title,String description,ListingCategory category,LocalDate availableFrom,BigDecimal areaM2,
+            Integer maxMotorbikeCount,Integer maxCarCount,ListingPricingRequest pricing,ApartmentDetailRequest apartmentDetail,
+            HouseDetailRequest houseDetail,OfficeDetailRequest officeDetail,CommercialDetailRequest commercialDetail,
+            RoomDetailRequest roomDetail,List<String> amenityCodes,List<String> customAmenities,List<ListingFurnishingRequest> furnishings,
+            List<ListingChargeRequest> charges,ListingAddressSourceRequest addressSource,List<ListingMediaRequest> media,
+            List<DayOfWeek> viewingDays,List<ViewingSlot> viewingSlots) {
+        this(id,duplicateSourceListingId,branchId,submissionAction,title,description,category,availableFrom,areaM2,
+                maxMotorbikeCount,maxCarCount,pricing,apartmentDetail,houseDetail,officeDetail,commercialDetail,roomDetail,
+                amenityCodes,customAmenities,furnishings,charges,addressSource,media,viewingDays,viewingSlots,List.of());
+    }
+
+    public CreateListingRequest withPolicies(List<ListingPolicyRequest> values) {
+        return new CreateListingRequest(id,duplicateSourceListingId,branchId,submissionAction,title,description,category,availableFrom,areaM2,
+                maxMotorbikeCount,maxCarCount,pricing,apartmentDetail,houseDetail,officeDetail,commercialDetail,roomDetail,
+                amenityCodes,customAmenities,furnishings,charges,addressSource,media,viewingDays,viewingSlots,values);
+    }
 
     public CreateListingRequest(
             String id,

@@ -179,8 +179,15 @@ public class AiListingSearchService {
             fields.put("charge." + type + ".custom_name", new Field("listing_charges", "custom_name", Kind.TEXT, fixed));
         }
         fields.put("amenity.code", new Field("amenities", "code", Kind.TEXT, null));
-        for (String code : List.of("WIFI", "AIR_CONDITIONER", "WATER_HEATER", "REFRIGERATOR", "WASHING_MACHINE", "ELEVATOR", "PARKING", "SECURITY_24_7", "CAMERA", "PETS_ALLOWED", "SWIMMING_POOL", "GYM")) {
+        for (String code : List.of("WIFI", "AIR_CONDITIONER", "WATER_HEATER", "REFRIGERATOR", "WASHING_MACHINE", "ELEVATOR", "PARKING", "SECURITY_24_7", "CAMERA", "SWIMMING_POOL", "GYM")) {
             fields.put("amenity." + code, new Field("listing_amenities", null, Kind.BOOLEAN, "EXISTS (SELECT 1 FROM amenities a WHERE a.id = t.amenity_id AND a.code = '" + code + "')"));
+        }
+        // Scope value and note to the same policy code so pet/smoking filters cannot
+        // accidentally match a different row's ALLOWED value.
+        for (var policy : com.hs.listing.config.ListingPolicyCatalog.defaults()) if (!"INTEGER".equals(policy.getValueType())) {
+            String fixed = "t.policy_code = '" + policy.getCode() + "'";
+            fields.put("policy." + policy.getCode() + ".value",new Field("listing_policy_values","policy_value",Kind.TEXT,fixed));
+            fields.put("policy." + policy.getCode() + ".note",new Field("listing_policy_values","note",Kind.TEXT,fixed));
         }
         for (String code : List.of("BED", "WARDROBE", "WORK_DESK", "KITCHEN_SHELF", "REFRIGERATOR", "WASHING_MACHINE", "WATER_HEATER", "CURTAIN", "FAN", "SOFA_SET", "DINING_SET", "TV", "KITCHEN_CABINET", "COOKTOP", "AIR_CONDITIONER", "LIGHTING")) {
             fields.put("furnishing." + code, new Field("listing_furnishing_assets", null, Kind.BOOLEAN, "t.item_code = '" + code + "'"));

@@ -38,7 +38,9 @@ public class ListingReferenceDataInitializer implements CommandLineRunner {
         amenity("PARKING", "Chỗ để xe", order++, Set.of(ListingCategory.APARTMENT));
         amenity("SECURITY_24_7", "Bảo vệ 24/7", order++, ALL);
         amenity("CAMERA", "Camera", order++, ALL);
-        amenity("PETS_ALLOWED", "Cho nuôi thú cưng", order++, HOME);
+        // Pets are a listing policy, not an amenity. Retire the old catalog entry without
+        // deleting historical associations or signed contractual snapshots.
+        amenityRepository.findByCode("PETS_ALLOWED").ifPresent(a -> { a.setActive(false); amenityRepository.save(a); });
         amenity("SWIMMING_POOL", "Hồ bơi", order++, HOME);
         amenity("GYM", "Phòng gym", order++, HOME);
 

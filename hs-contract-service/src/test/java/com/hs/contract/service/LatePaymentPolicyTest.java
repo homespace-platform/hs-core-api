@@ -12,6 +12,23 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class LatePaymentPolicyTest {
     private static final Instant DUE = Instant.parse("2026-11-05T16:59:59Z");
+    @Test void newTermsAcceptOnlyRateAndModeAndDeriveAllControls() {
+        for(String mode:java.util.List.of("NONE","FIXED_ONCE","FIXED_PER_DAY")) {
+            var p=LatePaymentPolicy.forNewAgreement(Map.of("latePaymentFeeMode",mode,"latePaymentFeeAmount","100000"),Map.of());
+            assertEquals(0,p.get("latePaymentFeeGraceDays"));assertEquals(MonthlyBillingSchedule.rules(),p.get("billingRules"));
+            assertEquals(mode.equals("NONE")?"0":mode.equals("FIXED_ONCE")?"100000":"1000000",p.get("latePaymentFeeCap"));
+        }
+        for(var injected:java.util.List.of(Map.<String,Object>of("latePaymentFeeGraceDays",2),Map.<String,Object>of("latePaymentFeeCap",700000),Map.<String,Object>of("billingRules",Map.of("maximumPenaltyDays",30)))) {
+            var p=new java.util.LinkedHashMap<String,Object>(Map.of("latePaymentFeeMode","FIXED_PER_DAY","latePaymentFeeAmount",100000));p.putAll(injected);
+            assertThrows(AppException.class,()->LatePaymentPolicy.forNewAgreement(p,Map.of()));
+        }
+    }
+    @Test void legacyLowerCapAndGraceRemainFrozenButNewRevisionDerivesFreshRules() {
+        var old=Map.<String,Object>of("latePaymentFeeMode","FIXED_PER_DAY","latePaymentFeeAmount",100000,"latePaymentFeeGraceDays",2,"latePaymentFeeCap",700000);
+        var next=LatePaymentPolicy.forNewAgreement(old,old);
+        assertEquals(0,next.get("latePaymentFeeGraceDays"));assertEquals("1000000",next.get("latePaymentFeeCap"));
+        assertEquals(2,LatePaymentPolicy.from(old).graceDays());assertEquals(new BigDecimal("700000"),LatePaymentPolicy.from(old).cap());
+    }
 
     @Test
     void legacyContractHasNoPenalty() {

@@ -1,6 +1,17 @@
 package com.hs.listing.service;
 import com.hs.common.advice.entity.AppException; import com.hs.listing.repository.*; import com.hs.storage.repository.StorageObjectRepository; import com.hs.user.repository.AddressRepository; import org.junit.jupiter.api.Test; import static org.junit.jupiter.api.Assertions.*; import static org.mockito.Mockito.*;
 class ListingServiceTest {
+    @org.junit.jupiter.api.Test
+    void adminCannotRemoveRequiredPoliciesFromPublishedListingUsingDraftAction() {
+        var repository = mock(ListingRepository.class);
+        var listing = new com.hs.listing.model.Listing(); listing.setId("published"); listing.setOwnerId("owner");
+        listing.setStatus(com.hs.listing.model.constant.ListingStatus.PUBLISHED);
+        when(repository.findByIdAndActiveTrue("published")).thenReturn(java.util.Optional.of(listing));
+        var service = new ListingService(repository,mock(AddressRepository.class),mock(StorageObjectRepository.class),
+                mock(com.hs.storage.service.StorageService.class),mock(AmenityRepository.class),mock(FurnishingItemRepository.class),mock(ListingStatusService.class),mock(PropertyBranchRepository.class));
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> service.updateByAdmin("admin","published",createDummyRequest(null,"published")));
+        verify(repository,never()).flush(); verify(repository,never()).save(any());
+    }
     @Test
     void rejectsUnauthenticatedUpsert() {
         ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),

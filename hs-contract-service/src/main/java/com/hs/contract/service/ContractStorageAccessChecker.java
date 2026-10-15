@@ -28,7 +28,7 @@ public class ContractStorageAccessChecker implements StorageAccessChecker {
         return contractRepository.findById(object.getReferenceId())
                 .map(contract -> userId.equals(contract.getLandlordId())
                         || (userId.equals(contract.getTenantId())
-                        && contract.getStatus() != ContractStatus.DRAFT))
+                        && (contract.getStatus() != ContractStatus.DRAFT || "AMENDMENT".equals(contract.getAgreementKind()))))
                 .orElse(false);
     }
 }

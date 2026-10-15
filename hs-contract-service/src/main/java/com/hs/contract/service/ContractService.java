@@ -49,6 +49,9 @@ public interface ContractService {
 
     ContractDocumentResponse getDocument(String documentId);
 
+    /** Fully signed PDF for the terms effective on the server's business date; never a draft fallback. */
+    ContractDocumentResponse getEffectiveDocument(String contractId);
+
     List<ContractDocumentResponse> getDocumentsByContract(String contractId);
 
     PageResponse<ContractResponse> getAllContractsForAdmin(ContractStatus status, String keyword, int page, int size);

@@ -16,6 +16,7 @@ import java.time.Instant;
 public class ContractResponse {
     private String id;
     private String contractNumber;
+    private String signingCity;
     private String rentalRequestId;
     private String listingId;
     private String landlordId;
@@ -24,6 +25,7 @@ public class ContractResponse {
     private String templateVersionId;
     private String currentRevisionId;
     private String parentContractId;
+    private String agreementKind;
     private Integer effectiveLeaseMonths;
     private ContractStatus status;
     private ContractPaymentStatus paymentStatus;

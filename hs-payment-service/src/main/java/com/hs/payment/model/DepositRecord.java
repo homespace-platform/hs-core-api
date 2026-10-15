@@ -52,6 +52,8 @@ public class DepositRecord extends BaseEntity {
 
     @Column(name = "held_amount", nullable = false, precision = 15, scale = 2)
     BigDecimal heldAmount;
+    @Column(name = "retained_amount", precision = 15, scale = 2)
+    BigDecimal retainedAmount;
 
     @Column(name = "refundable_amount", nullable = false, precision = 15, scale = 2)
     BigDecimal refundableAmount;

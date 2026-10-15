@@ -6,5 +6,6 @@ public enum PaymentType {
     UTILITY,
     OTHER_CHARGE,
     DEPOSIT_REFUND,
+    DEPOSIT_ADJUSTMENT,
     INITIAL_PAYMENT_REFUND
 }

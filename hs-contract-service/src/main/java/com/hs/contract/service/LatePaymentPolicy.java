@@ -10,10 +10,40 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
+import java.util.LinkedHashMap;
 
 /** Frozen contract terms; no fee is inferred for contracts signed before this policy existed. */
 public record LatePaymentPolicy(Mode mode, BigDecimal amount, int graceDays, BigDecimal cap) {
     public enum Mode { NONE, FIXED_ONCE, FIXED_PER_DAY }
+
+    /** New/unsigned terms: landlord owns only mode + rate; timing and ceiling are system-owned.
+     * from() remains a reader for frozen legacy signed policies, including an old lower cap. */
+    public static Map<String,Object> forNewAgreement(Map<String,Object> requested, Map<String,Object> previous) {
+        var result=new LinkedHashMap<String,Object>(requested==null?Map.of():requested);
+        var old=previous==null?Map.<String,Object>of():previous;
+        try {
+            Mode mode=Mode.valueOf(String.valueOf(result.getOrDefault("latePaymentFeeMode","NONE")));
+            BigDecimal amount=mode==Mode.NONE?BigDecimal.ZERO:new BigDecimal(String.valueOf(result.get("latePaymentFeeAmount")));
+            BigDecimal cap=mode==Mode.FIXED_PER_DAY?amount.multiply(BigDecimal.valueOf(MonthlyBillingSchedule.AUTO_ROLLOVER_DAYS)):amount;
+            for(String key:java.util.List.of("latePaymentFeeGraceDays","latePaymentFeeCap","billingRules")) {
+                Object expected=key.equals("latePaymentFeeGraceDays")?MonthlyBillingSchedule.LATE_FEE_GRACE_DAYS:key.equals("latePaymentFeeCap")?cap:MonthlyBillingSchedule.rules();
+                // A full snapshot may echo its previous values; it cannot choose new workflow controls.
+                if(result.containsKey(key) && !equivalent(result.get(key),old.get(key)) && !equivalent(result.get(key),expected))
+                    throw new IllegalArgumentException("System billing controls are read-only");
+            }
+            result.put("latePaymentFeeMode",mode.name());result.put("latePaymentFeeAmount",amount.toPlainString());
+            result.put("latePaymentFeeGraceDays",MonthlyBillingSchedule.LATE_FEE_GRACE_DAYS);result.put("latePaymentFeeCap",cap.toPlainString());
+            result.put("billingRules",MonthlyBillingSchedule.rules());
+            from(result);return result;
+        } catch(RuntimeException ex) { throw new AppException(ContractErrorCode.CONTRACT_LATE_FEE_INVALID,
+                "Chỉ được chọn cách tính và mức phí phạt. Hạn thanh toán, ngày ân hạn và mức phạt tối đa do hệ thống tính."); }
+    }
+    private static boolean equivalent(Object a,Object b) {
+        if(a==null||b==null)return a==b;
+        if(a instanceof Map<?,?> || b instanceof Map<?,?>)return a.equals(b);
+        try { return new BigDecimal(a.toString()).compareTo(new BigDecimal(b.toString()))==0; }
+        catch(NumberFormatException ex){return a.equals(b);}
+    }
 
     public static LatePaymentPolicy from(Map<String, Object> policies) {
         if (policies == null || policies.get("latePaymentFeeMode") == null)

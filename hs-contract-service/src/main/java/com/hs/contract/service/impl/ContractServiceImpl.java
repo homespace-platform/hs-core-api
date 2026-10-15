@@ -79,6 +79,7 @@ import org.springframework.beans.factory.annotation.Value;
 @Slf4j
 @Service
 public class ContractServiceImpl implements ContractService {
+    private static final String SIGNING_CITY = "Thành phố Hồ Chí Minh";
 
     private final ContractRepository contractRepository;
     private final ContractRevisionRepository revisionRepository;
@@ -98,6 +99,15 @@ public class ContractServiceImpl implements ContractService {
 
     @Autowired(required = false)
     private PdfSignatureEngine pdfSignatureEngine;
+
+    @Autowired
+    private com.hs.contract.service.engine.ContractAmendmentRenderer amendmentRenderer;
+    @Autowired
+    private com.hs.contract.service.ContractAmendmentService amendments;
+    @Autowired
+    private com.hs.contract.service.ContractTermsResolver termsResolver;
+    @Autowired
+    private com.hs.common.time.BillingTime billingTime;
 
     @Value("${homespace.signature.mode:INTERNAL}")
     private String signatureMode;
@@ -427,7 +437,7 @@ public class ContractServiceImpl implements ContractService {
     public ContractRevisionResponse updateRevision(String contractId, UpdateContractRevisionRequest request) {
         Contract contract = findContractForUpdateAndCheckAccess(contractId);
         if(contract.getParentContractId()!=null) throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,
-                "Văn bản gia hạn giữ nguyên điều kiện đã chốt; không sửa riêng bản nháp sau khi duyệt yêu cầu.");
+                "Văn bản liên kết giữ nguyên điều kiện đã thống nhất; không sửa bản nháp sau khi duyệt yêu cầu.");
         String currentUserId = getCurrentUserId();
 
         // Chỉ chủ nhà mới được cập nhật bản nháp
@@ -439,7 +449,10 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
         }
 
-        LatePaymentPolicy lateFee = LatePaymentPolicy.from(request.getPolicies());
+        Map<String,Object> previousPolicies=contract.getCurrentRevisionId()==null?Map.of():revisionRepository.findById(contract.getCurrentRevisionId())
+                .map(r->fromJson(r.getPoliciesSnapshot(),MAP_TYPE)).orElse(Map.of());
+        Map<String,Object> policies=LatePaymentPolicy.forNewAgreement(request.getPolicies(),previousPolicies);
+        LatePaymentPolicy lateFee = LatePaymentPolicy.from(policies);
         if (lateFee.mode() != LatePaymentPolicy.Mode.NONE) {
             ContractTemplateVersion template = templateVersionRepository.findById(contract.getTemplateVersionId())
                     .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
@@ -460,8 +473,6 @@ public class ContractServiceImpl implements ContractService {
             financial.put("paymentDueDay", MonthlyBillingSchedule.paymentDueDescription());
             financial.put("paymentDueOffsetDays", MonthlyBillingSchedule.PAYMENT_WINDOW_DAYS);
         }
-        Map<String, Object> policies = request.getPolicies() == null ? null
-                : new LinkedHashMap<>(request.getPolicies());
         if (policies != null) {
             policies.put("paymentDueDay", MonthlyBillingSchedule.paymentDueDescription());
             // A removed clause cannot remain enabled through an old structured draft flag.
@@ -628,6 +639,9 @@ public class ContractServiceImpl implements ContractService {
                 && isEmptyList(fromJson(revision.getAmenitiesSnapshot(), CHARGE_LIST_TYPE))) {
             warnings.add("Tin đăng chưa khai báo tiện ích nên bảng tiện ích trong hợp đồng sẽ để trống.");
         }
+        Map<String,Object> listingPolicySnapshot = fromJson(revision.getPoliciesSnapshot(),MAP_TYPE);
+        if (!dynamicTables.contains("#policiesTable") && listingPolicySnapshot != null && listingPolicySnapshot.get("listingPolicies") instanceof List<?> rows && !rows.isEmpty())
+            warnings.add("Mẫu Word chưa có {{#policiesTable}}. Chính sách được in trong khối thỏa thuận để không mất dữ liệu; cần cập nhật Điều chính sách và bỏ câu mặc định trái Listing.");
 
         return ContractCompletenessResponse.builder()
                 .contractId(contract.getId())
@@ -697,14 +711,14 @@ public class ContractServiceImpl implements ContractService {
         ContractTemplateVersion templateVersion = templateVersionRepository.findById(contract.getTemplateVersionId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
 
-        // Tải template Word từ storage
-        byte[] templateBytes = downloadStorageFile(templateVersion.getStorageObjectId());
-
         Map<String, Object> dataModel = buildDataModel(contract, revision);
 
         byte[] renderedDocx;
         try {
+            if ("AMENDMENT".equals(contract.getAgreementKind())) amendments.validateSigning(contract);
+            byte[] templateBytes = downloadStorageFile(templateVersion.getStorageObjectId());
             renderedDocx = renderService.renderDocx(new ByteArrayInputStream(templateBytes), dataModel);
+            if ("AMENDMENT".equals(contract.getAgreementKind())) renderedDocx = amendmentRenderer.appendAdjustment(renderedDocx, contract);
         } catch (Exception e) {
             log.error("Lỗi khi render DOCX hợp đồng id={}: {}", contractId, e.getMessage(), e);
             throw new AppException(ContractErrorCode.CONTRACT_RENDER_FAILED);
@@ -1091,6 +1105,30 @@ public class ContractServiceImpl implements ContractService {
                 .toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public ContractDocumentResponse getEffectiveDocument(String contractId) {
+        Contract contract = findContractAndCheckAccess(contractId);
+        if (contract.getParentContractId() != null) contract = findContractAndCheckAccess(contract.getParentContractId());
+        final String rootId = contract.getId();
+        // Same source of truth as effective contract fields and billing. SCHEDULED is
+        // effective at the boundary even if the synchronization job has not run yet.
+        ContractRevision effective = termsResolver.at(contract, billingTime.today());
+        String ownerId = effective.getContract().getId();
+        if (!rootId.equals(ownerId)) {
+            Contract owner = findContractAndCheckAccess(ownerId);
+            if (!rootId.equals(owner.getParentContractId()) || !"AMENDMENT".equals(owner.getAgreementKind()))
+                throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        }
+        return documentRepository.findByContractIdAndRevisionId(ownerId, effective.getId()).stream()
+                .filter(d -> ownerId.equals(d.getContractId()) && effective.getId().equals(d.getRevisionId()))
+                .filter(d -> d.getPurpose() == DocumentPurpose.SIGNED_FINAL && d.getDocumentType() == ContractDocumentType.PDF
+                        && d.getStatus() == DocumentGenerationStatus.READY && d.getStorageObjectId() != null && !d.getStorageObjectId().isBlank())
+                .max(Comparator.comparing(ContractDocument::getGeneratedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
+                        .thenComparing(ContractDocument::getId, Comparator.nullsFirst(Comparator.naturalOrder())))
+                .map(this::toDocumentResponse).orElse(null);
+    }
+
     private ContractRevision requireCurrentRevision(Contract contract) {
         if (contract.getCurrentRevisionId() == null) {
             throw new AppException(ContractErrorCode.CONTRACT_REVISION_NOT_FOUND);
@@ -1102,10 +1140,7 @@ public class ContractServiceImpl implements ContractService {
     /** Trải các snapshot của revision thành data model phẳng mà poi-tl dùng để render. */
     private Map<String, Object> buildDataModel(Contract contract, ContractRevision revision) {
         Map<String, Object> policies = fromJson(revision.getPoliciesSnapshot(), MAP_TYPE);
-        String lateFeeClause = LatePaymentPolicy.from(policies).clause();
         String specialTerms = revision.getSpecialTerms() == null ? "" : revision.getSpecialTerms().trim();
-        if (!lateFeeClause.isEmpty()) specialTerms = specialTerms.isEmpty()
-                ? lateFeeClause : specialTerms + "\n" + lateFeeClause;
         return renderService.buildDataModelFromSnapshots(
                 fromJson(revision.getLandlordSnapshot(), MAP_TYPE),
                 fromJson(revision.getTenantSnapshot(), MAP_TYPE),
@@ -1123,7 +1158,7 @@ public class ContractServiceImpl implements ContractService {
                 revision.getRevisionNumber(),
                 contract.getContractNumber(),
                 LocalDate.now(),
-                "Thành phố Hồ Chí Minh"
+                SIGNING_CITY
         );
     }
 
@@ -1152,7 +1187,7 @@ public class ContractServiceImpl implements ContractService {
         if (!landlord && !tenant && !"system".equals(userId)) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
-        if (tenant && contract.getStatus() == ContractStatus.DRAFT) {
+        if (tenant && contract.getStatus() == ContractStatus.DRAFT && !"AMENDMENT".equals(contract.getAgreementKind())) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
     }
@@ -1197,6 +1232,7 @@ public class ContractServiceImpl implements ContractService {
         return ContractResponse.builder()
                 .id(c.getId())
                 .contractNumber(c.getContractNumber())
+                .signingCity(SIGNING_CITY)
                 .rentalRequestId(c.getRentalRequestId())
                 .listingId(c.getListingId())
                 .landlordId(c.getLandlordId())
@@ -1205,6 +1241,7 @@ public class ContractServiceImpl implements ContractService {
                 .templateVersionId(c.getTemplateVersionId())
                 .currentRevisionId(c.getCurrentRevisionId())
                 .parentContractId(c.getParentContractId())
+                .agreementKind(c.getAgreementKind())
                 .effectiveLeaseMonths(c.getEffectiveLeaseMonths())
                 .status(c.getStatus())
                 .rentalPaymentId(c.getRentalPaymentId())
@@ -1244,7 +1281,9 @@ public class ContractServiceImpl implements ContractService {
     private ContractDocumentResponse toDocumentResponse(ContractDocument d) {
         String viewUrl = null;
         String downloadUrl = null;
-        if (d.getStorageObjectId() != null && d.getStatus() == DocumentGenerationStatus.READY) {
+        // Superseded previews remain readable history, but never become signable again.
+        if (d.getStorageObjectId() != null && (d.getStatus() == DocumentGenerationStatus.READY
+                || d.getStatus() == DocumentGenerationStatus.STALE)) {
             try {
                 StorageUrlResponse v = storageService.createViewUrl(d.getStorageObjectId());
                 if (v != null) viewUrl = v.url();

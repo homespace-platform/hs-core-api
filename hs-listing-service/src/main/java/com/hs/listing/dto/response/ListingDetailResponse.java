@@ -50,5 +50,6 @@ public record ListingDetailResponse(
                 Instant updatedAt,
                 String createdBy,
                 String updatedBy,
-                Long viewCount) {
+                Long viewCount,
+                List<ListingPolicyResponse> policies) {
 }

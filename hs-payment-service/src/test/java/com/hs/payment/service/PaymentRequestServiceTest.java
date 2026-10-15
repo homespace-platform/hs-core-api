@@ -68,6 +68,38 @@ class PaymentRequestServiceTest {
     private BankAccount landlordAccount;
     private BankAccount tenantAccount;
 
+    @Test void depositDeltaCreatesOnlyDifferenceAndReusesSameObligation() {
+        when(bankAccountService.getDefaultIncomingAccount("landlord-1")).thenReturn(landlordAccount);
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSDELTA1");
+        when(paymentRequestRepository.save(any())).thenAnswer(i->{PaymentRequest p=i.getArgument(0);p.setId("delta");return p;});
+        var due=Instant.parse("2026-11-19T00:00:00Z");
+        var payment=paymentRequestService.createDepositAdjustment("appendix","root","rental","listing","landlord-1","tenant-1",new BigDecimal("5000000"),due);
+        assertEquals(PaymentType.DEPOSIT_ADJUSTMENT,payment.getType());assertEquals(new BigDecimal("5000000"),payment.getTotalAmount());
+        assertEquals("tenant-1",payment.getPayerId());assertEquals("landlord-1",payment.getPayeeId());
+        verifyNoInteractions(depositRecordRepository);
+        when(paymentRequestRepository.findByInvoiceId("appendix")).thenReturn(Optional.of(payment));
+        assertSame(payment,paymentRequestService.createDepositAdjustment("appendix","root","rental","listing","landlord-1","tenant-1",new BigDecimal("5000000"),due));
+        assertThrows(IllegalStateException.class,()->paymentRequestService.createDepositAdjustment("appendix","root","rental","listing","landlord-1","tenant-1",new BigDecimal("-5000000"),due));
+        verify(paymentRequestRepository,times(1)).save(any());
+    }
+    @Test void depositHeldBalanceChangesOnlyOnExplicitReceiptAndCannotBeConfirmedTwice() {
+        for(var direction:com.hs.payment.model.constant.PaymentDirection.values()) {
+            var payment=PaymentRequest.builder().id("delta").rentalRequestId("rental").type(PaymentType.DEPOSIT_ADJUSTMENT)
+                    .direction(direction).payeeId("receiver").payerId("sender").status(PaymentStatus.TRANSFER_REPORTED).totalAmount(new BigDecimal("5000000")).build();
+            var deposit=com.hs.payment.model.DepositRecord.builder().originalAmount(new BigDecimal("20000000")).heldAmount(new BigDecimal("20000000"))
+                    .refundableAmount(new BigDecimal("20000000")).status(com.hs.payment.model.constant.DepositStatus.HELD).build();
+            when(paymentRequestRepository.findByIdForUpdate("delta")).thenReturn(Optional.of(payment));
+            when(paymentRequestRepository.save(any())).thenAnswer(i->i.getArgument(0));
+            when(depositRecordRepository.findByRentalRequestIdForUpdate("rental")).thenReturn(Optional.of(deposit));
+            when(billingTime.now()).thenReturn(Instant.parse("2026-11-15T03:00:00Z"));
+            paymentRequestService.confirmReceipt("delta","receiver");
+            BigDecimal expected=new BigDecimal(direction==com.hs.payment.model.constant.PaymentDirection.TENANT_TO_LANDLORD?"25000000":"15000000");
+            assertEquals(expected,deposit.getHeldAmount());assertEquals(new BigDecimal("20000000"),deposit.getOriginalAmount());
+            paymentRequestService.confirmReceipt("delta","receiver");assertEquals(expected,deposit.getHeldAmount());
+        }
+        verify(depositRecordRepository,times(2)).save(any());
+    }
+
     @Test
     void settlementRefundUsesTenantBankAndNeverCollectsInitialPaymentAgain() {
         when(bankAccountService.getDefaultRefundAccount("tenant-1")).thenReturn(tenantAccount);

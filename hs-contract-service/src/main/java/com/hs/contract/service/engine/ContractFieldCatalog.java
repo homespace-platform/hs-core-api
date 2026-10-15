@@ -104,8 +104,9 @@ public class ContractFieldCatalog {
         add("#chargesTable", "Bảng biểu phí dịch vụ", "Bảng động", "DYNAMIC_TABLE", "Bảng chi tiết các khoản tiền điện, nước, gửi xe, quản lý... tự động mở rộng theo thỏa thuận", "[Bảng 3 cột: Khoản phí | Đơn giá / Cách tính | Ghi chú]", ALL);
         add("#equipmentTable", "Bảng trang thiết bị bàn giao", "Bảng động", "DYNAMIC_TABLE", "Biên bản danh mục trang thiết bị nội thất bàn giao", "[Bảng 4 cột: STT | Tên tài sản | Số lượng | Hiện trạng]", OPTIONAL);
         add("#propertyFeaturesTable", "Bảng đặc điểm bất động sản", "Bảng động", "DYNAMIC_TABLE", "Bảng chi tiết các thông số kỹ thuật và đặc điểm của tài sản cho thuê theo loại hình", "[Bảng 2 cột: Đặc điểm | Giá trị]", OPTIONAL);
-        add("#amenitiesTable", "Bảng tiện ích & quyền sử dụng", "Bảng động", "DYNAMIC_TABLE", "Bảng chi tiết các tiện ích và quyền sử dụng đi kèm", "[Bảng 5 cột: STT | Tiện ích / Quyền sử dụng | Phạm vi | Chi phí | Điều kiện / Ghi chú]", OPTIONAL);
+        add("#amenitiesTable", "Bảng tiện ích", "Bảng động", "DYNAMIC_TABLE", "Danh sách tiện ích đã lưu trên bài đăng hoặc được hai bên ký điều chỉnh", "[Bảng 2 cột: STT | Tên tiện ích]", OPTIONAL);
         add("#initialPaymentTable", "Bảng phụ lục thanh toán ban đầu", "Bảng động", "DYNAMIC_TABLE", "Bảng xác nhận các khoản tiền người thuê đã thanh toán trước thời điểm ký hợp đồng", "[Bảng 3 cột: Khoản thanh toán | Số tiền | Trạng thái / Ghi chú]", OPTIONAL);
+        add("#policiesTable", "Bảng chính sách tài sản thuê", "Bảng động", "DYNAMIC_TABLE", "Chính sách đã chốt từ Listing, gồm nhóm chung và nhóm theo loại hình; không chứa phí phạt", "[Bảng 2 cột: Chính sách | Quy định áp dụng]", OPTIONAL);
     }
 
     private static void add(String key, String label, String group, String dataType, String description,

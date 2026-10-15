@@ -45,6 +45,10 @@ import java.math.RoundingMode;
 public class MonthlyBillingService {
     @org.springframework.beans.factory.annotation.Autowired
     private ContractLifecycleService lifecycle;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ContractTermsResolver terms;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ContractAmendmentService amendments;
     private static final DateTimeFormatter BILLING_DATE = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private final ContractRepository contracts;
     private final ContractRevisionRepository revisions;
@@ -324,10 +328,11 @@ public class MonthlyBillingService {
             throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
         DepositRecord deposit = deposits.findByRentalRequestId(contract.getRentalRequestId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY));
-        if (deposit.getStatus() != DepositStatus.HELD || deposit.getHeldAmount() == null
-                || deposit.getHeldAmount().compareTo(deposit.getOriginalAmount()) != 0)
+        if (!depositMatchesCurrentTerms(contract,deposit))
             throw new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY);
         rejectPendingForOtherDecision(invoice, landlordId);
+        if (amendments != null && amendments.hasPending(contract))
+            throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED, "Hãy hoàn tất hoặc rút đề nghị phụ lục trước khi đề nghị chấm dứt.");
         invoice.setResolutionMode("TERMINATION"); invoices.save(invoice);
         contract.setTerminationProposalInvoiceId(invoiceId);
         contract.setTerminationProposedAt(time.now());
@@ -433,8 +438,7 @@ public class MonthlyBillingService {
             throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
         DepositRecord deposit = deposits.findByRentalRequestIdForUpdate(contract.getRentalRequestId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY));
-        if (deposit.getStatus() != DepositStatus.HELD || deposit.getHeldAmount() == null
-                || deposit.getHeldAmount().compareTo(deposit.getOriginalAmount()) != 0)
+        if (!depositMatchesCurrentTerms(contract,deposit))
             throw new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY);
         finalizeTermination(contract, deposit, landlordId,
                 "Hai bên đồng ý chấm dứt sớm, đã bàn giao; cọc thuộc chủ nhà", false);
@@ -467,8 +471,7 @@ public class MonthlyBillingService {
             throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED);
         DepositRecord deposit = deposits.findByRentalRequestIdForUpdate(contract.getRentalRequestId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY));
-        if (deposit.getStatus() != DepositStatus.HELD || deposit.getHeldAmount() == null
-                || deposit.getHeldAmount().compareTo(deposit.getOriginalAmount()) != 0)
+        if (!depositMatchesCurrentTerms(contract,deposit))
             throw new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY);
         finalizeTermination(contract, deposit, landlordId,
                 "Chủ nhà chấm dứt theo điều khoản quá hạn trong hợp đồng đã ký sau khi người thuê từ chối đề nghị; đã nhận lại phòng", true);
@@ -479,10 +482,22 @@ public class MonthlyBillingService {
         return response(invoice);
     }
 
+    private boolean depositMatchesCurrentTerms(Contract contract,DepositRecord deposit) {
+        if(deposit.getStatus()!=DepositStatus.HELD || deposit.getHeldAmount()==null)return false;
+        var revision=terms==null?revisions.findById(contract.getCurrentRevisionId()).orElse(null):terms.at(contract,time.today());
+        var financial=revision==null?Map.<String,Object>of():read(revision.getFinancialSnapshot(),new TypeReference<Map<String,Object>>(){});
+        BigDecimal target=financial==null?null:decimal(financial.get("depositAmountValue"));
+        if(target==null)target=deposit.getOriginalAmount();
+        return target!=null && deposit.getHeldAmount().compareTo(target)==0;
+    }
+
     private void finalizeTermination(Contract contract, DepositRecord deposit,
                                      String landlordId, String reason, boolean forced) {
+        if(payments.getContractPaymentRequests(contract.getId(),contract.getLandlordId()).stream().anyMatch(p->p.type()==PaymentType.DEPOSIT_ADJUSTMENT && p.status()!=PaymentStatus.CONFIRMED))
+            throw new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY);
         listingStatusService.releaseRentedAfterTermination(contract.getListingId(), landlordId);
         parkingReservations.releaseReservationsForContract(contract.getId());
+        deposit.setRetainedAmount(deposit.getHeldAmount());
         deposit.setStatus(DepositStatus.RETAINED_BY_LANDLORD);
         deposit.setHeldAmount(BigDecimal.ZERO);
         deposit.setRefundableAmount(BigDecimal.ZERO);
@@ -519,8 +534,7 @@ public class MonthlyBillingService {
                 || time.today().isBefore(invoice.getPeriodEndExclusive().minusDays(1))
                 || !time.now().isBefore(meterDeadline(invoice)))
             throw new AppException(ContractErrorCode.INVOICE_NOT_READY);
-        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId())
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
+        ContractRevision revision = costRevision(contract, invoice);
         RentalRequest rental = rentalRequests.findById(contract.getRentalRequestId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
         List<Map<String, Object>> charges = readList(revision.getChargesSnapshot(),
@@ -564,13 +578,13 @@ public class MonthlyBillingService {
         }
         RentalRequest rental = rentalRequests.findById(contract.getRentalRequestId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
-        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId())
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
+        ContractRevision revision = costRevision(contract, invoice);
         Map<String, Object> financial = read(revision.getFinancialSnapshot(),
                 new TypeReference<Map<String, Object>>() {});
         List<Map<String, Object>> signedCharges = readList(revision.getChargesSnapshot(),
                 new TypeReference<List<Map<String, Object>>>() {});
         if (financial == null) throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
+        invoice.setRentPeriodStart(null);invoice.setRentPeriodEndExclusive(null);
         if (signedCharges.stream().anyMatch(c -> "STATE_WATER_RATE".equals(c.get("billingMethod"))
                 && !Boolean.TRUE.equals(c.get("includedInRent"))))
             throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
@@ -586,15 +600,31 @@ public class MonthlyBillingService {
                 || rental.getMoveInDate() == null)
             throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
         if (invoice.getPeriodIndex() + 1 < leaseMonths(contract, rental)) {
-            BigDecimal rent = decimal(financial.get("amountValue"));
+            ContractRevision rentRevision = terms == null ? revision : terms.at(contract, invoice.getPeriodEndExclusive());
+            Map<String, Object> rentFinancial = read(rentRevision.getFinancialSnapshot(), new TypeReference<Map<String, Object>>() {});
+            BigDecimal rent = decimal(rentFinancial.get("amountValue"));
             if (rent == null || rent.signum() <= 0) throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
-            if (!String.valueOf(financial.get("amountNumber")).contains(ContractRenderService.formatVND(rent)))
+            if (!String.valueOf(rentFinancial.get("amountNumber")).contains(ContractRenderService.formatVND(rent)))
                 throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
+            invoice.setRentTermsRevisionId(rentRevision.getId());
             LocalDate nextStart = invoice.getPeriodEndExclusive();
-            LocalDate nextEnd = rental.getMoveInDate().plusMonths(invoice.getPeriodIndex() + 2L).minusDays(1);
-            lines.add(new InvoiceLine("RENT", "Tiền phòng tháng " + (invoice.getPeriodIndex() + 2)
-                    + " (" + nextStart.format(BILLING_DATE) + "–" + nextEnd.format(BILLING_DATE) + ")",
-                    BigDecimal.ONE, rent, rent));
+            LocalDate coveredThrough=rental.getMoveInDate().plusMonths(1);
+            for(var paidPeriod:invoices.findByContractIdOrderByPeriodIndexDesc(contract.getId())) {
+                if(paidPeriod.getPeriodIndex()>=invoice.getPeriodIndex() || paidPeriod.getStatus()==MonthlyInvoiceStatus.DRAFT || paidPeriod.isFinalCostSupplement())continue;
+                LocalDate covered=paidPeriod.getRentPeriodEndExclusive();
+                if(covered==null && readList(paidPeriod.getLineItemsSnapshot(),new TypeReference<List<InvoiceLine>>(){}).stream().anyMatch(l->"RENT".equals(l.type())))
+                    covered=rental.getMoveInDate().plusMonths(paidPeriod.getPeriodIndex()+2L);
+                if(covered!=null && covered.isAfter(coveredThrough))coveredThrough=covered;
+            }
+            if(!nextStart.isBefore(coveredThrough)) {
+                int cycle=rentFinancial.get("paymentCycleMonths")==null?1:FreeFormAmendmentTerms.integer(rentFinancial.get("paymentCycleMonths"),1,12);
+                int months=Math.min(cycle,leaseMonths(contract,rental)-invoice.getPeriodIndex()-1);
+                LocalDate nextEnd=rental.getMoveInDate().plusMonths(invoice.getPeriodIndex()+1L+months);
+                invoice.setRentPeriodStart(nextStart);invoice.setRentPeriodEndExclusive(nextEnd);
+                lines.add(new InvoiceLine("RENT", (months==1?"Tiền phòng tháng "+(invoice.getPeriodIndex()+2):"Tiền phòng " + months + " tháng")
+                        + " (" + nextStart.format(BILLING_DATE) + "–" + nextEnd.minusDays(1).format(BILLING_DATE) + ")",
+                        BigDecimal.valueOf(months), rent, rent.multiply(BigDecimal.valueOf(months))));
+            }
         }
         if (!firstPeriodFeesPrepaid) {
             for (Map<String, Object> charge : signedCharges) {
@@ -664,6 +694,7 @@ public class MonthlyBillingService {
         if (total.signum() < 0 || total.scale() > 2 && total.stripTrailingZeros().scale() > 2)
             throw new AppException(ContractErrorCode.INVOICE_AMOUNT_INVALID);
         invoice.setLineItemsSnapshot(write(lines));
+        invoice.setCostTermsRevisionId(revision.getId());
         invoice.setTotalAmount(total);
         invoice.setBaseAmount(total);
         invoice.setLateFeeAmount(BigDecimal.ZERO);
@@ -675,9 +706,9 @@ public class MonthlyBillingService {
             int offset;
             try { offset = Integer.parseInt(String.valueOf(financial.get("paymentDueOffsetDays"))); }
             catch (NumberFormatException ex) { throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE); }
-            if (offset != MonthlyBillingSchedule.PAYMENT_WINDOW_DAYS)
+            if (offset < 0 || offset > 30)
                 throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
-            scheduledDue = MonthlyBillingSchedule.dueAt(invoice.getPeriodEndExclusive());
+            scheduledDue = invoice.getPeriodEndExclusive().plusDays(offset).atTime(23,59,59).atZone(BillingTime.ZONE).toInstant();
         } else {
             LocalDate fifth = invoice.getPeriodEndExclusive().withDayOfMonth(5);
             if (fifth.isBefore(invoice.getPeriodEndExclusive())) fifth = fifth.plusMonths(1);
@@ -872,7 +903,7 @@ public class MonthlyBillingService {
                     contract.getId(), invoice.getPeriodIndex() - 1).orElse(null);
             if (previous == null || previous.getStatus() == MonthlyInvoiceStatus.DRAFT) return false;
         }
-        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId()).orElse(null);
+        ContractRevision revision = costRevision(contract, invoice);
         if (revision == null) return false;
         List<Map<String, Object>> charges = readList(revision.getChargesSnapshot(),
                 new TypeReference<List<Map<String, Object>>>() {});
@@ -934,7 +965,7 @@ public class MonthlyBillingService {
         Contract contract = contracts.findById(invoice.getContractId()).orElse(null);
         if (contract == null) return;
         if (contract.getTerminationAcceptedAt() != null && contract.getTerminationCompletedAt() == null) return;
-        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId()).orElse(null);
+        ContractRevision revision = costRevision(contract, invoice);
         if (revision == null) return;
         Map<String, Object> policies = read(revision.getPoliciesSnapshot(), new TypeReference<Map<String, Object>>() {});
         LatePaymentPolicy policy = LatePaymentPolicy.from(policies);
@@ -970,8 +1001,7 @@ public class MonthlyBillingService {
     }
 
     private void fillMissingMeters(Contract contract, MonthlyInvoice invoice) {
-        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId())
-                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
+        ContractRevision revision = costRevision(contract, invoice);
         RentalRequest rental = rentalRequests.findById(contract.getRentalRequestId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
         List<Map<String, Object>> charges = readList(revision.getChargesSnapshot(), new TypeReference<List<Map<String, Object>>>() {});
@@ -1106,7 +1136,7 @@ public class MonthlyBillingService {
         BigDecimal originalDeposit = depositRecord == null ? null : depositRecord.getOriginalAmount();
         BigDecimal retainedDeposit = depositRecord != null
                 && depositRecord.getStatus() == DepositStatus.RETAINED_BY_LANDLORD
-                ? depositRecord.getOriginalAmount() : null;
+                ? depositRecord.getRetainedAmount()!=null?depositRecord.getRetainedAmount():depositRecord.getOriginalAmount() : null;
         return new MonthlyInvoiceResponse(i.getId(), i.getContractId(), i.getPeriodIndex(),
                 i.getPeriodStart(), i.getPeriodEndExclusive(), i.getStatus(), i.getElectricityStart(),
                 i.getElectricityEnd(), i.getWaterStart(), i.getWaterEnd(),
@@ -1132,11 +1162,19 @@ public class MonthlyBillingService {
     }
 
     /** Read-only presentation of old lump-sum fee rows. Never recalculate settled amounts or use today's clock. */
+    private ContractRevision costRevision(Contract contract, MonthlyInvoice invoice) {
+        if (invoice.getCostTermsRevisionId() != null) return revisions.findById(invoice.getCostTermsRevisionId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
+        if (terms != null) return terms.at(contract, invoice.getPeriodStart());
+        return revisions.findById(contract.getCurrentRevisionId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE));
+    }
+
     private List<InvoiceLine> displayInvoiceLines(MonthlyInvoice invoice, Contract contract) {
         List<InvoiceLine> lines = readList(invoice.getLineItemsSnapshot(), new TypeReference<List<InvoiceLine>>() {});
         if (contract == null || lines.stream().noneMatch(line -> "LATE_FEE".equals(line.type()) && line.quantityUnit() == null))
             return lines;
-        ContractRevision revision = revisions.findById(contract.getCurrentRevisionId()).orElse(null);
+        ContractRevision revision = costRevision(contract, invoice);
         if (revision == null) return lines;
         LatePaymentPolicy policy;
         try {

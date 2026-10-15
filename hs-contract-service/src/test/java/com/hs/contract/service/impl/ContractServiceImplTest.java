@@ -54,12 +54,159 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 class ContractServiceImplTest {
+    private final class EffectiveDocumentFixture {
+        final ContractRepository contracts = mock(ContractRepository.class);
+        final ContractRevisionRepository revisions = mock(ContractRevisionRepository.class);
+        final ContractDocumentRepository documents = mock(ContractDocumentRepository.class);
+        final com.hs.contract.repository.ContractAmendmentRepository amendments = mock(com.hs.contract.repository.ContractAmendmentRepository.class);
+        final java.util.Map<String,Contract> owners = new java.util.HashMap<>();
+        final java.util.Map<String,ContractRevision> snapshots = new java.util.HashMap<>();
+        final java.util.List<com.hs.contract.model.ContractAmendment> history = new java.util.ArrayList<>();
+        final java.util.List<ContractDocument> files = new java.util.ArrayList<>();
+        final Contract root = Contract.builder().id("root").currentRevisionId("root-revision").landlordId("owner").tenantId("tenant")
+                .status(ContractStatus.ACTIVE).signedAt(java.time.Instant.parse("2026-10-15T03:00:00Z")).build();
+        final ContractServiceImpl service = createService(contracts,revisions,documents,mock(ContractTemplateVersionRepository.class));
+        EffectiveDocumentFixture() {
+            owners.put("root",root);snapshots.put("root-revision",ContractRevision.builder().id("root-revision").contract(root).build());
+            when(contracts.findById(anyString())).thenAnswer(i -> Optional.ofNullable(owners.get(i.getArgument(0))));
+            when(revisions.findById(anyString())).thenAnswer(i -> Optional.ofNullable(snapshots.get(i.getArgument(0))));
+            when(amendments.findByContractIdOrderByCreatedAtDesc("root")).thenAnswer(i -> history);
+            when(documents.findByContractIdAndRevisionId(anyString(),anyString())).thenAnswer(i -> files.stream()
+                    .filter(d -> d.getContractId().equals(i.getArgument(0)) && d.getRevisionId().equals(i.getArgument(1))).toList());
+            var storage=mock(StorageService.class);
+            when(storage.createViewUrl(anyString())).thenAnswer(i -> new com.hs.storage.dto.response.StorageUrlResponse("https://files.example/view/"+i.getArgument(0),java.time.Instant.parse("2026-10-15T10:00:00Z")));
+            when(storage.createDownloadUrl(anyString())).thenAnswer(i -> new com.hs.storage.dto.response.StorageUrlResponse("https://files.example/download/"+i.getArgument(0),java.time.Instant.parse("2026-10-15T10:00:00Z")));
+            org.springframework.test.util.ReflectionTestUtils.setField(service,"storageService",storage);
+            org.springframework.test.util.ReflectionTestUtils.setField(service,"termsResolver",new com.hs.contract.service.ContractTermsResolver(amendments,revisions));
+            at("2026-11-15T10:00:00");UserContextHolder.set(new UserContext("owner","owner@example.com"));
+            signedPdf("root");
+        }
+        void at(String dateTime) {
+            var environment=mock(org.springframework.core.env.Environment.class);
+            when(environment.getActiveProfiles()).thenReturn(new String[]{"test"});
+            org.springframework.test.util.ReflectionTestUtils.setField(service,"billingTime",new com.hs.common.time.BillingTime(dateTime,environment));
+        }
+        com.hs.contract.model.ContractAmendment appendix(String id,String status,String date,String signedAt) {
+            var child=Contract.builder().id(id).parentContractId("root").agreementKind("AMENDMENT").currentRevisionId(id+"-revision")
+                    .landlordId("owner").tenantId("tenant").status(ContractStatus.ACTIVE).build();
+            owners.put(id,child);snapshots.put(child.getCurrentRevisionId(),ContractRevision.builder().id(child.getCurrentRevisionId()).contract(child).build());
+            var proposal=com.hs.contract.model.ContractAmendment.builder().id(id).contractId("root").agreementContractId(id).termsRevisionId(child.getCurrentRevisionId())
+                    .status(status).effectiveOn(java.time.LocalDate.parse(date)).signedAt(signedAt==null?null:java.time.Instant.parse(signedAt)).build();
+            history.add(proposal);return proposal;
+        }
+        ContractDocument signedPdf(String owner) {
+            var file=ContractDocument.builder().id(owner+"-pdf").contractId(owner).revisionId(owners.get(owner).getCurrentRevisionId())
+                    .documentType(ContractDocumentType.PDF).purpose(DocumentPurpose.SIGNED_FINAL).status(DocumentGenerationStatus.READY)
+                    .storageObjectId(owner+"-object").fileName(owner+".pdf").generatedAt(java.time.Instant.parse("2026-10-15T05:00:00Z")).build();
+            files.add(file);return file;
+        }
+    }
+    @Test void effectivePdfChangesExactlyAtVietnamMidnightAndUsesSimulatedTimeForBothParties() {
+        var f=new EffectiveDocumentFixture();
+        var a=f.appendix("november","SCHEDULED","2026-11-15","2026-10-20T03:00:00Z");f.signedPdf("november");
+        for(String actor:List.of("owner","tenant")) {
+            UserContextHolder.set(new UserContext(actor,actor+"@example.com"));
+            f.at("2026-11-14T16:59:59Z");assertEquals("root-pdf",f.service.getEffectiveDocument("root").getId());
+            f.at("2026-11-14T17:00:00Z");var current=f.service.getEffectiveDocument("root");
+            assertEquals("november-pdf",current.getId());assertEquals("november",current.getContractId());assertEquals("november-revision",current.getRevisionId());
+            assertEquals("https://files.example/view/november-object",current.getViewUrl());
+            assertEquals("https://files.example/download/november-object",current.getDownloadUrl());
+            f.at("2026-11-15T10:00:00");assertEquals("november-pdf",f.service.getEffectiveDocument("root").getId());
+        }
+        assertEquals("SCHEDULED",a.getStatus());assertEquals("root-revision",f.root.getCurrentRevisionId());
+        verify(f.contracts,never()).save(any());verify(f.documents,never()).save(any());verify(f.amendments,never()).save(any());
+    }
+    @Test void effectivePdfSelectsLatestEffectiveSignedTermsNotNewestFileOrFutureOrSupersededProposal() {
+        var f=new EffectiveDocumentFixture();
+        f.appendix("november","APPLIED","2026-11-15","2026-10-20T03:00:00Z");f.signedPdf("november");
+        f.appendix("december","SCHEDULED","2026-12-15","2026-10-19T03:00:00Z");f.signedPdf("december");
+        f.appendix("superseded","SUPERSEDED","2026-11-15","2026-10-22T03:00:00Z");f.signedPdf("superseded");
+        for(String status:List.of("REQUESTED","APPROVED","REJECTED","WITHDRAWN","EXPIRED","APPLIED")) {
+            f.appendix(status,status,"2026-11-15",null);f.signedPdf(status);
+        }
+        f.files.getFirst().setGeneratedAt(java.time.Instant.parse("2099-01-01T00:00:00Z"));
+        assertEquals("november-pdf",f.service.getEffectiveDocument("root").getId());
+        f.at("2026-12-15T00:00:00");assertEquals("december-pdf",f.service.getEffectiveDocument("root").getId());
+        f.at("2026-11-14T23:59:59");assertEquals("root-pdf",f.service.getEffectiveDocument("root").getId());
+    }
+    @Test void missingEffectiveSignedPdfNeverFallsBackToOldRootOrAnUnsignedDraft() {
+        var f=new EffectiveDocumentFixture();f.appendix("november","APPLIED","2026-11-15","2026-10-20T03:00:00Z");
+        assertNull(f.service.getEffectiveDocument("root"));
+        for(DocumentPurpose purpose:List.of(DocumentPurpose.PREVIEW,DocumentPurpose.OFFICIAL,DocumentPurpose.SIGNED_LANDLORD)) {
+            f.files.clear();f.signedPdf("root");f.signedPdf("november").setPurpose(purpose);assertNull(f.service.getEffectiveDocument("root"));
+        }
+        for(DocumentGenerationStatus status:List.of(DocumentGenerationStatus.STALE,DocumentGenerationStatus.FAILED,DocumentGenerationStatus.GENERATING)) {
+            f.files.clear();f.signedPdf("root");f.signedPdf("november").setStatus(status);assertNull(f.service.getEffectiveDocument("root"));
+        }
+        f.files.clear();var file=f.signedPdf("november");file.setDocumentType(ContractDocumentType.DOCX);assertNull(f.service.getEffectiveDocument("root"));
+        file.setDocumentType(ContractDocumentType.PDF);file.setStorageObjectId(" ");assertNull(f.service.getEffectiveDocument("root"));
+        file.setStorageObjectId("object");file.setRevisionId("another-revision");assertNull(f.service.getEffectiveDocument("root"));
+    }
+    @Test void effectivePdfRejectsOutsidersAndRevisionsOutsideTheRequestedRoot() {
+        var f=new EffectiveDocumentFixture();f.appendix("foreign","APPLIED","2026-11-15","2026-10-20T03:00:00Z");f.signedPdf("foreign");
+        UserContextHolder.set(new UserContext("outsider","outsider@example.com"));
+        assertThrows(AppException.class,()->f.service.getEffectiveDocument("root"));verifyNoInteractions(f.amendments);
+        UserContextHolder.set(new UserContext("tenant","tenant@example.com"));f.owners.get("foreign").setParentContractId("another-root");
+        assertThrows(AppException.class,()->f.service.getEffectiveDocument("root"));
+        verify(f.documents,never()).findByContractIdAndRevisionId(any(),any());
+    }
+    @Test void openingFutureAppendixDossierStillResolvesCurrentlyEffectiveRootTermsForEitherParty() {
+        var f=new EffectiveDocumentFixture();
+        f.appendix("pl1","APPLIED","2026-11-15","2026-10-20T03:00:00Z");f.signedPdf("pl1");
+        f.appendix("pl2","SCHEDULED","2026-12-15","2026-11-15T03:00:00Z");f.signedPdf("pl2");
+        for(String actor:List.of("owner","tenant")) {
+            UserContextHolder.set(new UserContext(actor,actor+"@example.com"));
+            f.at("2026-11-15T10:00:00");
+            assertEquals("pl1-pdf",f.service.getEffectiveDocument("root").getId());
+            assertEquals("pl1-pdf",f.service.getEffectiveDocument("pl2").getId());
+            f.at("2026-12-14T23:59:59");assertEquals("pl1-pdf",f.service.getEffectiveDocument("pl2").getId());
+            f.at("2026-12-15T00:00:00");assertEquals("pl2-pdf",f.service.getEffectiveDocument("pl2").getId());
+        }
+    }
+
+    @Test void archivedFilesAreReadableByBothPartiesWithoutChangingTheirStatusOrSignedHistory() {
+        var contracts=mock(ContractRepository.class);var docs=mock(ContractDocumentRepository.class);
+        var service=createService(contracts,mock(ContractRevisionRepository.class),docs,mock(ContractTemplateVersionRepository.class));
+        var storage=mock(StorageService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"storageService",storage);
+        var contract=Contract.builder().id("root").landlordId("owner").tenantId("tenant").status(ContractStatus.ACTIVE).currentRevisionId("signed-revision").build();
+        var old=ContractDocument.builder().id("old-file").contractId("root").revisionId("old-revision").documentType(ContractDocumentType.DOCX)
+                .purpose(DocumentPurpose.PREVIEW).status(DocumentGenerationStatus.STALE).storageObjectId("old-object").fileName("old.docx").build();
+        when(contracts.findById("root")).thenReturn(Optional.of(contract));
+        when(docs.findById("old-file")).thenReturn(Optional.of(old));
+        when(docs.findByContractIdOrderByGeneratedAtDesc("root")).thenReturn(List.of(old));
+        when(storage.createViewUrl("old-object")).thenReturn(new com.hs.storage.dto.response.StorageUrlResponse("https://files.example/old/view",java.time.Instant.parse("2026-10-15T10:00:00Z")));
+        when(storage.createDownloadUrl("old-object")).thenReturn(new com.hs.storage.dto.response.StorageUrlResponse("https://files.example/old/download",java.time.Instant.parse("2026-10-15T10:00:00Z")));
+        for(String actor:List.of("owner","tenant")) {
+            UserContextHolder.set(new UserContext(actor,actor+"@example.com"));
+            assertEquals("https://files.example/old/view",service.getDocumentsByContract("root").getFirst().getViewUrl());
+            assertEquals("https://files.example/old/download",service.getDocument("old-file").getDownloadUrl());
+        }
+        assertEquals(DocumentGenerationStatus.STALE,old.getStatus());assertEquals("signed-revision",contract.getCurrentRevisionId());
+        verify(docs,never()).save(any());
+    }
+    @Test void documentHistoryRejectsStrangersAndKeepsUnsignedRootPrivateButAllowsApprovedAppendixParties() {
+        var contracts=mock(ContractRepository.class);var docs=mock(ContractDocumentRepository.class);
+        var service=createService(contracts,mock(ContractRevisionRepository.class),docs,mock(ContractTemplateVersionRepository.class));
+        var root=Contract.builder().id("root").landlordId("owner").tenantId("tenant").status(ContractStatus.DRAFT).build();
+        var appendix=Contract.builder().id("appendix").parentContractId("root").agreementKind("AMENDMENT").landlordId("owner").tenantId("tenant").status(ContractStatus.DRAFT).build();
+        when(contracts.findById("root")).thenReturn(Optional.of(root));when(contracts.findById("appendix")).thenReturn(Optional.of(appendix));
+        when(docs.findByContractIdOrderByGeneratedAtDesc("appendix")).thenReturn(List.of());
+        UserContextHolder.set(new UserContext("stranger","stranger@example.com"));
+        assertThrows(AppException.class,()->service.getDocumentsByContract("root"));assertThrows(AppException.class,()->service.getDocumentsByContract("appendix"));
+        verify(docs,never()).findByContractIdOrderByGeneratedAtDesc(any());
+        UserContextHolder.set(new UserContext("tenant","tenant@example.com"));
+        assertThrows(AppException.class,()->service.getDocumentsByContract("root"));
+        assertEquals(List.of(),service.getDocumentsByContract("appendix"));
+    }
 
     @Test
     @SuppressWarnings({"rawtypes", "unchecked"})

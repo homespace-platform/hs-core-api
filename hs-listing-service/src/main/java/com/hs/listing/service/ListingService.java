@@ -26,7 +26,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 public class ListingService {
     private final ListingRepository listingRepository;
     private final AddressRepository addressRepository;
@@ -36,6 +36,14 @@ public class ListingService {
     private final FurnishingItemRepository furnishingItemRepository;
     private final ListingStatusService listingStatusService;
     private final PropertyBranchRepository branchRepository;
+    private final ListingPolicyService policyService;
+
+    /** Compatibility for standalone service fixtures; Spring uses the full injected constructor. */
+    public ListingService(ListingRepository listings,AddressRepository addresses,StorageObjectRepository storage,
+            StorageService storageService,AmenityRepository amenities,FurnishingItemRepository furnishings,
+            ListingStatusService statuses,PropertyBranchRepository branches) {
+        this(listings,addresses,storage,storageService,amenities,furnishings,statuses,branches,new ListingPolicyService(null));
+    }
 
     @Transactional
     public CreateListingResponse upsert(String ownerId, CreateListingRequest r) {
@@ -118,6 +126,12 @@ public class ListingService {
         if (listing.getStatus() == ListingStatus.RENTED_EXTERNALLY) {
             throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_RENTED_EXTERNALLY);
         }
+        // Admin updates preserve status rather than downgrading to a draft. Do not allow a
+        // draft-shaped payload to remove policies from a public or awaiting-review listing.
+        if (listing.getStatus() != null && Set.of(ListingStatus.PUBLISHED,ListingStatus.PENDING_REVIEW,ListingStatus.RESERVED).contains(listing.getStatus())) {
+            var policyTarget = new Listing(); policyTarget.setCategory(request.category());
+            policyService.attach(policyTarget,request.policies(),true);
+        }
         validate(request, listing);
         ListingStatus preservedStatus = listing.getStatus();
         clearOwnedData(listing);
@@ -198,6 +212,7 @@ public class ListingService {
         l.setManagementFeeIncluded(p.managementFeeIncluded());
         l.setVatIncluded(p.vatIncluded());
         l.setActive(true);
+        policyService.attach(l,r.policies(),r.submissionAction() == ListingSubmissionAction.SUBMIT_FOR_REVIEW);
     }
 
     private void clearOwnedData(Listing l) {
@@ -209,6 +224,7 @@ public class ListingService {
         l.getMedia().clear();
         l.getCharges().clear();
         l.getCustomAmenities().clear();
+        l.getPolicies().clear();
         l.getAmenities().clear();
         l.getFurnishings().clear();
         l.getViewingDays().clear();
@@ -231,6 +247,8 @@ public class ListingService {
     }
 
     private void validate(CreateListingRequest r, Listing existing) {
+        Listing policyTarget = new Listing(); policyTarget.setCategory(r.category());
+        policyService.attach(policyTarget,r.policies(),r.submissionAction() == ListingSubmissionAction.SUBMIT_FOR_REVIEW);
         if (r.duplicateSourceListingId() != null && !r.duplicateSourceListingId().isBlank()) {
             if (r.id() != null && !r.id().isBlank()) {
                 throw error(400, "DUPLICATE_INVALID_REQUEST", "Cannot specify duplicateSourceListingId when updating an existing listing");
@@ -295,6 +313,9 @@ public class ListingService {
                     invalid("charges.customName", "REQUIRED");
                 if (c.chargeType() == ChargeType.OVERTIME_AIR_CONDITIONING)
                     invalid("charges.chargeType", "INVALID_FOR_CATEGORY");
+                if (c.chargeType() == null || c.billingMethod() == null
+                        || !com.hs.listing.model.constant.ChargeMethodRules.methods(c.chargeType().name()).contains(c.billingMethod().name()))
+                    invalid("charges.billingMethod", "INVALID_FOR_CHARGE_TYPE");
             }
         for (var m : r.media()) {
             boolean hasStorage = m.storageObjectId() != null && !m.storageObjectId().isBlank();
@@ -371,6 +392,7 @@ public class ListingService {
         }
         if (request.amenityCodes() != null) {
             for (String value : request.amenityCodes()) {
+                if ("PETS_ALLOWED".equalsIgnoreCase(value)) invalid("amenityCodes","PETS_MOVED_TO_POLICIES");
                 if (value == null || value.isBlank())
                     continue;
                 Amenity amenity = amenitiesByKey.get(catalogKey(value));

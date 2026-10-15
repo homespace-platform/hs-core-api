@@ -79,9 +79,12 @@ public class Contract extends BaseEntity {
     @Column(name = "signed_at")
     private Instant signedAt;
 
-    /** Document-only renewal agreement; billing and deposit stay on the root contract. */
+    /** Linked signing document; billing and deposit stay on the root contract. */
     @Column(name = "parent_contract_id", length = 36)
     private String parentContractId;
+    /** Null on legacy contracts/renewals; AMENDMENT explicitly selects the appendix workflow. */
+    @Column(name = "agreement_kind", length = 20)
+    private String agreementKind;
     @Column(name = "effective_lease_months")
     private Integer effectiveLeaseMonths;
 

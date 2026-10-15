@@ -123,6 +123,7 @@ public class ListingQueryService {
 
     public ListingDetailResponse toDetail(Listing listing) {
         var amenities = listing.getAmenities().stream()
+                .filter(item -> !"PETS_ALLOWED".equals(item.getCode()))
                 .sorted(Comparator.comparing(Amenity::getSortOrder).thenComparing(Amenity::getCode))
                 .map(item -> new ListingOptionItemResponse(item.getCode(), item.getName(), item.getSortOrder()))
                 .toList();
@@ -168,7 +169,7 @@ public class ListingQueryService {
                 listing.getPublishedAt(), listing.getExpiresAt(), listing.getStatusChangedAt(),
                 listing.getStatusChangedBy(), listing.getVersion(),
                 listing.getCreatedAt(), listing.getUpdatedAt(), listing.getCreatedBy(), listing.getUpdatedBy(),
-                listing.getViewCount() != null ? listing.getViewCount() : 0L);
+                listing.getViewCount() != null ? listing.getViewCount() : 0L,ListingPolicyService.snapshot(listing));
     }
 
     /**

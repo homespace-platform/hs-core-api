@@ -787,6 +787,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     private void markEmbeddingFailed(String requestId, String code, String message) {
         new TransactionTemplate(transactionManager).executeWithoutResult(tx ->
             requestRepository.findById(requestId).ifPresent(req -> {
+            if (req.getStatus() == SignatureRequestStatus.CANCELLED || req.getStatus() == SignatureRequestStatus.SIGNED) return;
             if (req.getProcessingAttempts() >= MAX_EMBEDDING_ATTEMPTS) {
                 req.setStatus(SignatureRequestStatus.FAILED);
                 req.setFailedAt(Instant.now());

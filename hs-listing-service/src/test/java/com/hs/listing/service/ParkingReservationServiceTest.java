@@ -39,6 +39,145 @@ class ParkingReservationServiceTest {
         service = new ParkingReservationService(parkingReservationRepository, propertyBranchRepository, listingRepository);
     }
 
+    private final LocalDate amendmentStart = LocalDate.of(2026,11,15), amendmentEnd = LocalDate.of(2027,1,15);
+    private List<ParkingReservation> amendmentBookings;
+    private PropertyBranch amendmentBranch;
+    private void amendmentPool(Integer motorbikeCapacity, Integer carCapacity) {
+        var listing = Listing.builder().id("listing").branchId("branch").maxMotorbikeCount(0).maxCarCount(0).build();
+        amendmentBranch = PropertyBranch.builder().id("branch").motorbikeParkingCapacity(motorbikeCapacity).carParkingCapacity(carCapacity).build();
+        when(listingRepository.findById("listing")).thenReturn(java.util.Optional.of(listing));
+        when(listingRepository.findByIdForUpdate("listing")).thenReturn(java.util.Optional.of(listing));
+        when(propertyBranchRepository.findByIdForUpdate("branch")).thenReturn(java.util.Optional.of(amendmentBranch));
+        amendmentBookings = new ArrayList<>();
+        when(parkingReservationRepository.findByContractId(any())).thenAnswer(i -> amendmentBookings.stream()
+                .filter(r -> java.util.Objects.equals(r.getContractId(),i.getArgument(0))).toList());
+        when(parkingReservationRepository.findAllActiveBranchReservations(any(),any(),any())).thenAnswer(i -> amendmentBookings.stream()
+                .filter(r -> "branch".equals(r.getBranchId()) && r.getVehicleType() == i.getArgument(1)
+                        && (r.getStatus() == ParkingReservationStatus.ACTIVE || r.getStatus() == ParkingReservationStatus.HELD)).toList());
+        when(parkingReservationRepository.findOverlappingBranchReservations(any(),any(),any(),any(),any())).thenAnswer(i -> amendmentBookings.stream()
+                .filter(r -> "branch".equals(r.getBranchId()) && r.getVehicleType() == i.getArgument(1)
+                        && (r.getStatus() == ParkingReservationStatus.ACTIVE || r.getStatus() == ParkingReservationStatus.HELD)
+                        && r.getStartDate().isBefore(i.getArgument(4)) && r.getEndDateExclusive().isAfter(i.getArgument(3))).toList());
+        when(parkingReservationRepository.save(any())).thenAnswer(i -> {
+            ParkingReservation r = i.getArgument(0); if (!amendmentBookings.contains(r)) amendmentBookings.add(r); return r;
+        });
+    }
+    private ParkingReservation booked(String contractId, VehicleType type, int count, LocalDate start, LocalDate end) {
+        var booking = ParkingReservation.builder().contractId(contractId).branchId("branch").listingId("listing")
+                .vehicleType(type).quantity(count).startDate(start).endDateExclusive(end).status(ParkingReservationStatus.ACTIVE).build();
+        amendmentBookings.add(booking); return booking;
+    }
+    private void validateAmendment(int motorbikes, int cars) {
+        service.validateAmendmentCapacity("root",null,"listing",amendmentStart,amendmentEnd,motorbikes,cars);
+    }
+    private void holdAmendment(int motorbikes, int cars) {
+        service.holdForAmendment("root","appendix","rental","listing",amendmentStart,amendmentEnd,motorbikes,cars,Instant.now().plusSeconds(3600));
+    }
+    @Test void branchAmendmentIgnoresListingLimitsButCountsOtherRentalsAndOwnReplacementCorrectly() {
+        amendmentPool(10,2);
+        var old = booked("root",VehicleType.MOTORBIKE,2,amendmentStart.minusMonths(1),amendmentEnd);
+        booked("other",VehicleType.MOTORBIKE,6,amendmentStart,amendmentEnd);
+        booked("other-car",VehicleType.CAR,1,amendmentStart,amendmentEnd);
+        validateAmendment(4,1); verify(parkingReservationRepository,never()).save(any());
+        holdAmendment(4,1);
+        var held = amendmentBookings.stream().filter(r -> r.getStatus() == ParkingReservationStatus.HELD).toList();
+        assertEquals(2,held.size());assertEquals(3,held.stream().mapToInt(ParkingReservation::getQuantity).sum());
+        // Rechecking after approval must exclude THIS appendix's delta, not count it twice.
+        service.validateAmendmentCapacity("root","appendix","listing",amendmentStart,amendmentEnd,4,1);
+        service.activateAmendmentHold("root","appendix","rental","listing",amendmentStart,amendmentEnd,4,1);
+        assertEquals(amendmentStart,old.getEndDateExclusive());
+        assertTrue(held.stream().allMatch(r -> r.getStatus() == ParkingReservationStatus.RELEASED));
+        assertEquals(10,service.getMaxConcurrentUsage("branch",VehicleType.MOTORBIKE));
+        verify(listingRepository,never()).save(any());verify(propertyBranchRepository,never()).save(any());
+    }
+    @Test void insufficientBranchCapacityRejectsBeforeAnyHoldOrOriginalMutation() {
+        amendmentPool(10,0);
+        var old = booked("root",VehicleType.MOTORBIKE,2,amendmentStart.minusMonths(1),amendmentEnd);
+        booked("other",VehicleType.MOTORBIKE,6,amendmentStart,amendmentEnd);
+        var error = assertThrows(com.hs.common.advice.entity.AppException.class,() -> validateAmendment(5,0));
+        assertTrue(error.getMessage().contains("4 chỗ xe máy"));
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> holdAmendment(4,1));
+        verify(parkingReservationRepository,never()).save(any());assertEquals(amendmentEnd,old.getEndDateExclusive());
+    }
+    @Test void branchHeldSlotsFromAnotherAgreementAlsoConsumeCapacity() {
+        amendmentPool(5,0);
+        booked("other-pending",VehicleType.MOTORBIKE,3,amendmentStart,amendmentEnd).setStatus(ParkingReservationStatus.HELD);
+        validateAmendment(2,0);
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> validateAmendment(3,0));
+    }
+    @Test void futureLeaseExtensionReservesFullCountsAfterOldRootBookingEnds() {
+        amendmentPool(5,0);
+        var midpoint = amendmentStart.plusMonths(1);
+        booked("root",VehicleType.MOTORBIKE,2,amendmentStart.minusMonths(1),midpoint);
+        holdAmendment(3,0);
+        var held = amendmentBookings.stream().filter(r -> r.getStatus() == ParkingReservationStatus.HELD).toList();
+        assertEquals(2,held.size());
+        assertEquals(1,held.get(0).getQuantity());assertEquals(amendmentStart,held.get(0).getStartDate());assertEquals(midpoint,held.get(0).getEndDateExclusive());
+        assertEquals(3,held.get(1).getQuantity());assertEquals(midpoint,held.get(1).getStartDate());assertEquals(amendmentEnd,held.get(1).getEndDateExclusive());
+        assertEquals(3,service.calculatePeakUsage(amendmentBookings,amendmentStart,amendmentEnd));
+    }
+    @Test void extensionCannotBorrowRootSlotsAfterTheyHaveEnded() {
+        amendmentPool(5,0);
+        var midpoint = amendmentStart.plusMonths(1);
+        booked("root",VehicleType.MOTORBIKE,2,amendmentStart.minusMonths(1),midpoint);
+        booked("other",VehicleType.MOTORBIKE,4,midpoint,amendmentEnd);
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> holdAmendment(2,0));
+        verify(parkingReservationRepository,never()).save(any());
+    }
+    @Test void nonOverlappingBranchBookingsUsePeakNotSumAndRespectExclusiveEnd() {
+        amendmentPool(5,0);
+        var midpoint = amendmentStart.plusMonths(1);
+        booked("first",VehicleType.MOTORBIKE,3,amendmentStart,midpoint);
+        booked("second",VehicleType.MOTORBIKE,3,midpoint,amendmentEnd);
+        booked("outside",VehicleType.MOTORBIKE,100,amendmentEnd,amendmentEnd.plusMonths(1));
+        validateAmendment(2,0);holdAmendment(2,0);
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> validateAmendment(3,0));
+    }
+    @Test void replacementRetainsOldScheduledBookingUntilNewAppendixIsFullySigned() {
+        amendmentPool(10,0);
+        var historical = booked("root",VehicleType.MOTORBIKE,2,amendmentStart.minusMonths(1),amendmentStart);
+        var scheduled = booked("root",VehicleType.MOTORBIKE,4,amendmentStart,amendmentEnd);
+        booked("other",VehicleType.MOTORBIKE,5,amendmentStart,amendmentEnd);
+        holdAmendment(5,0);
+        assertEquals(ParkingReservationStatus.ACTIVE,scheduled.getStatus());assertEquals(4,scheduled.getQuantity());
+        service.activateAmendmentHold("root","appendix","rental","listing",amendmentStart,amendmentEnd,5,0);
+        assertEquals(ParkingReservationStatus.RELEASED,scheduled.getStatus());
+        assertEquals(ParkingReservationStatus.ACTIVE,historical.getStatus());assertEquals(amendmentStart,historical.getEndDateExclusive());
+        assertEquals(10,service.getMaxConcurrentUsage("branch",VehicleType.MOTORBIKE));
+    }
+    @Test void reductionAndCancellationNeverReleaseOriginalSlotsPrematurely() {
+        amendmentPool(10,0);
+        var original = booked("root",VehicleType.MOTORBIKE,5,amendmentStart.minusMonths(1),amendmentEnd);
+        holdAmendment(2,0);verify(parkingReservationRepository,never()).save(any());
+        holdAmendment(6,0);var delta = amendmentBookings.getLast();assertEquals(1,delta.getQuantity());
+        service.releaseRenewalHold("appendix");assertEquals(ParkingReservationStatus.RELEASED,delta.getStatus());
+        assertEquals(ParkingReservationStatus.ACTIVE,original.getStatus());assertEquals(amendmentEnd,original.getEndDateExclusive());
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> service.activateAmendmentHold("root","appendix","rental","listing",amendmentStart,amendmentEnd,6,0));
+        assertEquals(amendmentEnd,original.getEndDateExclusive());
+    }
+    @Test void recheckBeforeActivationRejectsChangedCapacityWithoutReleasingAnySlots() {
+        amendmentPool(5,0);
+        var original = booked("root",VehicleType.MOTORBIKE,2,amendmentStart.minusMonths(1),amendmentEnd);
+        holdAmendment(4,0);var held = amendmentBookings.getLast();
+        amendmentBranch.setMotorbikeParkingCapacity(3);
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> service.activateAmendmentHold("root","appendix","rental","listing",amendmentStart,amendmentEnd,4,0));
+        assertEquals(ParkingReservationStatus.HELD,held.getStatus());assertEquals(amendmentEnd,original.getEndDateExclusive());
+    }
+    @Test void zeroOrUnknownBranchCapacityAllowsOnlyZeroForThatVehicleType() {
+        amendmentPool(null,0);validateAmendment(0,0);
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> validateAmendment(1,0));
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> validateAmendment(0,1));
+    }
+    @Test void malformedCountsDatesAndConcurrentBranchRelinkAreRejected() {
+        amendmentPool(10,10);
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> validateAmendment(-1,0));
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> validateAmendment(0,101));
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> service.validateAmendmentCapacity("root",null,"listing",amendmentStart,amendmentStart,1,0));
+        when(listingRepository.findByIdForUpdate("listing")).thenReturn(java.util.Optional.of(Listing.builder().id("listing").branchId("changed-branch").build()));
+        assertThrows(com.hs.common.advice.entity.AppException.class,() -> validateAmendment(1,0));
+        verify(parkingReservationRepository,never()).save(any());
+    }
+
     @Test
     @DisplayName("6. Hai reservation không overlap có thể tái sử dụng slot")
     void testNonOverlappingReservationsReuseSlots() {
@@ -85,6 +224,25 @@ class ParkingReservationServiceTest {
         service.activateRenewalHold("agreement","root");
         assertEquals("root",held.getContractId());assertEquals(ParkingReservationStatus.ACTIVE,held.getStatus());assertNull(held.getHoldExpiresAt());
         assertEquals(start,original.getEndDateExclusive());
+    }
+
+    @Test void amendmentReservesOnlyDeltaAndPreservesHistoricalParking() {
+        var start = LocalDate.of(2026,11,14); var end = LocalDate.of(2027,1,14);
+        var original = ParkingReservation.builder().contractId("root").listingId("listing").rentalRequestId("rental")
+                .vehicleType(VehicleType.MOTORBIKE).quantity(1).startDate(start.minusMonths(1)).endDateExclusive(end).status(ParkingReservationStatus.ACTIVE).build();
+        var listing = Listing.builder().id("listing").maxMotorbikeCount(3).maxCarCount(0).build();
+        when(listingRepository.findById("listing")).thenReturn(java.util.Optional.of(listing));
+        when(listingRepository.findByIdForUpdate("listing")).thenReturn(java.util.Optional.of(listing));
+        when(parkingReservationRepository.findByContractId("root")).thenReturn(List.of(original));
+        when(parkingReservationRepository.findOverlappingListingReservations(any(),any(),any(),any(),any())).thenReturn(List.of(original));
+        service.holdForAmendment("root","appendix","rental","listing",start,end,2,0,Instant.now().plusSeconds(3600));
+        var captured = ArgumentCaptor.forClass(ParkingReservation.class); verify(parkingReservationRepository).save(captured.capture());
+        var hold = captured.getValue(); assertEquals(1,hold.getQuantity()); assertEquals(end,original.getEndDateExclusive());
+        when(parkingReservationRepository.findByContractId("appendix")).thenReturn(List.of(hold));
+        service.activateAmendmentHold("root","appendix","rental","listing",start,end,2,0);
+        assertEquals(start,original.getEndDateExclusive()); assertEquals(ParkingReservationStatus.RELEASED,hold.getStatus());
+        verify(parkingReservationRepository,times(4)).save(captured.capture());
+        var adjusted = captured.getAllValues().getLast(); assertEquals(2,adjusted.getQuantity()); assertEquals(start,adjusted.getStartDate()); assertEquals("root",adjusted.getContractId());
     }
 
     @Test void conflictingParkingCapacityRejectsRenewalWithoutMutatingOriginalBooking() {

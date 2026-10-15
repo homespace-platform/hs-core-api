@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.contract.service.MonthlyBillingSchedule;
 import com.hs.contract.service.ContractPolicyTerms;
+import com.hs.contract.service.LatePaymentPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -31,7 +32,23 @@ public class ContractRenderService {
      * Render dữ liệu vào template Word (.docx) và trả về mảng byte kết quả
      */
     public byte[] renderDocx(InputStream templateInputStream, Map<String, Object> dataModel) throws Exception {
-        try (XWPFTemplate template = XWPFTemplate.compile(templateInputStream).render(dataModel)) {
+        byte[] bytes = templateInputStream.readAllBytes();
+        boolean policyTable = false;
+        try (var zip = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(bytes))) {
+            java.util.zip.ZipEntry entry;
+            while ((entry=zip.getNextEntry()) != null) if ("word/document.xml".equals(entry.getName())) {
+                policyTable = new String(zip.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8).contains("{{#policiesTable}}"); break;
+            }
+        }
+        var resolved = new HashMap<>(dataModel);
+        if (policyTable && dataModel.get("contract") instanceof Map<?,?> original) {
+            var contract = new LinkedHashMap<String,Object>(); original.forEach((k,v) -> contract.put(k.toString(),v));
+            String terms = Objects.toString(contract.get("specialTerms"),"");
+            int index = terms.lastIndexOf("\nCHÍNH SÁCH ÁP DỤNG CHO TÀI SẢN THUÊ:\n");
+            if (index >= 0) contract.put("specialTerms",terms.substring(0,index));
+            resolved.put("contract",contract);
+        }
+        try (XWPFTemplate template = XWPFTemplate.compile(new java.io.ByteArrayInputStream(bytes)).render(resolved)) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             template.write(out);
             return out.toByteArray();
@@ -100,8 +117,16 @@ public class ContractRenderService {
         contract.put("schemaVersion", schemaVersion != null ? String.valueOf(schemaVersion) : "2");
         contract.put("revisionNumber", revisionNumber != null ? String.valueOf(revisionNumber) : "1");
         String terms = specialTerms == null ? "" : specialTerms.trim();
+        String deadline=financial==null?"":Objects.toString(financial.get("paymentDueDay"),"");
+        if(!deadline.isBlank())terms+=(terms.isEmpty()?"":"\n")+"Hạn thanh toán theo quy trình hệ thống: "+deadline+".";
+        String lateFeeClause=LatePaymentPolicy.from(policies).clause();
+        if(!lateFeeClause.isBlank())terms+=(terms.isEmpty()?"":"\n")+lateFeeClause;
         String policyClause = ContractPolicyTerms.clause(policies);
         if (!policyClause.isBlank()) terms = terms.isEmpty() ? policyClause : terms + "\n" + policyClause;
+        // Compatibility for old Word templates without #policiesTable. New templates should
+        // place that dynamic table at the policy section; this text keeps every listing rule visible.
+        String listingRules = policies == null ? "" : ContractListingPolicies.text(policies);
+        if (!listingRules.isBlank()) terms += "\nCHÍNH SÁCH ÁP DỤNG CHO TÀI SẢN THUÊ:\n" + listingRules;
         contract.put("specialTerms", terms);
         model.put("contract", contract);
 
@@ -111,6 +136,7 @@ public class ContractRenderService {
         model.put("propertyFeaturesTable", buildPropertyFeaturesTable(property));
         model.put("amenitiesTable", buildAmenitiesTable(amenities));
         model.put("initialPaymentTable", buildInitialPaymentTable(initialPayment, financial));
+        model.put("policiesTable", buildPoliciesTable(policies));
 
         return model;
     }
@@ -162,7 +188,7 @@ public class ContractRenderService {
         property.put("listingCode", "HS-2026-DEMO");
         property.put("rentalScope", "Thuê toàn bộ căn hộ chung cư");
         property.put("fullAddress", "Tầng 12, Căn hộ A12-08, Tòa tháp Landmark, 720A Điện Biên Phủ, Phường 22, Quận Bình Thạnh, TP.HCM");
-        property.put("areaText", "75 m²");
+        property.put("areaText", "75 mét vuông");
         property.put("propertyType", "Căn hộ chung cư");
         property.put("unitNumber", "A12-08");
         property.put("floor", "Tầng 12");
@@ -203,10 +229,9 @@ public class ContractRenderService {
         );
 
         List<Map<String, Object>> amenities = List.of(
-                Map.of("index", 1, "code", "WIFI", "name", "Internet Wifi tốc độ cao", "scope", "Riêng trong căn/phòng/nhà", "costText", "Đã bao gồm trong giá thuê", "conditionText", "Gói cước 150 Mbps"),
-                Map.of("index", 2, "code", "PARKING", "name", "Chỗ để xe máy", "scope", "Dùng chung", "costText", "120.000 VNĐ / xe / tháng", "conditionText", "Đăng ký 01 xe máy với ban quản lý"),
-                Map.of("index", 3, "code", "ELEVATOR", "name", "Thang máy thẻ từ", "scope", "Dùng chung", "costText", "Đã bao gồm trong giá thuê", "conditionText", "Theo nội quy tòa nhà"),
-                Map.of("index", 4, "code", "PETS_ALLOWED", "name", "Được phép nuôi thú cưng", "scope", "Riêng trong căn/phòng/nhà", "costText", "Miễn phí", "conditionText", "Bên B chịu trách nhiệm giữ gìn vệ sinh, tiếng ồn và bồi thường thiệt hại nếu có")
+                Map.of("index", 1, "code", "WIFI", "name", "WiFi"),
+                Map.of("index", 2, "code", "AIR_CONDITIONER", "name", "Máy lạnh"),
+                Map.of("index", 3, "code", "CUSTOM", "name", "Ban công đón gió")
         );
 
         List<Map<String, Object>> charges = List.of(
@@ -279,9 +304,9 @@ public class ContractRenderService {
         property.put("listingCode", getStr(src, "listingCode", ""));
         property.put("rentalScope", getStr(src, "rentalScope", ""));
         property.put("fullAddress", getStr(src, "fullAddress", ""));
-        property.put("areaText", getStr(src, "areaText", ""));
+        property.put("areaText", getStr(src, "areaText", "").replace("m²", "mét vuông"));
         property.put("propertyType", getStr(src, "propertyType", ""));
-        property.put("unitNumber", getStr(src, "unitNumber", ""));
+        property.put("unitNumber", getStr(src, "unitNumber", "").isBlank() ? "Toàn bộ căn" : getStr(src, "unitNumber", ""));
         property.put("floor", getStr(src, "floor", ""));
         property.put("buildingName", getStr(src, "buildingName", ""));
         property.put("maxOccupants", String.valueOf(src.getOrDefault("maxOccupants", "")));
@@ -364,7 +389,7 @@ public class ContractRenderService {
             for (Object obj : list) {
                 if (obj instanceof Map<?, ?> map) {
                     String name = String.valueOf(map.get("featureName"));
-                    String val = String.valueOf(map.get("featureValue"));
+                    String val = ContractPropertyFeatureLabels.value(name, map.get("featureValue"));
                     if (!val.isBlank() && !"null".equalsIgnoreCase(val)) {
                         rows.add(Rows.of(name, val).create());
                     }
@@ -401,10 +426,10 @@ public class ContractRenderService {
     }
 
     /**
-     * Bảng động tiện ích & quyền sử dụng {{#amenitiesTable}}
+     * Bảng tiện ích đúng tên được lưu, không suy diễn điều kiện/phạm vi/chi phí.
      */
     private TableRenderData buildAmenitiesTable(List<Map<String, Object>> amenities) {
-        RowRenderData header = Rows.of("STT", "Tiện ích / Quyền sử dụng", "Phạm vi", "Chi phí", "Điều kiện / Ghi chú")
+        RowRenderData header = Rows.of("STT", "Tên tiện ích")
                 .bgColor("F2F4F7")
                 .textColor("1D2939")
                 .textBold()
@@ -415,13 +440,10 @@ public class ContractRenderService {
             int stt = 1;
             for (Map<String, Object> a : amenities) {
                 String name = getStr(a, "name", "");
-                String scope = getStr(a, "scope", "Riêng trong căn/phòng/nhà");
-                String cost = getStr(a, "costText", "Đã bao gồm trong giá thuê");
-                String condition = getStr(a, "conditionText", "Theo nội quy sử dụng");
-                rows.add(Rows.of(String.valueOf(stt++), name, scope, cost, condition).create());
+                rows.add(Rows.of(String.valueOf(stt++), name).create());
             }
         } else {
-            rows.add(Rows.of("1", "Tiện ích cơ bản theo tài sản thuê", "Theo phạm vi bàn giao", "Đã bao gồm trong giá thuê", "Sử dụng đúng mục đích").create());
+            rows.add(Rows.of("—", "Không có tiện ích được ghi nhận").create());
         }
 
         List<RowRenderData> allRows = new ArrayList<>();
@@ -490,7 +512,7 @@ public class ContractRenderService {
                 rows.add(Rows.of(name, method, note).create());
             }
         } else {
-            rows.add(Rows.of("Không phát sinh phí dịch vụ khác", "Đã bao gồm trong giá thuê", "Không thu riêng").create());
+            rows.add(Rows.of("Chưa ghi nhận khoản phí dịch vụ", "—", "Theo các khoản đã thỏa thuận; không tự suy ra miễn phí").create());
         }
 
         List<RowRenderData> allRows = new ArrayList<>();
@@ -516,16 +538,28 @@ public class ContractRenderService {
                 String name = getStr(eq, "name", "");
                 String quantity = String.valueOf(eq.getOrDefault("quantity", "1"));
                 String condition = getStr(eq, "condition", "Tốt");
+                String note = getStr(eq,"note","").trim();
+                if (!note.isEmpty() && !condition.contains(note)) condition += " — " + note;
                 rows.add(Rows.of(String.valueOf(stt++), name, quantity, condition).create());
             }
         } else {
-            rows.add(Rows.of("1", "Nhà trống bàn giao cơ bản", "1", "Nguyên trạng lúc nhận nhà").create());
+            rows.add(Rows.of("—", "Chưa ghi nhận tài sản bàn giao", "—", "Đối chiếu biên bản bàn giao thực tế").create());
         }
 
         List<RowRenderData> allRows = new ArrayList<>();
         allRows.add(header);
         allRows.addAll(rows);
         return Tables.create(allRows.toArray(new RowRenderData[0]));
+    }
+
+    @SuppressWarnings("unchecked")
+    private TableRenderData buildPoliciesTable(Map<String,Object> policies) {
+        var rows = new ArrayList<RowRenderData>();
+        rows.add(Rows.of("Chính sách","Quy định áp dụng").bgColor("F2F4F7").textColor("1D2939").textBold().create());
+        if (policies != null && policies.get("listingPolicies") instanceof List<?> source && !source.isEmpty()) {
+            for (var item : source) { var row = (Map<String,Object>)item; rows.add(Rows.of(getStr(row,"label",""),getStr(row,"displayValue","")).create()); }
+        } else rows.add(Rows.of("Chưa có bản chụp chính sách bài đăng","Đối chiếu điều khoản đã ký; không tự bổ sung quyền hoặc hạn chế").create());
+        return Tables.create(rows.toArray(new RowRenderData[0]));
     }
 
     private String getStr(Map<String, Object> map, String key, String defaultVal) {
