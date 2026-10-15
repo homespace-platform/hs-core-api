@@ -1,4 +1,4 @@
 ```
-mvn clean install -DskipTests
-mvn spring-boot:run -pl hs-api-service
+./mvnw clean install -DskipTests
+./mvnw spring-boot:run -pl hs-api-service
 ```
