@@ -15,7 +15,12 @@ public record BillingPeriodView(String kind, Integer paymentPeriodNumber,
         // Issued bills retain their original meaning even after a renewal changes the lease length.
         boolean hasRent = invoice.getStatus() == MonthlyInvoiceStatus.DRAFT
                 ? leaseMonths != null && invoice.getPeriodIndex() + 1 < leaseMonths : issuedWithRent;
-        if (!hasRent) return new BillingPeriodView(leaseMonths!=null && invoice.getPeriodIndex()+1<leaseMonths ? "COSTS_ONLY" : "FINAL_SETTLEMENT", null, null, null);
+        if (!hasRent) {
+            String kind=invoice.getStatus()==MonthlyInvoiceStatus.DRAFT
+                    ? (leaseMonths!=null&&invoice.getPeriodIndex()+1<leaseMonths?"COSTS_ONLY":"FINAL_SETTLEMENT")
+                    : (invoice.getIssuedBillingKind()!=null?invoice.getIssuedBillingKind():"FINAL_SETTLEMENT");
+            return new BillingPeriodView(kind,null,null,null);
+        }
         return new BillingPeriodView("RECURRING", invoice.getPeriodIndex() + 2,
                 invoice.getPeriodEndExclusive(), leaseStart == null ? null
                 : leaseStart.plusMonths(invoice.getPeriodIndex() + 2L));

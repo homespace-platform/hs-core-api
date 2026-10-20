@@ -13,7 +13,8 @@ import java.time.LocalDate;
         @Index(name = "idx_rental_request_listing_status", columnList = "listing_id, status"),
         @Index(name = "idx_rental_request_owner_status", columnList = "owner_id, status"),
         @Index(name = "idx_rental_request_renter_status", columnList = "renter_id, status"),
-        @Index(name = "idx_rental_request_expires_status", columnList = "hold_expires_at, status")
+        @Index(name = "idx_rental_request_expires_status", columnList = "hold_expires_at, status"),
+        @Index(name = "idx_rental_request_response_status", columnList = "status, respond_by")
 })
 @Getter
 @Setter
@@ -120,4 +121,13 @@ public class RentalRequest extends BaseEntity {
 
     @Column(name = "hold_expires_at")
     private Instant holdExpiresAt;
+
+    @Column(name = "respond_by")
+    private Instant respondBy;
+
+    private Instant cancellationRequestedAt;
+    @Column(length=1000) private String cancellationReason;
+
+    @Version
+    private Long version;
 }

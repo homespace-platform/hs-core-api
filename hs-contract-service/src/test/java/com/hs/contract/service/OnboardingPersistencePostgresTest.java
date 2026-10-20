@@ -1,0 +1,125 @@
+package com.hs.contract.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hs.common.time.BillingTime;
+import com.hs.contract.repository.*;
+import com.hs.contract.service.engine.ContractDataBuilder;
+import com.hs.listing.model.*;
+import com.hs.listing.model.constant.*;
+import com.hs.listing.repository.*;
+import com.hs.listing.service.*;
+import com.hs.payment.model.*;
+import com.hs.payment.model.constant.*;
+import com.hs.payment.repository.PaymentRequestRepository;
+import com.hs.payment.service.PaymentRequestService;
+import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.SpringBootConfiguration;
+import org.springframework.boot.persistence.autoconfigure.EntityScan;
+import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
+import org.springframework.context.annotation.*;
+import org.springframework.core.env.Environment;
+import org.springframework.data.jpa.repository.config.*;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.transaction.TestTransaction;
+import java.math.BigDecimal;
+import java.time.*;
+import java.util.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
+
+/** Run only against a throwaway database. Real schema, row locks, date updates and rollback. */
+@EnabledIfEnvironmentVariable(named="HS_TEST_PG_URL",matches=".+")
+@DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
+@TestPropertySource(properties={"spring.datasource.url=${HS_TEST_PG_URL}","spring.datasource.username=${HS_TEST_PG_USER:postgres}",
+    "spring.datasource.password=${HS_TEST_PG_PASSWORD:test}","spring.jpa.hibernate.ddl-auto=create-drop","spring.jpa.show-sql=false","spring.profiles.active=test"})
+@Import({RentalOnboardingService.class,ParkingReservationService.class})
+class OnboardingPersistencePostgresTest {
+    @SpringBootConfiguration @EntityScan("com.hs")
+    @EnableJpaRepositories(basePackageClasses={RentalRequestRepository.class,PaymentRequestRepository.class,ContractRepository.class})
+    @EnableJpaAuditing static class Config {
+        @Bean BillingTime time(Environment env){return new BillingTime("2026-10-21T10:00:00",env);}
+        @Bean ObjectMapper mapper(){return new ObjectMapper().findAndRegisterModules();}
+    }
+    @MockitoBean PaymentRequestService paymentService;
+    @MockitoBean ListingStatusService listingStatus;
+    @MockitoBean RentalCostCalculator calculator;
+    @MockitoBean ContractDataBuilder builder;
+    @Autowired RentalOnboardingService service;
+    @Autowired RentalRequestRepository rentals;
+    @Autowired ListingRepository listings;
+    @Autowired PaymentRequestRepository payments;
+    @Autowired RentalStartChangeRepository changes;
+    @Autowired ContractRepository contracts;
+    @Autowired ParkingReservationRepository reservations;
+    @Autowired EntityManager em;
+    String id;
+    @BeforeEach void fixture() {
+        var listing=Listing.builder().id(UUID.randomUUID().toString()).ownerId("owner").title("Phòng kiểm thử nhận nhà").description("Dữ liệu kiểm thử")
+            .category(ListingCategory.ROOM).status(ListingStatus.RESERVED).priceAmount(new BigDecimal("5000000"))
+            .availableFrom(LocalDate.of(2026,10,21)).areaM2(BigDecimal.TEN).currency("VND").minimumLeaseMonths(1)
+            .priceUnit(PriceUnit.MONTH).paymentCycle(PaymentCycle.MONTHLY).depositType(DepositType.MONTH_COUNT).build();
+        listing=listings.saveAndFlush(listing);
+        var r=RentalRequest.builder().id(UUID.randomUUID().toString()).listing(listing).ownerId("owner").renterId("tenant")
+            .renterName("Người thuê thử").renterPhone("0900000000").status(RentalRequestStatus.ACCEPTED)
+            .moveInDate(LocalDate.of(2026,11,1)).leaseMonths(3).monthlyRentPrice(new BigDecimal("5000000"))
+            .depositAmount(new BigDecimal("10000000")).build();
+        id=rentals.saveAndFlush(r).getId();
+        payments.saveAndFlush(PaymentRequest.builder().rentalRequestId(id).listingId(listing.getId()).payerId("tenant").payeeId("owner")
+            .type(PaymentType.RESERVATION_DEPOSIT).onboardingKey(id+":RESERVATION_DEPOSIT").direction(PaymentDirection.TENANT_TO_LANDLORD)
+            .status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("10000000")).transferReference("HS"+UUID.randomUUID().toString().substring(0,12))
+            .confirmedAt(Instant.parse("2026-10-21T03:00:00Z")).build());
+        em.clear();
+    }
+    @Test void futureDepositCreatesNoFirstMonthAndCanPrepareDraft() {
+        var v=service.refresh(id,"tenant");assertEquals("WAITING_START",v.stage());assertTrue(v.canPrepareContract());assertFalse(v.canSign());
+        assertTrue(payments.findByRentalRequestIdAndType(id,PaymentType.INITIAL).isEmpty());
+    }
+    @Test void tenantDraftPaginationRequiresAcceptedRentalAndConfirmedPaymentForTheSameParties() {
+        var r=rentals.findById(id).orElseThrow();
+        var draft=com.hs.contract.model.Contract.builder().id(UUID.randomUUID().toString()).contractNumber("TEST-"+UUID.randomUUID())
+            .rentalRequestId(id).listingId(r.getListing().getId()).landlordId("owner").tenantId("tenant")
+            .templateId("template").templateVersionId("version").status(com.hs.contract.model.constant.ContractStatus.DRAFT).build();
+        contracts.saveAndFlush(draft);
+        org.springframework.data.jpa.domain.Specification<com.hs.contract.model.Contract> visible=(root,query,cb)->cb.and(
+            cb.equal(root.get("tenantId"),"tenant"),cb.isNull(root.get("parentContractId")),ContractDraftVisibility.tenantReadable(root,query,cb));
+        assertEquals(1,contracts.findAll(visible,org.springframework.data.domain.PageRequest.of(0,10)).getTotalElements());
+        var deposit=payments.findByRentalRequestIdAndType(id,PaymentType.RESERVATION_DEPOSIT).orElseThrow();
+        deposit.setStatus(PaymentStatus.TRANSFER_REPORTED);payments.saveAndFlush(deposit);
+        assertEquals(0,contracts.count(visible));
+        deposit.setStatus(PaymentStatus.CONFIRMED);deposit.setPayeeId("other-owner");payments.saveAndFlush(deposit);
+        assertEquals(0,contracts.count(visible));
+        deposit.setPayeeId("owner");payments.saveAndFlush(deposit);r.setStatus(RentalRequestStatus.PENDING);rentals.saveAndFlush(r);
+        assertEquals(0,contracts.count(visible));
+    }
+    @Test void earlierStartPersistsCalendarAndAuditWithoutChangingPrice() {
+        service.requestEarlier(id,"tenant",new RentalOnboardingService.StartRequest(LocalDate.of(2026,10,25),"Thống nhất nhận nhà sớm"));
+        String change=changes.findByRentalRequestIdOrderByRequestedAtDesc(id).getFirst().getId();
+        service.decideEarlier(id,change,"owner",new RentalOnboardingService.Decision(true,null));em.flush();em.clear();
+        var r=rentals.findById(id).orElseThrow();assertEquals(LocalDate.of(2026,10,25),r.getMoveInDate());assertEquals(new BigDecimal("5000000.00"),r.getMonthlyRentPrice());
+        assertEquals("APPROVED",changes.findById(change).orElseThrow().getStatus());
+        assertEquals(LocalDate.of(2027,1,25),service.refresh(id,"owner").endExclusive());
+    }
+    @Test void failedCapacityDecisionRollsBackBothDateAndDecision() {
+        service.requestEarlier(id,"tenant",new RentalOnboardingService.StartRequest(LocalDate.of(2026,10,25),"Thống nhất nhận nhà sớm"));
+        String change=changes.findByRentalRequestIdOrderByRequestedAtDesc(id).getFirst().getId();
+        var r=rentals.findById(id).orElseThrow();
+        var hold=reservations.saveAndFlush(ParkingReservation.builder().id(UUID.randomUUID().toString()).rentalRequestId(id)
+            .listingId(r.getListing().getId()).vehicleType(VehicleType.MOTORBIKE).quantity(1)
+            .startDate(r.getMoveInDate()).endDateExclusive(r.getMoveInDate().plusMonths(3)).status(ParkingReservationStatus.HELD).build());
+        String holdId=hold.getId();
+        // Commit only the fixture so the failing public service has its own real transaction.
+        TestTransaction.flagForCommit();TestTransaction.end();
+        doThrow(new IllegalStateException("Không đủ chỗ xe")).when(calculator).calculate(any(),any(),anyInt(),anyInt(),anyInt(),anyInt(),any());
+        assertThrows(IllegalStateException.class,()->service.decideEarlier(id,change,"owner",new RentalOnboardingService.Decision(true,null)));
+        TestTransaction.start();
+        assertEquals(LocalDate.of(2026,11,1),rentals.findById(id).orElseThrow().getMoveInDate());
+        assertEquals("REQUESTED",changes.findById(change).orElseThrow().getStatus());
+        assertEquals(ParkingReservationStatus.HELD,reservations.findById(holdId).orElseThrow().getStatus());
+    }
+}

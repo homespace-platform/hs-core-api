@@ -372,6 +372,46 @@ class ContractServiceImplTest {
     }
 
     @Test
+    void tenantCanReviewDepositBackedDraftButCannotEditOrTreatDepositAsFullPayment() {
+        var contracts=mock(ContractRepository.class);var rentals=mock(RentalRequestRepository.class);
+        var payments=mock(PaymentRequestRepository.class);var docs=mock(ContractDocumentRepository.class);
+        var service=createServiceWithPayment(contracts,mock(ContractRevisionRepository.class),docs,
+                mock(ContractTemplateVersionRepository.class),rentals,mock(ListingStatusService.class),payments);
+        var draft=Contract.builder().id("draft").rentalRequestId("rental").landlordId("owner").tenantId("tenant")
+                .status(ContractStatus.DRAFT).rentalPaymentId("deposit").build();
+        var rental=RentalRequest.builder().id("rental").ownerId("owner").renterId("tenant").status(RentalRequestStatus.ACCEPTED).build();
+        var deposit=PaymentRequest.builder().id("deposit").rentalRequestId("rental").payerId("tenant").payeeId("owner")
+                .type(PaymentType.RESERVATION_DEPOSIT).status(PaymentStatus.CONFIRMED).build();
+        when(contracts.findById("draft")).thenReturn(Optional.of(draft));
+        when(contracts.findByIdForUpdate("draft")).thenReturn(Optional.of(draft));
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(draft));
+        when(contracts.findByUserInvolved("tenant")).thenReturn(List.of(draft));
+        when(rentals.findById("rental")).thenReturn(Optional.of(rental));
+        when(payments.findByRentalRequestIdAndType("rental",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.of(deposit));
+        when(payments.findById("deposit")).thenReturn(Optional.of(deposit));
+        when(docs.findByContractIdOrderByGeneratedAtDesc("draft")).thenReturn(List.of());
+        UserContextHolder.set(new UserContext("tenant","tenant@example.com"));
+        assertEquals("draft",service.getContract("draft").getId());
+        assertEquals(ContractPaymentStatus.UNPAID,service.getContract("draft").getPaymentStatus());
+        assertEquals("draft",service.findByRentalRequestId("rental").getId());
+        assertEquals(1,service.getContractsForCurrentUser((ContractStatus)null).size());
+        assertEquals(List.of(),service.getDocumentsByContract("draft"));
+        assertThrows(AppException.class,()->service.updateRevision("draft",new UpdateContractRevisionRequest()));
+        for(var status:PaymentStatus.values()) {
+            if(status==PaymentStatus.CONFIRMED)continue;
+            deposit.setStatus(status);
+            assertNull(service.findByRentalRequestId("rental"));
+            assertThrows(AppException.class,()->service.getContract("draft"));
+        }
+        deposit.setStatus(PaymentStatus.CONFIRMED);deposit.setPayerId("another-tenant");
+        assertThrows(AppException.class,()->service.getContract("draft"));
+        deposit.setPayerId("tenant");rental.setStatus(RentalRequestStatus.CANCELLED_BY_RENTER);
+        assertThrows(AppException.class,()->service.getContract("draft"));
+        UserContextHolder.set(new UserContext("stranger","stranger@example.com"));
+        assertThrows(AppException.class,()->service.getContract("draft"));
+    }
+
+    @Test
     void mockPaymentIncludesEstimatedChargesAndExcludesMeterCharges() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         ContractRevisionRepository revisionRepository = mock(ContractRevisionRepository.class);
@@ -416,6 +456,7 @@ class ContractServiceImplTest {
     void paidTenantCanSignAndCompleteRentalLifecycle() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
+        when(rentalRequestRepository.findByIdForUpdate(anyString())).thenAnswer(i -> rentalRequestRepository.findById(i.getArgument(0)));
         ListingStatusService listingStatusService = mock(ListingStatusService.class);
         ContractServiceImpl service = createService(
                 contractRepository,
@@ -457,9 +498,66 @@ class ContractServiceImplTest {
     }
 
     @Test
+    void internalSigningIsBlockedUntilBackendSaysSigningIsOpen() throws Exception {
+        ContractRepository contractRepository = mock(ContractRepository.class);
+        RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
+        when(rentalRequestRepository.findByIdForUpdate(anyString())).thenAnswer(i -> rentalRequestRepository.findById(i.getArgument(0)));
+        ListingStatusService listingStatusService = mock(ListingStatusService.class);
+        ContractServiceImpl service = createService(contractRepository, mock(ContractRevisionRepository.class),
+                mock(ContractDocumentRepository.class), mock(ContractTemplateVersionRepository.class),
+                rentalRequestRepository, listingStatusService);
+        var onboarding = mock(com.hs.contract.service.RentalOnboardingService.class);
+        var field = ContractServiceImpl.class.getDeclaredField("onboarding");
+        field.setAccessible(true);
+        field.set(service, onboarding);
+        org.mockito.Mockito.doThrow(new AppException(com.hs.contract.advice.ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED, "Chưa đến ngày bắt đầu thuê"))
+                .when(onboarding).validateSigning("request-1", "tenant-1");
+        Contract contract = Contract.builder().id("contract-1").rentalRequestId("request-1").listingId("listing-1")
+                .landlordId("landlord-1").tenantId("tenant-1").status(ContractStatus.PENDING_REVIEW)
+                .paymentStatus(ContractPaymentStatus.PAID).build();
+        UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
+        when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
+        when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
+        when(rentalRequestRepository.findById("request-1")).thenReturn(Optional.of(RentalRequest.builder()
+                .id("request-1").ownerId("landlord-1").renterId("tenant-1").status(RentalRequestStatus.ACCEPTED).build()));
+
+        assertThrows(AppException.class, () -> service.sign("contract-1"));
+        verify(onboarding).validateSigning("request-1", "tenant-1");
+        assertEquals(ContractStatus.PENDING_REVIEW, contract.getStatus());
+        verify(listingStatusService, org.mockito.Mockito.never())
+                .markRentedByContract(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void tenantReviewingADraftCannotRenderOrSendIt() {
+        var contracts = mock(ContractRepository.class);
+        var rentals = mock(RentalRequestRepository.class);
+        var payments = mock(PaymentRequestRepository.class);
+        var service = createServiceWithPayment(contracts, mock(ContractRevisionRepository.class), mock(ContractDocumentRepository.class),
+                mock(ContractTemplateVersionRepository.class), rentals, mock(ListingStatusService.class), payments);
+        var draft = Contract.builder().id("draft").rentalRequestId("rental").landlordId("owner").tenantId("tenant")
+                .status(ContractStatus.DRAFT).build();
+        var rental = RentalRequest.builder().id("rental").ownerId("owner").renterId("tenant").status(RentalRequestStatus.ACCEPTED).build();
+        var deposit = PaymentRequest.builder().id("deposit").rentalRequestId("rental").payerId("tenant").payeeId("owner")
+                .type(PaymentType.RESERVATION_DEPOSIT).status(PaymentStatus.CONFIRMED).build();
+        when(contracts.findById("draft")).thenReturn(Optional.of(draft));
+        when(contracts.findByIdForUpdate("draft")).thenReturn(Optional.of(draft));
+        when(rentals.findById("rental")).thenReturn(Optional.of(rental));
+        when(payments.findByRentalRequestIdAndType("rental", PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.of(deposit));
+        UserContextHolder.set(new UserContext("tenant", "tenant@example.com"));
+
+        assertEquals("draft", service.getContract("draft").getId());
+        assertThrows(AppException.class, () -> service.triggerPreview("draft"));
+        assertThrows(AppException.class, () -> service.sendToTenant("draft"));
+        assertThrows(AppException.class, () -> service.sign("draft"));
+        assertEquals(ContractStatus.DRAFT, draft.getStatus());
+    }
+
+    @Test
     void unpaidTenantCannotSignContract() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
+        when(rentalRequestRepository.findByIdForUpdate(anyString())).thenAnswer(i -> rentalRequestRepository.findById(i.getArgument(0)));
         ListingStatusService listingStatusService = mock(ListingStatusService.class);
         ContractServiceImpl service = createService(
                 contractRepository,
@@ -490,6 +588,7 @@ class ContractServiceImplTest {
     void createDraft_failsWhenInitialPaymentNotPaid() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
+        when(rentalRequestRepository.findByIdForUpdate(anyString())).thenAnswer(i -> rentalRequestRepository.findById(i.getArgument(0)));
         PaymentRequestRepository paymentRequestRepository = mock(PaymentRequestRepository.class);
 
         ContractServiceImpl service = createServiceWithPayment(
@@ -524,6 +623,7 @@ class ContractServiceImplTest {
     void createDraft_succeedsWhenInitialPaymentIsConfirmed() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
+        when(rentalRequestRepository.findByIdForUpdate(anyString())).thenAnswer(i -> rentalRequestRepository.findById(i.getArgument(0)));
         PaymentRequestRepository paymentRequestRepository = mock(PaymentRequestRepository.class);
         ContractTemplateVersionRepository templateVersionRepository = mock(ContractTemplateVersionRepository.class);
         ContractRevisionRepository revisionRepository = mock(ContractRevisionRepository.class);
@@ -619,6 +719,7 @@ class ContractServiceImplTest {
             com.hs.contract.advice.ContractErrorCode expectedError) {
         ContractRepository contracts = mock(ContractRepository.class);
         RentalRequestRepository requests = mock(RentalRequestRepository.class);
+        when(requests.findByIdForUpdate(anyString())).thenAnswer(i -> requests.findById(i.getArgument(0)));
         PaymentRequestRepository payments = mock(PaymentRequestRepository.class);
         ContractTemplateVersionRepository versions = mock(ContractTemplateVersionRepository.class);
         ContractServiceImpl service = createServiceWithPayment(
@@ -675,6 +776,7 @@ class ContractServiceImplTest {
     void sign_allowedForNewContractWhenRentalPaymentIsConfirmed() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
+        when(rentalRequestRepository.findByIdForUpdate(anyString())).thenAnswer(i -> rentalRequestRepository.findById(i.getArgument(0)));
         ListingStatusService listingStatusService = mock(ListingStatusService.class);
         PaymentRequestRepository paymentRequestRepository = mock(PaymentRequestRepository.class);
 
@@ -728,6 +830,7 @@ class ContractServiceImplTest {
     void createDraft_succeedsWhenInitialPaymentIsConfirmedReal() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
+        when(rentalRequestRepository.findByIdForUpdate(anyString())).thenAnswer(i -> rentalRequestRepository.findById(i.getArgument(0)));
         PaymentRequestRepository paymentRequestRepository = mock(PaymentRequestRepository.class);
         ContractTemplateVersionRepository templateVersionRepository = mock(ContractTemplateVersionRepository.class);
         ContractRevisionRepository revisionRepository = mock(ContractRevisionRepository.class);

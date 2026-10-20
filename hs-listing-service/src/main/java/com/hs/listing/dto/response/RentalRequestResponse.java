@@ -40,6 +40,7 @@ public record RentalRequestResponse(
         String rejectReason,
         Instant acceptedAt,
         Instant holdExpiresAt,
+        Instant respondBy,
         InitialPaymentSummary initialPayment,
         Instant createdAt,
         Instant updatedAt

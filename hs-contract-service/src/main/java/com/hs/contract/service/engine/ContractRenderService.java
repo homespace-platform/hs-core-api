@@ -49,6 +49,19 @@ public class ContractRenderService {
             resolved.put("contract",contract);
         }
         try (XWPFTemplate template = XWPFTemplate.compile(new java.io.ByteArrayInputStream(bytes)).render(resolved)) {
+            // These are document-generation facts; actual signature timestamps live in the PDF signatures.
+            for(var paragraph:template.getXWPFDocument().getParagraphs()) {
+                String text=paragraph.getText();
+                String adjusted=text.replace("Ngày ký:","Ngày lập văn bản:");
+                if(adjusted.contains("Bảng ghi nhận thanh toán ban đầu"))
+                    adjusted=adjusted.replace("đã được hai bên xác nhận","theo trạng thái từng khoản");
+                if(!adjusted.equals(text)) {
+                    var style=paragraph.getRuns().isEmpty()?null:paragraph.getRuns().getFirst().getCTR().getRPr();
+                    var copy=style==null?null:(org.openxmlformats.schemas.wordprocessingml.x2006.main.CTRPr)style.copy();
+                    for(int n=paragraph.getRuns().size()-1;n>=0;n--)paragraph.removeRun(n);
+                    var run=paragraph.createRun();if(copy!=null)run.getCTR().setRPr(copy);run.setText(adjusted);
+                }
+            }
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             template.write(out);
             return out.toByteArray();

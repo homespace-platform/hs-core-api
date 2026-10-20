@@ -36,6 +36,8 @@ public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, 
                                                  @Param("actorId") String actorId);
 
     Optional<PaymentRequest> findByTransferReference(String transferReference);
+    Optional<PaymentRequest> findByOnboardingKey(String onboardingKey);
+    List<PaymentRequest> findByRentalRequestIdAndTypeIn(String rentalRequestId, Collection<PaymentType> types);
 
     Optional<PaymentRequest> findByInvoiceId(String invoiceId);
     Optional<PaymentRequest> findByContractIdAndType(String contractId, PaymentType type);

@@ -32,6 +32,9 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
                 : (req.getMonthlyRentPrice() != null ? req.getMonthlyRentPrice() : BigDecimal.ZERO);
         BigDecimal deposit = req.getDepositAmount() != null ? req.getDepositAmount() : BigDecimal.ZERO;
 
+        if(req.getMoveInDate().isAfter(java.time.LocalDate.ofInstant(paymentRequestService.businessNow(),com.hs.common.time.BillingTime.ZONE))) {
+            paymentRequestService.createDeposit(req,holdExpiresAt); return;
+        }
         paymentRequestService.createInitialPayment(
                 req.getId(),
                 listingId,
@@ -53,6 +56,7 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
     @Override
     public InitialPaymentSummary getInitialPaymentSummary(String rentalRequestId) {
         return paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.INITIAL)
+                .or(()->paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,PaymentType.RESERVATION_DEPOSIT))
                 .map(this::toSummary)
                 .orElse(null);
     }
@@ -62,9 +66,12 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
         if (rentalRequestIds == null || rentalRequestIds.isEmpty()) {
             return Map.of();
         }
-        return paymentRequestRepository.findByRentalRequestIdInAndType(rentalRequestIds, PaymentType.INITIAL)
-                .stream()
-                .collect(Collectors.toMap(PaymentRequest::getRentalRequestId, this::toSummary));
+        var summaries=new java.util.HashMap<String,InitialPaymentSummary>();
+        paymentRequestRepository.findByRentalRequestIdInAndType(rentalRequestIds,PaymentType.RESERVATION_DEPOSIT)
+            .forEach(p->summaries.put(p.getRentalRequestId(),toSummary(p)));
+        paymentRequestRepository.findByRentalRequestIdInAndType(rentalRequestIds,PaymentType.INITIAL)
+            .forEach(p->summaries.put(p.getRentalRequestId(),toSummary(p)));
+        return summaries;
     }
 
     @Override

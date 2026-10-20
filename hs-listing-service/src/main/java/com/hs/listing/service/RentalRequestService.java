@@ -63,6 +63,14 @@ public class RentalRequestService {
     private final ObjectMapper objectMapper;
     private final RentalPaymentLifecyclePort rentalPaymentLifecyclePort;
     private List<RentalHoldProtectionChecker> holdProtectionCheckers = List.of();
+    @Autowired(required=false) private com.hs.common.time.BillingTime businessTime;
+    @Value("${rental.response-hours:24}") private long responseHours=24;
+    private Instant now() { return businessTime==null?Instant.now():businessTime.now(); }
+    private void validateMoveIn(java.time.LocalDate date) {
+        var today=java.time.LocalDate.ofInstant(now(),com.hs.common.time.BillingTime.ZONE);
+        if(date==null || date.isBefore(today))
+            throw new AppException(ListingErrorCode.RENTAL_ESTIMATE_INVALID,"Ngày bắt đầu thuê đã qua; vui lòng chọn ngày mới.");
+    }
 
     @Autowired
     public RentalRequestService(
@@ -76,7 +84,7 @@ public class RentalRequestService {
             PropertyBranchRepository propertyBranchRepository,
             ObjectMapper objectMapper,
             @Autowired(required = false) RentalPaymentLifecyclePort rentalPaymentLifecyclePort,
-            @Value("${rental.hold-duration-minutes:15}") long holdDurationMinutes) {
+            @Value("${rental.hold-duration-minutes:60}") long holdDurationMinutes) {
         this.rentalRequestRepository = rentalRequestRepository;
         this.listingRepository = listingRepository;
         this.listingStatusService = listingStatusService;
@@ -118,6 +126,7 @@ public class RentalRequestService {
             throw new AppException(ListingErrorCode.RENTAL_ESTIMATE_INVALID, "listingId is required");
         }
 
+        validateMoveIn(req.moveInDate());
         Listing listing = listingRepository.findByIdAndActiveTrue(req.listingId())
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
 
@@ -140,6 +149,7 @@ public class RentalRequestService {
     // 1. TẠO YÊU CẦU THUÊ NHÀ (RENTER)
     @Transactional
     public RentalRequestResponse createRentalRequest(String renterId, String renterEmail, CreateRentalRequest req) {
+        validateMoveIn(req.moveInDate());
         if (renterId == null || renterId.isBlank()) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
@@ -216,6 +226,7 @@ public class RentalRequestService {
                 .excludedChargesSnapshot(excludedChargesJson)
                 .renterNote(req.renterNote() != null && !req.renterNote().isBlank() ? req.renterNote().trim() : null)
                 .status(RentalRequestStatus.PENDING)
+                .respondBy(now().plus(Duration.ofHours(responseHours)))
                 .build();
 
         RentalRequest saved = rentalRequestRepository.save(rentalRequest);
@@ -230,7 +241,7 @@ public class RentalRequestService {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
 
-        RentalRequest req = rentalRequestRepository.findById(requestId)
+        RentalRequest req = rentalRequestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.RENTAL_REQUEST_NOT_FOUND));
 
         if (!ownerId.equals(req.getOwnerId())) {
@@ -241,6 +252,9 @@ public class RentalRequestService {
             throw new AppException(ListingErrorCode.INVALID_RENTAL_REQUEST_STATUS);
         }
 
+        validateMoveIn(req.getMoveInDate());
+        if(req.getRespondBy()!=null && !now().isBefore(req.getRespondBy()))
+            throw new AppException(ListingErrorCode.INVALID_RENTAL_REQUEST_STATUS,"Đã hết hạn phản hồi yêu cầu thuê.");
         Listing listing = req.getListing();
         if (listing.getStatus() != ListingStatus.PUBLISHED) {
             throw new AppException(ListingErrorCode.LISTING_ALREADY_RESERVED);
@@ -266,7 +280,7 @@ public class RentalRequestService {
                 req.getDepositAmount()
         );
 
-        Instant now = Instant.now();
+        Instant now = now();
         Instant holdExpiresAt = now.plus(holdDuration);
 
         req.setStatus(RentalRequestStatus.ACCEPTED);
@@ -286,19 +300,7 @@ public class RentalRequestService {
         // Chuyển bài đăng sang trạng thái RESERVED
         listingStatusService.markReserved(listing, ownerId);
 
-        // Tự động hủy toàn bộ các yêu cầu PENDING khác cho cùng bài đăng này
-        List<RentalRequest> otherPending = rentalRequestRepository.findByListingIdAndStatus(listing.getId(), RentalRequestStatus.PENDING);
-        for (RentalRequest other : otherPending) {
-            if (!other.getId().equals(requestId)) {
-                other.setStatus(RentalRequestStatus.CANCELLED_BY_SYSTEM);
-                other.setRejectReason("Chủ nhà đã chấp thuận một yêu cầu thuê khác cho bất động sản này.");
-                rentalRequestRepository.save(other);
-
-                // Ghi log giả lập gửi email thông báo hủy cho khách
-                log.info("[EMAIL_MOCK] To: {} | Subject: Yêu cầu thuê nhà của bạn đã bị hủy | Lý do: Chủ nhà đã chấp thuận khách thuê khác cho bài đăng '{}'",
-                        other.getRenterEmail(), listing.getTitle());
-            }
-        }
+        // Other requests remain pending until an agreement is actually completed.
 
         // Tạo INITIAL payment trạng thái AWAITING_TRANSFER trong cùng transaction
         if (rentalPaymentLifecyclePort != null) {
@@ -485,9 +487,14 @@ public class RentalRequestService {
     // 9. CRON JOB: HẾT HẠN GIỮ CHỖ -> TỰ ĐỘNG EXPIRE & TRẢ VỀ PUBLISHED
     @Transactional
     public int expirePendingHoldRequests(Instant now) {
-        // Đồng bộ lại holdExpiresAt nếu config rút ngắn (vd. 24h -> 15 phút)
-        clampActiveHoldExpiriesToConfig(now);
+        // Existing payment deadlines are immutable when configuration changes.
 
+        for(var pending:rentalRequestRepository.findByStatusAndRespondByLessThanEqual(RentalRequestStatus.PENDING,now)) {
+            var locked=rentalRequestRepository.findByIdForUpdate(pending.getId()).orElseThrow();
+            if(locked.getStatus()==RentalRequestStatus.PENDING && locked.getRespondBy()!=null && !now.isBefore(locked.getRespondBy())) {
+                locked.setStatus(RentalRequestStatus.EXPIRED); rentalRequestRepository.save(locked);
+            }
+        }
         List<RentalRequest> expiredList = rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(
                 RentalRequestStatus.ACCEPTED, now);
 
@@ -496,7 +503,9 @@ public class RentalRequestService {
         }
 
         int expiredCount = 0;
-        for (RentalRequest req : expiredList) {
+        for (RentalRequest candidate : expiredList) {
+            RentalRequest req=rentalRequestRepository.findByIdForUpdate(candidate.getId()).orElseThrow();
+            if(req.getStatus()!=RentalRequestStatus.ACCEPTED)continue;
             if (isHoldProtected(req.getId()) || (rentalPaymentLifecyclePort != null && rentalPaymentLifecyclePort.isHoldProtected(req.getId()))) {
                 log.info("[RENTAL_HOLD_PROTECTED] Request [{}] has protected payment or contract; skip expiration.", req.getId());
                 continue;
@@ -532,30 +541,6 @@ public class RentalRequestService {
     private boolean isHoldProtected(String rentalRequestId) {
         return holdProtectionCheckers.stream()
                 .anyMatch(checker -> checker.isProtected(rentalRequestId));
-    }
-
-    /**
-     * Nếu thời hạn giữ chỗ cấu hình ngắn hơn mốc đã lưu (sau khi đổi config),
-     * cắt holdExpiresAt về acceptedAt + holdDuration (hoặc now nếu đã quá hạn theo config mới).
-     * KHÔNG cắt ngắn nếu yêu cầu đã thanh toán ban đầu (đang được bảo vệ tới contractDueAt) hoặc có contract bảo vệ.
-     */
-    private void clampActiveHoldExpiriesToConfig(Instant now) {
-        List<RentalRequest> activeHolds =
-                rentalRequestRepository.findAllByStatusAndHoldExpiresAtIsNotNull(RentalRequestStatus.ACCEPTED);
-        for (RentalRequest req : activeHolds) {
-            if (isHoldProtected(req.getId()) || (rentalPaymentLifecyclePort != null && (rentalPaymentLifecyclePort.isConfirmed(req.getId()) || rentalPaymentLifecyclePort.isHoldProtected(req.getId())))) {
-                continue;
-            }
-            Instant acceptedAt = req.getAcceptedAt() != null ? req.getAcceptedAt() : now;
-            Instant maxExpiry = acceptedAt.plus(holdDuration);
-            Instant currentExpiry = req.getHoldExpiresAt();
-            if (currentExpiry != null && currentExpiry.isAfter(maxExpiry)) {
-                req.setHoldExpiresAt(maxExpiry);
-                rentalRequestRepository.save(req);
-                log.info("[RENTAL_HOLD_CLAMP] Request [{}] holdExpiresAt {} -> {} (config={})",
-                        req.getId(), currentExpiry, maxExpiry, holdDuration);
-            }
-        }
     }
 
     // MAPPER
@@ -629,6 +614,7 @@ public class RentalRequestService {
                 .rejectReason(r.getRejectReason())
                 .acceptedAt(r.getAcceptedAt())
                 .holdExpiresAt(r.getHoldExpiresAt())
+                .respondBy(r.getRespondBy())
                 .initialPayment(paymentSummary)
                 .createdAt(r.getCreatedAt())
                 .updatedAt(r.getUpdatedAt())

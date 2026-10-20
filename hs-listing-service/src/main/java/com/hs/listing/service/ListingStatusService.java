@@ -169,7 +169,8 @@ public class ListingStatusService {
         if (listing.getStatus() != ListingStatus.RESERVED) {
             return;
         }
-        change(listing, ListingStatus.PUBLISHED, reason != null ? reason : "Hết hạn giữ chỗ hoặc hủy giữ chỗ", actorId,
+        ListingStatus restored = hasRemainingPublicationWindow(listing) ? ListingStatus.PUBLISHED : ListingStatus.EXPIRED;
+        change(listing, restored, reason != null ? reason : "Hết hạn giữ chỗ hoặc hủy giữ chỗ", actorId,
                 ListingStatusActorType.SYSTEM, false);
     }
 
@@ -233,7 +234,8 @@ public class ListingStatusService {
 
         // Nếu tin đăng rời khỏi trạng thái PUBLISHED (bị ẩn, hết hạn, đã thuê, vi phạm...)
         // -> Tự động hủy toàn bộ lịch hẹn xem nhà đang active (PENDING hoặc CONFIRMED)
-        if (previous == ListingStatus.PUBLISHED && target != ListingStatus.PUBLISHED) {
+        if (target != ListingStatus.PUBLISHED && target != ListingStatus.RESERVED
+                && (previous == ListingStatus.PUBLISHED || previous == ListingStatus.RESERVED)) {
             try {
                 appointmentService.cancelActiveAppointmentsForListing(listing.getId(), target);
             } catch (Exception e) {

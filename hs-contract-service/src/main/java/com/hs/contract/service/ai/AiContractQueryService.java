@@ -321,6 +321,9 @@ public class AiContractQueryService {
         Set<String> paymentIds = new HashSet<>();
         all.forEach(i -> { if (i.getPaymentRequestId() != null) paymentIds.add(i.getPaymentRequestId()); });
         DepositRecord deposit = deposits.findByRentalRequestId(c.getRentalRequestId()).orElse(null);
+        var onboardingPayments=payments.findByRentalRequestIdAndTypeIn(c.getRentalRequestId(),
+                List.of(com.hs.payment.model.constant.PaymentType.INITIAL,com.hs.payment.model.constant.PaymentType.RESERVATION_DEPOSIT));
+        onboardingPayments.forEach(p->paymentIds.add(p.getId()));
         ContractClosure close = closures.findById(c.getId()).orElse(null);
         if (deposit != null) { addIfPresent(paymentIds, deposit.getInitialPaymentRequestId()); addIfPresent(paymentIds, deposit.getRefundPaymentRequestId()); }
         if (close != null) { addIfPresent(paymentIds, close.getRefundPaymentId()); addIfPresent(paymentIds, close.getBalancePaymentId()); }
@@ -376,6 +379,7 @@ public class AiContractQueryService {
                 "note", "Hóa đơn đã chuyển nợ sang kỳ sau không được cộng lại."));
         out.put("invoices", rows);
         out.put("initialPayment", deposit == null ? null : paymentView(pay.get(deposit.getInitialPaymentRequestId())));
+        out.put("onboardingPayments",onboardingPayments.stream().map(this::paymentView).toList());
         out.put("deposit", deposit == null ? null : obj("status", deposit.getStatus().name(),
                 "original", money(deposit.getOriginalAmount()), "held", money(deposit.getHeldAmount()),
                 "retained", money(deposit.getRetainedAmount()), "refundable", money(deposit.getRefundableAmount()),

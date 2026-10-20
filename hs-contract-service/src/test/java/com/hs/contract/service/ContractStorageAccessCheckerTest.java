@@ -72,6 +72,40 @@ class ContractStorageAccessCheckerTest {
                 .build();
     }
 
+    @Test void tenantReadsDepositBackedRootDraftDocumentsOnlyForTheMatchingAcceptedRental() {
+        var contracts = mock(ContractRepository.class);
+        var rentals = mock(com.hs.listing.repository.RentalRequestRepository.class);
+        var payments = mock(com.hs.payment.repository.PaymentRequestRepository.class);
+        var checker = new ContractStorageAccessChecker(contracts, rentals, payments);
+        var draft = Contract.builder().id("draft").rentalRequestId("rental").landlordId("owner").tenantId("tenant")
+                .status(ContractStatus.DRAFT).build();
+        var rental = com.hs.listing.model.RentalRequest.builder().id("rental").ownerId("owner").renterId("tenant")
+                .status(com.hs.listing.model.constant.RentalRequestStatus.ACCEPTED).build();
+        var deposit = com.hs.payment.model.PaymentRequest.builder().id("deposit").rentalRequestId("rental")
+                .payerId("tenant").payeeId("owner").type(com.hs.payment.model.constant.PaymentType.RESERVATION_DEPOSIT)
+                .status(com.hs.payment.model.constant.PaymentStatus.CONFIRMED).build();
+        when(contracts.findById("draft")).thenReturn(Optional.of(draft));
+        when(rentals.findById("rental")).thenReturn(Optional.of(rental));
+        when(payments.findByRentalRequestIdAndType("rental", com.hs.payment.model.constant.PaymentType.RESERVATION_DEPOSIT))
+                .thenReturn(Optional.of(deposit));
+
+        assertTrue(checker.canAccess("tenant", contractDocument("draft")));
+        assertTrue(checker.canAccess("owner", contractDocument("draft")));
+        assertFalse(checker.canAccess("outsider", contractDocument("draft")));
+
+        // A reported-but-unconfirmed transfer is not money received.
+        deposit.setStatus(com.hs.payment.model.constant.PaymentStatus.TRANSFER_REPORTED);
+        assertFalse(checker.canAccess("tenant", contractDocument("draft")));
+        // Wrong payer.
+        deposit.setStatus(com.hs.payment.model.constant.PaymentStatus.CONFIRMED);
+        deposit.setPayerId("someone-else");
+        assertFalse(checker.canAccess("tenant", contractDocument("draft")));
+        // Rental no longer ACCEPTED.
+        deposit.setPayerId("tenant");
+        rental.setStatus(com.hs.listing.model.constant.RentalRequestStatus.CANCELLED_BY_RENTER);
+        assertFalse(checker.canAccess("tenant", contractDocument("draft")));
+    }
+
     @Test void tenantCanReadAgreedAmendmentBeforeLandlordSignature() {
         var repository = mock(ContractRepository.class);
         var checker = new ContractStorageAccessChecker(repository);

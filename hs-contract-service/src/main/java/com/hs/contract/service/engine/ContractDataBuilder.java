@@ -67,6 +67,8 @@ public class ContractDataBuilder {
     private final UserRepository userRepository;
     private final AddressRepository addressRepository;
     private final ObjectMapper objectMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.hs.payment.repository.PaymentRequestRepository payments;
 
     public ContractDataBuilder(UserRepository userRepository, AddressRepository addressRepository) {
         this(userRepository, addressRepository, new ObjectMapper());
@@ -128,7 +130,7 @@ public class ContractDataBuilder {
         List<Map<String, Object>> charges = buildCharges(request, listingSnapshot, source, occupants);
         List<Map<String, Object>> equipments = buildEquipments(listingSnapshot, source);
         List<Map<String, Object>> amenities = buildAmenities(listingSnapshot, source);
-        Map<String, Object> initialPayment = buildInitialPayment(request, payment, financial, charges);
+        Map<String, Object> initialPayment = onboardingPayment(request,payment,financial,charges);
         Map<String, Object> policies = buildPolicies(listingSnapshot, request);
         Map<String, Object> meters = buildMeters(listingSnapshot, source, occupants);
 
@@ -963,6 +965,47 @@ public class ContractDataBuilder {
     }
 
     // --- Bảng phụ lục thanh toán ban đầu ({{#initialPaymentTable}}) ---
+
+    public Map<String,Object> onboardingPayment(RentalRequest request,PaymentRequest fallback,
+            Map<String,Object> financial,List<Map<String,Object>> charges) {
+        if(payments==null)return buildInitialPayment(request,fallback,financial,charges);
+        var deposit=payments.findByRentalRequestIdAndType(request.getId(),com.hs.payment.model.constant.PaymentType.RESERVATION_DEPOSIT).orElse(null);
+        var rent=payments.findByRentalRequestIdAndType(request.getId(),com.hs.payment.model.constant.PaymentType.INITIAL).orElse(null);
+        if(deposit==null)return buildInitialPayment(request,rent!=null?rent:fallback,financial,charges);
+        var map=buildInitialPayment(request,rent,financial,charges);
+        var rows=new ArrayList<Map<String,String>>();
+        BigDecimal rentAmount=request.getEffectiveMonthlyRent()!=null?request.getEffectiveMonthlyRent():request.getMonthlyRentPrice();
+        rows.add(createPaymentRow("Tiền thuê kỳ đầu",ContractRenderService.formatVND(rentAmount),receiptNote(rent)));
+        rows.add(createPaymentRow("Tiền đặt cọc",ContractRenderService.formatVND(deposit.getTotalAmount()),receiptNote(deposit)));
+        boolean rentPaid=rent!=null&&rent.getStatus()==com.hs.payment.model.constant.PaymentStatus.CONFIRMED;
+        boolean depositPaid=deposit.getStatus()==com.hs.payment.model.constant.PaymentStatus.CONFIRMED;
+        rows.add(createPaymentRow("Tổng nghĩa vụ ban đầu",ContractRenderService.formatVND(rentAmount.add(deposit.getTotalAmount())),
+            rentPaid&&depositPaid?"Đã xác nhận đủ hai khoản":"Cọc và tiền thuê thanh toán riêng; chưa xác nhận đủ hai khoản"));
+        map.put("rows",rows);map.put("totalAmount",ContractRenderService.formatVND(rentAmount.add(deposit.getTotalAmount())));
+        map.put("status",rentPaid&&depositPaid?"Hai khoản đã được xác nhận":"Chưa xác nhận đủ tiền tháng đầu và tiền cọc");
+        map.put("transferReference","Cọc: "+deposit.getTransferReference()+"; tiền thuê: "+(rent==null?"chưa mở":rent.getTransferReference()));
+        map.put("transactionCode",map.get("transferReference"));
+        map.put("depositReceipt",receiptNote(deposit));map.put("rentReceipt",receiptNote(rent));
+        return map;
+    }
+    private String receiptNote(PaymentRequest p) {
+        if(p==null)return "Chưa mở thanh toán";
+        if(p.getTotalAmount()!=null&&p.getTotalAmount().signum()==0&&p.getStatus()==com.hs.payment.model.constant.PaymentStatus.CONFIRMED)
+            return "Không yêu cầu thanh toán; không phát sinh chuyển khoản";
+        String label=p.getStatus()==null?"Chưa xác định":switch(p.getStatus()) {
+            case CONFIRMED -> "Đã xác nhận nhận đủ tiền";
+            case AWAITING_TRANSFER -> "Chưa báo chuyển khoản";
+            case TRANSFER_REPORTED -> "Đã báo chuyển; chờ xác nhận thực nhận";
+            case REJECTED -> "Chứng từ chưa được chấp nhận; cần đối soát";
+            case DISPUTED -> "Đang đối soát";
+            case CANCELLED -> "Đã hủy";
+            case EXPIRED,OVERDUE -> "Đã hết hạn; cần xử lý";
+        };
+        String note="Mã: "+p.getTransferReference()+"; trạng thái: "+label;
+        if(p.getPayerReportedAt()!=null)note+="; báo chuyển: "+DATE_TIME_FORMATTER.format(p.getPayerReportedAt().atZone(VIETNAM_ZONE));
+        if(p.getConfirmedAt()!=null)note+="; xác nhận: "+DATE_TIME_FORMATTER.format(p.getConfirmedAt().atZone(VIETNAM_ZONE));
+        return note;
+    }
 
     private Map<String, Object> buildInitialPayment(
             RentalRequest request,

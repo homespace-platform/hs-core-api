@@ -8,6 +8,11 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class BillingPeriodViewTest {
+    @Test void issuedCostsOnlyKeepsItsFrozenKindAfterLeaseChanges() {
+        var bill=MonthlyInvoice.builder().periodIndex(0).status(MonthlyInvoiceStatus.PAID).issuedBillingKind("COSTS_ONLY").build();
+        assertEquals("COSTS_ONLY",BillingPeriodView.from(bill,1,LocalDate.of(2026,10,21),false).kind());
+        assertEquals("COSTS_ONLY",BillingPeriodView.from(bill,12,LocalDate.of(2026,10,21),false).kind());
+    }
     @Test void everyLeaseLengthSeparatesPaymentPeriodsFromFinalExpenseSettlement() {
         var start = LocalDate.of(2026, 10, 13);
         for (int months : new int[]{1, 3, 12, 36}) {

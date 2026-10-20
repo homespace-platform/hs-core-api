@@ -46,6 +46,8 @@ public class MonthlyInvoice extends BaseEntity {
     private BigDecimal waterEnd;
     @Column(name = "line_items_snapshot", columnDefinition = "TEXT")
     private String lineItemsSnapshot;
+    @Column(name="issued_billing_kind",length=30)
+    private String issuedBillingKind;
     @Column(name = "cost_terms_revision_id", length = 36)
     private String costTermsRevisionId;
     @Column(name = "rent_terms_revision_id", length = 36)

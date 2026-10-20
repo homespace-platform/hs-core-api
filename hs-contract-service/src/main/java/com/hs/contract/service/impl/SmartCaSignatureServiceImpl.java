@@ -65,6 +65,8 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.hs.contract.service.RentalOnboardingService onboarding;
     @org.springframework.beans.factory.annotation.Autowired
     private com.hs.contract.service.ContractLifecycleService lifecycle;
 
@@ -453,6 +455,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     }
 
     private String createSignatureRequest(ContractSigningContext ctx, PrepareResult prep, String preparedStorageId) {
+        if(ctx.contract().getParentContractId()==null && onboarding!=null)
+            rentalRequestRepository.findByIdForUpdate(ctx.contract().getRentalRequestId()).orElseThrow();
         if(ctx.contract().getParentContractId()!=null) {
             contractRepository.findByIdForUpdate(ctx.contract().getParentContractId()).orElseThrow();
         }
@@ -463,6 +467,9 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
             throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED,"Văn bản đã thay đổi trong khi chuẩn bị ký.");
         if(checkIdempotency(current.getId(),ctx.user().getId())!=null)
             throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED,"Yêu cầu ký đang được xử lý; vui lòng làm mới trạng thái.");
+        if(ctx.role()==SignerRole.LANDLORD && current.getStatus()==ContractStatus.DRAFT) {
+            current.setStatus(ContractStatus.LANDLORD_SIGNATURE_PENDING);contractRepository.save(current);
+        }
         SignatureRequest req = SignatureRequest.builder()
                 .contractId(ctx.contract().getId())
                 .revisionId(ctx.contract().getCurrentRevisionId())
@@ -699,6 +706,10 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         if (req == null || req.getStatus() != SignatureRequestStatus.EMBEDDING) return;
         Contract contract = contractRepository.findById(ctx.contractId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if(contract.getParentContractId()==null && onboarding!=null) {
+            rentalRequestRepository.findByIdForUpdate(contract.getRentalRequestId()).orElseThrow();
+            contract=contractRepository.findByIdForUpdate(ctx.contractId()).orElseThrow();
+        }
         if (contract.getParentContractId()!=null) {
             contractRepository.findByIdForUpdate(contract.getParentContractId()).orElseThrow();
             contract=contractRepository.findByIdForUpdate(ctx.contractId()).orElseThrow();
@@ -777,6 +788,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 || !contract.getListingId().equals(rentalRequest.getListing().getId())) {
             throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
         }
+        if(onboarding!=null)onboarding.validateSigning(contract.getRentalRequestId(),contract.getTenantId());
         listingStatusService.markRentedByContract(contract.getListingId(), contract.getTenantId());
         rentalRequest.setStatus(RentalRequestStatus.COMPLETED);
         rentalRequest.setHoldExpiresAt(null);
@@ -880,6 +892,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     }
 
     private void validateContractStatusForSigning(Contract contract, SignerRole role) {
+        if(contract.getParentContractId()==null && onboarding!=null)onboarding.validateSigning(contract.getRentalRequestId(),contract.getTenantId());
         if(contract.getParentContractId()!=null) lifecycle.validateAgreementSigning(contract);
         if (contract.getRentalPaymentId() != null) {
             PaymentRequest payment = paymentRequestRepository.findById(contract.getRentalPaymentId())

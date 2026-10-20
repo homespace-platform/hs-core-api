@@ -103,6 +103,13 @@ public class PaymentRequest extends BaseEntity {
     @Column(name = "due_at")
     Instant dueAt;
 
+    /** Not a QR expiry: the business opening time is enforced by every payment entry point. */
+    @Column(name = "opens_at")
+    Instant opensAt;
+
+    @Column(name="onboarding_key", unique=true, length=80)
+    String onboardingKey;
+
     @Column(name = "payer_reported_at")
     Instant payerReportedAt;
 

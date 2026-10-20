@@ -694,6 +694,8 @@ public class MonthlyBillingService {
         if (total.signum() < 0 || total.scale() > 2 && total.stripTrailingZeros().scale() > 2)
             throw new AppException(ContractErrorCode.INVOICE_AMOUNT_INVALID);
         invoice.setLineItemsSnapshot(write(lines));
+        invoice.setIssuedBillingKind(lines.stream().anyMatch(l->"RENT".equals(l.type()))?"RECURRING"
+                :invoice.getPeriodIndex()+1<leaseMonths(contract,rental)?"COSTS_ONLY":"FINAL_SETTLEMENT");
         invoice.setCostTermsRevisionId(revision.getId());
         invoice.setTotalAmount(total);
         invoice.setBaseAmount(total);

@@ -13,7 +13,8 @@ import java.util.Set;
 public class ContractRentalHoldProtectionChecker implements RentalHoldProtectionChecker {
 
     private static final Set<ContractStatus> PROTECTED_STATUSES =
-            Set.of(ContractStatus.PENDING_REVIEW, ContractStatus.ACTIVE);
+            Set.of(ContractStatus.PENDING_REVIEW, ContractStatus.LANDLORD_SIGNATURE_PENDING,
+                    ContractStatus.TENANT_SIGNATURE_PENDING, ContractStatus.ACTIVE);
 
     private final ContractRepository contractRepository;
 

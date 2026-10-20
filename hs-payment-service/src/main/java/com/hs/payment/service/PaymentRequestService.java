@@ -54,6 +54,52 @@ public class PaymentRequestService {
     @Value("${homespace.payment.contract-due-hours:48}")
     private long contractDueHours = 48;
 
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.hs.listing.repository.RentalRequestRepository rentalRequests;
+
+    public Instant businessNow() { return billingTime == null ? Instant.now() : billingTime.now(); }
+
+    public static boolean isOnboarding(PaymentRequest p) {
+        return p.getType()==PaymentType.INITIAL || p.getType()==PaymentType.RESERVATION_DEPOSIT;
+    }
+
+    /** Also called by mobile upload: UI countdowns never grant authority to pay. */
+    public void validateTransferWindow(PaymentRequest p) {
+        if (!isOnboarding(p)) return;
+        Instant now=businessNow();
+        if (p.getOpensAt()!=null && now.isBefore(p.getOpensAt()))
+            throw new AppException(PaymentErrorCode.PAYMENT_HOLD_EXPIRED,"Chưa đến ngày thanh toán tiền thuê tháng đầu.");
+        if (p.getDueAt()!=null && !now.isBefore(p.getDueAt()))
+            throw new AppException(PaymentErrorCode.PAYMENT_HOLD_EXPIRED,"Đã hết hạn chuyển khoản; nếu đã chuyển tiền, hãy yêu cầu đối soát.");
+        if (rentalRequests!=null) {
+            var rental=rentalRequests.findById(p.getRentalRequestId()).orElseThrow();
+            if (rental.getStatus()!=com.hs.listing.model.constant.RentalRequestStatus.ACCEPTED)
+                throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
+            if(rental.getCancellationRequestedAt()!=null)
+                throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS,"Hồ sơ đang chờ quyết định hủy.");
+        }
+    }
+
+    private void lockRentalForPayment(String id) {
+        if(rentalRequests==null)return;
+        var p=paymentRequestRepository.findById(id).orElseThrow(()->new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
+        if(isOnboarding(p))rentalRequests.findByIdForUpdate(p.getRentalRequestId()).orElseThrow();
+    }
+
+    @Transactional
+    public PaymentRequest createDeposit(com.hs.listing.model.RentalRequest r, Instant due) {
+        return createOnboarding(r.getId(),r.getListing().getId(),r.getRenterId(),r.getOwnerId(),
+            BigDecimal.ZERO,r.getDepositAmount(),r.getCostBreakdownSnapshot(),r.getExcludedChargesSnapshot(),due,
+            PaymentType.RESERVATION_DEPOSIT,null);
+    }
+
+    @Transactional
+    public PaymentRequest createFirstRent(com.hs.listing.model.RentalRequest r, Instant opens, Instant due) {
+        return createOnboarding(r.getId(),r.getListing().getId(),r.getRenterId(),r.getOwnerId(),
+            r.getEffectiveMonthlyRent()!=null?r.getEffectiveMonthlyRent():r.getMonthlyRentPrice(),BigDecimal.ZERO,
+            r.getCostBreakdownSnapshot(),r.getExcludedChargesSnapshot(),due,PaymentType.INITIAL,opens);
+    }
+
     @Transactional
     public PaymentRequest createInitialPayment(
             String rentalRequestId,
@@ -66,9 +112,14 @@ public class PaymentRequestService {
             String excludedChargesSnapshot,
             Instant holdExpiresAt
     ) {
-        // Idempotency: return existing if present
-        Optional<PaymentRequest> existing = paymentRequestRepository.findByRentalRequestIdAndType(
-                rentalRequestId, PaymentType.INITIAL);
+        return createOnboarding(rentalRequestId,listingId,payerId,payeeId,monthlyRent,depositAmount,
+                breakdownSnapshot,excludedChargesSnapshot,holdExpiresAt,PaymentType.INITIAL,null);
+    }
+
+    private PaymentRequest createOnboarding(String rentalRequestId,String listingId,String payerId,String payeeId,
+            BigDecimal monthlyRent,BigDecimal depositAmount,String breakdownSnapshot,String excludedChargesSnapshot,
+            Instant holdExpiresAt,PaymentType type,Instant opensAt) {
+        Optional<PaymentRequest> existing = paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,type);
         if (existing.isPresent()) {
             return existing.get();
         }
@@ -83,7 +134,7 @@ public class PaymentRequestService {
         String ref = transferReferenceGenerator.generateUniqueReference();
 
         // Generate VietQR for tenant to transfer directly to landlord's incoming bank account
-        String qrUrl = vietQrProvider.generateQrImageUrl(
+        String qrUrl = totalAmount.signum()==0 ? "" : vietQrProvider.generateQrImageUrl(
                 payeeAccount.getBankBin(),
                 payeeAccount.getAccountNumber(),
                 payeeAccount.getAccountHolderName(),
@@ -112,9 +163,12 @@ public class PaymentRequestService {
                 .listingId(listingId)
                 .payerId(payerId)
                 .payeeId(payeeId)
-                .type(PaymentType.INITIAL)
+                .type(type)
+                .onboardingKey(rentalRequestId+":"+type.name())
                 .direction(PaymentDirection.TENANT_TO_LANDLORD)
-                .status(PaymentStatus.AWAITING_TRANSFER)
+                .status(totalAmount.signum()==0 ? PaymentStatus.CONFIRMED : PaymentStatus.AWAITING_TRANSFER)
+                .confirmedAt(totalAmount.signum()==0 ? businessNow() : null)
+                .opensAt(opensAt)
                 .currency("VND")
                 .totalAmount(totalAmount)
                 .transferReference(ref)
@@ -154,8 +208,9 @@ public class PaymentRequestService {
                     .build());
         }
 
-        // Initialize DepositRecord in PENDING status
-        if (depositAmount != null && depositAmount.compareTo(BigDecimal.ZERO) > 0) {
+        // A zero deposit is a recorded exemption, never a zero-value bank transfer.
+        if (depositAmount != null && (type==PaymentType.RESERVATION_DEPOSIT
+                || type==PaymentType.INITIAL && paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,PaymentType.RESERVATION_DEPOSIT).isEmpty())) {
             DepositRecord depositRecord = DepositRecord.builder()
                     .rentalRequestId(rentalRequestId)
                     .initialPaymentRequestId(saved.getId())
@@ -164,16 +219,16 @@ public class PaymentRequestService {
                     .originalAmount(depositAmount)
                     .heldAmount(BigDecimal.ZERO)
                     .refundableAmount(depositAmount)
-                    .status(DepositStatus.PENDING)
+                    .status(depositAmount.signum()==0?DepositStatus.HELD:DepositStatus.PENDING)
                     .build();
             depositRecordRepository.save(depositRecord);
         }
 
-        recordEvent(saved.getId(), PaymentEventType.CREATED, null, PaymentStatus.AWAITING_TRANSFER,
-                payeeId, "LANDLORD", "Tạo yêu cầu chuyển khoản ban đầu giữ chỗ", null);
+        recordEvent(saved.getId(), PaymentEventType.CREATED, null, saved.getStatus(),
+                payeeId, "LANDLORD", totalAmount.signum()==0?"Ghi nhận miễn thanh toán; không phát sinh chuyển khoản":"Tạo yêu cầu thanh toán "+type.name(), null);
 
-        log.info("Created INITIAL PaymentRequest [{}] ref=[{}] for rentalRequest [{}]",
-                saved.getId(), ref, rentalRequestId);
+        log.info("Created {} PaymentRequest [{}] ref=[{}] for rentalRequest [{}]",
+                type, saved.getId(), ref, rentalRequestId);
         return saved;
     }
 
@@ -360,6 +415,7 @@ public class PaymentRequestService {
 
     @Transactional
     public PaymentRequestResponse reportTransfer(String paymentRequestId, String actorId, ReportTransferRequest request) {
+        lockRentalForPayment(paymentRequestId);
         PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)
                 .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
 
@@ -380,12 +436,13 @@ public class PaymentRequestService {
                 && !(PaymentTimePolicy.usesBillingTime(payment) && payment.getStatus() == PaymentStatus.OVERDUE)) {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
         }
-        if (PaymentTimePolicy.usesBillingTime(payment)
+        if (PaymentTimePolicy.usesBillingTime(payment) && !isOnboarding(payment)
                 && (request == null || request.expectedAmount() == null
                 || request.expectedAmount().compareTo(payment.getTotalAmount()) != 0)) {
             throw new AppException(PaymentErrorCode.MONTHLY_AMOUNT_CHANGED);
         }
 
+        validateTransferWindow(payment);
         // Chấp nhận 1 trong 2 nguồn chứng từ: mobile session hoặc web proofStorageId
         String proofStorageId;
         if (request != null && request.evidenceUploadSessionId() != null && !request.evidenceUploadSessionId().isBlank()) {
@@ -438,7 +495,7 @@ public class PaymentRequestService {
         }
 
         PaymentStatus oldStatus = payment.getStatus();
-        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? billingTime.now() : Instant.now();
+        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? businessNow() : Instant.now();
 
         payment.setStatus(PaymentStatus.TRANSFER_REPORTED);
         payment.setPayerReportedAt(now);
@@ -475,6 +532,7 @@ public class PaymentRequestService {
 
     @Transactional
     public PaymentRequestResponse confirmReceipt(String paymentRequestId, String actorId) {
+        lockRentalForPayment(paymentRequestId);
         PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)
                 .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
 
@@ -490,7 +548,7 @@ public class PaymentRequestService {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
         }
 
-        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? billingTime.now() : Instant.now();
+        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? businessNow() : Instant.now();
         payment.setStatus(PaymentStatus.CONFIRMED);
         payment.setPayeeConfirmedAt(now);
         payment.setConfirmedAt(now);
@@ -532,6 +590,7 @@ public class PaymentRequestService {
 
     @Transactional
     public PaymentRequestResponse rejectReceipt(String paymentRequestId, String actorId, RejectReceiptRequest request) {
+        lockRentalForPayment(paymentRequestId);
         PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)
                 .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
 
@@ -547,7 +606,7 @@ public class PaymentRequestService {
             throw new AppException(PaymentErrorCode.REJECTION_REASON_REQUIRED);
         }
 
-        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? billingTime.now() : Instant.now();
+        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? businessNow() : Instant.now();
         payment.setStatus(PaymentStatus.REJECTED);
         payment.setRejectedAt(now);
         payment.setRejectedReason(request.reason().trim());
@@ -566,6 +625,7 @@ public class PaymentRequestService {
 
     @Transactional
     public PaymentRequestResponse dispute(String paymentRequestId, String actorId, DisputePaymentRequest request) {
+        lockRentalForPayment(paymentRequestId);
         PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)
                 .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
 
@@ -573,7 +633,8 @@ public class PaymentRequestService {
             throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);
         }
 
-        if (payment.getStatus() != PaymentStatus.TRANSFER_REPORTED && payment.getStatus() != PaymentStatus.REJECTED) {
+        if (payment.getStatus() != PaymentStatus.TRANSFER_REPORTED && payment.getStatus() != PaymentStatus.REJECTED
+                && !(isOnboarding(payment) && (payment.getStatus()==PaymentStatus.AWAITING_TRANSFER || payment.getStatus()==PaymentStatus.EXPIRED))) {
             throw new AppException(PaymentErrorCode.DISPUTE_NOT_ALLOWED);
         }
 
@@ -613,6 +674,7 @@ public class PaymentRequestService {
     @Transactional(readOnly = true)
     public PaymentRequestResponse getInitialPaymentByRentalRequestId(String rentalRequestId, String actorId) {
         PaymentRequest payment = paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.INITIAL)
+                .or(() -> paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,PaymentType.RESERVATION_DEPOSIT))
                 .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
 
         if (!actorId.equals(payment.getPayerId()) && !actorId.equals(payment.getPayeeId())) {
@@ -655,12 +717,13 @@ public class PaymentRequestService {
 
     @Transactional
     public void cancelPaymentByRentalRequest(String rentalRequestId, String reason) {
-        paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.INITIAL)
-                .ifPresent(payment -> {
+        java.util.stream.Stream.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT)
+                .map(t->paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,t))
+                .flatMap(Optional::stream).forEach(payment -> {
                     if (payment.getStatus() == PaymentStatus.AWAITING_TRANSFER) {
                         PaymentStatus oldStatus = payment.getStatus();
                         payment.setStatus(PaymentStatus.CANCELLED);
-                        payment.setCancelledAt(Instant.now());
+                        payment.setCancelledAt(businessNow());
                         payment.setCancelledReason(reason);
                         paymentRequestRepository.save(payment);
                         recordEvent(payment.getId(), PaymentEventType.CANCELLED, oldStatus,
@@ -673,9 +736,10 @@ public class PaymentRequestService {
 
     @Transactional
     public void handleHoldExpired(String rentalRequestId) {
-        paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.INITIAL)
-                .ifPresent(payment -> {
-                    Instant now = Instant.now();
+        java.util.stream.Stream.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT)
+                .map(t->paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,t))
+                .flatMap(Optional::stream).forEach(payment -> {
+                    Instant now = businessNow();
                     if (payment.getStatus() == PaymentStatus.AWAITING_TRANSFER) {
                         PaymentStatus oldStatus = payment.getStatus();
                         payment.setStatus(PaymentStatus.EXPIRED);
@@ -684,19 +748,15 @@ public class PaymentRequestService {
                         recordEvent(payment.getId(), PaymentEventType.EXPIRED, oldStatus,
                                 PaymentStatus.EXPIRED, "SYSTEM", "SYSTEM", "Hết hạn chuyển khoản giữ chỗ", null);
                         log.info("PaymentRequest [{}] marked EXPIRED because hold expired without payment", payment.getId());
-                    } else if (payment.getStatus() == PaymentStatus.CONFIRMED) {
-                        // Landlord failed to prepare contract on time.
-                        // Create REFUND OBLIGATION PaymentRequest (LANDLORD -> TENANT), do NOT auto-refund!
-                        log.info("Hold expired for CONFIRMED payment [{}]. Creating INITIAL_PAYMENT_REFUND obligation.", payment.getId());
-                        createRefundObligation(payment);
                     }
                 });
     }
 
-    private void createRefundObligation(PaymentRequest initialPayment) {
+    @Transactional
+    public void createRefundObligation(PaymentRequest initialPayment) {
+        if(initialPayment.getStatus()!=PaymentStatus.CONFIRMED || initialPayment.getTotalAmount().signum()==0)return;
         // Idempotency: check if refund request already created
-        Optional<PaymentRequest> existingRefund = paymentRequestRepository.findByRentalRequestIdAndType(
-                initialPayment.getRentalRequestId(), PaymentType.INITIAL_PAYMENT_REFUND);
+        Optional<PaymentRequest> existingRefund = paymentRequestRepository.findByOnboardingKey("REFUND:"+initialPayment.getId());
         if (existingRefund.isPresent()) {
             return;
         }
@@ -721,6 +781,7 @@ public class PaymentRequestService {
                 .payerId(initialPayment.getPayeeId()) // Landlord must refund
                 .payeeId(initialPayment.getPayerId()) // Tenant receives refund
                 .type(PaymentType.INITIAL_PAYMENT_REFUND)
+                .onboardingKey("REFUND:"+initialPayment.getId())
                 .direction(PaymentDirection.LANDLORD_TO_TENANT)
                 .status(PaymentStatus.AWAITING_TRANSFER)
                 .currency("VND")
@@ -730,7 +791,7 @@ public class PaymentRequestService {
                 .payeeBankAccountSnapshot(initialPayment.getPayerBankAccountSnapshot())
                 .qrProvider("VIETQR_QUICK_LINK")
                 .qrImageUrl(qrUrl)
-                .dueAt(Instant.now().plus(Duration.ofDays(3)))
+                .dueAt(businessNow().plus(Duration.ofDays(3)))
                 .build();
 
         PaymentRequest savedRefund = paymentRequestRepository.save(refundPayment);
@@ -744,33 +805,25 @@ public class PaymentRequestService {
 
         recordEvent(savedRefund.getId(), PaymentEventType.REFUND_OBLIGATION_CREATED, null,
                 PaymentStatus.AWAITING_TRANSFER, "SYSTEM", "SYSTEM",
-                "Quá thời hạn tạo hợp đồng, phát sinh nghĩa vụ hoàn tiền từ chủ nhà cho người thuê", null);
+                "Hai bên đồng ý hủy hồ sơ trước khi ký; chủ nhà cần hoàn khoản thực nhận và người thuê xác nhận nhận đủ", null);
     }
 
     @Transactional(readOnly = true)
     public boolean isHoldProtected(String rentalRequestId) {
-        return paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.INITIAL)
-                .map(payment -> {
-                    Instant now = Instant.now();
-                    if (payment.getStatus() == PaymentStatus.CONFIRMED) {
-                        return payment.getContractDueAt() == null || payment.getContractDueAt().isAfter(now);
-                    }
-                    if (payment.getStatus() == PaymentStatus.TRANSFER_REPORTED) {
-                        return payment.getConfirmationDueAt() == null || payment.getConfirmationDueAt().isAfter(now);
-                    }
-                    if (payment.getStatus() == PaymentStatus.AWAITING_TRANSFER) {
-                        return payment.getDueAt() == null || payment.getDueAt().isAfter(now);
-                    }
-                    return false;
-                })
-                .orElse(false);
+        return java.util.stream.Stream.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT)
+            .map(t->paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,t))
+            .flatMap(Optional::stream).anyMatch(p-> switch(p.getStatus()) {
+                case CONFIRMED,TRANSFER_REPORTED,DISPUTED,REJECTED -> true;
+                case AWAITING_TRANSFER -> p.getDueAt()==null || businessNow().isBefore(p.getDueAt());
+                default -> false;
+            });
     }
 
     @Transactional(readOnly = true)
     public boolean isConfirmed(String rentalRequestId) {
-        return paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.INITIAL)
-                .map(p -> p.getStatus() == PaymentStatus.CONFIRMED)
-                .orElse(false);
+        return java.util.stream.Stream.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT)
+                .map(t->paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,t))
+                .flatMap(Optional::stream).anyMatch(p->p.getStatus()==PaymentStatus.CONFIRMED);
     }
 
     @Transactional(readOnly = true)

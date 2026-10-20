@@ -36,6 +36,13 @@ public class RentalRequestController {
 
     @Value("${rental.hold-duration-minutes:60}")
     private long holdDurationMinutes;
+    @Value("${rental.response-hours:24}") private long responseHours;
+
+    @GetMapping("/policy")
+    public ApiResponse<java.util.Map<String,Long>> policy() {
+        return ApiResponse.<java.util.Map<String,Long>>builder()
+            .result(java.util.Map.of("holdMinutes",holdDurationMinutes,"responseHours",responseHours)).build();
+    }
 
     // =========================================================================
     // 1. DÀNH CHO KHÁCH HÀNG (RENTER)

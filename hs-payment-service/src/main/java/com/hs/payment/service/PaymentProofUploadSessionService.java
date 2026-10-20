@@ -42,6 +42,8 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class PaymentProofUploadSessionService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private OnboardingPaymentGuard onboardingGuard;
     @org.springframework.beans.factory.annotation.Autowired
     private com.hs.payment.repository.DepositRecordRepository refundDeposits;
 
@@ -84,6 +86,8 @@ public class PaymentProofUploadSessionService {
         if (!actorId.equals(payment.getPayerId())) {
             throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);
         }
+
+        if(onboardingGuard!=null)onboardingGuard.validate(payment);
 
         if (payment.getStatus() != PaymentStatus.AWAITING_TRANSFER && payment.getStatus() != PaymentStatus.REJECTED
                 && !(PaymentTimePolicy.usesBillingTime(payment) && payment.getStatus() == PaymentStatus.OVERDUE)) {
@@ -265,6 +269,10 @@ public class PaymentProofUploadSessionService {
             throw new AppException(PaymentErrorCode.PROOF_SESSION_INVALID, "Phiên tải chứng từ không hợp lệ hoặc đã kết thúc.");
         }
 
+        if(onboardingGuard!=null) {
+            PaymentRequest candidate = paymentRequestRepository.findById(session.getPaymentRequestId()).orElseThrow();
+            onboardingGuard.validate(candidate);
+        }
         PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(session.getPaymentRequestId())
                 .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND, "Không tìm thấy yêu cầu thanh toán."));
 

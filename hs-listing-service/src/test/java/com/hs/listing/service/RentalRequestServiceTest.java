@@ -159,7 +159,7 @@ class RentalRequestServiceTest {
     }
 
     @Test
-    void acceptRentalRequest_marksReservedAndCancelsOtherPending_createsHeldReservation() {
+    void acceptRentalRequest_marksReservedAndKeepsOtherPending_createsHeldReservation() {
         Listing listing = Listing.builder()
                 .id("listing-1")
                 .ownerId("owner-1")
@@ -191,11 +191,9 @@ class RentalRequestServiceTest {
                 .status(RentalRequestStatus.PENDING)
                 .build();
 
-        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req1));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(req1));
         when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
         when(rentalRequestRepository.save(any(RentalRequest.class))).thenAnswer(inv -> inv.getArgument(0));
-        when(rentalRequestRepository.findByListingIdAndStatus("listing-1", RentalRequestStatus.PENDING))
-                .thenReturn(List.of(req1, req2));
 
         RentalRequestResponse res = rentalRequestService.acceptRentalRequest("owner-1", "req-1");
 
@@ -209,8 +207,8 @@ class RentalRequestServiceTest {
         verify(listingStatusService, times(1)).markReserved(listing, "owner-1");
 
         // Verify req2 was cancelled by system
-        assertEquals(RentalRequestStatus.CANCELLED_BY_SYSTEM, req2.getStatus());
-        verify(rentalRequestRepository, atLeast(2)).save(any(RentalRequest.class));
+        assertEquals(RentalRequestStatus.PENDING, req2.getStatus());
+        verify(rentalRequestRepository, times(1)).save(any(RentalRequest.class));
 
         // Verify HELD reservation is created on accept
         verify(parkingReservationService, times(1)).createHeldReservations(
@@ -272,6 +270,7 @@ class RentalRequestServiceTest {
 
         when(rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(eq(RentalRequestStatus.ACCEPTED), any(Instant.class)))
                 .thenReturn(List.of(expiredReq));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(expiredReq));
 
         int expiredCount = rentalRequestService.expirePendingHoldRequests(Instant.now());
 
@@ -300,6 +299,7 @@ class RentalRequestServiceTest {
         when(rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(
                 eq(RentalRequestStatus.ACCEPTED), any(Instant.class)))
                 .thenReturn(List.of(request));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(request));
 
         int expiredCount = rentalRequestService.expirePendingHoldRequests(Instant.now());
 
@@ -551,6 +551,7 @@ class RentalRequestServiceTest {
 
         when(rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(eq(RentalRequestStatus.ACCEPTED), any()))
                 .thenReturn(List.of(req));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(req));
         when(rentalPaymentLifecyclePort.isConfirmed("req-1")).thenReturn(true);
 
         int count = rentalRequestService.expirePendingHoldRequests(now);

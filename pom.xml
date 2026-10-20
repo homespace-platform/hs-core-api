@@ -54,4 +54,13 @@
             </plugins>
         </pluginManagement>
     </build>
+    <profiles>
+        <!-- Keep CLI verification isolated from IDE incremental compilation. -->
+        <profile>
+            <id>isolated-build</id>
+            <build>
+                <directory>${project.basedir}/target/isolated</directory>
+            </build>
+        </profile>
+    </profiles>
 </project>

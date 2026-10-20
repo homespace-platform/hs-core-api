@@ -9,7 +9,6 @@ public record CreateRentalRequest(
         String listingId,
 
         @NotNull(message = "moveInDate is required")
-        @FutureOrPresent(message = "moveInDate must be today or in the future")
         LocalDate moveInDate,
 
         @NotNull(message = "leaseMonths is required")

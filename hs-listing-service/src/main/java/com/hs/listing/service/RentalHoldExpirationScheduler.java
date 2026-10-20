@@ -13,10 +13,11 @@ import java.time.Instant;
 public class RentalHoldExpirationScheduler {
 
     private final RentalRequestService rentalRequestService;
+    private final com.hs.common.time.BillingTime time;
 
     @Scheduled(fixedDelayString = "${rental.expiration-check-delay-ms}")
     public void expireHoldRequests() {
-        int count = rentalRequestService.expirePendingHoldRequests(Instant.now());
+        int count = rentalRequestService.expirePendingHoldRequests(time.now());
         if (count > 0) {
             log.info("Expired {} rental hold request(s) and restored listing(s) to PUBLISHED", count);
         }

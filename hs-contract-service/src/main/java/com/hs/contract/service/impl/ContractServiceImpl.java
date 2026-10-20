@@ -30,6 +30,7 @@ import com.hs.contract.repository.ContractRepository;
 import com.hs.contract.repository.ContractRevisionRepository;
 import com.hs.contract.repository.ContractTemplateVersionRepository;
 import com.hs.contract.service.ContractService;
+import com.hs.contract.service.ContractDraftVisibility;
 import com.hs.contract.service.LatePaymentPolicy;
 import com.hs.contract.service.ContractPolicyTerms;
 import com.hs.contract.service.ContractPreviewIdentity;
@@ -79,6 +80,7 @@ import org.springframework.beans.factory.annotation.Value;
 @Slf4j
 @Service
 public class ContractServiceImpl implements ContractService {
+    @Autowired(required=false) private com.hs.contract.service.RentalOnboardingService onboarding;
     private static final String SIGNING_CITY = "Thành phố Hồ Chí Minh";
 
     private final ContractRepository contractRepository;
@@ -170,7 +172,7 @@ public class ContractServiceImpl implements ContractService {
     public ContractResponse createDraft(CreateContractDraftRequest request) {
         String currentUserId = getCurrentUserId();
 
-        RentalRequest rentalRequest = rentalRequestRepository.findById(request.getRentalRequestId())
+        RentalRequest rentalRequest = rentalRequestRepository.findByIdForUpdate(request.getRentalRequestId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.RENTAL_REQUEST_NOT_APPROVED));
 
         // 1. Kiểm tra trạng thái RentalRequest: phải là ACCEPTED
@@ -182,6 +184,9 @@ public class ContractServiceImpl implements ContractService {
         if (!rentalRequest.getOwnerId().equals(currentUserId)) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
+        if (rentalRequest.getCancellationRequestedAt()!=null) {
+            throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED,"Hồ sơ đang chờ quyết định hủy; chưa thể tạo hợp đồng.");
+        }
 
         // 3. Nếu đã tồn tại Contract cho RentalRequest này thì trả về luôn (tương thích backward)
         Optional<Contract> existing = contractRepository.findByRentalRequestId(rentalRequest.getId());
@@ -192,7 +197,9 @@ public class ContractServiceImpl implements ContractService {
 
         // 4. GATE: Kiểm tra INITIAL_PAYMENT của request. Chỉ cho tạo hợp đồng khi đã xác nhận hoàn tất (CONFIRMED)
         PaymentRequest payment = paymentRequestRepository != null
-                ? paymentRequestRepository.findByRentalRequestIdAndType(rentalRequest.getId(), PaymentType.INITIAL).orElse(null)
+                ? paymentRequestRepository.findByRentalRequestIdAndType(rentalRequest.getId(), PaymentType.INITIAL)
+                    .filter(p->p.getStatus()==PaymentStatus.CONFIRMED)
+                    .or(()->paymentRequestRepository.findByRentalRequestIdAndType(rentalRequest.getId(),PaymentType.RESERVATION_DEPOSIT)).orElse(null)
                 : null;
 
         if (payment == null || payment.getStatus() != PaymentStatus.CONFIRMED) {
@@ -232,8 +239,8 @@ public class ContractServiceImpl implements ContractService {
                 .templateVersionId(templateVersion.getId())
                 .status(ContractStatus.DRAFT)
                 .rentalPaymentId(payment.getId())
-                .paymentStatus(ContractPaymentStatus.PAID)
-                .paidAt(payment.getConfirmedAt())
+                .paymentStatus(payment.getType()!=PaymentType.RESERVATION_DEPOSIT?ContractPaymentStatus.PAID:ContractPaymentStatus.UNPAID)
+                .paidAt(payment.getType()!=PaymentType.RESERVATION_DEPOSIT?payment.getConfirmedAt():null)
                 .build();
 
         contract = contractRepository.save(contract);
@@ -294,7 +301,8 @@ public class ContractServiceImpl implements ContractService {
                 && !"system".equals(currentUserId)) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
-        if (currentUserId.equals(contract.getTenantId()) && contract.getStatus() == ContractStatus.DRAFT) {
+        if (!currentUserId.equals(contract.getLandlordId()) && currentUserId.equals(contract.getTenantId())
+                && contract.getStatus() == ContractStatus.DRAFT && !canTenantReviewRootDraft(contract)) {
             return null;
         }
         return toContractResponse(contract);
@@ -314,13 +322,15 @@ public class ContractServiceImpl implements ContractService {
                 predicates.add(cb.equal(root.get("landlordId"), currentUserId));
             } else if (role == ContractPartyRole.TENANT) {
                 predicates.add(cb.equal(root.get("tenantId"), currentUserId));
-                predicates.add(cb.notEqual(root.get("status"), ContractStatus.DRAFT));
+                predicates.add(billableOnly ? cb.notEqual(root.get("status"), ContractStatus.DRAFT)
+                        : ContractDraftVisibility.tenantReadable(root,query,cb));
             } else {
                 predicates.add(cb.or(
                         cb.equal(root.get("landlordId"), currentUserId),
                         cb.and(
                                 cb.equal(root.get("tenantId"), currentUserId),
-                                cb.notEqual(root.get("status"), ContractStatus.DRAFT)
+                                billableOnly ? cb.notEqual(root.get("status"), ContractStatus.DRAFT)
+                                        : ContractDraftVisibility.tenantReadable(root,query,cb)
                         )
                 ));
             }
@@ -352,7 +362,7 @@ public class ContractServiceImpl implements ContractService {
         return list.stream()
                 .filter(contract -> contract.getParentContractId() == null)
                 .filter(contract -> userId.equals(contract.getLandlordId())
-                        || contract.getStatus() != ContractStatus.DRAFT)
+                        || contract.getStatus() != ContractStatus.DRAFT || canTenantReviewRootDraft(contract))
                 .map(this::toContractResponse)
                 .toList();
     }
@@ -698,6 +708,12 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
         }
         ContractRevision revision = requireCurrentRevision(contract);
+        if(contract.getParentContractId()==null && onboarding!=null) {
+            var rental=rentalRequestRepository.findById(contract.getRentalRequestId()).orElseThrow();
+            var payment=paymentRequestRepository.findByRentalRequestIdAndType(rental.getId(),PaymentType.INITIAL).orElse(null);
+            revision.setInitialPaymentSnapshot(toJson(dataBuilder.onboardingPayment(rental,payment,Map.of(),List.of())));
+            revisionRepository.save(revision);
+        }
 
         ContractCompletenessResponse completeness = assessCompleteness(contract, revision);
         if (!completeness.isComplete()) {
@@ -929,6 +945,10 @@ public class ContractServiceImpl implements ContractService {
         if (contract.getStatus() != ContractStatus.PENDING_REVIEW) {
             throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
         }
+        // The signing window (start date reached, both payments confirmed, deadline) is decided by the backend.
+        if (contract.getParentContractId() == null && onboarding != null) {
+            onboarding.validateSigning(contract.getRentalRequestId(), contract.getTenantId());
+        }
 
         // Kiểm tra thanh toán:
         // Luồng mới: Kiểm tra PaymentRequest liên kết đã CONFIRMED
@@ -1066,7 +1086,8 @@ public class ContractServiceImpl implements ContractService {
             if (paymentOpt.isPresent()) {
                 PaymentStatus status = paymentOpt.get().getStatus();
                 if (status == PaymentStatus.CONFIRMED) {
-                    return ContractPaymentStatus.PAID;
+                    return paymentOpt.get().getType()==PaymentType.RESERVATION_DEPOSIT
+                            ? ContractPaymentStatus.UNPAID : ContractPaymentStatus.PAID;
                 } else if (status == PaymentStatus.CANCELLED || status == PaymentStatus.EXPIRED) {
                     return ContractPaymentStatus.FAILED;
                 } else {
@@ -1157,7 +1178,7 @@ public class ContractServiceImpl implements ContractService {
                 revision.getSchemaVersion() != null ? revision.getSchemaVersion() : 2,
                 revision.getRevisionNumber(),
                 contract.getContractNumber(),
-                LocalDate.now(),
+                LocalDate.now(com.hs.common.time.BillingTime.ZONE),
                 SIGNING_CITY
         );
     }
@@ -1174,6 +1195,11 @@ public class ContractServiceImpl implements ContractService {
     }
 
     private Contract findContractForUpdateAndCheckAccess(String contractId) {
+        if(onboarding!=null) {
+            var before=contractRepository.findById(contractId).orElseThrow(()->new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+            checkContractAccess(before);
+            if(before.getParentContractId()==null)rentalRequestRepository.findByIdForUpdate(before.getRentalRequestId()).orElseThrow();
+        }
         Contract contract = contractRepository.findByIdForUpdate(contractId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         checkContractAccess(contract);
@@ -1187,9 +1213,14 @@ public class ContractServiceImpl implements ContractService {
         if (!landlord && !tenant && !"system".equals(userId)) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
-        if (tenant && contract.getStatus() == ContractStatus.DRAFT && !"AMENDMENT".equals(contract.getAgreementKind())) {
+        if (!landlord && tenant && contract.getStatus() == ContractStatus.DRAFT
+                && !"AMENDMENT".equals(contract.getAgreementKind()) && !canTenantReviewRootDraft(contract)) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
+    }
+
+    private boolean canTenantReviewRootDraft(Contract contract) {
+        return ContractDraftVisibility.tenantMayReview(contract,rentalRequestRepository,paymentRequestRepository);
     }
 
     private void requireLandlord(Contract contract) {
