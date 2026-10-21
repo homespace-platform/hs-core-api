@@ -1,6 +1,12 @@
 # Kịch bản test độc lập — hợp đồng 3 tháng, hiệu lực 21/10/2026
 
-## Luồng nhận nhà mới — 21/10/2026
+## Mốc hôm nay — 22/10/2026
+
+Mốc giả lập cho hôm nay là **22/10/2026 lúc 10:00:00, giờ Việt Nam (UTC+7)**: `HOMESPACE_TIME_SIMULATED_AT=2026-10-22T10:00:00`.
+
+Các UC bên dưới vẫn giữ ngày bắt đầu hợp đồng **21/10/2026** và các mốc tương ứng để không thay đổi lịch hóa đơn/phụ lục của fixture đã tạo. Không coi ngày 21/10 trong các UC là hôm nay và không lùi đồng hồ trên dữ liệu đã tiến lịch. Việc cập nhật tài liệu này không tự thay đổi `.env` hoặc đồng hồ Core đang chạy.
+
+## Luồng nhận nhà mới — 22/10/2026
 
 Các UC cũ bên dưới bắt đầu thuê ngay 21/10 nên vẫn thanh toán INITIAL gộp cọc + tháng đầu. Nếu chọn ngày vào ở sau hôm nay, chỉ thu cọc RESERVATION_DEPOSIT sau chấp nhận; đến ngày bắt đầu mới mở INITIAL tiền tháng đầu. Cọc đã nhận giữ phòng qua các ngày chờ, không tự hủy sau 48 giờ. Đề nghị bắt đầu sớm được duyệt đổi cả ngày thuê, ngày kết thúc và kỳ hóa đơn; phải kết xuất lại bản nháp trước ký. Chi tiết 30 ca mới: `../hs-web-app/docs/RENTAL_ONBOARDING_TEST_CASES.md`.
 
@@ -26,7 +32,7 @@ Hạn chủ nhà phản hồi 24 giờ; giữ chỗ chưa báo chuyển 60 phút
 Riêng đồng hồ giả lập đặt trong `hs-core-api/.env`, khi Core chạy profile dev/test:
 
 ```dotenv
-HOMESPACE_TIME_SIMULATED_AT=2026-10-21T10:00:00
+HOMESPACE_TIME_SIMULATED_AT=2026-10-22T10:00:00
 ```
 
 `application.properties` chỉ ánh xạ biến (không ghi cứng ngày). Các cấu hình nghiệp vụ khác vẫn ở file này:
