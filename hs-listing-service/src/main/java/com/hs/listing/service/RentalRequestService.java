@@ -160,10 +160,12 @@ public class RentalRequestService {
     // 1. TẠO YÊU CẦU THUÊ NHÀ (RENTER)
     @Transactional
     public RentalRequestResponse createRentalRequest(String renterId, String renterEmail, CreateRentalRequest req) {
-        validateMoveIn(req.moveInDate());
         if (renterId == null || renterId.isBlank()) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
+        if(req==null || !req.reservationPolicyAccepted())
+            throw new AppException(ListingErrorCode.RESERVATION_POLICY_ACCEPTANCE_REQUIRED);
+        validateMoveIn(req.moveInDate());
 
         Listing listing = listingRepository.findByIdAndActiveTrue(req.listingId())
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
@@ -236,8 +238,8 @@ public class RentalRequestService {
                 .costBreakdownSnapshot(costBreakdownJson)
                 .excludedChargesSnapshot(excludedChargesJson)
                 .renterNote(req.renterNote() != null && !req.renterNote().isBlank() ? req.renterNote().trim() : null)
-                .reservationPolicyVersion(req.reservationPolicyAccepted()?"RESERVATION_DEFAULT_V1":null)
-                .reservationPolicyAcceptedAt(req.reservationPolicyAccepted()?now():null)
+                .reservationPolicyVersion("RESERVATION_DEFAULT_V1")
+                .reservationPolicyAcceptedAt(now())
                 .status(RentalRequestStatus.PENDING)
                 .respondBy(now().plus(Duration.ofHours(responseHours)))
                 .build();

@@ -31,6 +31,33 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class RentalRequestServiceTest {
+    @Test void missingOrFalseConsentCannotCreateRequestEvenWhenCallingTheServiceDirectly() {
+        for(var request:List.of(
+            new CreateRentalRequest("listing",LocalDate.now().plusDays(5),12,1,0,0,"Tenant","0900000000",null,null,null),
+            new CreateRentalRequest("listing",LocalDate.now().plusDays(5),12,1,0,0,"Tenant","0900000000",null,null,null,false))) {
+            var error=assertThrows(AppException.class,()->rentalRequestService.createRentalRequest("tenant",null,request));
+            assertEquals(ListingErrorCode.RESERVATION_POLICY_ACCEPTANCE_REQUIRED.getCode(),error.getCode());
+            assertEquals(400,error.getStatusCode().value());
+        }
+        verifyNoInteractions(listingRepository,rentalRequestRepository,rentalPaymentLifecyclePort,listingStatusService);
+    }
+    @Test void httpPayloadMustExplicitlyAcceptReservationPolicy() throws Exception {
+        var mapper=new ObjectMapper().findAndRegisterModules();
+        String base="""
+            {"listingId":"listing","moveInDate":"2026-11-01","leaseMonths":12,
+             "renterName":"Tenant","renterPhone":"0900000000"%s}
+            """;
+        try(var factory=jakarta.validation.Validation.buildDefaultValidatorFactory()) {
+            for(String consent:List.of("",",\"reservationPolicyAccepted\":false",",\"reservationPolicyAccepted\":null")) {
+                var request=mapper.readValue(base.formatted(consent),CreateRentalRequest.class);
+                assertFalse(request.reservationPolicyAccepted());
+                assertTrue(factory.getValidator().validate(request).stream()
+                    .anyMatch(v->v.getPropertyPath().toString().equals("reservationPolicyAccepted")));
+            }
+            var accepted=mapper.readValue(base.formatted(",\"reservationPolicyAccepted\":true"),CreateRentalRequest.class);
+            assertTrue(factory.getValidator().validate(accepted).isEmpty());
+        }
+    }
     private com.hs.listing.dto.estimate.RentalEstimateResponse quoteAt(String instant,LocalDate startsOn,boolean freeDeposit) {
         var clock=mock(com.hs.common.time.BillingTime.class);
         when(clock.now()).thenReturn(Instant.parse(instant));
@@ -109,7 +136,7 @@ class RentalRequestServiceTest {
     @Test
     void createRentalRequest_rejectsUnauthenticated() {
         CreateRentalRequest req = new CreateRentalRequest(
-                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note"
+                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
         );
         assertThrows(AppException.class, () -> rentalRequestService.createRentalRequest(null, null, req));
     }
@@ -125,7 +152,7 @@ class RentalRequestServiceTest {
         when(listingRepository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
 
         CreateRentalRequest req = new CreateRentalRequest(
-                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note"
+                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
         );
 
         AppException ex = assertThrows(AppException.class, () -> rentalRequestService.createRentalRequest("user-1", "user1@gmail.com", req));
@@ -143,7 +170,7 @@ class RentalRequestServiceTest {
         when(listingRepository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
 
         CreateRentalRequest req = new CreateRentalRequest(
-                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note"
+                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
         );
 
         AppException ex = assertThrows(AppException.class, () -> rentalRequestService.createRentalRequest("renter-1", "r@gmail.com", req));
@@ -172,7 +199,7 @@ class RentalRequestServiceTest {
                 .thenReturn(new VehicleAvailabilityInfo(2, 0, 2));
 
         CreateRentalRequest req = new CreateRentalRequest(
-                "listing-1", LocalDate.now().plusDays(5), 12, 2, 1, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note"
+                "listing-1", LocalDate.now().plusDays(5), 12, 2, 1, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
         );
 
         RentalRequestResponse res = rentalRequestService.createRentalRequest("renter-1", "a@gmail.com", req);
@@ -181,6 +208,10 @@ class RentalRequestServiceTest {
         assertEquals("listing-1", res.listingId());
         assertEquals("renter-1", res.renterId());
         assertEquals(RentalRequestStatus.PENDING, res.status());
+        var saved=org.mockito.ArgumentCaptor.forClass(RentalRequest.class);
+        verify(rentalRequestRepository).save(saved.capture());
+        assertEquals("RESERVATION_DEFAULT_V1",saved.getValue().getReservationPolicyVersion());
+        assertNotNull(saved.getValue().getReservationPolicyAcceptedAt());
         assertEquals(2, res.occupantCount());
         assertEquals(1, res.motorbikeCount());
         assertEquals(0, res.carCount());
@@ -354,7 +385,7 @@ class RentalRequestServiceTest {
         when(listingRepository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
 
         CreateRentalRequest req = new CreateRentalRequest(
-                "listing-1", LocalDate.now().plusDays(5), 12, 3, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note"
+                "listing-1", LocalDate.now().plusDays(5), 12, 3, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
         );
 
         AppException ex = assertThrows(AppException.class, () -> rentalRequestService.createRentalRequest("renter-1", "a@gmail.com", req));
@@ -376,7 +407,7 @@ class RentalRequestServiceTest {
                 .thenReturn(new VehicleAvailabilityInfo(0, 0, 0));
 
         CreateRentalRequest req = new CreateRentalRequest(
-                "listing-1", LocalDate.now().plusDays(5), 12, 1, 1, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note"
+                "listing-1", LocalDate.now().plusDays(5), 12, 1, 1, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
         );
 
         AppException ex = assertThrows(AppException.class, () -> rentalRequestService.createRentalRequest("renter-1", "a@gmail.com", req));
@@ -398,7 +429,7 @@ class RentalRequestServiceTest {
                 .thenReturn(new VehicleAvailabilityInfo(2, 1, 1)); // only 1 available
 
         CreateRentalRequest req = new CreateRentalRequest(
-                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 2, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note"
+                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 2, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
         );
 
         AppException ex = assertThrows(AppException.class, () -> rentalRequestService.createRentalRequest("renter-1", "a@gmail.com", req));
@@ -451,7 +482,7 @@ class RentalRequestServiceTest {
                 .thenReturn(new VehicleAvailabilityInfo(2, 0, 2));
 
         CreateRentalRequest req = new CreateRentalRequest(
-                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note"
+                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
         );
 
         RentalRequestResponse res = rentalRequestService.createRentalRequest("renter-1", "a@gmail.com", req);

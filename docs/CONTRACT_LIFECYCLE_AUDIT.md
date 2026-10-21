@@ -14,7 +14,7 @@ Lối thoát có thỏa thuận vẫn được giữ: tenant có thể đề ngh
 
 Phạm vi đã được chủ dự án xác nhận: **cả hai trường hợp**. Không có scheduler tự tịch thu cọc.
 
-1. Tenant chủ động đồng ý `RESERVATION_DEFAULT_V1` khi gửi yêu cầu. Lưu phiên bản và thời điểm trước thanh toán; không suy ra đồng ý từ bản nháp chưa ký. Hồ sơ không có đồng ý không được giữ cọc hồi tố.
+1. Yêu cầu thuê mới bắt buộc tenant chủ động đồng ý `RESERVATION_DEFAULT_V1` khi gửi. UI có required, khóa nút và submit guard; API có AssertTrue và service guard, thiếu/false/null đều bị chặn. Lưu phiên bản và thời điểm trước thanh toán; không tích sẵn hay suy ra đồng ý từ bản nháp chưa ký. Hồ sơ cũ không có đồng ý không được giữ cọc hồi tố; không tự backfill.
 2. Chỉ xét rental ACCEPTED, Listing RESERVED, sổ cọc HELD dương, chưa đủ chữ ký/chưa bàn giao. Chủ nhà phải có PDF đúng revision/fingerprint. Nhánh bỏ ký cần chữ ký SmartCA chủ nhà trên đúng revision và hết hạn riêng của tenant.
 3. Chủ nhà gửi thông báo cuối cùng, mở thêm ít nhất 24 giờ để tenant **thực sự có thể thanh toán/ký** hoặc phản hồi. Cấu hình `rental.default-response-hours` không thể rút dưới 24 giờ. Thông báo và hạn được lưu nhật ký.
 4. Báo chuyển, REJECTED, DISPUTED, phản hồi tenant, SmartCA đang chạy/FAILED/chưa rõ kết quả đều chặn giữ cọc. Tenant đã ký cũng chặn. Đổi revision, hạn hoặc trạng thái tiền làm thông báo cũ mất điều kiện áp dụng.

@@ -42,6 +42,7 @@ public record CreateRentalRequest(
 
         @Size(max = 500, message = "renterNote cannot exceed 500 characters")
         String renterNote,
+        @AssertTrue(message = "Bạn cần đồng ý điều kiện giữ chỗ trước khi gửi yêu cầu thuê.")
         boolean reservationPolicyAccepted
 ) {
     public CreateRentalRequest(String listingId, java.time.LocalDate moveInDate,Integer leaseMonths,Integer occupantCount,

@@ -48,6 +48,7 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     CAR_CAPACITY_EXCEEDED(4051, "Car parking capacity exceeded for the selected period", HttpStatus.CONFLICT),
     PARKING_CAPACITY_CHANGED(4052, "Parking capacity cannot be reduced below current active reservations", HttpStatus.BAD_REQUEST),
     RENTAL_ESTIMATE_INVALID(4053, "Rental estimate parameters are invalid", HttpStatus.BAD_REQUEST),
+    RESERVATION_POLICY_ACCEPTANCE_REQUIRED(4054, "Bạn cần đồng ý điều kiện giữ chỗ trước khi gửi yêu cầu thuê.", HttpStatus.BAD_REQUEST),
     RENTAL_PAYMENT_NOT_FOUND(4060, "Rental payment not found", HttpStatus.NOT_FOUND),
     RENTAL_PAYMENT_FORBIDDEN(4061, "You do not have permission to perform this payment action", HttpStatus.FORBIDDEN),
     RENTAL_PAYMENT_EXPIRED(4062, "Rental payment has expired", HttpStatus.CONFLICT),
