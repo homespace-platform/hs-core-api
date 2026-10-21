@@ -16,5 +16,6 @@ public record InitialPaymentSummary(
         Instant payeeConfirmedAt,
         Instant paidAt,
         Instant confirmedAt,
-        Instant contractDueAt
+        Instant contractDueAt,
+        boolean canCancelImmediately
 ) {}

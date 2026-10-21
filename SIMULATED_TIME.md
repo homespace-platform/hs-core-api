@@ -4,11 +4,11 @@
 
 Các UC cũ bên dưới bắt đầu thuê ngay 21/10 nên vẫn thanh toán INITIAL gộp cọc + tháng đầu. Nếu chọn ngày vào ở sau hôm nay, chỉ thu cọc RESERVATION_DEPOSIT sau chấp nhận; đến ngày bắt đầu mới mở INITIAL tiền tháng đầu. Cọc đã nhận giữ phòng qua các ngày chờ, không tự hủy sau 48 giờ. Đề nghị bắt đầu sớm được duyệt đổi cả ngày thuê, ngày kết thúc và kỳ hóa đơn; phải kết xuất lại bản nháp trước ký. Chi tiết 30 ca mới: `../hs-web-app/docs/RENTAL_ONBOARDING_TEST_CASES.md`.
 
-Hạn chủ nhà phản hồi 24 giờ; giữ chỗ chưa báo chuyển 60 phút; chờ xác nhận 24 giờ; ký 48 giờ sau xác nhận tháng đầu. Đã báo chuyển/quá hạn đối soát hoặc đã nhận tiền thì không tự mở phòng. Hủy trước ký cần người thuê đề nghị và chủ nhà đồng ý; nghĩa vụ hoàn tiền không phải giao dịch hoàn tự động.
+Hạn chủ nhà phản hồi 24 giờ; giữ chỗ chưa báo chuyển 60 phút; chờ xác nhận 24 giờ. Chủ nhà có hạn hoàn thiện/ký sau xác nhận tháng đầu; người thuê có 48 giờ riêng sau khi chủ nhà ký SmartCA. Đã báo chuyển/quá hạn đối soát hoặc đã nhận tiền thì không tự mở phòng. Hủy có hoàn tiền cần thỏa thuận; nhánh vi phạm trước thuê cần đồng ý điều kiện giữ cọc trước thanh toán, thông báo cuối ít nhất 24 giờ và chủ nhà chốt. Xem `docs/CONTRACT_LIFECYCLE_AUDIT.md`. Nghĩa vụ hoàn tiền không phải giao dịch hoàn tự động.
 
 ## Cách chạy để không nhầm hóa đơn hoặc lùi dữ liệu
 
-**Vị trí thao tác sau khi gom module thanh toán:** vào **Hóa đơn → chọn hợp đồng**. Hồ sơ có ba mục **Thanh toán ban đầu**, **Hóa đơn theo kỳ** và **Hoàn cọc**. Chọn đúng kỳ ở danh sách bên trái để nhập công tơ/thanh toán/xác nhận; mỗi lần chỉ mở chi tiết một hóa đơn. Đề xuất khấu trừ, khiếu nại, QR chuyển tiền hoàn và xác nhận nhận cọc đều nằm ở mục **Hoàn cọc**. Trong các bảng UC bên dưới, thao tác “mở hồ sơ/quyết toán cọc” dùng mục này, thay vì block quyết toán trong Chi tiết hợp đồng. **Gia hạn thời gian thuê và ký SmartCA vẫn ở Hợp đồng**. Các mốc thời gian và điều kiện xử lý tiền giữ nguyên.
+**Vị trí thao tác sau khi gom module thanh toán:** vào **Hóa đơn → chọn hợp đồng**. Hồ sơ chỉ có **Hóa đơn theo kỳ** (bao gồm tiền thuê tháng 1) và **Cọc & hoàn cọc**. Không còn block Thanh toán ban đầu riêng. Chọn đúng kỳ bên trái để nhập công tơ/thanh toán/xác nhận; mỗi lần chỉ mở chi tiết một hóa đơn. Đề xuất khấu trừ, khiếu nại, QR hoàn, xác nhận nhận cọc và xử lý hồ sơ nhận nhà đều nằm ở **Cọc & hoàn cọc**. **Gia hạn thời gian thuê và ký SmartCA vẫn ở Hợp đồng**.
 
 - **Mỗi UC là một hợp đồng MỚI, riêng biệt**, đều bắt đầu từ `2026-10-21T10:00:00`. Không chạy nhiều UC trên cùng ID hợp đồng.
 - Chọn một UC, thực hiện tuần tự từ hàng đầu xuống hàng cuối của chính UC đó. **Không cần ghép mốc từ UC khác.** Ca kết thúc khi đã kiểm tra đủ kết quả cuối bảng; không buộc chạy tiếp ca khác.

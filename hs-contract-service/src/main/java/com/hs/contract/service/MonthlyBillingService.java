@@ -208,10 +208,18 @@ public class MonthlyBillingService {
         if (billable(contract)) syncContract(contractId);
         else if (contract.getStatus() == ContractStatus.TERMINATED)
             invoices.findByContractIdOrderByPeriodIndexDesc(contractId).forEach(i -> reconcile(lockInvoice(i.getId())));
-        return invoices.findByContractIdOrderByPeriodIndexDesc(contractId).stream()
+        var result=new ArrayList<>(invoices.findByContractIdOrderByPeriodIndexDesc(contractId).stream()
                 .filter(invoice -> actorId.equals(contract.getLandlordId())
                         || invoice.getStatus() != MonthlyInvoiceStatus.DRAFT)
-                .map(this::response).toList();
+                .map(this::response).toList());
+        if(contract.getParentContractId()==null) {
+            payments.attachOnboardingToContract(contract.getRentalRequestId(),contractId);
+            payments.findByRentalRequestIdAndType(contract.getRentalRequestId(),PaymentType.INITIAL).ifPresent(first -> {
+                var rental=rentalRequests.findById(contract.getRentalRequestId()).orElseThrow();
+                result.add(FirstRentInvoice.from(contractId,rental,payments.getPaymentRequest(first.getId(),actorId),time.now()));
+            });
+        }
+        return result;
     }
 
     /** Record an escalation after five overdue days; this never changes the lease or payment terms. */

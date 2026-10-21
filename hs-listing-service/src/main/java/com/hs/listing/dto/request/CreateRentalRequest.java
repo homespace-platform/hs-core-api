@@ -41,5 +41,12 @@ public record CreateRentalRequest(
         BigDecimal depositAmount,
 
         @Size(max = 500, message = "renterNote cannot exceed 500 characters")
-        String renterNote
-) {}
+        String renterNote,
+        boolean reservationPolicyAccepted
+) {
+    public CreateRentalRequest(String listingId, java.time.LocalDate moveInDate,Integer leaseMonths,Integer occupantCount,
+            Integer motorbikeCount,Integer carCount,String renterName,String renterPhone,String renterEmail,
+            java.math.BigDecimal depositAmount,String renterNote) {
+        this(listingId,moveInDate,leaseMonths,occupantCount,motorbikeCount,carCount,renterName,renterPhone,renterEmail,depositAmount,renterNote,false);
+    }
+}

@@ -35,6 +35,8 @@ class RentalOnboardingServiceTest {
     @Mock RentalOnboardingEventRepository events; @Mock PaymentRequestRepository payments;
     @Mock PaymentRequestService paymentService; @Mock ContractRepository contracts;
     @Mock ContractRevisionRepository revisions; @Mock ParkingReservationService parking;
+    @Mock com.hs.payment.repository.DepositRecordRepository deposits;
+    @Mock SignatureRequestRepository signatures; @Mock ContractDocumentRepository documents;
     @Mock ListingStatusService listingStatus; @Mock RentalCostCalculator calculator;
     @Mock ListingRepository listings; @Mock PropertyBranchRepository branches;
     @Mock BillingTime time; @Spy ObjectMapper mapper=new ObjectMapper();

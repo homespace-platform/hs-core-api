@@ -734,6 +734,16 @@ public class PaymentRequestService {
                 });
     }
 
+    /** No transfer declaration or positive receipt may be discarded by an immediate cancellation. */
+    public static boolean cancellableBeforeTransfer(PaymentRequest p) {
+        if(p.getPayerReportedAt()!=null || (p.getPayeeConfirmedAt()!=null || p.getConfirmedAt()!=null)
+                && p.getTotalAmount()!=null && p.getTotalAmount().signum()>0)return false;
+        return p.getStatus()==PaymentStatus.AWAITING_TRANSFER || p.getStatus()==PaymentStatus.EXPIRED
+            || p.getStatus()==PaymentStatus.CANCELLED || p.getStatus()==PaymentStatus.OVERDUE
+            || p.getStatus()==PaymentStatus.CONFIRMED && p.getType()==PaymentType.RESERVATION_DEPOSIT
+                && p.getTotalAmount()!=null && p.getTotalAmount().signum()==0;
+    }
+
     @Transactional
     public void handleHoldExpired(String rentalRequestId) {
         java.util.stream.Stream.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT)
@@ -754,10 +764,24 @@ public class PaymentRequestService {
 
     @Transactional
     public void createRefundObligation(PaymentRequest initialPayment) {
+        createRefundObligation(initialPayment,initialPayment.getTotalAmount(),false);
+    }
+
+    /** Refund only confirmed rent when a separately agreed deposit is retained. Never alter the receipt. */
+    @Transactional
+    public void createRentRefundObligation(PaymentRequest initialPayment,BigDecimal amount) {
+        createRefundObligation(initialPayment,amount,true);
+    }
+
+    private void createRefundObligation(PaymentRequest initialPayment,BigDecimal amount,boolean rentOnly) {
+        if(amount==null || amount.signum()<0 || amount.compareTo(initialPayment.getTotalAmount())>0)
+            throw new IllegalArgumentException("Invalid refund amount");
+        if(amount.signum()==0)return;
         if(initialPayment.getStatus()!=PaymentStatus.CONFIRMED || initialPayment.getTotalAmount().signum()==0)return;
         // Idempotency: check if refund request already created
         Optional<PaymentRequest> existingRefund = paymentRequestRepository.findByOnboardingKey("REFUND:"+initialPayment.getId());
         if (existingRefund.isPresent()) {
+            if(existingRefund.get().getTotalAmount().compareTo(amount)!=0)throw new IllegalStateException("Refund obligation amount differs; reconciliation required");
             return;
         }
 
@@ -770,12 +794,13 @@ public class PaymentRequestService {
                     tenantAccount.bankBin(),
                     tenantAccount.accountNumber(),
                     tenantAccount.accountHolderName(),
-                    initialPayment.getTotalAmount(),
+                    amount,
                     ref
             );
         }
 
         PaymentRequest refundPayment = PaymentRequest.builder()
+                .contractId(initialPayment.getContractId())
                 .rentalRequestId(initialPayment.getRentalRequestId())
                 .listingId(initialPayment.getListingId())
                 .payerId(initialPayment.getPayeeId()) // Landlord must refund
@@ -785,7 +810,7 @@ public class PaymentRequestService {
                 .direction(PaymentDirection.LANDLORD_TO_TENANT)
                 .status(PaymentStatus.AWAITING_TRANSFER)
                 .currency("VND")
-                .totalAmount(initialPayment.getTotalAmount())
+                .totalAmount(amount)
                 .transferReference(ref)
                 .payerBankAccountSnapshot(initialPayment.getPayeeBankAccountSnapshot())
                 .payeeBankAccountSnapshot(initialPayment.getPayerBankAccountSnapshot())
@@ -797,7 +822,7 @@ public class PaymentRequestService {
         PaymentRequest savedRefund = paymentRequestRepository.save(refundPayment);
 
         // Update DepositRecord status to REFUND_DUE
-        depositRecordRepository.findByInitialPaymentRequestId(initialPayment.getId()).ifPresent(record -> {
+        if(!rentOnly) depositRecordRepository.findByInitialPaymentRequestId(initialPayment.getId()).ifPresent(record -> {
             record.setStatus(DepositStatus.REFUND_DUE);
             record.setRefundPaymentRequestId(savedRefund.getId());
             depositRecordRepository.save(record);
@@ -805,7 +830,16 @@ public class PaymentRequestService {
 
         recordEvent(savedRefund.getId(), PaymentEventType.REFUND_OBLIGATION_CREATED, null,
                 PaymentStatus.AWAITING_TRANSFER, "SYSTEM", "SYSTEM",
-                "Hai bên đồng ý hủy hồ sơ trước khi ký; chủ nhà cần hoàn khoản thực nhận và người thuê xác nhận nhận đủ", null);
+                rentOnly?"Hoàn tiền thuê đã nhận; cọc được xử lý riêng theo thông báo vi phạm":"Hai bên đồng ý hủy hồ sơ trước khi ký; chủ nhà cần hoàn khoản thực nhận và người thuê xác nhận nhận đủ", null);
+    }
+
+    @Transactional
+    public void attachOnboardingToContract(String rentalId,String contractId) {
+        for(var p:paymentRequestRepository.findByRentalRequestIdAndTypeIn(rentalId,
+                List.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT,PaymentType.INITIAL_PAYMENT_REFUND))) {
+            if(p.getContractId()!=null && !contractId.equals(p.getContractId()))throw new IllegalStateException("Payment already linked");
+            if(p.getContractId()==null){p.setContractId(contractId);paymentRequestRepository.save(p);}
+        }
     }
 
     @Transactional(readOnly = true)

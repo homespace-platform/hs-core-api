@@ -67,7 +67,10 @@ public class RentalRequestService {
     @Value("${rental.response-hours:24}") private long responseHours=24;
     private Instant now() { return businessTime==null?Instant.now():businessTime.now(); }
     private void validateMoveIn(java.time.LocalDate date) {
-        var today=java.time.LocalDate.ofInstant(now(),com.hs.common.time.BillingTime.ZONE);
+        validateMoveIn(date,now());
+    }
+    private void validateMoveIn(java.time.LocalDate date,Instant at) {
+        var today=java.time.LocalDate.ofInstant(at,com.hs.common.time.BillingTime.ZONE);
         if(date==null || date.isBefore(today))
             throw new AppException(ListingErrorCode.RENTAL_ESTIMATE_INVALID,"Ngày bắt đầu thuê đã qua; vui lòng chọn ngày mới.");
     }
@@ -126,7 +129,8 @@ public class RentalRequestService {
             throw new AppException(ListingErrorCode.RENTAL_ESTIMATE_INVALID, "listingId is required");
         }
 
-        validateMoveIn(req.moveInDate());
+        var calculatedAt=now();
+        validateMoveIn(req.moveInDate(),calculatedAt);
         Listing listing = listingRepository.findByIdAndActiveTrue(req.listingId())
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
 
@@ -135,7 +139,7 @@ public class RentalRequestService {
         int motorbikes = req.motorbikeCount() != null ? req.motorbikeCount() : 0;
         int cars = req.carCount() != null ? req.carCount() : 0;
 
-        return rentalCostCalculator.calculate(
+        var estimate=rentalCostCalculator.calculate(
                 listing,
                 req.moveInDate(),
                 leaseMonths,
@@ -144,6 +148,13 @@ public class RentalRequestService {
                 cars,
                 req.negotiatedDepositAmount()
         );
+        var plan=com.hs.listing.dto.estimate.RentalPaymentPlan.at(
+            calculatedAt,req.moveInDate(),estimate.effectiveMonthlyRent(),estimate.depositAmount());
+        return estimate.toBuilder().paymentPlan(plan).disclaimer(
+            (plan.depositOnly()?"Sau khi chủ nhà chấp thuận chỉ thu cọc; tiền thuê tháng đầu mở từ ngày "+req.moveInDate()+", không thu lại cọc. "
+                :"Dọn vào cùng ngày: sau khi chủ nhà chấp thuận thu cọc và tiền thuê tháng đầu. ")
+            +"Phí dịch vụ, điện nước và phát sinh quyết toán cuối kỳ. Dự toán theo ngày nghiệp vụ "+plan.businessDate()
+            +"; khoản thực tế được xác định lại khi chủ nhà chấp thuận.").build();
     }
 
     // 1. TẠO YÊU CẦU THUÊ NHÀ (RENTER)
@@ -225,6 +236,8 @@ public class RentalRequestService {
                 .costBreakdownSnapshot(costBreakdownJson)
                 .excludedChargesSnapshot(excludedChargesJson)
                 .renterNote(req.renterNote() != null && !req.renterNote().isBlank() ? req.renterNote().trim() : null)
+                .reservationPolicyVersion(req.reservationPolicyAccepted()?"RESERVATION_DEFAULT_V1":null)
+                .reservationPolicyAcceptedAt(req.reservationPolicyAccepted()?now():null)
                 .status(RentalRequestStatus.PENDING)
                 .respondBy(now().plus(Duration.ofHours(responseHours)))
                 .build();

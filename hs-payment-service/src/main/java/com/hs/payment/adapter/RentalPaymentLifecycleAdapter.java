@@ -57,7 +57,8 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
     public InitialPaymentSummary getInitialPaymentSummary(String rentalRequestId) {
         return paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.INITIAL)
                 .or(()->paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,PaymentType.RESERVATION_DEPOSIT))
-                .map(this::toSummary)
+                .map(p->toSummary(p,paymentRequestRepository.findByRentalRequestIdAndTypeIn(rentalRequestId,
+                    java.util.List.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT)).stream().allMatch(PaymentRequestService::cancellableBeforeTransfer)))
                 .orElse(null);
     }
 
@@ -67,10 +68,11 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
             return Map.of();
         }
         var summaries=new java.util.HashMap<String,InitialPaymentSummary>();
-        paymentRequestRepository.findByRentalRequestIdInAndType(rentalRequestIds,PaymentType.RESERVATION_DEPOSIT)
-            .forEach(p->summaries.put(p.getRentalRequestId(),toSummary(p)));
-        paymentRequestRepository.findByRentalRequestIdInAndType(rentalRequestIds,PaymentType.INITIAL)
-            .forEach(p->summaries.put(p.getRentalRequestId(),toSummary(p)));
+        var all=new java.util.ArrayList<>(paymentRequestRepository.findByRentalRequestIdInAndType(rentalRequestIds,PaymentType.RESERVATION_DEPOSIT));
+        all.addAll(paymentRequestRepository.findByRentalRequestIdInAndType(rentalRequestIds,PaymentType.INITIAL));
+        var safe=all.stream().collect(Collectors.groupingBy(PaymentRequest::getRentalRequestId,
+            Collectors.reducing(true,PaymentRequestService::cancellableBeforeTransfer,(a,b)->a&&b)));
+        all.forEach(p->summaries.put(p.getRentalRequestId(),toSummary(p,Boolean.TRUE.equals(safe.get(p.getRentalRequestId())))));
         return summaries;
     }
 
@@ -89,7 +91,7 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
         return paymentRequestService.isConfirmed(rentalRequestId);
     }
 
-    private InitialPaymentSummary toSummary(PaymentRequest p) {
+    private InitialPaymentSummary toSummary(PaymentRequest p,boolean canCancel) {
         return InitialPaymentSummary.builder()
                 .id(p.getId())
                 .status(p.getStatus() != null ? p.getStatus().name() : null)
@@ -101,6 +103,7 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
                 .paidAt(p.getConfirmedAt())
                 .confirmedAt(p.getConfirmedAt())
                 .contractDueAt(p.getContractDueAt())
+                .canCancelImmediately(canCancel)
                 .build();
     }
 }

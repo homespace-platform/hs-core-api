@@ -68,6 +68,24 @@ class PaymentRequestServiceTest {
     private BankAccount landlordAccount;
     private BankAccount tenantAccount;
 
+    @Test void rentOnlyRefundDoesNotRefundOrResetRetainedDeposit() {
+        var source=PaymentRequest.builder().id("source").contractId("root").rentalRequestId("rental").listingId("listing")
+            .payerId("tenant").payeeId("owner").status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("15000000")).build();
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-02T03:00:00Z"));
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSREFUND1");
+        when(paymentRequestRepository.save(any())).thenAnswer(i->{PaymentRequest p=i.getArgument(0);p.setId("refund");return p;});
+        paymentRequestService.createRentRefundObligation(source,new BigDecimal("5000000"));
+        var captor=org.mockito.ArgumentCaptor.forClass(PaymentRequest.class);verify(paymentRequestRepository).save(captor.capture());
+        var refund=captor.getValue();assertEquals(new BigDecimal("5000000"),refund.getTotalAmount());assertEquals("root",refund.getContractId());
+        assertEquals("owner",refund.getPayerId());assertEquals("tenant",refund.getPayeeId());assertEquals(PaymentType.INITIAL_PAYMENT_REFUND,refund.getType());
+        assertEquals(PaymentStatus.AWAITING_TRANSFER,refund.getStatus());assertEquals(Instant.parse("2026-11-05T03:00:00Z"),refund.getDueAt());
+        verifyNoInteractions(depositRecordRepository);assertEquals(PaymentStatus.CONFIRMED,source.getStatus());
+        assertEquals(new BigDecimal("15000000"),source.getTotalAmount());
+        when(paymentRequestRepository.findByOnboardingKey("REFUND:source")).thenReturn(Optional.of(refund));
+        paymentRequestService.createRentRefundObligation(source,new BigDecimal("5000000"));verify(paymentRequestRepository,times(1)).save(any());
+        assertThrows(IllegalArgumentException.class,()->paymentRequestService.createRentRefundObligation(source,new BigDecimal("16000000")));
+    }
+
     @Test void depositDeltaCreatesOnlyDifferenceAndReusesSameObligation() {
         when(bankAccountService.getDefaultIncomingAccount("landlord-1")).thenReturn(landlordAccount);
         when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSDELTA1");

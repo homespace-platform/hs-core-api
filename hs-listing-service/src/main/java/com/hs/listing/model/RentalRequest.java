@@ -128,6 +128,17 @@ public class RentalRequest extends BaseEntity {
     private Instant cancellationRequestedAt;
     @Column(length=1000) private String cancellationReason;
 
+    /** Consent captured before funds are requested; never infer it from an unsigned draft. */
+    @Column(length=40) private String reservationPolicyVersion;
+    private Instant reservationPolicyAcceptedAt;
+    @Column(length=30) private String defaultNoticeKind;
+    private Instant defaultNoticeAt;
+    private Instant defaultRespondBy;
+    @Column(length=1000) private String defaultNoticeReason;
+    @Column(length=1000) private String defaultNoticeFingerprint;
+    private Instant defaultDisputedAt;
+    private Instant defaultCompletedAt;
+
     @Version
     private Long version;
 }

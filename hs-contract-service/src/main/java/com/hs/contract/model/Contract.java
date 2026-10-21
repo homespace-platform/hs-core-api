@@ -76,6 +76,9 @@ public class Contract extends BaseEntity {
     @Column(name = "landlord_confirmed_at")
     private Instant landlordConfirmedAt;
 
+    /** Business-clock deadline starts only once the landlord supplies their signed document. */
+    private Instant tenantSigningDueAt;
+
     @Column(name = "signed_at")
     private Instant signedAt;
 

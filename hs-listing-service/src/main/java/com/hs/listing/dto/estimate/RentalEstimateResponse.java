@@ -5,7 +5,7 @@ import lombok.Builder;
 import java.math.BigDecimal;
 import java.util.List;
 
-@Builder
+@Builder(toBuilder = true)
 public record RentalEstimateResponse(
         String listingId,
         Integer occupantCount,
@@ -20,5 +20,6 @@ public record RentalEstimateResponse(
         BigDecimal estimatedInitialTotal,
         BigDecimal estimatedLeaseTotal,
         List<ExcludedChargeItem> excludedCharges,
-        String disclaimer
+        String disclaimer,
+        RentalPaymentPlan paymentPlan
 ) {}

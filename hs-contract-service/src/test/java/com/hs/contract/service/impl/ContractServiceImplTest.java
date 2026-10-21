@@ -56,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
@@ -223,11 +224,12 @@ class ContractServiceImplTest {
         Root<Contract> root = mock(Root.class);
         Path statusPath = mock(Path.class);
         when(root.get("status")).thenReturn(statusPath);
-        specCaptor.getValue().toPredicate(root, null, mock(CriteriaBuilder.class));
-        verify(root).get("tenantId");
-        verify(root, never()).get("landlordId");
+        var query=mock(jakarta.persistence.criteria.CriteriaQuery.class,org.mockito.Answers.RETURNS_DEEP_STUBS);
+        specCaptor.getValue().toPredicate(root, query, mock(CriteriaBuilder.class));
+        verify(root,atLeastOnce()).get("tenantId");
+        verify(root,atLeastOnce()).get("landlordId"); // Receipt must match both parties, not just the rental id.
         verify(statusPath).in(ContractStatus.ACTIVE, ContractStatus.EXPIRED, ContractStatus.CLOSED, ContractStatus.TERMINATED);
-        verify(root).get("parentContractId");
+        verify(root,atLeastOnce()).get("parentContractId");
     }
 
     @Test

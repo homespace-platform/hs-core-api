@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
+@lombok.Builder
 public record MonthlyInvoiceResponse(String id, String contractId, int periodIndex,
                                      LocalDate periodStart, LocalDate periodEndExclusive,
                                      MonthlyInvoiceStatus status, BigDecimal electricityStart,

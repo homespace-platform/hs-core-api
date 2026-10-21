@@ -100,6 +100,10 @@ class MonthlyBillingServiceTest {
         PaymentRequest initial = PaymentRequest.builder().id("initial").status(PaymentStatus.CONFIRMED).build();
         when(payments.findByRentalRequestIdAndType("rental", PaymentType.INITIAL))
                 .thenReturn(Optional.of(initial));
+        when(payments.getPaymentRequest(eq("initial"),anyString())).thenReturn(PaymentRequestResponse.builder()
+            .id("initial").type(PaymentType.INITIAL).status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("5000000"))
+            .lineItems(List.of(PaymentLineItemResponse.builder().type("RENT").displayName("Tiền thuê tháng 1")
+                .quantity(1).unitPrice(new BigDecimal("5000000")).amount(new BigDecimal("5000000")).build())).build());
         when(payments.toResponse(initial, "tenant")).thenReturn(PaymentRequestResponse.builder()
                 .lineItems(List.of(PaymentLineItemResponse.builder().type("RENT")
                         .amount(new BigDecimal("5000000")).build())).build());
@@ -265,11 +269,11 @@ class MonthlyBillingServiceTest {
         when(contracts.findByIdForUpdate("contract")).thenReturn(Optional.of(contract));
         when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(invoice));
 
-        assertTrue(service.list("contract", "tenant").isEmpty());
-        assertEquals(1, service.list("contract", "landlord").size());
+        assertEquals(List.of("INITIAL_RENT"),service.list("contract", "tenant").stream().map(i->i.billingPeriod().kind()).toList());
+        assertEquals(2, service.list("contract", "landlord").size());
 
         invoice.setStatus(MonthlyInvoiceStatus.UNPAID);
-        assertEquals(1, service.list("contract", "tenant").size());
+        assertEquals(2, service.list("contract", "tenant").size());
     }
 
     @Test

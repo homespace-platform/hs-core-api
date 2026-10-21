@@ -31,6 +31,38 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class RentalRequestServiceTest {
+    private com.hs.listing.dto.estimate.RentalEstimateResponse quoteAt(String instant,LocalDate startsOn,boolean freeDeposit) {
+        var clock=mock(com.hs.common.time.BillingTime.class);
+        when(clock.now()).thenReturn(Instant.parse(instant));
+        org.springframework.test.util.ReflectionTestUtils.setField(rentalRequestService,"businessTime",clock);
+        var listing=Listing.builder().id("quote").ownerId("owner").category(com.hs.listing.model.constant.ListingCategory.HOUSE)
+            .priceUnit(com.hs.listing.model.constant.PriceUnit.MONTH).priceAmount(new BigDecimal("19660000"))
+            .depositType(freeDeposit?DepositType.NONE:DepositType.MONTH_COUNT).depositMonths(freeDeposit?null:2).build();
+        when(listingRepository.findByIdAndActiveTrue("quote")).thenReturn(Optional.of(listing));
+        return rentalRequestService.estimateRentalCost(new com.hs.listing.dto.estimate.RentalEstimateRequest("quote",startsOn,12,1,0,0,null));
+    }
+    @Test void futureMoveInQuotesOnlyDepositNowAndNamesTheFirstRentOpeningDate() {
+        var estimate=quoteAt("2026-10-21T03:00:00Z",LocalDate.of(2026,11,1),false);
+        var plan=estimate.paymentPlan();
+        assertTrue(plan.depositOnly());assertEquals(LocalDate.of(2026,10,21),plan.businessDate());
+        assertEquals(new BigDecimal("39320000"),plan.amountAfterApproval());
+        assertEquals(new BigDecimal("19660000"),plan.firstRentAmount());assertEquals(LocalDate.of(2026,11,1),plan.firstRentOpensOn());
+        assertEquals(new BigDecimal("58980000"),estimate.estimatedInitialTotal()); // Combined contractual total remains unchanged.
+    }
+    @Test void sameBusinessDayUsesTheExistingCombinedAmountIncludingAtVietnamMidnight() {
+        assertTrue(quoteAt("2026-10-31T16:59:59Z",LocalDate.of(2026,11,1),false).paymentPlan().depositOnly());
+        var estimate=quoteAt("2026-10-31T17:00:00Z",LocalDate.of(2026,11,1),false);
+        assertEquals(LocalDate.of(2026,11,1),estimate.paymentPlan().businessDate());
+        assertFalse(estimate.paymentPlan().depositOnly());assertEquals(new BigDecimal("58980000"),estimate.paymentPlan().amountAfterApproval());
+    }
+    @Test void waivedFutureDepositDoesNotCollectFirstRentEarly() {
+        var plan=quoteAt("2026-10-21T03:00:00Z",LocalDate.of(2026,11,1),true).paymentPlan();
+        assertTrue(plan.depositOnly());assertEquals(0,plan.amountAfterApproval().signum());
+        assertEquals(new BigDecimal("19660000"),plan.firstRentAmount());
+    }
+    @Test void pastBusinessDateIsRejectedEvenWhenTheMachineClockIsEarlier() {
+        assertThrows(AppException.class,()->quoteAt("2026-11-02T03:00:00Z",LocalDate.of(2026,11,1),false));
+    }
 
     private RentalRequestRepository rentalRequestRepository;
     private ListingRepository listingRepository;

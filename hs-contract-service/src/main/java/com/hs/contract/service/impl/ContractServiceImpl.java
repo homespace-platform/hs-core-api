@@ -246,6 +246,8 @@ public class ContractServiceImpl implements ContractService {
         contract = contractRepository.save(contract);
 
         // 6. Chụp dữ liệu thật của hai bên, tin đăng, yêu cầu thuê và khoản thanh toán ban đầu vào Revision 1
+        payment.setContractId(contract.getId());
+        if(paymentRequestRepository!=null)paymentRequestRepository.save(payment);
         ContractDataBuilder.ContractSnapshots snapshots = dataBuilder.build(rentalRequest, listing, payment);
 
         ContractRevision revision = ContractRevision.builder()
@@ -322,15 +324,13 @@ public class ContractServiceImpl implements ContractService {
                 predicates.add(cb.equal(root.get("landlordId"), currentUserId));
             } else if (role == ContractPartyRole.TENANT) {
                 predicates.add(cb.equal(root.get("tenantId"), currentUserId));
-                predicates.add(billableOnly ? cb.notEqual(root.get("status"), ContractStatus.DRAFT)
-                        : ContractDraftVisibility.tenantReadable(root,query,cb));
+                predicates.add(ContractDraftVisibility.tenantReadable(root,query,cb));
             } else {
                 predicates.add(cb.or(
                         cb.equal(root.get("landlordId"), currentUserId),
                         cb.and(
                                 cb.equal(root.get("tenantId"), currentUserId),
-                                billableOnly ? cb.notEqual(root.get("status"), ContractStatus.DRAFT)
-                                        : ContractDraftVisibility.tenantReadable(root,query,cb)
+                                ContractDraftVisibility.tenantReadable(root,query,cb)
                         )
                 ));
             }
@@ -340,7 +340,13 @@ public class ContractServiceImpl implements ContractService {
                 predicates.add(cb.equal(root.get("status"), status));
             }
             if (billableOnly) {
-                predicates.add(root.get("status").in(ContractStatus.ACTIVE, ContractStatus.EXPIRED, ContractStatus.CLOSED, ContractStatus.TERMINATED));
+                var funded=query.subquery(Integer.class);
+                var receipt=funded.from(PaymentRequest.class);
+                funded.select(cb.literal(1)).where(cb.equal(receipt.get("rentalRequestId"),root.get("rentalRequestId")),
+                    cb.equal(receipt.get("status"),PaymentStatus.CONFIRMED),
+                    receipt.get("type").in(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT),
+                    cb.equal(receipt.get("payerId"),root.get("tenantId")),cb.equal(receipt.get("payeeId"),root.get("landlordId")));
+                predicates.add(cb.or(root.get("status").in(ContractStatus.ACTIVE,ContractStatus.EXPIRED,ContractStatus.CLOSED,ContractStatus.TERMINATED),cb.exists(funded)));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };

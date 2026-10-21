@@ -6,6 +6,7 @@ public enum RentalRequestStatus {
     REJECTED,
     CANCELLED_BY_SYSTEM,
     CANCELLED_BY_RENTER,
+    CANCELLED_BY_OWNER,
     EXPIRED,
     COMPLETED
 }

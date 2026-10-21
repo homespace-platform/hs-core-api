@@ -33,6 +33,7 @@ public class RentalRequestController {
     private final RentalRequestService rentalRequestService;
     private final PaymentRequestService paymentRequestService;
     private final KycGateService kycGateService;
+    private final com.hs.contract.service.RentalOnboardingService onboarding;
 
     @Value("${rental.hold-duration-minutes:60}")
     private long holdDurationMinutes;
@@ -87,10 +88,11 @@ public class RentalRequestController {
 
     @PutMapping("/{id}/cancel")
     public ApiResponse<RentalRequestResponse> cancelRentalRequest(@PathVariable String id) {
-        String renterId = requireUserId();
+        String actorId = requireUserId();
+        onboarding.cancelUnpaid(id,actorId);
         return ApiResponse.<RentalRequestResponse>builder()
                 .message("Hủy yêu cầu thuê nhà thành công.")
-                .result(rentalRequestService.cancelRentalRequest(renterId, id))
+                .result(rentalRequestService.getRequestById(id, actorId))
                 .build();
     }
 

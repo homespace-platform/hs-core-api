@@ -748,6 +748,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 }
                 contract.setStatus(ContractStatus.TENANT_SIGNATURE_PENDING);
                 contract.setLandlordConfirmedAt(Instant.now());
+                if(contract.getParentContractId()==null && onboarding!=null)onboarding.landlordSigned(contract);
                 log.info("Contract {} landlord signed — now TENANT_SIGNATURE_PENDING", ctx.contractId());
             } else {
                 if (contract.getStatus() != ContractStatus.TENANT_SIGNATURE_PENDING
