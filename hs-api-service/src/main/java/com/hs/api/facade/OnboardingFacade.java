@@ -5,7 +5,6 @@ import com.hs.common.context.UserContext;
 import com.hs.common.context.UserContextHolder;
 import com.hs.payment.service.BankAccountService;
 import com.hs.user.dto.response.UserProfileResponse;
-import com.hs.user.service.AddressService;
 import com.hs.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,7 +19,6 @@ import java.util.List;
 public class OnboardingFacade {
 
     private final UserService userService;
-    private final AddressService addressService;
     private final BankAccountService bankAccountService;
 
     public OnboardingStatusResponse getOnboardingStatus() {
