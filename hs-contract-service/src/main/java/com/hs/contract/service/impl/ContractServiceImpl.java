@@ -70,6 +70,7 @@ import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import com.hs.listing.model.constant.ListingStatus;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
@@ -170,10 +171,23 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional
     public ContractResponse createDraft(CreateContractDraftRequest request) {
-        String currentUserId = getCurrentUserId();
+        return createDraftFor(request.getRentalRequestId(), getCurrentUserId());
+    }
 
-        RentalRequest rentalRequest = rentalRequestRepository.findByIdForUpdate(request.getRentalRequestId())
+    /** Internal workflow entry point. Never exposed by a controller or impersonates a user. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public ContractResponse createDraftAutomatically(String rentalRequestId) {
+        return createDraftFor(rentalRequestId, null);
+    }
+
+    private ContractResponse createDraftFor(String rentalRequestId, String currentUserId) {
+
+        RentalRequest rentalRequest = rentalRequestRepository.findByIdForUpdate(rentalRequestId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.RENTAL_REQUEST_NOT_APPROVED));
+
+        // Payment callbacks can arrive after cancellation/completion. Never resurrect a closed file.
+        if (currentUserId == null && (rentalRequest.getStatus() != RentalRequestStatus.ACCEPTED
+                || rentalRequest.getCancellationRequestedAt() != null)) return null;
 
         // 1. Kiểm tra trạng thái RentalRequest: phải là ACCEPTED
         if (rentalRequest.getStatus() != RentalRequestStatus.ACCEPTED) {
@@ -181,7 +195,7 @@ public class ContractServiceImpl implements ContractService {
         }
 
         // 2. Kiểm tra quyền: người gọi phải là chủ nhà
-        if (!rentalRequest.getOwnerId().equals(currentUserId)) {
+        if (currentUserId != null && !rentalRequest.getOwnerId().equals(currentUserId)) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
         if (rentalRequest.getCancellationRequestedAt()!=null) {
@@ -198,11 +212,15 @@ public class ContractServiceImpl implements ContractService {
         // 4. GATE: Kiểm tra INITIAL_PAYMENT của request. Chỉ cho tạo hợp đồng khi đã xác nhận hoàn tất (CONFIRMED)
         PaymentRequest payment = paymentRequestRepository != null
                 ? paymentRequestRepository.findByRentalRequestIdAndType(rentalRequest.getId(), PaymentType.INITIAL)
-                    .filter(p->p.getStatus()==PaymentStatus.CONFIRMED)
-                    .or(()->paymentRequestRepository.findByRentalRequestIdAndType(rentalRequest.getId(),PaymentType.RESERVATION_DEPOSIT)).orElse(null)
+                    .orElse(null)
                 : null;
+        PaymentRequest deposit = paymentRequestRepository != null
+                ? paymentRequestRepository.findByRentalRequestIdAndType(rentalRequest.getId(), PaymentType.RESERVATION_DEPOSIT).orElse(null) : null;
 
-        if (payment == null || payment.getStatus() != PaymentStatus.CONFIRMED) {
+        if (!com.hs.contract.service.ContractDraftFunding.ready(rentalRequest, payment, deposit)
+                || rentalRequest.getMoveInDate() != null && billingTime.today().isBefore(rentalRequest.getMoveInDate())
+                || rentalRequest.getListing() == null || rentalRequest.getListing().getStatus() != ListingStatus.RESERVED) {
+            if (currentUserId == null) return null;
             throw new AppException(ContractErrorCode.RENTAL_PAYMENT_REQUIRED_BEFORE_CONTRACT);
         }
 
@@ -210,9 +228,8 @@ public class ContractServiceImpl implements ContractService {
         if (listing == null || listing.getCategory() == null) {
             throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_NOT_AVAILABLE);
         }
-        if (templateVersionRepository.countActiveSystemTemplates(listing.getCategory()) > 1) {
-            throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_CONFIGURATION_INVALID);
-        }
+        var templateProblem = com.hs.contract.service.ContractDraftTemplates.problem(templateVersionRepository, listing.getCategory());
+        if (templateProblem != null) throw new AppException(templateProblem);
 
         // Mẫu chỉ do admin phát hành. Client không được quyết định template/version.
         List<ContractTemplateVersion> currentVersions = templateVersionRepository
@@ -226,7 +243,7 @@ public class ContractServiceImpl implements ContractService {
         ContractTemplateVersion templateVersion = currentVersions.get(0);
 
         // 6. Sinh số hợp đồng
-        String contractNumber = "HD-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-"
+        String contractNumber = "HD-" + billingTime.today().format(DateTimeFormatter.BASIC_ISO_DATE) + "-"
                 + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
 
         Contract contract = Contract.builder()
@@ -248,6 +265,10 @@ public class ContractServiceImpl implements ContractService {
         // 6. Chụp dữ liệu thật của hai bên, tin đăng, yêu cầu thuê và khoản thanh toán ban đầu vào Revision 1
         payment.setContractId(contract.getId());
         if(paymentRequestRepository!=null)paymentRequestRepository.save(payment);
+        if (deposit != null) {
+            deposit.setContractId(contract.getId());
+            paymentRequestRepository.save(deposit);
+        }
         ContractDataBuilder.ContractSnapshots snapshots = dataBuilder.build(rentalRequest, listing, payment);
 
         ContractRevision revision = ContractRevision.builder()
@@ -713,6 +734,36 @@ public class ContractServiceImpl implements ContractService {
         if (contract.getStatus() != ContractStatus.DRAFT) {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
         }
+        return renderPreview(contract, false);
+    }
+
+    /** Internal only: no impersonated user and no public endpoint bypassing ownership checks. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public ContractDocumentResponse prepareDraftPreviewAutomatically(String rentalRequestId, String contractId) {
+        // Same lock order as receipt/cancellation. Recheck eligibility after the draft transaction committed.
+        var rental = rentalRequestRepository.findByIdForUpdate(rentalRequestId).orElseThrow();
+        var contract = contractRepository.findByIdForUpdate(contractId).orElseThrow();
+        if (!rentalRequestId.equals(contract.getRentalRequestId()) || contract.getParentContractId() != null
+                || !Objects.equals(contract.getLandlordId(), rental.getOwnerId())
+                || !Objects.equals(contract.getTenantId(), rental.getRenterId())
+                || contract.getStatus() != ContractStatus.DRAFT || rental.getStatus() != RentalRequestStatus.ACCEPTED
+                || rental.getCancellationRequestedAt() != null || rental.getListing() == null
+                || !Objects.equals(contract.getListingId(), rental.getListing().getId())
+                || rental.getListing().getStatus() != ListingStatus.RESERVED
+                || rental.getMoveInDate() == null || billingTime.today().isBefore(rental.getMoveInDate())) return null;
+        var rent = paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.INITIAL).orElse(null);
+        var deposit = paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.RESERVATION_DEPOSIT).orElse(null);
+        if (!com.hs.contract.service.ContractDraftFunding.ready(rental, rent, deposit)) return null;
+        var completeness = assessCompleteness(contract, requireCurrentRevision(contract));
+        if (!completeness.isComplete()) {
+            log.info("AUTOMATIC_CONTRACT_PREVIEW_INCOMPLETE rental={} contract={}; complete draft data before export", rentalRequestId, contractId);
+            return null; // Keep the draft available for review; never invent missing legal/identity data.
+        }
+        return renderPreview(contract, true);
+    }
+
+    private ContractDocumentResponse renderPreview(Contract contract, boolean requirePdf) {
+        String contractId = contract.getId();
         ContractRevision revision = requireCurrentRevision(contract);
         if(contract.getParentContractId()==null && onboarding!=null) {
             var rental=rentalRequestRepository.findById(contract.getRentalRequestId()).orElseThrow();
@@ -728,7 +779,8 @@ public class ContractServiceImpl implements ContractService {
 
         String fingerprint = ContractPreviewIdentity.fingerprint(revision, signatureMode);
         Optional<ContractDocument> existing = currentPreview(contractId, revision, fingerprint);
-        if (existing.isPresent()) return toDocumentResponse(existing.get());
+        if (existing.isPresent() && (!requirePdf || existing.get().getDocumentType() == ContractDocumentType.PDF))
+            return toDocumentResponse(existing.get());
 
         ContractTemplateVersion templateVersion = templateVersionRepository.findById(contract.getTemplateVersionId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
@@ -750,6 +802,9 @@ public class ContractServiceImpl implements ContractService {
         // Complete conversion/signature preparation before uploading. A real PDF failure
         // must not leave a ready DOCX (or an orphan upload) in the SmartCA workflow.
         Optional<byte[]> pdfBytesOpt = conversionService.convertDocxToPdf(renderedDocx, docxName);
+        if (requirePdf && pdfBytesOpt.isEmpty()) {
+            throw new AppException(ContractErrorCode.CONTRACT_RENDER_FAILED);
+        }
         if ("SMARTCA".equalsIgnoreCase(signatureMode)) {
             if (pdfBytesOpt.isEmpty() || pdfSignatureEngine == null) {
                 throw new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY,
@@ -771,7 +826,8 @@ public class ContractServiceImpl implements ContractService {
                 StoragePurpose.CONTRACT_DOCUMENT,
                 "CONTRACT",
                 contractId,
-                StorageVisibility.PRIVATE
+                StorageVisibility.PRIVATE,
+                contract.getLandlordId()
         );
 
         ContractDocument docxDoc = ContractDocument.builder()
@@ -800,7 +856,8 @@ public class ContractServiceImpl implements ContractService {
                     StoragePurpose.CONTRACT_DOCUMENT,
                     "CONTRACT",
                     contractId,
-                    StorageVisibility.PRIVATE
+                    StorageVisibility.PRIVATE,
+                    contract.getLandlordId()
             );
 
             ContractDocument pdfDoc = ContractDocument.builder()

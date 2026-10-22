@@ -58,6 +58,7 @@ class PaymentRequestServiceTest {
     private PaymentProofUploadSessionService paymentProofUploadSessionService;
     @Mock
     private BillingTime billingTime;
+    @Mock private org.springframework.context.ApplicationEventPublisher receiptEvents;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -520,6 +521,22 @@ class PaymentRequestServiceTest {
         assertNotNull(payment.getConfirmedAt());
         assertNotNull(payment.getPayeeConfirmedAt());
         verify(paymentEventRepository).save(any());
+    }
+
+    @Test void onboardingReceiptPublishesOnlyAfterAuthorizedConfirmationAndCanBeRetried() {
+        org.springframework.test.util.ReflectionTestUtils.setField(paymentRequestService,"receiptEvents",receiptEvents);
+        var payment=PaymentRequest.builder().id("receipt").rentalRequestId("rental").payerId("tenant").payeeId("owner")
+            .type(PaymentType.INITIAL).status(PaymentStatus.TRANSFER_REPORTED).totalAmount(new BigDecimal("100"))
+            .direction(com.hs.payment.model.constant.PaymentDirection.TENANT_TO_LANDLORD).build();
+        when(paymentRequestRepository.findByIdForUpdate("receipt")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.save(any())).thenAnswer(i->i.getArgument(0));
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-01T03:00:00Z"));
+        assertThrows(AppException.class,()->paymentRequestService.confirmReceipt("receipt","other"));
+        verifyNoInteractions(receiptEvents);
+        paymentRequestService.confirmReceipt("receipt","owner");
+        paymentRequestService.confirmReceipt("receipt","owner");
+        verify(receiptEvents,times(2)).publishEvent(new com.hs.payment.event.OnboardingReceiptConfirmed("rental"));
+        verify(paymentRequestRepository,times(1)).save(any());
     }
 
     @Test

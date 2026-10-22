@@ -34,6 +34,9 @@ import java.util.*;
 /** Coordinates only the pre-tenancy workflow. Confirmed funds never expire into a vacant room. */
 @Service @RequiredArgsConstructor @Slf4j
 public class RentalOnboardingService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private AutomaticContractDrafts automaticDrafts;
+    private final ContractTemplateVersionRepository draftTemplates;
     private final RentalRequestRepository rentals;
     private final RentalStartChangeRepository changes;
     private final RentalOnboardingEventRepository events;
@@ -146,7 +149,14 @@ public class RentalOnboardingService {
             boolean reported=rent.getStatus()==PaymentStatus.TRANSFER_REPORTED;
             stage=reported?"AWAITING_RENT_CONFIRMATION":rent.getDueAt()!=null&&!time.now().isBefore(rent.getDueAt())?"REQUIRES_REVIEW":"AWAITING_FIRST_RENT";
             message=reported?"Chờ chủ nhà xác nhận tiền tháng đầu.":"Chờ tiền thuê tháng đầu; không thu lại tiền cọc. Quá hạn cần hai bên đối soát, không tự đổi ngày thuê.";
-        } else {stage=signingOpen?"READY_TO_SIGN":"REQUIRES_REVIEW";message=signingOpen?"Đã xác nhận đủ tiền. Hoàn thiện văn bản và ký trước hạn.":"Đã quá hạn hoàn tất ký; cần hai bên xử lý hồ sơ, không tự giải phóng phòng hoặc ghi lùi ngày ký.";}
+        } else if(contract==null){
+            var templateProblem=ContractDraftTemplates.problem(draftTemplates,r.getListing().getCategory());
+            stage=templateProblem==null?"PREPARING_CONTRACT":"CONTRACT_TEMPLATE_REQUIRED";
+            message=templateProblem==null
+                ?"Đã xác nhận đủ cọc và tiền tháng đầu. Bản nháp chưa được tạo; hệ thống sẽ tự thử lại. Nếu chờ lâu, vui lòng liên hệ hỗ trợ; không chuyển tiền lần nữa."
+                :ContractDraftTemplates.message(templateProblem);
+        }
+        else {stage=signingOpen?"READY_TO_SIGN":"REQUIRES_REVIEW";message=signingOpen?"Đã xác nhận đủ tiền. Mở bản nháp để kiểm tra, hoàn thiện văn bản và ký trước hạn.":"Đã quá hạn hoàn tất ký; cần hai bên xử lý hồ sơ, không tự giải phóng phòng hoặc ghi lùi ngày ký.";}
         var rows=new ArrayList<PaymentRequestResponse>();
         for(var p:Arrays.asList(deposit,rent))if(p!=null)rows.add(paymentService.getPaymentRequest(p.getId(),actor));
         for(var refund:payments.findByRentalRequestIdAndTypeIn(r.getId(),List.of(PaymentType.INITIAL_PAYMENT_REFUND)))rows.add(paymentService.getPaymentRequest(refund.getId(),actor));
@@ -154,7 +164,7 @@ public class RentalOnboardingService {
             &&r.getMoveInDate().isAfter(time.today())&&(contract==null||contract.getStatus()==ContractStatus.DRAFT)
             &&changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()).stream().noneMatch(c->"REQUESTED".equals(c.getStatus()));
         return new View(time.now(),BillingTime.ZONE.toString(),stage,r.getMoveInDate(),r.getMoveInDate().plusMonths(r.getLeaseMonths()),
-            opens,rent!=null?rent.getDueAt():null,signDue,r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&depositReady(r)&&(contract==null||contract.getStatus()==ContractStatus.DRAFT),signingOpen,earlier,holdMinutes,
+            opens,rent!=null?rent.getDueAt():null,signDue,r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&paid&&(contract==null||contract.getStatus()==ContractStatus.DRAFT),signingOpen&&contract!=null,earlier,holdMinutes,
             rows,changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()),message,actor.equals(r.getOwnerId())?"LANDLORD":"TENANT",r.getCancellationRequestedAt(),r.getCancellationReason(),events.findByRentalRequestIdOrderByOccurredAtDesc(r.getId()),
             defaultView(r),deposits.findByRentalRequestId(r.getId()).map(d->new DepositView(d.getStatus().name(),d.getHeldAmount(),d.getRetainedAmount(),d.getRefundableAmount(),d.getRetainedReason())).orElse(null),canCancel(r,contract));
     }
@@ -339,10 +349,10 @@ public class RentalOnboardingService {
         var d=deposits.findByRentalRequestId(r.getId()).orElse(null);
         if(d==null || d.getStatus()!=DepositStatus.HELD || d.getHeldAmount()==null || d.getHeldAmount().signum()<=0)return null;
         var c=contracts.findByRentalRequestId(r.getId()).orElse(null);
-        if(c==null || c.getSignedAt()!=null || c.getParentContractId()!=null || c.getCurrentRevisionId()==null
-                || !Set.of(ContractStatus.DRAFT,ContractStatus.TENANT_SIGNATURE_PENDING).contains(c.getStatus()))return null;
+        if(c!=null && (c.getSignedAt()!=null || c.getParentContractId()!=null || c.getCurrentRevisionId()==null
+                || !Set.of(ContractStatus.DRAFT,ContractStatus.TENANT_SIGNATURE_PENDING).contains(c.getStatus())))return null;
         // A signed/unknown provider transaction must be reconciled, never classified as a tenant no-show.
-        for(var s:signatures.findByContractIdOrderByCreatedAtDesc(c.getId())) {
+        for(var s:c==null?List.<com.hs.contract.model.SignatureRequest>of():signatures.findByContractIdOrderByCreatedAtDesc(c.getId())) {
             if(s.getProviderSignatureValue()!=null && s.getStatus()!=com.hs.contract.model.constant.SignatureRequestStatus.SIGNED)return null;
             if(s.getStatus()==com.hs.contract.model.constant.SignatureRequestStatus.SIGNED
                     && s.getSignerRole()==com.hs.contract.model.constant.SignerRole.TENANT)return null;
@@ -355,6 +365,11 @@ public class RentalOnboardingService {
         var rent=payment(r.getId(),PaymentType.INITIAL);
         if(!depositReady(r) || rent==null || deposit!=null&&!confirmed(deposit)
                 || Set.of(PaymentStatus.TRANSFER_REPORTED,PaymentStatus.DISPUTED,PaymentStatus.REJECTED).contains(rent.getStatus()))return null;
+        // An unpaid first month deliberately has no contract yet. The reservation agreement,
+        // confirmed deposit, final notice and response window govern this branch instead.
+        if(c==null && Set.of(PaymentStatus.AWAITING_TRANSFER,PaymentStatus.OVERDUE,PaymentStatus.EXPIRED).contains(rent.getStatus())
+                && rent.getDueAt()!=null&&!time.now().isBefore(rent.getDueAt()))return "FIRST_RENT";
+        if(c==null)return null;
         var revision=revisions.findById(c.getCurrentRevisionId()).orElse(null);
         if(revision==null)return null;
         var renderIdentity=ContractPreviewIdentity.fingerprint(revision,signatureMode);
@@ -373,8 +388,15 @@ public class RentalOnboardingService {
         return null;
     }
     private String defaultFingerprint(RentalRequest r,String kind) {
-        var c=contracts.findByRentalRequestId(r.getId()).orElseThrow();
         var p=payment(r.getId(),PaymentType.INITIAL);
+        if("FIRST_RENT".equals(kind)) {
+            var d=deposits.findByRentalRequestId(r.getId()).orElseThrow();
+            var legacy=contracts.findByRentalRequestId(r.getId()).orElse(null);
+            var legacyIdentity=legacy==null?"NO_CONTRACT":legacy.getCurrentRevisionId()+":"+ContractPreviewIdentity.fingerprint(revisions.findById(legacy.getCurrentRevisionId()).orElseThrow(),signatureMode);
+            return kind+":"+r.getId()+":"+r.getMoveInDate()+":"+r.getLeaseMonths()+":"+r.getReservationPolicyVersion()
+                +":"+d.getInitialPaymentRequestId()+":"+d.getHeldAmount().stripTrailingZeros().toPlainString()+":"+p.getId()+":"+p.getTotalAmount().stripTrailingZeros().toPlainString()+":"+p.getDueAt()+":"+p.getStatus()+":"+legacyIdentity;
+        }
+        var c=contracts.findByRentalRequestId(r.getId()).orElseThrow();
         var revision=revisions.findById(c.getCurrentRevisionId()).orElseThrow();
         return kind+":"+c.getCurrentRevisionId()+":"+ContractPreviewIdentity.fingerprint(revision,signatureMode)+":"+c.getTenantSigningDueAt()+":"+p.getId()+":"+p.getDueAt()+":"+p.getContractDueAt()+":"+p.getStatus();
     }
@@ -388,7 +410,7 @@ public class RentalOnboardingService {
     @Transactional public View notifyDefault(String id,String actor,Cancellation note) {
         var r=rental(id,actor);owner(r,actor);sync(r);
         contracts.findByRentalRequestId(id).ifPresent(c->contracts.findByIdForUpdate(c.getId()).orElseThrow());
-        var kind=defaultKind(r);if(kind==null)throw invalid("Chưa đủ điều kiện: cần cọc thực nhận, thỏa thuận giữ cọc, văn bản sẵn sàng và quá hạn do người thuê; không có khoản/chữ ký đang đối soát.");
+        var kind=defaultKind(r);if(kind==null)throw invalid("Chưa đủ điều kiện: cần cọc thực nhận, thỏa thuận giữ cọc và quá hạn do người thuê; quá hạn ký cần văn bản chủ nhà đã ký. Không được có khoản/chữ ký đang đối soát.");
         if(defaultView(r).canComplete())return view(r,actor);
         var fingerprint=defaultFingerprint(r,kind);
         if(fingerprint.equals(r.getDefaultNoticeFingerprint()))return view(r,actor);
@@ -416,8 +438,7 @@ public class RentalOnboardingService {
     @Transactional public View completeDefault(String id,String actor,DefaultCompletion note) {
         var r=rental(id,actor);owner(r,actor);
         if(r.getDefaultCompletedAt()!=null)return view(r,actor); // Retry must not release another tenant's new hold.
-        var c=contracts.findByRentalRequestId(id).orElseThrow(()->invalid("Chưa có hợp đồng."));
-        c=contracts.findByIdForUpdate(c.getId()).orElseThrow();
+        var c=contracts.findByRentalRequestId(id).map(existing->contracts.findByIdForUpdate(existing.getId()).orElseThrow()).orElse(null);
         if(!note.tenantNotified() || !note.vacantPossessionConfirmed() || !defaultView(r).canComplete())throw invalid("Chưa đủ hạn, điều kiện đã thay đổi hoặc còn vấn đề cần đối soát.");
         var rent=payments.findByRentalRequestIdAndTypeForUpdate(id,PaymentType.INITIAL).orElseThrow();
         var deposit=deposits.findByRentalRequestIdForUpdate(id).orElseThrow();
@@ -429,7 +450,7 @@ public class RentalOnboardingService {
         deposit.setRetainedAmount(deposit.getHeldAmount());deposit.setHeldAmount(java.math.BigDecimal.ZERO);
         deposit.setRefundableAmount(java.math.BigDecimal.ZERO);deposit.setStatus(DepositStatus.RETAINED_BY_LANDLORD);
         deposit.setRetainedAt(time.now());deposit.setRetainedReason(note.reason());deposits.save(deposit);
-        c.setStatus(ContractStatus.CANCELLED);contracts.save(c);
+        if(c!=null){c.setStatus(ContractStatus.CANCELLED);contracts.save(c);}
         r.setStatus(RentalRequestStatus.CANCELLED_BY_SYSTEM);r.setDefaultCompletedAt(time.now());r.setHoldExpiresAt(null);rentals.save(r);
         for(var change:changes.findByRentalRequestIdOrderByRequestedAtDesc(id))if("REQUESTED".equals(change.getStatus())) {
             change.setStatus("EXPIRED");change.setDecidedAt(time.now());change.setDecidedBy(actor);changes.save(change);
@@ -444,7 +465,11 @@ public class RentalOnboardingService {
         int page=0; org.springframework.data.domain.Page<RentalRequest> batch;
         do {
             batch=rentals.findByStatus(RentalRequestStatus.ACCEPTED,PageRequest.of(page++,100));
-            for(var r:batch)try{new TransactionTemplate(transactions).executeWithoutResult(tx->{var locked=rentals.findByIdForUpdate(r.getId()).orElseThrow();sync(locked);});}
+            for(var r:batch)try{
+                new TransactionTemplate(transactions).executeWithoutResult(tx->{var locked=rentals.findByIdForUpdate(r.getId()).orElseThrow();sync(locked);});
+                // A separate transaction: draft/template errors cannot roll back newly opened rent.
+                if(automaticDrafts!=null)automaticDrafts.tryCreate(r.getId());
+            }
             catch(Exception e){log.error("RENTAL_ONBOARDING_SYNC_FAILED rental={}",r.getId(),e);}
         }while(batch.hasNext());
     }

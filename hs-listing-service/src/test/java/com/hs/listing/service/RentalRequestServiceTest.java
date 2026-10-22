@@ -31,6 +31,22 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class RentalRequestServiceTest {
+    @Test void bothListEndpointsBatchLatestChangesOnlyForTheirAuthorizedPage() {
+        var changes=mock(com.hs.listing.repository.RentalStartChangeRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(rentalRequestService,"startChanges",changes);
+        var r=RentalRequest.builder().id("rental").ownerId("owner").renterId("tenant").status(RentalRequestStatus.ACCEPTED).build();
+        when(rentalRequestRepository.findAll(any(org.springframework.data.jpa.domain.Specification.class),any(org.springframework.data.domain.Pageable.class)))
+            .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(r)));
+        var change=com.hs.listing.model.RentalStartChange.builder().id("change").rentalRequestId("rental")
+            .previousDate(LocalDate.now().plusDays(20)).requestedDate(LocalDate.now().plusDays(10)).status("REQUESTED")
+            .reason("Muốn bắt đầu thuê sớm hơn").requestedAt(Instant.now()).respondBy(Instant.now().plusSeconds(3600)).build();
+        when(changes.findLatestForRentalRequestIds(List.of("rental"))).thenReturn(List.of(change));
+        assertEquals("change",rentalRequestService.getOwnerRequests("owner",null,null,1,8).getResult().getFirst().latestStartChange().id());
+        assertEquals("change",rentalRequestService.getMyRequests("tenant",null,1,8).getResult().getFirst().latestStartChange().id());
+        verify(changes,times(2)).findLatestForRentalRequestIds(List.of("rental"));
+        assertThrows(AppException.class,()->rentalRequestService.getOwnerRequests("",null,null,1,8));
+        verifyNoMoreInteractions(changes);
+    }
     @Test void missingOrFalseConsentCannotCreateRequestEvenWhenCallingTheServiceDirectly() {
         for(var request:List.of(
             new CreateRentalRequest("listing",LocalDate.now().plusDays(5),12,1,0,0,"Tenant","0900000000",null,null,null),

@@ -64,6 +64,7 @@ public class RentalRequestService {
     private final RentalPaymentLifecyclePort rentalPaymentLifecyclePort;
     private List<RentalHoldProtectionChecker> holdProtectionCheckers = List.of();
     @Autowired(required=false) private com.hs.common.time.BillingTime businessTime;
+    @Autowired private com.hs.listing.repository.RentalStartChangeRepository startChanges;
     @Value("${rental.response-hours:24}") private long responseHours=24;
     private Instant now() { return businessTime==null?Instant.now():businessTime.now(); }
     private void validateMoveIn(java.time.LocalDate date) {
@@ -449,7 +450,8 @@ public class RentalRequestService {
         Map<String, InitialPaymentSummary> paymentsMap = (requestIds.isEmpty() || rentalPaymentLifecyclePort == null)
                 ? Map.of()
                 : rentalPaymentLifecyclePort.getInitialPaymentSummaries(requestIds);
-        return new PageResponse<>(pageResult.map(r -> toResponse(r, paymentsMap.get(r.getId()))));
+        var changesMap=latestStartChanges(requestIds);
+        return new PageResponse<>(pageResult.map(r -> toResponse(r, paymentsMap.get(r.getId()), changesMap.get(r.getId()))));
     }
 
     // 7. CHỦ NHÀ XEM DANH SÁCH YÊU CẦU THUÊ ĐƯỢC GỬI ĐẾN
@@ -483,7 +485,8 @@ public class RentalRequestService {
         Map<String, InitialPaymentSummary> paymentsMap = (requestIds.isEmpty() || rentalPaymentLifecyclePort == null)
                 ? Map.of()
                 : rentalPaymentLifecyclePort.getInitialPaymentSummaries(requestIds);
-        return new PageResponse<>(pageResult.map(r -> toResponse(r, paymentsMap.get(r.getId()))));
+        var changesMap=latestStartChanges(requestIds);
+        return new PageResponse<>(pageResult.map(r -> toResponse(r, paymentsMap.get(r.getId()), changesMap.get(r.getId()))));
     }
 
     // 8. KIỂM TRA XEM KHÁCH CÓ YÊU CẦU ACTIVE TRÊN BÀI ĐĂNG NÀY KHÔNG
@@ -563,10 +566,17 @@ public class RentalRequestService {
         InitialPaymentSummary paymentSummary = rentalPaymentLifecyclePort != null
                 ? rentalPaymentLifecyclePort.getInitialPaymentSummary(r.getId())
                 : null;
-        return toResponse(r, paymentSummary);
+        return toResponse(r, paymentSummary, latestStartChanges(List.of(r.getId())).get(r.getId()));
     }
 
-    private RentalRequestResponse toResponse(RentalRequest r, InitialPaymentSummary paymentSummary) {
+    private Map<String,com.hs.listing.dto.response.RentalStartChangeSummary> latestStartChanges(List<String> ids) {
+        if(ids.isEmpty() || startChanges==null)return Map.of();
+        var at=now();
+        return startChanges.findLatestForRentalRequestIds(ids).stream().collect(Collectors.toMap(
+            RentalStartChange::getRentalRequestId,c->com.hs.listing.dto.response.RentalStartChangeSummary.from(c,at)));
+    }
+
+    private RentalRequestResponse toResponse(RentalRequest r, InitialPaymentSummary paymentSummary, com.hs.listing.dto.response.RentalStartChangeSummary latestStartChange) {
         Listing l = r.getListing();
         String thumbnail = null;
         String addressStr = null;
@@ -631,6 +641,7 @@ public class RentalRequestService {
                 .holdExpiresAt(r.getHoldExpiresAt())
                 .respondBy(r.getRespondBy())
                 .initialPayment(paymentSummary)
+                .latestStartChange(latestStartChange)
                 .createdAt(r.getCreatedAt())
                 .updatedAt(r.getUpdatedAt())
                 .build();

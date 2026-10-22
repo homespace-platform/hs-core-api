@@ -41,6 +41,7 @@ class RentalOnboardingServiceTest {
     @Mock ListingRepository listings; @Mock PropertyBranchRepository branches;
     @Mock BillingTime time; @Spy ObjectMapper mapper=new ObjectMapper();
     @Mock ContractDataBuilder builder; @Mock PlatformTransactionManager transactions;
+    @Mock ContractTemplateVersionRepository draftTemplates;
     @InjectMocks RentalOnboardingService service;
     Instant now; RentalRequest rental; PaymentRequest deposit;
     @BeforeEach void setup() {
@@ -61,6 +62,20 @@ class RentalOnboardingServiceTest {
             .totalAmount(new BigDecimal("5000000")).confirmedAt(status==PaymentStatus.CONFIRMED?now:null).build();
         when(payments.findByRentalRequestIdAndType("rental",PaymentType.INITIAL)).thenReturn(Optional.of(p));return p;
     }
+    @Test void paidWithoutPublishedTemplateExplainsTheBlockInsteadOfPretendingToGenerate() {
+        rental.getListing().setCategory(ListingCategory.HOUSE);
+        rent(PaymentStatus.CONFIRMED);
+        var view=service.refresh("rental","owner");
+        assertEquals("CONTRACT_TEMPLATE_REQUIRED",view.stage());
+        assertTrue(view.message().contains("chưa có mẫu"));assertTrue(view.message().contains("quản trị viên"));
+        assertFalse(view.message().contains("đang tự tạo"));
+        when(draftTemplates.findCurrentPublishedSystemVersions(ListingCategory.HOUSE)).thenReturn(List.of(
+            com.hs.contract.model.ContractTemplateVersion.builder().id("published").build()));
+        assertEquals("PREPARING_CONTRACT",service.refresh("rental","tenant").stage());
+        when(draftTemplates.countActiveSystemTemplates(ListingCategory.HOUSE)).thenReturn(2L);
+        var duplicate=service.refresh("rental","owner");assertEquals("CONTRACT_TEMPLATE_REQUIRED",duplicate.stage());
+        assertTrue(duplicate.message().contains("bị trùng"));
+    }
     private RentalStartChange pending() {
         var c=RentalStartChange.builder().id("change").rentalRequestId("rental").previousDate(rental.getMoveInDate())
             .requestedDate(LocalDate.of(2026,10,25)).status("REQUESTED").respondBy(now.plusSeconds(86400)).build();
@@ -68,7 +83,7 @@ class RentalOnboardingServiceTest {
         when(changes.findByRentalRequestIdOrderByRequestedAtDesc("rental")).thenReturn(List.of(c));return c;
     }
     @Test void depositPaidBeforeMoveInNeverOpensRentOrSigning() {
-        var v=service.refresh("rental","tenant");assertEquals("WAITING_START",v.stage());assertTrue(v.canPrepareContract());assertFalse(v.canSign());
+        var v=service.refresh("rental","tenant");assertEquals("WAITING_START",v.stage());assertFalse(v.canPrepareContract());assertFalse(v.canSign());
         verify(paymentService,never()).createFirstRent(any(),any(),any());
     }
     @Test void openingBoundaryUsesVietnamMidnightAndOriginalDeadline() {
@@ -108,6 +123,7 @@ class RentalOnboardingServiceTest {
     @Test void outstandingDisputeNeverLooksPaid() {deposit.setStatus(PaymentStatus.DISPUTED);var v=service.refresh("rental","tenant");assertEquals("REQUIRES_REVIEW",v.stage());assertFalse(v.canSign());}
     @Test void transferReportedIsNotAnotherRequestToPay() {deposit.setStatus(PaymentStatus.TRANSFER_REPORTED);assertEquals("AWAITING_DEPOSIT_CONFIRMATION",service.refresh("rental","tenant").stage());}
     @Test void signingRequiresBothPaymentsAndStartDate() {
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(Contract.builder().id("contract").status(ContractStatus.TENANT_SIGNATURE_PENDING).build()));
         rent(PaymentStatus.CONFIRMED);assertFalse(service.refresh("rental","tenant").canSign());
         rental.setMoveInDate(LocalDate.of(2026,10,21));assertTrue(service.refresh("rental","tenant").canSign());
         deposit.setStatus(PaymentStatus.TRANSFER_REPORTED);assertFalse(service.refresh("rental","tenant").canSign());

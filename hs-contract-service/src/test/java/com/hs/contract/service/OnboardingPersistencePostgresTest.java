@@ -55,6 +55,7 @@ class OnboardingPersistencePostgresTest {
     @MockitoBean ListingStatusService listingStatus;
     @MockitoBean RentalCostCalculator calculator;
     @MockitoBean ContractDataBuilder builder;
+    @MockitoBean AutomaticContractDrafts automaticDrafts;
     @Autowired RentalOnboardingService service;
     @Autowired RentalRequestRepository rentals;
     @Autowired ListingRepository listings;
@@ -68,6 +69,8 @@ class OnboardingPersistencePostgresTest {
     @Autowired com.hs.payment.repository.DepositRecordRepository deposits;
     @Autowired ContractRevisionRepository revisions;
     @Autowired ContractDocumentRepository documents;
+    @Autowired ContractTemplateRepository templates;
+    @Autowired ContractTemplateVersionRepository templateVersions;
     String id;
     @BeforeEach void fixture() {
         ((MutableTime)clock).current=Instant.parse("2026-10-21T03:00:00Z");
@@ -166,9 +169,125 @@ class OnboardingPersistencePostgresTest {
         var r=rentals.findById(id).orElseThrow();r.setStatus(RentalRequestStatus.CANCELLED_BY_OWNER);rentals.saveAndFlush(r);em.clear();
         assertEquals(RentalRequestStatus.CANCELLED_BY_OWNER,rentals.findById(id).orElseThrow().getStatus());
     }
-    @Test void futureDepositCreatesNoFirstMonthAndCanPrepareDraft() {
-        var v=service.refresh(id,"tenant");assertEquals("WAITING_START",v.stage());assertTrue(v.canPrepareContract());assertFalse(v.canSign());
+    @Test void futureDepositCreatesNeitherFirstMonthNorDraft() {
+        var v=service.refresh(id,"tenant");assertEquals("WAITING_START",v.stage());assertFalse(v.canPrepareContract());assertFalse(v.canSign());
         assertTrue(payments.findByRentalRequestIdAndType(id,PaymentType.INITIAL).isEmpty());
+    }
+    @Test void latestStartChangesAreBatchedDeterministicallyWithoutMixingRentalRequests() {
+        var requested=clock.now();
+        changes.saveAndFlush(RentalStartChange.builder().id("00000000-0000-0000-0000-000000000001").rentalRequestId(id)
+            .previousDate(LocalDate.of(2026,11,1)).requestedDate(LocalDate.of(2026,10,25)).reason("Lần đề nghị trước")
+            .status("WITHDRAWN").requestedAt(requested.minusSeconds(60)).respondBy(requested.plusSeconds(3600)).build());
+        var latest=changes.saveAndFlush(RentalStartChange.builder().id("00000000-0000-0000-0000-000000000002").rentalRequestId(id)
+            .previousDate(LocalDate.of(2026,11,1)).requestedDate(LocalDate.of(2026,10,26)).reason("Lần đề nghị mới nhất")
+            .status("REQUESTED").requestedAt(requested).respondBy(requested.plusSeconds(3600)).build());
+        var rows=changes.findLatestForRentalRequestIds(List.of(id));assertEquals(1,rows.size());assertEquals(latest.getId(),rows.getFirst().getId());
+        assertTrue(changes.findLatestForRentalRequestIds(List.of("unrelated-request")).isEmpty());
+        assertEquals("REQUESTED",changes.findById(latest.getId()).orElseThrow().getStatus());
+    }
+    private com.hs.contract.service.impl.ContractServiceImpl automaticCreator() {
+        var versions=mock(ContractTemplateVersionRepository.class);
+        when(versions.findCurrentPublishedSystemVersions(ListingCategory.ROOM)).thenReturn(List.of(
+            com.hs.contract.model.ContractTemplateVersion.builder().id("auto-version")
+                .template(com.hs.contract.model.ContractTemplate.builder().id("auto-template").build()).build()));
+        return automaticCreator(versions,mock(com.hs.contract.service.converter.DocumentConversionService.class),mock(com.hs.storage.service.StorageService.class));
+    }
+    private com.hs.contract.service.impl.ContractServiceImpl automaticCreator(ContractTemplateVersionRepository versions,
+            com.hs.contract.service.converter.DocumentConversionService converter,com.hs.storage.service.StorageService storage) {
+        var target=new com.hs.contract.service.impl.ContractServiceImpl(contracts,revisions,documents,versions,rentals,listingStatus,builder,
+            new com.hs.contract.service.engine.ContractFieldCatalog(),new com.hs.contract.service.engine.ContractRenderService(new ObjectMapper()),
+            converter,storage,new ObjectMapper(),mock(ParkingReservationService.class),payments);
+        org.springframework.test.util.ReflectionTestUtils.setField(target,"billingTime",clock);
+        var proxy=new org.springframework.aop.framework.ProxyFactory(target);proxy.setProxyTargetClass(true);
+        proxy.addAdvice(new org.springframework.transaction.interceptor.TransactionInterceptor(
+            transactions,new org.springframework.transaction.annotation.AnnotationTransactionAttributeSource()));
+        return (com.hs.contract.service.impl.ContractServiceImpl)proxy.getProxy();
+    }
+    @Test void absentTemplateThenPublishedTemplateAndFailedPdfRecoverWithoutLosingThePaidDraft() throws Exception {
+        paidFirstMonth();
+        var converter=mock(com.hs.contract.service.converter.DocumentConversionService.class);
+        var storage=mock(com.hs.storage.service.StorageService.class);
+        var creator=automaticCreator(templateVersions,converter,storage);
+        assertEquals(com.hs.contract.advice.ContractErrorCode.SYSTEM_TEMPLATE_NOT_AVAILABLE,
+            ContractDraftTemplates.problem(templateVersions,ListingCategory.ROOM));
+        TestTransaction.flagForCommit();TestTransaction.end();
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->creator.createDraftAutomatically(id));
+        TestTransaction.start();assertTrue(contracts.findByRentalRequestId(id).isEmpty());
+        var template=templates.saveAndFlush(com.hs.contract.model.ContractTemplate.builder().name("Test template")
+            .category(ListingCategory.ROOM).build());
+        var version=templateVersions.saveAndFlush(com.hs.contract.model.ContractTemplateVersion.builder().template(template).versionNumber(1)
+            .storageObjectId("test-source").placeholdersJson("[\"contract.number\"]").build());
+        assertEquals(com.hs.contract.advice.ContractErrorCode.SYSTEM_TEMPLATE_NOT_AVAILABLE,
+            ContractDraftTemplates.problem(templateVersions,ListingCategory.ROOM));
+        version.setStatus(com.hs.contract.model.constant.TemplateVersionStatus.PUBLISHED);templateVersions.saveAndFlush(version);
+        template.setLatestPublishedVersionId(version.getId());templates.saveAndFlush(template);
+        assertNull(ContractDraftTemplates.problem(templateVersions,ListingCategory.ROOM));
+        assertEquals(com.hs.contract.advice.ContractErrorCode.SYSTEM_TEMPLATE_NOT_AVAILABLE,
+            ContractDraftTemplates.problem(templateVersions,ListingCategory.HOUSE));
+        TestTransaction.flagForCommit();TestTransaction.end();
+        var draft=creator.createDraftAutomatically(id);
+        try(var word=new org.apache.poi.xwpf.usermodel.XWPFDocument();var out=new java.io.ByteArrayOutputStream()) {
+            word.createParagraph().createRun().setText("Contract {{contract.number}}");word.write(out);
+            when(storage.downloadDirect("test-source")).thenReturn(out.toByteArray());
+        }
+        when(converter.convertDocxToPdf(any(),anyString())).thenReturn(Optional.empty(),Optional.of("%PDF-test".getBytes()));
+        when(storage.uploadDirect(any(),anyString(),anyString(),any(),anyString(),anyString(),any(),eq("owner"))).thenAnswer(inv->{
+            var response=mock(com.hs.storage.dto.response.StorageObjectResponse.class);when(response.id()).thenReturn(UUID.randomUUID().toString());return response;
+        });
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->creator.prepareDraftPreviewAutomatically(id,draft.getId()));
+        TestTransaction.start();
+        assertEquals(draft.getId(),contracts.findByRentalRequestId(id).orElseThrow().getId());
+        assertTrue(documents.findByContractIdAndRevisionId(draft.getId(),draft.getCurrentRevisionId()).isEmpty());
+        assertEquals(PaymentStatus.CONFIRMED,payments.findByRentalRequestIdAndType(id,PaymentType.INITIAL).orElseThrow().getStatus());
+        TestTransaction.end();
+        var pdf=creator.prepareDraftPreviewAutomatically(id,draft.getId());
+        assertEquals(pdf.getId(),creator.prepareDraftPreviewAutomatically(id,draft.getId()).getId());
+        verify(converter,times(2)).convertDocxToPdf(any(),anyString());
+        TestTransaction.start();assertEquals(2,documents.findByContractIdAndRevisionId(draft.getId(),draft.getCurrentRevisionId()).size());
+    }
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
+    private void paidFirstMonth() {
+        ((MutableTime)clock).current=Instant.parse("2026-11-01T03:00:00Z");
+        payments.saveAndFlush(PaymentRequest.builder().rentalRequestId(id).payerId("tenant").payeeId("owner")
+            .type(PaymentType.INITIAL).direction(PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.CONFIRMED)
+            .totalAmount(new BigDecimal("5000000")).transferReference("HS"+UUID.randomUUID().toString().substring(0,12))
+            .confirmedAt(clock.now()).build());
+        doReturn(ContractDataBuilder.ContractSnapshots.builder().build()).when(builder).build(any(),any(),any());
+    }
+    @Test void automaticDraftDoesNotCreateAnythingForDepositAlone() {
+        var creator=automaticCreator();TestTransaction.flagForCommit();TestTransaction.end();
+        assertNull(creator.createDraftAutomatically(id));
+        TestTransaction.start();assertTrue(contracts.findByRentalRequestId(id).isEmpty());
+    }
+    @Test void concurrentAutomaticAttemptsPersistExactlyOneRootAndRevision() throws Exception {
+        paidFirstMonth();var creator=automaticCreator();TestTransaction.flagForCommit();TestTransaction.end();
+        try(var pool=java.util.concurrent.Executors.newFixedThreadPool(4)) {
+            var start=new java.util.concurrent.CountDownLatch(1);
+            var futures=new ArrayList<java.util.concurrent.Future<String>>();
+            for(int n=0;n<4;n++)futures.add(pool.submit(()->{start.await();return creator.createDraftAutomatically(id).getId();}));
+            start.countDown();var ids=new HashSet<String>();
+            for(var future:futures)ids.add(future.get(30,java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(1,ids.size());
+        }
+        TestTransaction.start();
+        var root=contracts.findByRentalRequestId(id).orElseThrow();
+        assertTrue(root.getContractNumber().startsWith("HD-20261101-"));
+        assertEquals(1L,jdbc.queryForObject("select count(*) from contracts where rental_request_id = ? and parent_contract_id is null",Long.class,id));
+        assertEquals(1L,jdbc.queryForObject("select count(*) from contract_revisions where contract_id = ?",Long.class,root.getId()));
+        assertEquals(root.getId(),payments.findByRentalRequestIdAndType(id,PaymentType.INITIAL).orElseThrow().getContractId());
+        assertEquals(root.getId(),payments.findByRentalRequestIdAndType(id,PaymentType.RESERVATION_DEPOSIT).orElseThrow().getContractId());
+        assertEquals(RentalRequestStatus.ACCEPTED,rentals.findById(id).orElseThrow().getStatus());
+    }
+    @Test void snapshotFailureRollsBackOnlyDraftThenRetryRecovers() {
+        paidFirstMonth();var creator=automaticCreator();TestTransaction.flagForCommit();TestTransaction.end();
+        when(builder.build(any(),any(),any())).thenThrow(new IllegalStateException("snapshot temporarily unavailable"));
+        assertThrows(IllegalStateException.class,()->creator.createDraftAutomatically(id));
+        TestTransaction.start();assertTrue(contracts.findByRentalRequestId(id).isEmpty());
+        var rent=payments.findByRentalRequestIdAndType(id,PaymentType.INITIAL).orElseThrow();
+        assertEquals(PaymentStatus.CONFIRMED,rent.getStatus());assertNull(rent.getContractId());TestTransaction.end();
+        doReturn(ContractDataBuilder.ContractSnapshots.builder().build()).when(builder).build(any(),any(),any());
+        assertNotNull(creator.createDraftAutomatically(id));
+        TestTransaction.start();assertTrue(contracts.findByRentalRequestId(id).isPresent());
     }
     @Test void tenantDraftPaginationRequiresAcceptedRentalAndConfirmedPaymentForTheSameParties() {
         var r=rentals.findById(id).orElseThrow();

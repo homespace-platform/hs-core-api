@@ -661,6 +661,8 @@ class ContractServiceImplTest {
         PaymentRequest payment = PaymentRequest.builder()
                 .id("pay-1")
                 .rentalRequestId("req-1")
+                .type(PaymentType.INITIAL).direction(com.hs.payment.model.constant.PaymentDirection.TENANT_TO_LANDLORD)
+                .payerId("tenant-1").payeeId("landlord-1")
                 .status(PaymentStatus.CONFIRMED)
                 .confirmedAt(java.time.Instant.now())
                 .totalAmount(new BigDecimal("10000000"))
@@ -695,6 +697,8 @@ class ContractServiceImplTest {
 
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
 
+        req.setMonthlyRentPrice(payment.getTotalAmount());req.setDepositAmount(BigDecimal.ZERO);listing.setStatus(ListingStatus.RESERVED);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"billingTime",new com.hs.common.time.BillingTime("",mock(org.springframework.core.env.Environment.class)));
         var response = service.createDraft(new CreateContractDraftRequest("req-1"));
         org.junit.jupiter.api.Assertions.assertNotNull(response);
         assertEquals("pay-1", response.getRentalPaymentId());
@@ -733,7 +737,10 @@ class ContractServiceImplTest {
                 .ownerId("landlord-1").renterId("tenant-1")
                 .status(RentalRequestStatus.ACCEPTED).build();
         PaymentRequest payment = PaymentRequest.builder().id("payment-1")
-                .status(PaymentStatus.CONFIRMED).build();
+                .status(PaymentStatus.CONFIRMED).type(PaymentType.INITIAL).rentalRequestId("req-1")
+                .direction(com.hs.payment.model.constant.PaymentDirection.TENANT_TO_LANDLORD).payerId("tenant-1").payeeId("landlord-1")
+                .totalAmount(new BigDecimal("10000000")).build();
+        request.setMonthlyRentPrice(payment.getTotalAmount());request.setDepositAmount(BigDecimal.ZERO);listing.setStatus(ListingStatus.RESERVED);
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
         when(requests.findById("req-1")).thenReturn(Optional.of(request));
         when(contracts.findByRentalRequestId("req-1")).thenReturn(Optional.empty());
@@ -868,6 +875,8 @@ class ContractServiceImplTest {
         PaymentRequest payment = PaymentRequest.builder()
                 .id("pay-real-1")
                 .rentalRequestId("req-1")
+                .type(PaymentType.INITIAL).direction(com.hs.payment.model.constant.PaymentDirection.TENANT_TO_LANDLORD)
+                .payerId("tenant-1").payeeId("landlord-1")
                 .status(PaymentStatus.CONFIRMED)
                 .confirmedAt(java.time.Instant.now())
                 .totalAmount(new BigDecimal("15000000"))
@@ -889,6 +898,8 @@ class ContractServiceImplTest {
         when(paymentRequestRepository.findByRentalRequestIdAndType("req-1", PaymentType.INITIAL))
                 .thenReturn(Optional.of(payment));
         when(paymentRequestRepository.findById("pay-real-1")).thenReturn(Optional.of(payment));
+        req.setMonthlyRentPrice(payment.getTotalAmount());req.setDepositAmount(BigDecimal.ZERO);listing.setStatus(ListingStatus.RESERVED);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"billingTime",new com.hs.common.time.BillingTime("",mock(org.springframework.core.env.Environment.class)));
         when(templateVersionRepository.findCurrentPublishedSystemVersions(com.hs.listing.model.constant.ListingCategory.ROOM))
                 .thenReturn(java.util.List.of(tplVer));
         when(dataBuilder.build(any(), any(), any())).thenReturn(ContractDataBuilder.ContractSnapshots.builder().build());

@@ -57,8 +57,11 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
     public InitialPaymentSummary getInitialPaymentSummary(String rentalRequestId) {
         return paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.INITIAL)
                 .or(()->paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,PaymentType.RESERVATION_DEPOSIT))
-                .map(p->toSummary(p,paymentRequestRepository.findByRentalRequestIdAndTypeIn(rentalRequestId,
-                    java.util.List.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT)).stream().allMatch(PaymentRequestService::cancellableBeforeTransfer)))
+                .map(p->{
+                    var all=paymentRequestRepository.findByRentalRequestIdAndTypeIn(rentalRequestId,java.util.List.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT));
+                    return toSummary(p,all.stream().allMatch(PaymentRequestService::cancellableBeforeTransfer),
+                        all.stream().anyMatch(row->row.getType()==PaymentType.RESERVATION_DEPOSIT));
+                })
                 .orElse(null);
     }
 
@@ -72,7 +75,8 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
         all.addAll(paymentRequestRepository.findByRentalRequestIdInAndType(rentalRequestIds,PaymentType.INITIAL));
         var safe=all.stream().collect(Collectors.groupingBy(PaymentRequest::getRentalRequestId,
             Collectors.reducing(true,PaymentRequestService::cancellableBeforeTransfer,(a,b)->a&&b)));
-        all.forEach(p->summaries.put(p.getRentalRequestId(),toSummary(p,Boolean.TRUE.equals(safe.get(p.getRentalRequestId())))));
+        var separateDeposits=all.stream().filter(p->p.getType()==PaymentType.RESERVATION_DEPOSIT).map(PaymentRequest::getRentalRequestId).collect(Collectors.toSet());
+        all.forEach(p->summaries.put(p.getRentalRequestId(),toSummary(p,Boolean.TRUE.equals(safe.get(p.getRentalRequestId())),separateDeposits.contains(p.getRentalRequestId()))));
         return summaries;
     }
 
@@ -91,14 +95,17 @@ public class RentalPaymentLifecycleAdapter implements RentalPaymentLifecyclePort
         return paymentRequestService.isConfirmed(rentalRequestId);
     }
 
-    private InitialPaymentSummary toSummary(PaymentRequest p,boolean canCancel) {
+    private InitialPaymentSummary toSummary(PaymentRequest p,boolean canCancel,boolean separateDeposit) {
         return InitialPaymentSummary.builder()
                 .id(p.getId())
+                .type(p.getType()!=null?p.getType().name():null)
+                .displayName(p.getType()==PaymentType.RESERVATION_DEPOSIT?"Tiền cọc giữ chỗ":separateDeposit?"Tiền thuê tháng đầu":"Khoản thanh toán ban đầu")
                 .status(p.getStatus() != null ? p.getStatus().name() : null)
                 .totalAmount(p.getTotalAmount())
                 .transferReference(p.getTransferReference())
                 .expiresAt(p.getDueAt())
                 .payerReportedAt(p.getPayerReportedAt())
+                .confirmationDueAt(p.getConfirmationDueAt())
                 .payeeConfirmedAt(p.getPayeeConfirmedAt())
                 .paidAt(p.getConfirmedAt())
                 .confirmedAt(p.getConfirmedAt())

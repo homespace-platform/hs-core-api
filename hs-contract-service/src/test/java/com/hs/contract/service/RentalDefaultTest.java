@@ -70,10 +70,24 @@ class RentalDefaultTest {
     private void notice() {service.notifyDefault("r","o",new RentalOnboardingService.Cancellation("Thông báo nghĩa vụ đã quá hạn"));}
     private void elapsed() {now=rental.getDefaultRespondBy();}
     private RentalOnboardingService.DefaultCompletion decision(){return new RentalOnboardingService.DefaultCompletion("Khách không phản hồi đúng hạn",true,true);}
+    @Test void firstRentDefaultWorksWithoutAnyContractAndStillNeedsNoticeAndGrace() {
+        when(contracts.findByRentalRequestId("r")).thenReturn(Optional.empty());
+        assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));
+        notice();assertEquals("FIRST_RENT",rental.getDefaultNoticeKind());
+        assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));
+        elapsed();service.completeDefault("r","o",decision());
+        assertEquals(DepositStatus.RETAINED_BY_LANDLORD,deposit.getStatus());
+        assertEquals(RentalRequestStatus.CANCELLED_BY_SYSTEM,rental.getStatus());
+        verify(contracts,never()).save(any());verify(parking).releaseReservationsForRequest("r");
+    }
     @Test void noticeIsNotForfeitureAndGraceReallyAllowsRentPayment() {
         notice();assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());assertEquals(DepositStatus.HELD,deposit.getStatus());
         assertEquals(rental.getDefaultRespondBy(),rent.getDueAt());assertEquals(now.plusSeconds(86400),rent.getDueAt());
         assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));verifyNoInteractions(parking);
+    }
+    @Test void databaseMoneyScaleDoesNotInvalidateTheSameNotice() {
+        notice();elapsed();rent.setTotalAmount(rent.getTotalAmount().setScale(2));deposit.setHeldAmount(deposit.getHeldAmount().setScale(2));
+        assertTrue(service.refresh("r","o").defaultCase().canComplete());
     }
     @ParameterizedTest @EnumSource(value=PaymentStatus.class,names={"EXPIRED","OVERDUE"})
     void finalNoticeReopensUnpaidObligationInsteadOfLeavingAnUnpayableExpiredQr(PaymentStatus status) {

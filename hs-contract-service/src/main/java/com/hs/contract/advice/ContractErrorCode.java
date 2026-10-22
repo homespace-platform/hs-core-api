@@ -25,7 +25,7 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     CONTRACT_PAYMENT_NOT_ALLOWED(6016, "Hợp đồng không ở trạng thái cho phép thanh toán", HttpStatus.CONFLICT),
     CONTRACT_SIGNING_NOT_ALLOWED(6017, "Hợp đồng chưa được thanh toán hoặc không thể ký ở trạng thái hiện tại", HttpStatus.CONFLICT),
     CONTRACT_PAYMENT_DATA_INVALID(6018, "Dữ liệu tiền thuê hoặc tiền cọc trong hợp đồng không hợp lệ", HttpStatus.UNPROCESSABLE_ENTITY),
-    RENTAL_PAYMENT_REQUIRED_BEFORE_CONTRACT(6019, "Hợp đồng chỉ có thể được tạo sau khi khách thuê hoàn tất thanh toán ban đầu", HttpStatus.CONFLICT),
+    RENTAL_PAYMENT_REQUIRED_BEFORE_CONTRACT(6019, "Chỉ tạo hợp đồng khi đã đến ngày bắt đầu thuê, phòng còn được giữ và chủ nhà đã xác nhận đủ cọc cùng tiền tháng đầu", HttpStatus.CONFLICT),
 
     // SmartCA signature errors (6020–6039)
     SIGNATURE_IDENTITY_MISSING(6020, "Tài khoản chưa hoàn tất xác minh CCCD — vui lòng hoàn thành định danh trước khi ký số", HttpStatus.FORBIDDEN),

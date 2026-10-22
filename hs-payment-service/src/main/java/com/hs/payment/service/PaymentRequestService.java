@@ -541,6 +541,7 @@ public class PaymentRequestService {
         }
 
         if (payment.getStatus() == PaymentStatus.CONFIRMED) {
+            publishOnboardingReceipt(payment);
             return toResponse(payment, actorId);
         }
 
@@ -585,7 +586,18 @@ public class PaymentRequestService {
                 payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"Người thuê xác nhận đã nhận tiền hoàn":"Chủ nhà xác nhận đã nhận đủ tiền", null);
 
         log.info("Payee [{}] CONFIRMED receipt for PaymentRequest [{}]", actorId, paymentRequestId);
+        publishOnboardingReceipt(saved);
         return toResponse(saved, actorId);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.context.ApplicationEventPublisher receiptEvents;
+
+    private void publishOnboardingReceipt(PaymentRequest payment) {
+        if (receiptEvents != null && payment.getRentalRequestId() != null
+                && (payment.getType() == PaymentType.INITIAL || payment.getType() == PaymentType.RESERVATION_DEPOSIT)) {
+            receiptEvents.publishEvent(new com.hs.payment.event.OnboardingReceiptConfirmed(payment.getRentalRequestId()));
+        }
     }
 
     @Transactional

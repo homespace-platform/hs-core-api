@@ -48,6 +48,7 @@ public class ContractRenderService {
             if (index >= 0) contract.put("specialTerms",terms.substring(0,index));
             resolved.put("contract",contract);
         }
+        bytes = LeaseDurationRenderCleanup.normalize(bytes, resolved);
         try (XWPFTemplate template = XWPFTemplate.compile(new java.io.ByteArrayInputStream(bytes)).render(resolved)) {
             // These are document-generation facts; actual signature timestamps live in the PDF signatures.
             for(var paragraph:template.getXWPFDocument().getParagraphs()) {

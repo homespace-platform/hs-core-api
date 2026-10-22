@@ -12,6 +12,15 @@ import com.hs.contract.service.converter.DocumentConversionService;
 import com.hs.contract.service.engine.*;
 import com.hs.contract.pdf.PdfSignatureEngine;
 import com.hs.listing.repository.RentalRequestRepository;
+import com.hs.listing.model.RentalRequest;
+import com.hs.listing.model.Listing;
+import com.hs.listing.model.constant.RentalRequestStatus;
+import com.hs.listing.model.constant.ListingStatus;
+import com.hs.payment.model.PaymentRequest;
+import com.hs.payment.model.constant.*;
+import com.hs.payment.repository.PaymentRequestRepository;
+import java.math.BigDecimal;
+import java.time.*;
 import com.hs.listing.service.ListingStatusService;
 import com.hs.storage.dto.response.StorageObjectResponse;
 import com.hs.storage.service.StorageService;
@@ -29,6 +38,8 @@ class ContractPreviewTest {
     private final ContractRevisionRepository revisions = mock(ContractRevisionRepository.class);
     private final ContractDocumentRepository documents = mock(ContractDocumentRepository.class);
     private final ContractTemplateVersionRepository templates = mock(ContractTemplateVersionRepository.class);
+    private final RentalRequestRepository rentals = mock(RentalRequestRepository.class);
+    private final PaymentRequestRepository payments = mock(PaymentRequestRepository.class);
     private final StorageService storage = mock(StorageService.class);
     private final DocumentConversionService converter = mock(DocumentConversionService.class);
     private final List<ContractDocument> saved = new ArrayList<>();
@@ -41,8 +52,60 @@ class ContractPreviewTest {
     private final ContractTemplateVersion template = ContractTemplateVersion.builder().id("template").storageObjectId("source")
             .placeholdersJson("[\"contract.specialTerms\",\"meters.electricityInitial\",\"meters.waterInitial\"]").build();
     private final ContractServiceImpl service = new ContractServiceImpl(contracts, revisions, documents, templates,
-            mock(RentalRequestRepository.class), mock(ListingStatusService.class), mock(ContractDataBuilder.class),
-            new ContractFieldCatalog(), new ContractRenderService(new ObjectMapper()), converter, storage, new ObjectMapper());
+            rentals, mock(ListingStatusService.class), mock(ContractDataBuilder.class),
+            new ContractFieldCatalog(), new ContractRenderService(new ObjectMapper()), converter, storage, new ObjectMapper(),null,payments);
+
+    private RentalRequest automaticRental() {
+        var rental=RentalRequest.builder().id("rental").ownerId("landlord").renterId("tenant")
+            .status(RentalRequestStatus.ACCEPTED).moveInDate(LocalDate.of(2026,10,31))
+            .monthlyRentPrice(new BigDecimal("100")).depositAmount(new BigDecimal("100"))
+            .listing(Listing.builder().id("listing").status(ListingStatus.RESERVED).build()).build();
+        contract.setRentalRequestId("rental");
+        contract.setListingId("listing");
+        when(rentals.findByIdForUpdate("rental")).thenReturn(Optional.of(rental));
+        for(var type:List.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT)) {
+            when(payments.findByRentalRequestIdAndType("rental",type)).thenReturn(Optional.of(PaymentRequest.builder()
+                .rentalRequestId("rental").payerId("tenant").payeeId("landlord").type(type).status(PaymentStatus.CONFIRMED)
+                .direction(PaymentDirection.TENANT_TO_LANDLORD).totalAmount(new BigDecimal("100")).build()));
+        }
+        var clock=mock(com.hs.common.time.BillingTime.class);when(clock.today()).thenReturn(rental.getMoveInDate());
+        ReflectionTestUtils.setField(service,"billingTime",clock);
+        UserContextHolder.clear();
+        return rental;
+    }
+
+    @Test void automaticPreviewGeneratesRealWordThroughExistingRendererAndReusesThePdfWithoutUserContext() {
+        automaticRental();
+        var first=service.prepareDraftPreviewAutomatically("rental","contract");
+        var second=service.prepareDraftPreviewAutomatically("rental","contract");
+        assertEquals(ContractDocumentType.PDF,first.getDocumentType());assertEquals(first.getId(),second.getId());
+        assertEquals(2,saved.size());verify(converter,times(1)).convertDocxToPdf(any(),anyString());
+        verify(storage,times(2)).uploadDirect(any(),anyString(),anyString(),any(),eq("CONTRACT"),eq("contract"),
+            eq(com.hs.storage.model.constant.StorageVisibility.PRIVATE),eq("landlord"));
+        assertEquals(ContractStatus.DRAFT,contract.getStatus());
+    }
+    @Test void automaticPdfFailureKeepsDraftUnchangedAndRetriesConversionRatherThanAcceptingDocx() {
+        automaticRental();when(converter.convertDocxToPdf(any(),anyString())).thenReturn(Optional.empty(),Optional.of("%PDF-test".getBytes()));
+        assertThrows(AppException.class,()->service.prepareDraftPreviewAutomatically("rental","contract"));
+        assertTrue(saved.isEmpty());assertEquals(ContractStatus.DRAFT,contract.getStatus());
+        assertEquals(ContractDocumentType.PDF,service.prepareDraftPreviewAutomatically("rental","contract").getDocumentType());
+        verify(converter,times(2)).convertDocxToPdf(any(),anyString());
+    }
+    @Test void incompleteDraftRemainsEditableAndExportsAfterMissingDataIsCompleted() {
+        automaticRental();revision.setSpecialTerms(null);revision.setPoliciesSnapshot(null);template.setPlaceholdersJson("[\"tenant.fullName\"]");
+        assertNull(service.prepareDraftPreviewAutomatically("rental","contract"));assertTrue(saved.isEmpty());verifyNoInteractions(converter);
+        revision.setTenantSnapshot("{\"fullName\":\"Người thuê\"}");
+        assertNotNull(service.prepareDraftPreviewAutomatically("rental","contract"));
+    }
+    @Test void cancellationWrongRentalUnfundedAndSignedContractsNeverAutomaticallyRender() {
+        var rental=automaticRental();rental.setCancellationRequestedAt(Instant.now());
+        assertNull(service.prepareDraftPreviewAutomatically("rental","contract"));rental.setCancellationRequestedAt(null);
+        contract.setRentalRequestId("another");assertNull(service.prepareDraftPreviewAutomatically("rental","contract"));
+        contract.setRentalRequestId("rental");contract.setStatus(ContractStatus.ACTIVE);
+        assertNull(service.prepareDraftPreviewAutomatically("rental","contract"));contract.setStatus(ContractStatus.DRAFT);
+        when(payments.findByRentalRequestIdAndType("rental",PaymentType.INITIAL)).thenReturn(Optional.empty());
+        assertNull(service.prepareDraftPreviewAutomatically("rental","contract"));verifyNoInteractions(converter);
+    }
 
     @BeforeEach void setup() throws Exception {
         UserContextHolder.set(new UserContext("landlord", "landlord@test.invalid"));
@@ -58,7 +121,7 @@ class ContractPreviewTest {
             return doc;
         });
         when(storage.downloadDirect("source")).thenReturn(word());
-        when(storage.uploadDirect(any(), anyString(), anyString(), any(), anyString(), anyString(), any()))
+        when(storage.uploadDirect(any(), anyString(), anyString(), any(), anyString(), anyString(), any(),anyString()))
                 .thenAnswer(inv -> {
                     StorageObjectResponse response = mock(StorageObjectResponse.class);
                     when(response.id()).thenReturn(UUID.randomUUID().toString()); return response;
@@ -127,7 +190,7 @@ class ContractPreviewTest {
         when(converter.convertDocxToPdf(any(), anyString())).thenReturn(Optional.empty());
         assertThrows(AppException.class, () -> service.triggerPreview("contract"));
         assertNull(service.getPreviewStatus("contract"));
-        verify(storage, never()).uploadDirect(any(), anyString(), anyString(), any(), anyString(), anyString(), any());
+        verify(storage, never()).uploadDirect(any(), anyString(), anyString(), any(), anyString(), anyString(), any(),anyString());
     }
 
     @Test void smartCaAddsSignaturePageOnlyOnceAcrossRetries() throws Exception {

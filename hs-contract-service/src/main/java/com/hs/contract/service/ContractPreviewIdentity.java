@@ -11,7 +11,7 @@ public final class ContractPreviewIdentity {
     private ContractPreviewIdentity() {}
     public static String fingerprint(ContractRevision revision, String signatureMode) {
         // Bump when renderer semantics change. Legacy READY files cannot satisfy a new render.
-        String identity = String.join("\u0000", "onboarding-receipts-v2",
+        String identity = String.join("\u0000", "onboarding-receipts-v3-duration",
                 Objects.toString(signatureMode, "INTERNAL"), Objects.toString(revision.getId(), ""),
                 Objects.toString(revision.getTemplateVersionId(), ""),
                 Objects.toString(revision.getLandlordSnapshot(), ""), Objects.toString(revision.getTenantSnapshot(), ""),

@@ -42,6 +42,7 @@ public record RentalRequestResponse(
         Instant holdExpiresAt,
         Instant respondBy,
         InitialPaymentSummary initialPayment,
+        RentalStartChangeSummary latestStartChange,
         Instant createdAt,
         Instant updatedAt
 ) {}
