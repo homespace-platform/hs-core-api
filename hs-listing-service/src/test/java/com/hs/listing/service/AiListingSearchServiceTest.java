@@ -23,6 +23,48 @@ class AiListingSearchServiceTest {
     private final NamedParameterJdbcTemplate jdbc = mock(NamedParameterJdbcTemplate.class);
     private final AiListingSearchService service = new AiListingSearchService(jdbc);
 
+    @Test void requestedTenAndConfiguredMaximumAreNotSilentlyClampedToFive() {
+        when(jdbc.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Long.class))).thenReturn(1000L);
+        when(jdbc.queryForList(anyString(), any(MapSqlParameterSource.class), eq(String.class))).thenReturn(List.of("id-1"));
+        service.search(new AiListingSearchRequest(List.of(),"newest",10));
+        var parameters=ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).queryForList(anyString(),parameters.capture(),eq(String.class));
+        assertEquals(10,parameters.getValue().getValue("limit"));
+        assertThrows(IllegalArgumentException.class,() -> new AiListingSearchService(jdbc,8).search(
+            new AiListingSearchRequest(List.of(),"newest",10)));
+        assertThrows(IllegalArgumentException.class,() -> new AiListingSearchService(jdbc,51));
+    }
+
+    @Test void configuredSmallPageAlsoBoundsTheUnspecifiedDefault() {
+        when(jdbc.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Long.class))).thenReturn(1000L);
+        when(jdbc.queryForList(anyString(), any(MapSqlParameterSource.class), eq(String.class))).thenReturn(List.of("id-1"));
+        new AiListingSearchService(jdbc,1).search(new AiListingSearchRequest(List.of(),"newest",null));
+        var parameters=ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).queryForList(anyString(),parameters.capture(),eq(String.class));
+        assertEquals(1,parameters.getValue().getValue("limit"));
+    }
+
+    @Test void rejectsBulkFetchAndAppliesAllPredicatesBeforeBoundedLimit() {
+        assertThrows(IllegalArgumentException.class, () -> service.search(new AiListingSearchRequest(List.of(),"newest",1000)));
+        verifyNoInteractions(jdbc);
+        when(jdbc.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Long.class))).thenReturn(1000L);
+        when(jdbc.queryForList(anyString(), any(MapSqlParameterSource.class), eq(String.class))).thenReturn(List.of("id-1"));
+        service.search(new AiListingSearchRequest(List.of(
+            new AiListingSearchRequest.Filter("city_id","eq","12"),
+            new AiListingSearchRequest.Filter("ward_id","eq","24588"),
+            new AiListingSearchRequest.Filter("category","eq","ROOM"),
+            new AiListingSearchRequest.Filter("price_amount","lte",5000000),
+            new AiListingSearchRequest.Filter("area_m2","gte",20)),"price_asc",5));
+        var sql=ArgumentCaptor.forClass(String.class);
+        var params=ArgumentCaptor.forClass(MapSqlParameterSource.class);
+        verify(jdbc).queryForList(sql.capture(),params.capture(),eq(String.class));
+        assertTrue(sql.getValue().startsWith("SELECT l.id FROM listings l WHERE "));
+        assertTrue(sql.getValue().contains("t.ward_id"));
+        assertTrue(sql.getValue().contains("l.price_amount <= :v3"));
+        assertTrue(sql.getValue().endsWith("ORDER BY l.price_amount ASC, l.id ASC LIMIT :limit"));
+        assertEquals(5,params.getValue().getValue("limit"));
+    }
+
     @Test
     void retainsFalseBooleanAndRequiresPublishedListings() {
         when(jdbc.queryForObject(anyString(), any(MapSqlParameterSource.class), eq(Long.class))).thenReturn(1L);

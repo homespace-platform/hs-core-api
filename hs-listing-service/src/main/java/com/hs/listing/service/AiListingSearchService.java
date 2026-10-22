@@ -24,9 +24,18 @@ public class AiListingSearchService {
 
     private static final Map<String, Field> FIELDS = buildFields();
     private final NamedParameterJdbcTemplate jdbc;
+    private final int maxResults;
 
     public AiListingSearchService(NamedParameterJdbcTemplate jdbc) {
+        this(jdbc,20);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AiListingSearchService(NamedParameterJdbcTemplate jdbc,
+            @org.springframework.beans.factory.annotation.Value("${listing.ai.max-results:20}") int maxResults) {
+        if (maxResults < 1 || maxResults > 50) throw new IllegalArgumentException("listing.ai.max-results must be between 1 and 50");
         this.jdbc = jdbc;
+        this.maxResults = maxResults;
     }
 
     public Map<String, String> fields() {
@@ -40,8 +49,8 @@ public class AiListingSearchService {
         if (request == null) throw new IllegalArgumentException("Search request is required");
         List<AiListingSearchRequest.Filter> filters = request.filters() == null ? List.of() : request.filters();
         if (filters.size() > 24) throw new IllegalArgumentException("Too many listing filters");
-        int limit = request.limit() == null ? 5 : request.limit();
-        if (limit < 1 || limit > 10) throw new IllegalArgumentException("Limit must be between 1 and 10");
+        int limit = request.limit() == null ? Math.min(5,maxResults) : request.limit();
+        if (limit < 1 || limit > maxResults) throw new IllegalArgumentException("Limit must be between 1 and " + maxResults);
 
         StringBuilder where = new StringBuilder("l.active = true AND l.status = 'PUBLISHED' AND (l.expires_at IS NULL OR l.expires_at > now())");
         MapSqlParameterSource params = new MapSqlParameterSource().addValue("limit", limit);

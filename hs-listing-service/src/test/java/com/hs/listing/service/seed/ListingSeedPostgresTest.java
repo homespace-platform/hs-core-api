@@ -11,6 +11,7 @@ import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.ListingAddressRepository;
 import com.hs.listing.dto.request.PublicListingSearchRequest;
 import com.hs.listing.service.ListingPublicService;
+import com.hs.listing.service.AiListingSearchService;
 import com.hs.storage.config.StorageProperties;
 import com.hs.user.repository.UserRepository;
 import java.nio.file.Files;
@@ -132,6 +133,7 @@ class ListingSeedPostgresTest {
             assertEquals(expectedWard,address.get("ward_id"));
         }
         verifyPublicFilters();
+        verifyDenseWardAiSearch();
         // Re-running also repairs the previous seed version's missing IDs, without replacing source coordinates.
         execute("UPDATE listing_addresses SET ward_id=NULL");
         // Unrelated and legacy-seed listing IDs must survive all reruns unchanged.
@@ -181,5 +183,51 @@ class ListingSeedPostgresTest {
     private PublicListingSearchRequest searchRequest(java.util.Map<String,Object> filters) {
         var values=new java.util.HashMap<String,Object>(); values.put("page",1); values.put("size",50); values.put("sort","newest"); values.putAll(filters);
         return new ObjectMapper().convertValue(values,PublicListingSearchRequest.class);
+    }
+
+    private void verifyDenseWardAiSearch() {
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            jdbc.execute("""
+                INSERT INTO listings
+                SELECT (jsonb_populate_record(NULL::listings,to_jsonb(l) || jsonb_build_object(
+                    'id',md5('ai-density-listing:' || n)::uuid::text,
+                    'title','DENSITY FIXTURE ' || n,'price_amount',2000000+(n%20)*250000,
+                    'area_m2',20+(n%20),'expires_at',null))).*
+                FROM (SELECT l.* FROM listings l JOIN listing_addresses a ON a.listing_id=l.id
+                      WHERE l.category='ROOM' AND a.ward_id='24588' LIMIT 1) l
+                CROSS JOIN generate_series(1,1000) n
+                """);
+            jdbc.execute("""
+                INSERT INTO listing_addresses
+                SELECT (jsonb_populate_record(NULL::listing_addresses,to_jsonb(a) || jsonb_build_object(
+                    'id',md5('ai-density-address:' || n)::uuid::text,
+                    'listing_id',md5('ai-density-listing:' || n)::uuid::text))).*
+                FROM (SELECT a.* FROM listing_addresses a WHERE a.ward_id='24588' LIMIT 1) a
+                CROSS JOIN generate_series(1,1000) n
+                """);
+            var service=new AiListingSearchService(new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource));
+            var filters=List.of(new com.hs.listing.dto.request.AiListingSearchRequest.Filter("city_id","eq","12"),
+                new com.hs.listing.dto.request.AiListingSearchRequest.Filter("ward_id","eq","24588"),
+                new com.hs.listing.dto.request.AiListingSearchRequest.Filter("category","eq","ROOM"),
+                new com.hs.listing.dto.request.AiListingSearchRequest.Filter("price_amount","lte",3000000),
+                new com.hs.listing.dto.request.AiListingSearchRequest.Filter("area_m2","gte",22));
+            var result=service.search(new com.hs.listing.dto.request.AiListingSearchRequest(filters,"price_asc",5));
+            assertTrue(result.total()>100); assertEquals(5,result.listingIds().size());
+            var ten=service.search(new com.hs.listing.dto.request.AiListingSearchRequest(filters,"price_asc",10));
+            assertEquals(10,ten.listingIds().size()); assertEquals(result.total(),ten.total());
+            var twenty=service.search(new com.hs.listing.dto.request.AiListingSearchRequest(filters,"price_asc",20));
+            assertEquals(20,twenty.listingIds().size());
+            for(String id:result.listingIds()) {
+                var row=jdbc.queryForMap("select l.price_amount,l.area_m2,a.ward_id from listings l join listing_addresses a on a.listing_id=l.id where l.id=?",id);
+                assertEquals("24588",row.get("ward_id"));
+                assertTrue(((BigDecimal)row.get("price_amount")).compareTo(new BigDecimal("3000000"))<=0);
+                assertTrue(((BigDecimal)row.get("area_m2")).compareTo(new BigDecimal("22"))>=0);
+            }
+            assertThrows(IllegalArgumentException.class,() -> service.search(
+                new com.hs.listing.dto.request.AiListingSearchRequest(filters,"newest",1000)));
+            System.out.println("DENSITY PASS: 1000 additional listings in one ward, all SQL criteria applied; requested/returned=5/5,10/10,20/20; total matches="+result.total());
+            status.setRollbackOnly();
+        });
+        assertEquals(300,count("listings"));
     }
 }
