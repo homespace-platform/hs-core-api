@@ -18,8 +18,8 @@ import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.ViewingAppointmentRepository;
 import com.hs.listing.service.ViewingAppointmentService;
 import com.hs.storage.config.StorageProperties;
-import com.hs.user.model.Address;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.model.ListingAddress;
+import com.hs.listing.repository.ListingAddressRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.junit.jupiter.api.BeforeEach;
@@ -69,7 +69,7 @@ class AiAppointmentQueryPostgresTest {
     @SpringBootConfiguration
     @EntityScan("com.hs")
     @EnableJpaRepositories(basePackageClasses = {ViewingAppointmentRepository.class, ListingRepository.class,
-            AddressRepository.class})
+            ListingAddressRepository.class})
     @EnableJpaAuditing
     static class Config {}
 
@@ -86,7 +86,7 @@ class AiAppointmentQueryPostgresTest {
 
     @Autowired ViewingAppointmentRepository appointments;
     @Autowired ListingRepository listings;
-    @Autowired AddressRepository addresses;
+    @Autowired ListingAddressRepository addresses;
     @PersistenceContext EntityManager em;
 
     AiAppointmentQueryService service;
@@ -94,7 +94,7 @@ class AiAppointmentQueryPostgresTest {
 
     @BeforeEach
     void setUp() {
-        booking = new ViewingAppointmentService(appointments, listings, mock(AddressRepository.class), mock(StorageProperties.class));
+        booking = new ViewingAppointmentService(appointments, listings, mock(ListingAddressRepository.class), mock(StorageProperties.class));
         service = new AiAppointmentQueryService(appointments, listings, booking, em, Clock.fixed(NOW, VN));
         Listing l1 = listing(L1, ALICE, "Phong tro Phu Loi", ListingStatus.PUBLISHED);
         Listing l2 = listing(L2, DAN, "Can ho Thu Duc", ListingStatus.PUBLISHED);
@@ -465,15 +465,35 @@ class AiAppointmentQueryPostgresTest {
         return listings.save(l);
     }
 
+    @Test
+    void vietmapSchemaHasIndependentUserListingAndBranchRowsAndNoLegacyTable() {
+        ListingAddress listingAddress=addresses.findByListingIdAndActiveTrue(L1).orElseThrow();
+        var user=new com.hs.user.model.User(); user.setId("address-user");user.setUsername("address-user");user.setEmail("address-user@example.test");em.persist(user);
+        var profileAddress=new com.hs.user.model.Address();profileAddress.setUser(user);profileAddress.copyAddressFrom(listingAddress);em.persist(profileAddress);
+        var branchAddress=new com.hs.listing.model.BranchAddress();branchAddress.copyAddressFrom(listingAddress);
+        var branch=com.hs.listing.model.PropertyBranch.builder().id("address-branch").ownerId(ALICE).name("Branch")
+                .category(com.hs.listing.model.constant.ListingCategory.ROOM).address(branchAddress).build();em.persist(branch);em.flush();
+        assertNotEquals(profileAddress.getId(),listingAddress.getId());assertNotEquals(branchAddress.getId(),listingAddress.getId());
+        profileAddress.setDisplay("Changed private address");em.flush();em.clear();
+        assertNotEquals("Changed private address",addresses.findByListingIdAndActiveTrue(L1).orElseThrow().getDisplay());
+        assertEquals(0L,((Number)em.createNativeQuery("select count(*) from information_schema.tables where table_schema='public' and table_name='addresses'").getSingleResult()).longValue());
+        assertEquals(3L,((Number)em.createNativeQuery("select count(*) from information_schema.tables where table_schema='public' and table_name in ('user_addresses','listing_addresses','branch_addresses')").getSingleResult()).longValue());
+        assertEquals(0L,((Number)em.createNativeQuery("select count(*) from information_schema.columns where table_schema='public' and table_name in ('user_addresses','listing_addresses','branch_addresses') and column_name in ('province_code','province_name','ward_code','ward_name','street_line','full_address')").getSingleResult()).longValue());
+        var facets=em.createQuery("select distinct a.cityId,a.city from ListingAddress a, Listing l where a.listingId=l.id and a.active=true and l.active=true and l.status=com.hs.listing.model.constant.ListingStatus.PUBLISHED order by a.city",Object[].class).getResultList();
+        assertEquals("12",facets.getFirst()[0]);
+    }
+
     void address(String listingId, String full) {
-        Address a = new Address();
+        ListingAddress a = new ListingAddress();
         a.setListingId(listingId);
-        a.setProvinceCode("79");
-        a.setProvinceName("TP Ho Chi Minh");
-        a.setWardCode("1");
-        a.setWardName("Phuong");
-        a.setStreetLine("street");
-        a.setFullAddress(full);
+        a.setCityId("12");
+        a.setCity("TP Ho Chi Minh");
+        a.setWardId("18700");
+        a.setWard("Phuong");
+        a.setStreet("street");
+        a.setDisplay(full);
+        a.setRefId("vm:test"); a.setAddress("Phuong, TP"); a.setResolvedAt(java.time.Instant.now());
+        a.setLatitude(java.math.BigDecimal.TEN); a.setLongitude(java.math.BigDecimal.valueOf(106));
         a.setActive(true);
         addresses.save(a);
     }

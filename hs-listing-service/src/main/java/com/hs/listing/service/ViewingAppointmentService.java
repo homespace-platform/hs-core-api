@@ -17,8 +17,8 @@ import com.hs.listing.model.constant.ListingEnums.ViewingSlot;
 import com.hs.listing.model.constant.ListingStatus;
 import com.hs.storage.config.StorageProperties;
 import com.hs.storage.model.constant.StorageVisibility;
-import com.hs.user.model.Address;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.model.ListingAddress;
+import com.hs.listing.repository.ListingAddressRepository;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.ViewingAppointmentRepository;
 import lombok.RequiredArgsConstructor;
@@ -49,7 +49,7 @@ public class ViewingAppointmentService {
 
     private final ViewingAppointmentRepository appointmentRepository;
     private final ListingRepository listingRepository;
-    private final AddressRepository addressRepository;
+    private final ListingAddressRepository addressRepository;
     private final StorageProperties storageProperties;
 
     // Định nghĩa các khung giờ 1 tiếng cố định cho từng buổi
@@ -688,9 +688,9 @@ public class ViewingAppointmentService {
                     }
                 }
             }
-            Address addr = addressRepository.findByListingIdAndActiveTrue(l.getId()).orElse(null);
+            ListingAddress addr = addressRepository.findByListingIdAndActiveTrue(l.getId()).orElse(null);
             if (addr != null) {
-                addressStr = addr.getFullAddress();
+                addressStr = addr.getDisplay();
             }
         }
 

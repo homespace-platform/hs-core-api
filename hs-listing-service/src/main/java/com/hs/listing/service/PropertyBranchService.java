@@ -20,7 +20,7 @@ import com.hs.storage.model.constant.StoragePurpose;
 import com.hs.storage.model.constant.StorageStatus;
 import com.hs.storage.model.constant.StorageVisibility;
 import com.hs.storage.repository.StorageObjectRepository;
-import com.hs.user.model.Address;
+import com.hs.listing.model.BranchAddress;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -39,6 +39,8 @@ public class PropertyBranchService {
     private final ParkingReservationService parkingReservationService;
     private final StorageObjectRepository storageObjectRepository;
     private final StorageProperties storageProperties;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.common.location.VietmapService vietmap;
 
     private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final java.security.SecureRandom SECURE_RANDOM = new java.security.SecureRandom();
@@ -67,13 +69,8 @@ public class PropertyBranchService {
         int carCap = request.getCarParkingCapacity() != null ? Math.max(0, request.getCarParkingCapacity()) : 0;
         BranchChargeMappingHelper.validateBranchCharges(request.getDefaultCharges(), motorbikeCap, carCap);
 
-        Address address = new Address();
-        address.setStreetLine(request.getStreetLine() != null ? request.getStreetLine() : "");
-        address.setWardCode(request.getWardCode() != null ? request.getWardCode() : "");
-        address.setWardName(request.getWardName() != null ? request.getWardName() : "");
-        address.setProvinceCode(request.getProvinceCode() != null ? request.getProvinceCode() : "");
-        address.setProvinceName(request.getProvinceName() != null ? request.getProvinceName() : "");
-        address.setFullAddress(request.getFullAddress().trim());
+        BranchAddress address = new BranchAddress();
+        vietmap.apply(address, request.getRefId(), request.getAddressNote());
 
         String code = (request.getCode() != null && !request.getCode().trim().isBlank())
                 ? request.getCode().trim().toUpperCase()
@@ -161,17 +158,12 @@ public class PropertyBranchService {
         branch.setMotorbikeParkingCapacity(newMotorbikeCap);
         branch.setCarParkingCapacity(newCarCap);
 
-        Address address = branch.getAddress();
+        BranchAddress address = branch.getAddress();
         if (address == null) {
-            address = new Address();
+            address = new BranchAddress();
             branch.setAddress(address);
         }
-        address.setStreetLine(request.getStreetLine() != null ? request.getStreetLine() : "");
-        address.setWardCode(request.getWardCode() != null ? request.getWardCode() : "");
-        address.setWardName(request.getWardName() != null ? request.getWardName() : "");
-        address.setProvinceCode(request.getProvinceCode() != null ? request.getProvinceCode() : "");
-        address.setProvinceName(request.getProvinceName() != null ? request.getProvinceName() : "");
-        address.setFullAddress(request.getFullAddress().trim());
+        vietmap.apply(address, request.getRefId(), request.getAddressNote());
 
         validateAndLinkCoverImage(branch, request.getCoverImageId(), ownerId);
 
@@ -281,7 +273,7 @@ public class PropertyBranchService {
                         .map(Amenity::getCode)
                         .collect(Collectors.toList());
 
-        Address addr = b.getAddress();
+        BranchAddress addr = b.getAddress();
         long count = listingRepository.countByBranchIdAndActiveTrue(b.getId());
         int totalUnits = count > 0 ? (int) count : (b.getTotalUnits() != null ? b.getTotalUnits() : 0);
 
@@ -303,12 +295,20 @@ public class PropertyBranchService {
                 .name(b.getName())
                 .code(b.getCode())
                 .category(b.getCategory())
-                .streetLine(addr != null ? addr.getStreetLine() : null)
-                .wardCode(addr != null ? addr.getWardCode() : null)
-                .wardName(addr != null ? addr.getWardName() : null)
-                .provinceCode(addr != null ? addr.getProvinceCode() : null)
-                .provinceName(addr != null ? addr.getProvinceName() : null)
-                .fullAddress(addr != null ? addr.getFullAddress() : null)
+                .street(addr != null ? addr.getStreet() : null)
+                .wardId(addr != null ? addr.getWardId() : null)
+                .ward(addr != null ? addr.getWard() : null)
+                .cityId(addr != null ? addr.getCityId() : null)
+                .city(addr != null ? addr.getCity() : null)
+                .display(addr != null ? addr.getDisplay() : null)
+                .refId(addr != null ? addr.getRefId() : null)
+                .houseNumber(addr != null ? addr.getHouseNumber() : null)
+                .address(addr != null ? addr.getAddress() : null)
+                .districtId(addr != null ? addr.getDistrictId() : null)
+                .district(addr != null ? addr.getDistrict() : null)
+                .latitude(addr != null ? addr.getLatitude() : null)
+                .longitude(addr != null ? addr.getLongitude() : null)
+                .addressNote(addr != null ? addr.getAddressNote() : null)
                 .description(b.getDescription())
                 .buildingRules(b.getBuildingRules())
                 .totalUnits(totalUnits)

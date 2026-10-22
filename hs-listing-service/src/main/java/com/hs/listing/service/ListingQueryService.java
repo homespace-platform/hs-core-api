@@ -13,7 +13,7 @@ import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.storage.config.StorageProperties;
 import com.hs.storage.model.StorageObject;
 import com.hs.storage.model.constant.StorageVisibility;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.repository.ListingAddressRepository;
 import com.hs.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -31,7 +31,7 @@ public class ListingQueryService {
     public static final int MY_LISTING_PAGE_SIZE = 10;
 
     private final ListingRepository listingRepository;
-    private final AddressRepository addressRepository;
+    private final ListingAddressRepository addressRepository;
     private final UserRepository userRepository;
     private final StorageProperties storageProperties;
     private final RentalRequestRepository rentalRequestRepository;
@@ -65,8 +65,10 @@ public class ListingQueryService {
             specification = specification.and((root, query, cb) ->
                     cb.like(cb.lower(root.get("title")), pattern));
         }
-        return new PageResponse<>(listingRepository.findAll(specification, pageable)
-                .map(this::toSummary));
+        var result=listingRepository.findAll(specification,pageable);
+        var addresses=addressRepository.findAllByListingIdInAndActiveTrue(result.getContent().stream().map(Listing::getId).toList())
+            .stream().collect(java.util.stream.Collectors.toMap(com.hs.listing.model.ListingAddress::getListingId,java.util.function.Function.identity()));
+        return new PageResponse<>(result.map(listing -> toSummary(listing,addresses.get(listing.getId()))));
     }
 
     @Transactional(readOnly = true)
@@ -96,7 +98,7 @@ public class ListingQueryService {
         return toDetail(listing);
     }
 
-    private MyListingSummaryResponse toSummary(Listing listing) {
+    private MyListingSummaryResponse toSummary(Listing listing,com.hs.listing.model.ListingAddress address) {
         ListingMedia cover = listing.getMedia().stream()
                 .filter(ListingMedia::isCover)
                 .filter(media -> media.getMediaType() == com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE)
@@ -105,9 +107,7 @@ public class ListingQueryService {
                         .filter(media -> media.getMediaType() == com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE)
                         .min(Comparator.comparing(ListingMedia::getSortOrder))
                         .orElse(null));
-        String fullAddress = addressRepository.findByListingIdAndActiveTrue(listing.getId())
-                .map(address -> address.getFullAddress())
-                .orElse(null);
+        String fullAddress = address == null ? null : address.getDisplay();
         String branchName = listing.getBranchId() != null
                 ? branchRepository.findByIdAndActiveTrue(listing.getBranchId()).map(PropertyBranch::getName).orElse(null)
                 : null;

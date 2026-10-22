@@ -14,7 +14,7 @@ import com.hs.listing.repository.ListingStatusHistoryRepository;
 import com.hs.storage.config.StorageProperties;
 import com.hs.storage.model.StorageObject;
 import com.hs.storage.model.constant.StorageVisibility;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.repository.ListingAddressRepository;
 import com.hs.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -38,7 +38,7 @@ public class ListingAdminService {
     private final ListingQueryService queryService;
     private final ListingStatusService statusService;
     private final ListingService listingService;
-    private final AddressRepository addressRepository;
+    private final ListingAddressRepository addressRepository;
     private final UserRepository userRepository;
     private final StorageProperties storageProperties;
 
@@ -138,7 +138,7 @@ public class ListingAdminService {
                         .min(Comparator.comparing(ListingMedia::getSortOrder))
                         .orElse(null));
         String address = addressRepository.findByListingIdAndActiveTrue(listing.getId())
-                .map(item -> item.getFullAddress()).orElse(null);
+                .map(item -> item.getDisplay()).orElse(null);
         ListingOwnerResponse owner = userRepository.findById(listing.getOwnerId())
                 .map(ListingOwnerResponse::from).orElse(null);
         return new AdminListingSummaryResponse(

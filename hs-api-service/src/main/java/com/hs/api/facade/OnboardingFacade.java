@@ -41,7 +41,10 @@ public class OnboardingFacade {
         boolean profileComplete = hasText(profile.firstName()) && hasText(profile.lastName())
                 && hasText(profile.phone()) && profile.dob() != null && profile.gender() != null;
 
-        boolean addressComplete = profile.address() != null && hasText(profile.address().streetLine());
+        boolean addressComplete = profile.address() != null && hasText(profile.address().refId())
+                && (hasText(profile.address().street()) || hasText(profile.address().name()))
+                && hasText(profile.address().cityId()) && hasText(profile.address().wardId())
+                && profile.address().latitude() != null && profile.address().longitude() != null;
         boolean passwordComplete = userService.hasPassword();
         boolean bankComplete = bankAccountService.hasActiveBankAccount(userId);
 

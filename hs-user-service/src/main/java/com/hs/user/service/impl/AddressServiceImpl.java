@@ -28,6 +28,7 @@ public class AddressServiceImpl implements AddressService {
 
     AddressRepository addressRepository;
     CurrentUserUtils currentUserUtils;
+    com.hs.common.location.VietmapService vietmapService;
 
     @Override
     @Transactional(readOnly = true)
@@ -41,7 +42,7 @@ public class AddressServiceImpl implements AddressService {
         Address address = addressRepository.findByUser_Id(user.getId()).orElseGet(Address::new);
         address.setUser(user);
         address.setActive(true);
-        apply(address, request);
+        vietmapService.apply(address, request.refId(), request.addressNote());
         Address saved = addressRepository.save(address);
         log.info("Upserted address {} for user {}", saved.getId(), user.getId());
         return AddressMapper.mapToAddressResponse(saved);
@@ -61,16 +62,4 @@ public class AddressServiceImpl implements AddressService {
                 .orElseThrow(() -> new AppException(UserErrorCode.ADDRESS_NOT_EXISTED));
     }
 
-    private void apply(Address address, UpsertAddressRequest request) {
-        String streetLine = request.streetLine().trim();
-        String wardName = request.wardName().trim();
-        String provinceName = request.provinceName().trim();
-
-        address.setProvinceCode(request.provinceCode().trim());
-        address.setProvinceName(provinceName);
-        address.setWardCode(request.wardCode().trim());
-        address.setWardName(wardName);
-        address.setStreetLine(streetLine);
-        address.setFullAddress(streetLine + ", " + wardName + ", " + provinceName);
-    }
 }

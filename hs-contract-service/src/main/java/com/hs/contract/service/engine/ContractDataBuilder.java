@@ -66,6 +66,8 @@ public class ContractDataBuilder {
 
     private final UserRepository userRepository;
     private final AddressRepository addressRepository;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.listing.repository.ListingAddressRepository listingAddresses;
     private final ObjectMapper objectMapper;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private com.hs.payment.repository.PaymentRequestRepository payments;
@@ -191,11 +193,11 @@ public class ContractDataBuilder {
         String unitNumber = resolveUnitNumber(listing);
         String floor = resolveFloor(listing);
         String buildingName = resolveBuildingName(listing);
-        String baseAddress = addressRepository.findByListingIdAndActiveTrue(listing.getId())
-                .map(Address::getFullAddress)
+        String baseAddress = listingAddresses == null ? "" : listingAddresses.findByListingIdAndActiveTrue(listing.getId())
+                .map(ListingAddress::getDisplay)
                 .orElse("");
         if (baseAddress.isBlank() && listing.getBranch() != null && listing.getBranch().getAddress() != null)
-            baseAddress = nullToEmpty(listing.getBranch().getAddress().getFullAddress());
+            baseAddress = nullToEmpty(listing.getBranch().getAddress().getDisplay());
         String fullAddress = joinNonBlank(", ", unitNumber, floor, buildingName, baseAddress);
 
         ListingSnapshotDto.ApartmentDetailSnapshot aptSnapshot = null;
@@ -412,8 +414,8 @@ public class ContractDataBuilder {
 
         String fullAddress = isNotBlank(snapshot.getFullAddress()) ? snapshot.getFullAddress() : "";
         if (fullAddress.isBlank() && liveListing != null) {
-            String baseAddress = addressRepository.findByListingIdAndActiveTrue(liveListing.getId())
-                    .map(Address::getFullAddress)
+            String baseAddress = listingAddresses == null ? "" : listingAddresses.findByListingIdAndActiveTrue(liveListing.getId())
+                    .map(ListingAddress::getDisplay)
                     .orElse("");
             fullAddress = joinNonBlank(", ", unitNumber, floor, buildingName, baseAddress);
         }
@@ -1268,7 +1270,7 @@ public class ContractDataBuilder {
             return "";
         }
         return addressRepository.findByUser_IdAndActiveTrue(userId)
-                .map(Address::getFullAddress)
+                .map(Address::getDisplay)
                 .map(ContractDataBuilder::nullToEmpty)
                 .orElse("");
     }

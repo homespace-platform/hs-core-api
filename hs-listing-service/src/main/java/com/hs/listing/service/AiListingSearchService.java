@@ -105,7 +105,7 @@ public class AiListingSearchService {
                 where.append(" AND ").append(predicate);
             } else {
                 where.append(" AND EXISTS (SELECT 1 FROM ").append(field.table()).append(" t WHERE t.listing_id = l.id");
-                if (field.table().equals("addresses") || field.table().equals("listing_charges")) {
+                if (field.table().equals("listing_addresses") || field.table().equals("listing_charges")) {
                     where.append(" AND t.active = true");
                 }
                 if (field.fixedCondition() != null) where.append(" AND ").append(field.fixedCondition());
@@ -117,9 +117,9 @@ public class AiListingSearchService {
             if (keyword.length() > 160) throw new IllegalArgumentException("Keyword is too long");
             params.addValue("kw", "%" + escapeLike(keyword.toLowerCase(Locale.ROOT)) + "%");
             where.append(" AND (lower(l.title) LIKE :kw ESCAPE '\\' OR lower(coalesce(l.description,'')) LIKE :kw ESCAPE '\\'"
-                    + " OR EXISTS (SELECT 1 FROM addresses ka WHERE ka.listing_id = l.id AND ka.active = true AND ("
-                    + "lower(coalesce(ka.full_address,'')) LIKE :kw ESCAPE '\\' OR lower(coalesce(ka.street_line,'')) LIKE :kw ESCAPE '\\'"
-                    + " OR lower(coalesce(ka.ward_name,'')) LIKE :kw ESCAPE '\\' OR lower(coalesce(ka.province_name,'')) LIKE :kw ESCAPE '\\')))");
+                    + " OR EXISTS (SELECT 1 FROM listing_addresses ka WHERE ka.listing_id = l.id AND ka.active = true AND ("
+                    + "lower(coalesce(ka.display,'')) LIKE :kw ESCAPE '\\' OR lower(coalesce(ka.street,'')) LIKE :kw ESCAPE '\\'"
+                    + " OR lower(coalesce(ka.ward,'')) LIKE :kw ESCAPE '\\' OR lower(coalesce(ka.city,'')) LIKE :kw ESCAPE '\\')))");
         }
         String from = " FROM listings l WHERE " + where;
         long total = jdbc.queryForObject("SELECT count(*)" + from, params, Long.class);
@@ -168,7 +168,7 @@ public class AiListingSearchService {
         add(fields, "listings", null, Kind.BOOLEAN, "negotiable", "management_fee_included", "vat_included");
         add(fields, "listings", null, Kind.DATE, "available_from", "published_at", "expires_at");
         add(fields, "listings", null, Kind.INTEGER, "view_count");
-        add(fields, "addresses", null, Kind.TEXT, "province_code", "province_name", "ward_code", "ward_name", "street_line", "full_address");
+        add(fields, "listing_addresses", null, Kind.TEXT, "city_id", "city", "ward_id", "ward", "street", "display");
         addScoped(fields, "house", "listing_house_details", Kind.NUMBER, "land_area_m2", "frontage_width_m", "length_m", "access_road_width_m");
         addScoped(fields, "house", "listing_house_details", Kind.INTEGER, "frontage_count", "total_floors", "bedroom_count", "bathroom_count", "living_room_count", "kitchen_count", "max_occupants", "max_vehicles", "rented_floor_from", "rented_floor_to");
         addScoped(fields, "house", "listing_house_details", Kind.BOOLEAN, "has_rooftop", "has_garage");

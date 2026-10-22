@@ -2,7 +2,7 @@ package com.hs.listing.model;
 
 import com.hs.common.persistence.BaseEntity;
 import com.hs.listing.model.constant.ListingCategory;
-import com.hs.user.model.Address;
+import com.hs.listing.model.BranchAddress;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -70,8 +70,8 @@ public class PropertyBranch extends BaseEntity {
     private String coverImageId;
 
     @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
-    @JoinColumn(name = "address_id")
-    private Address address;
+    @JoinColumn(name = "address_id", unique = true)
+    private BranchAddress address;
 
     @OneToMany(mappedBy = "branch", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default

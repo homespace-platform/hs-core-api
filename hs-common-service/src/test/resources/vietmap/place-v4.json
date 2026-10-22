@@ -1,0 +1,17 @@
+{
+  "display": "197 Trần Phú, Phường Chợ Quán, Thành phố Hồ Chí Minh",
+  "name": "197 Trần Phú",
+  "hs_num": "197",
+  "street": "Trần Phú",
+  "address": "Phường Chợ Quán, Thành phố Hồ Chí Minh",
+  "city_id": 12,
+  "city": "Thành phố Hồ Chí Minh",
+  "district_id": 0,
+  "district": "",
+  "ward_id": 18700,
+  "ward": "Phường Chợ Quán",
+  "lat": 10.759222947000069,
+  "lng": 106.67590269100003,
+  "partner_code": null,
+  "place_detail": null
+}

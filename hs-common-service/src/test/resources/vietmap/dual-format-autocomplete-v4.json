@@ -1,0 +1,134 @@
+[
+    {
+        "ref_id": "auto:RAkPYywrDwZuX3VVf2QAb2wiZCwyYFsWf1imkkZ7AViEg79CZhbUicQMFXDuxxIlW0xbFXKgn0I319iIQRChoqCFh4v4VlFCZhbUicQMFXDuxxIlW0xbDg5SHUxZBVEfAghdBFUFVgBVDwBZA1QDHVVaDAQbVAVWCx0EBQVXFiQAWhFICgsxQIePwV5FevXDEiNcUgw",
+        "distance": 0,
+        "address": "Phường An Nhơn, Thành phố Hồ Chí Minh",
+        "name": "Nhà Nghỉ Trần Bá Giao Gò Vấp Đường Trần Bá Giao",
+        "display": "Nhà Nghỉ Trần Bá Giao Gò Vấp Đường Trần Bá Giao, Phường An Nhơn, Thành phố Hồ Chí Minh",
+        "boundaries": [
+            {
+                "type": 2,
+                "id": 24332,
+                "name": "An Nhơn",
+                "prefix": "Phường",
+                "full_name": "Phường An Nhơn"
+            },
+            {
+                "type": 0,
+                "id": 12,
+                "name": "Hồ Chí Minh",
+                "prefix": "Thành phố",
+                "full_name": "Thành phố Hồ Chí Minh"
+            }
+        ],
+        "categories": [
+            "2002"
+        ],
+        "entry_points": [],
+        "data_old": {
+            "ref_id": "auto:RAkPYywrDwZuX3VVf2QAb2wiZCwyYFsWf1imkkZ7AViEg79CZhbUicQMFXDuxxIlW0xbFXKgn0I319iIQRChoqCFh4v4VlFCZhbUicQMFXDuxxIlW0xbDg5SHUxZBVEfAghdBFUFVgBVDwBZA1QDHVVaDAQbVAVWCx0EBQVXFjYTQwcWCmQX09ySCBAn-5dCdQ1UXA",
+            "distance": 0,
+            "address": "Phường 5, Quận Gò Vấp, Thành phố Hồ Chí Minh",
+            "name": "Nhà Nghỉ Trần Bá Giao Gò Vấp Đường Trần Bá Giao",
+            "display": "Nhà Nghỉ Trần Bá Giao Gò Vấp Đường Trần Bá Giao Phường 5, Quận Gò Vấp, Thành phố Hồ Chí Minh",
+            "boundaries": [
+                {
+                    "type": 2,
+                    "id": 724748,
+                    "name": "5",
+                    "prefix": "Phường",
+                    "full_name": "Phường 5"
+                },
+                {
+                    "type": 1,
+                    "id": 3852,
+                    "name": "Gò Vấp",
+                    "prefix": "Quận",
+                    "full_name": "Quận Gò Vấp"
+                },
+                {
+                    "type": 0,
+                    "id": 12,
+                    "name": "Hồ Chí Minh",
+                    "prefix": "Thành phố",
+                    "full_name": "Thành phố Hồ Chí Minh"
+                }
+            ],
+            "categories": [
+                "2002"
+            ],
+            "entry_points": [],
+            "data_old": null,
+            "data_new": null,
+            "is_match_address": null,
+            "partner_code": null
+        },
+        "data_new": null,
+        "is_match_address": null,
+        "partner_code": null
+    },
+    {
+        "ref_id": "auto:RAkPYDcwcHd5XAUBBR0EVAdTGlIDBlBJUwIDBAcCXlZQDlMEA10NVgJTUABJUAZUC08GBA0FSFMDDlEbBghXAlUHBABQDABaVlcO9_OkhdOW-1wFEnlG1I_EQ0Ij9cMNdlkEXV0OVwBLAARbAVQCB1pbDAsUXwtbCRwEAxtVFFNZBVAWd1EJQQMOXQ",
+        "distance": 0,
+        "address": "Phường An Nhơn, Thành phố Hồ Chí Minh",
+        "name": "Đường Trần Bá Giao",
+        "display": "Đường Trần Bá Giao, Phường An Nhơn, Thành phố Hồ Chí Minh",
+        "boundaries": [
+            {
+                "type": 2,
+                "id": 24332,
+                "name": "An Nhơn",
+                "prefix": "Phường",
+                "full_name": "Phường An Nhơn"
+            },
+            {
+                "type": 0,
+                "id": 12,
+                "name": "Hồ Chí Minh",
+                "prefix": "Thành phố",
+                "full_name": "Thành phố Hồ Chí Minh"
+            }
+        ],
+        "categories": [],
+        "entry_points": [],
+        "data_old": {
+            "ref_id": "auto:RAkPYDcwcHd5XAUBBR0EVAdTGlIDBlBJUwIDBAcCXlZQDlMEA10NVgJTUABJUAZUC08GBA0FSFMDDlEbBghXAlUHBABQDABaVlcO9_OkhdOW-1wFEnlG1I_EQ0Ij9cMNdlkEXV0OVwBLAARbAVQCB1pbDAsUXwtbCRwEAxtVFFNZBVAWZUIQV10O",
+            "distance": 0,
+            "address": "Phường 5, Quận Gò Vấp, Thành phố Hồ Chí Minh",
+            "name": "Đường Trần Bá Giao",
+            "display": "Đường Trần Bá Giao Phường 5, Quận Gò Vấp, Thành phố Hồ Chí Minh",
+            "boundaries": [
+                {
+                    "type": 2,
+                    "id": 724748,
+                    "name": "5",
+                    "prefix": "Phường",
+                    "full_name": "Phường 5"
+                },
+                {
+                    "type": 1,
+                    "id": 3852,
+                    "name": "Gò Vấp",
+                    "prefix": "Quận",
+                    "full_name": "Quận Gò Vấp"
+                },
+                {
+                    "type": 0,
+                    "id": 12,
+                    "name": "Hồ Chí Minh",
+                    "prefix": "Thành phố",
+                    "full_name": "Thành phố Hồ Chí Minh"
+                }
+            ],
+            "categories": [],
+            "entry_points": [],
+            "data_old": null,
+            "data_new": null,
+            "is_match_address": null,
+            "partner_code": null
+        },
+        "data_new": null,
+        "is_match_address": null,
+        "partner_code": null
+    }
+]

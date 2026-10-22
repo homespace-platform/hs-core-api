@@ -17,8 +17,8 @@ import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.storage.config.StorageProperties;
 import com.hs.storage.model.constant.StorageVisibility;
-import com.hs.user.model.Address;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.model.ListingAddress;
+import com.hs.listing.repository.ListingAddressRepository;
 import jakarta.persistence.criteria.JoinType;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,7 +54,7 @@ public class RentalRequestService {
     private final RentalRequestRepository rentalRequestRepository;
     private final ListingRepository listingRepository;
     private final ListingStatusService listingStatusService;
-    private final AddressRepository addressRepository;
+    private final ListingAddressRepository addressRepository;
     private final StorageProperties storageProperties;
     private final Duration holdDuration;
     private final RentalCostCalculator rentalCostCalculator;
@@ -81,7 +81,7 @@ public class RentalRequestService {
             RentalRequestRepository rentalRequestRepository,
             ListingRepository listingRepository,
             ListingStatusService listingStatusService,
-            AddressRepository addressRepository,
+            ListingAddressRepository addressRepository,
             StorageProperties storageProperties,
             RentalCostCalculator rentalCostCalculator,
             ParkingReservationService parkingReservationService,
@@ -106,7 +106,7 @@ public class RentalRequestService {
             RentalRequestRepository rentalRequestRepository,
             ListingRepository listingRepository,
             ListingStatusService listingStatusService,
-            AddressRepository addressRepository,
+            ListingAddressRepository addressRepository,
             StorageProperties storageProperties,
             RentalCostCalculator rentalCostCalculator,
             ParkingReservationService parkingReservationService,
@@ -601,9 +601,9 @@ public class RentalRequestService {
                     }
                 }
             }
-            Address addr = addressRepository.findByListingIdAndActiveTrue(l.getId()).orElse(null);
+            ListingAddress addr = addressRepository.findByListingIdAndActiveTrue(l.getId()).orElse(null);
             if (addr != null) {
-                addressStr = addr.getFullAddress();
+                addressStr = addr.getDisplay();
             }
         }
 
@@ -670,10 +670,10 @@ public class RentalRequestService {
         String floor = resolveFloor(listing);
         String buildingName = resolveBuildingName(listing);
         String baseAddress = addressRepository.findByListingIdAndActiveTrue(listing.getId())
-                .map(Address::getFullAddress)
+                .map(ListingAddress::getDisplay)
                 .orElse("");
         if (baseAddress.isBlank() && branch != null && branch.getAddress() != null) {
-            baseAddress = branch.getAddress().getFullAddress() != null ? branch.getAddress().getFullAddress() : "";
+            baseAddress = branch.getAddress().getDisplay() != null ? branch.getAddress().getDisplay() : "";
         }
         String fullAddress = joinNonBlank(", ", unitNumber, floor, buildingName, baseAddress);
 

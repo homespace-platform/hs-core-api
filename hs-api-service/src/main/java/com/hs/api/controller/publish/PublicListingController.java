@@ -89,8 +89,8 @@ public class PublicListingController {
             @RequestParam(required = false) String ownerId,
             @RequestParam(required = false) ListingCategory category,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) String provinceCode,
-            @RequestParam(required = false) String wardCode,
+            @RequestParam(required = false) String cityId,
+            @RequestParam(required = false) String wardId,
             @RequestParam(required = false) BigDecimal priceMin,
             @RequestParam(required = false) BigDecimal priceMax,
             @RequestParam(required = false) BigDecimal areaMin,
@@ -113,7 +113,7 @@ public class PublicListingController {
             @RequestParam(defaultValue = "newest") String sort) {
 
         return listingPublicService.search(new PublicListingSearchRequest(
-                page, size, ownerId, category, keyword, provinceCode, wardCode,
+                page, size, ownerId, category, keyword, cityId, wardId,
                 priceMin, priceMax, areaMin, areaMax, bedrooms, bathrooms, hasVideo,
                 furnishingStatus, direction, balconyDirection, officeGrade, positionType, restroomType,
                 kitchenType, accessType, legalStatus,

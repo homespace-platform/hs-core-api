@@ -14,7 +14,7 @@ import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.ViewingAppointmentRepository;
 import com.hs.listing.service.ViewingAppointmentService;
 import com.hs.storage.config.StorageProperties;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.repository.ListingAddressRepository;
 import org.junit.jupiter.api.Test;
 
 import java.time.DayOfWeek;
@@ -106,7 +106,7 @@ class AppointmentActionRulesParityTest {
         ViewingAppointmentRepository appointments = mock(ViewingAppointmentRepository.class);
         when(appointments.findByIdWithListing(anyString())).thenReturn(Optional.of(appointment));
         when(appointments.save(any(ViewingAppointment.class))).thenAnswer(call -> call.getArgument(0));
-        return new ViewingAppointmentService(appointments, mock(ListingRepository.class), mock(AddressRepository.class),
+        return new ViewingAppointmentService(appointments, mock(ListingRepository.class), mock(ListingAddressRepository.class),
                 mock(StorageProperties.class));
     }
 }

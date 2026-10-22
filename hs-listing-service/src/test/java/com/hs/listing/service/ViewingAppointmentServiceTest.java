@@ -16,7 +16,7 @@ import com.hs.listing.model.constant.ListingStatus;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.ViewingAppointmentRepository;
 import com.hs.storage.config.StorageProperties;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.repository.ListingAddressRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -35,7 +35,7 @@ class ViewingAppointmentServiceTest {
 
     private ViewingAppointmentRepository appointmentRepository;
     private ListingRepository listingRepository;
-    private AddressRepository addressRepository;
+    private ListingAddressRepository addressRepository;
     private StorageProperties storageProperties;
     private ViewingAppointmentService appointmentService;
 
@@ -47,7 +47,7 @@ class ViewingAppointmentServiceTest {
     void setUp() {
         appointmentRepository = mock(ViewingAppointmentRepository.class);
         listingRepository = mock(ListingRepository.class);
-        addressRepository = mock(AddressRepository.class);
+        addressRepository = mock(ListingAddressRepository.class);
         storageProperties = mock(StorageProperties.class);
 
         appointmentService = new ViewingAppointmentService(

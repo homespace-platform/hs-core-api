@@ -472,9 +472,9 @@ public class AiAppointmentQueryService {
         // Renter names are matchable only on rows where the caller is the owner.
         any.add(cb.and(cb.equal(root.get("ownerId"), s.userId), cb.like(cb.lower(root.get("renterName")), pattern, '\\')));
         Subquery<Long> sub = query.subquery(Long.class);
-        Root<com.hs.user.model.Address> address = sub.from(com.hs.user.model.Address.class);
+        Root<com.hs.listing.model.ListingAddress> address = sub.from(com.hs.listing.model.ListingAddress.class);
         sub.select(cb.literal(1L)).where(cb.equal(address.get("listingId"), listing.get("id")),
-                cb.isTrue(address.get("active")), cb.like(cb.lower(address.get("fullAddress")), pattern, '\\'));
+                cb.isTrue(address.get("active")), cb.like(cb.lower(address.get("display")), pattern, '\\'));
         any.add(cb.exists(sub));
         return cb.or(any.toArray(Predicate[]::new));
     }
@@ -542,7 +542,7 @@ public class AiAppointmentQueryService {
     private Map<String, String> addresses(Collection<String> listingIds) {
         if (listingIds.isEmpty()) return Map.of();
         Map<String, String> out = new HashMap<>();
-        em.createQuery("select a.listingId, a.fullAddress from Address a where a.listingId in :ids and a.active = true",
+        em.createQuery("select a.listingId, a.display from ListingAddress a where a.listingId in :ids and a.active = true",
                         Object[].class)
                 .setParameter("ids", listingIds).getResultList()
                 .forEach(row -> out.put((String) row[0], (String) row[1]));

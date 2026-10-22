@@ -12,7 +12,5 @@ public interface AddressRepository extends JpaRepository<Address, String> {
 
     Optional<Address> findByUser_IdAndActiveTrue(String userId);
 
-    Optional<Address> findByListingIdAndActiveTrue(String listingId);
-
     boolean existsByUser_Id(String userId);
 }

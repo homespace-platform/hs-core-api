@@ -12,8 +12,8 @@ import com.hs.storage.model.StorageObject;
 import com.hs.storage.model.constant.StorageStatus;
 import com.hs.storage.repository.StorageObjectRepository;
 import com.hs.storage.service.StorageService;
-import com.hs.user.model.Address;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.model.ListingAddress;
+import com.hs.listing.repository.ListingAddressRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.BeanUtils;
 import org.springframework.http.HttpStatus;
@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 public class ListingService {
     private final ListingRepository listingRepository;
-    private final AddressRepository addressRepository;
+    private final ListingAddressRepository addressRepository;
     private final StorageObjectRepository storageObjectRepository;
     private final StorageService storageService;
     private final AmenityRepository amenityRepository;
@@ -37,9 +37,13 @@ public class ListingService {
     private final ListingStatusService listingStatusService;
     private final PropertyBranchRepository branchRepository;
     private final ListingPolicyService policyService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.user.repository.AddressRepository userAddresses;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.common.location.VietmapService vietmap;
 
     /** Compatibility for standalone service fixtures; Spring uses the full injected constructor. */
-    public ListingService(ListingRepository listings,AddressRepository addresses,StorageObjectRepository storage,
+    public ListingService(ListingRepository listings,ListingAddressRepository addresses,StorageObjectRepository storage,
             StorageService storageService,AmenityRepository amenities,FurnishingItemRepository furnishings,
             ListingStatusService statuses,PropertyBranchRepository branches) {
         this(listings,addresses,storage,storageService,amenities,furnishings,statuses,branches,new ListingPolicyService(null));
@@ -95,7 +99,7 @@ public class ListingService {
                 l, r.submissionAction(), ownerId, ListingStatusActorType.USER);
         Listing saved = listingRepository.save(l);
         linkStorageObjects(saved);
-        upsertAddress(saved.getId(), ownerId, r.addressSource());
+        upsertAddress(saved, ownerId, r.addressSource());
         return response(saved);
     }
 
@@ -111,7 +115,7 @@ public class ListingService {
                 listing, request.submissionAction(), adminId, ListingStatusActorType.ADMIN);
         Listing saved = listingRepository.save(listing);
         linkStorageObjects(saved);
-        upsertAddress(saved.getId(), ownerId, request.addressSource());
+        upsertAddress(saved, ownerId, request.addressSource());
         return response(saved);
     }
 
@@ -140,7 +144,7 @@ public class ListingService {
         listing.setStatus(preservedStatus);
         Listing saved = listingRepository.save(listing);
         linkStorageObjects(saved);
-        upsertAddress(saved.getId(), saved.getOwnerId(), request.addressSource());
+        upsertAddress(saved, saved.getOwnerId(), request.addressSource());
         return response(saved);
     }
 
@@ -601,45 +605,31 @@ public class ListingService {
         }
     }
 
-    private void upsertAddress(String listingId, String ownerId, ListingAddressSourceRequest source) {
-        Address target = addressRepository.findByListingIdAndActiveTrue(listingId).orElseGet(Address::new);
-        if (source.type() == AddressSourceType.SAVED) {
+    private void upsertAddress(Listing listing, String ownerId, ListingAddressSourceRequest source) {
+        String listingId=listing.getId();
+        ListingAddress target = addressRepository.findByListingId(listingId).orElseGet(ListingAddress::new);
+        if (listing.getBranchId()!=null) {
+            PropertyBranch branch=branchRepository.findByIdAndOwnerIdAndActiveTrue(listing.getBranchId(),ownerId)
+                .orElseThrow(() -> error(403,"BRANCH_FORBIDDEN","Chi nhánh không thuộc tài khoản của bạn."));
+            if(branch.getAddress()==null || branch.getAddress().getRefId()==null)
+                throw error(400,"BRANCH_ADDRESS_REQUIRED","Vui lòng cập nhật địa chỉ Vietmap của chi nhánh trước.");
+            target.copyAddressFrom(branch.getAddress());
+        } else if (source.type() == AddressSourceType.SAVED) {
             if (source.savedAddressId() == null)
                 invalid("addressSource.savedAddressId", "REQUIRED");
-            Address saved = addressRepository.findById(source.savedAddressId())
-                    .orElseThrow(() -> error(404, "ADDRESS_NOT_FOUND", "Address not found"));
-            if (saved.getUser() == null || !ownerId.equals(saved.getUser().getId()))
-                throw error(403, "ADDRESS_FORBIDDEN", "Address belongs to another user");
-            copyAddressFields(target, saved);
+            com.hs.user.model.Address saved = userAddresses.findById(source.savedAddressId())
+                    .orElseThrow(() -> error(404, "ADDRESS_NOT_FOUND", "ListingAddress not found"));
+            if (!Boolean.TRUE.equals(saved.getActive()) || saved.getUser() == null || !ownerId.equals(saved.getUser().getId()))
+                throw error(403, "ADDRESS_FORBIDDEN", "ListingAddress belongs to another user");
+            target.copyAddressFrom(saved);
         } else {
             if (source.address() == null)
                 invalid("addressSource.address", "REQUIRED");
-            apply(target, source.address());
+            vietmap.apply(target, source.address().refId(), source.address().addressNote());
         }
-        target.setUser(null);
         target.setListingId(listingId);
         target.setActive(true);
         addressRepository.save(target);
-    }
-
-    private void copyAddressFields(Address target, Address source) {
-        target.setProvinceCode(source.getProvinceCode());
-        target.setProvinceName(source.getProvinceName());
-        target.setWardCode(source.getWardCode());
-        target.setWardName(source.getWardName());
-        target.setStreetLine(source.getStreetLine());
-        target.setFullAddress(source.getFullAddress());
-    }
-
-    private void apply(Address a, ListingAddressRequest q) {
-        a.setProvinceCode(q.provinceCode().trim());
-        a.setProvinceName(q.provinceName().trim());
-        a.setWardCode(q.wardCode().trim());
-        a.setWardName(q.wardName().trim());
-        a.setStreetLine(q.streetLine().trim());
-        a.setFullAddress(q.fullAddress() == null || q.fullAddress().isBlank()
-                ? String.join(", ", a.getStreetLine(), a.getWardName(), a.getProvinceName())
-                : q.fullAddress().trim());
     }
 
     private Set<String> normalized(List<String> values) {

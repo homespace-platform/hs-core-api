@@ -1,28 +1,14 @@
 package com.hs.user.mapper;
-
 import com.hs.user.dto.response.AddressResponse;
 import com.hs.user.model.Address;
-
-public class AddressMapper {
-
-    private AddressMapper() {
-    }
-
-    public static AddressResponse mapToAddressResponse(Address address) {
-        if (address == null) {
-            return null;
-        }
-        return AddressResponse.builder()
-                .id(address.getId())
-                .provinceCode(address.getProvinceCode())
-                .provinceName(address.getProvinceName())
-                .wardCode(address.getWardCode())
-                .wardName(address.getWardName())
-                .streetLine(address.getStreetLine())
-                .fullAddress(address.getFullAddress())
-                .active(address.getActive())
-                .createdAt(address.getCreatedAt())
-                .updatedAt(address.getUpdatedAt())
-                .build();
+public final class AddressMapper {
+    private AddressMapper() {}
+    public static AddressResponse mapToAddressResponse(Address a) {
+        if(a==null) return null;
+        return AddressResponse.builder().id(a.getId()).refId(a.getRefId()).display(a.getDisplay()).name(a.getName())
+            .houseNumber(a.getHouseNumber()).street(a.getStreet()).address(a.getAddress()).cityId(a.getCityId()).city(a.getCity())
+            .districtId(a.getDistrictId()).district(a.getDistrict()).wardId(a.getWardId()).ward(a.getWard())
+            .latitude(a.getLatitude()).longitude(a.getLongitude()).addressNote(a.getAddressNote()).active(a.getActive())
+            .createdAt(a.getCreatedAt()).updatedAt(a.getUpdatedAt()).build();
     }
 }

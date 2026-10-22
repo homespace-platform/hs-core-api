@@ -4,7 +4,7 @@ import com.hs.listing.model.Listing;
 import com.hs.listing.model.constant.*;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.storage.config.StorageProperties;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.repository.ListingAddressRepository;
 import com.hs.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -67,13 +67,13 @@ class ListingQueryServiceTest {
                 ()->service.getById(viewer,"missing")).getStatusCode().value());
     }
     private ListingQueryService accessService(ListingRepository listings,com.hs.listing.repository.RentalRequestRepository rentals) {
-        return new ListingQueryService(listings,mock(AddressRepository.class),mock(UserRepository.class),properties(),rentals,
+        return new ListingQueryService(listings,mock(ListingAddressRepository.class),mock(UserRepository.class),properties(),rentals,
             mock(com.hs.listing.repository.PropertyBranchRepository.class));
     }
     @Test
     void returnsTenOwnedListingsPerPage() {
         ListingRepository listings = mock(ListingRepository.class);
-        AddressRepository addresses = mock(AddressRepository.class);
+        ListingAddressRepository addresses = mock(ListingAddressRepository.class);
         Listing listing = listing();
         when(listings.findAll(any(Specification.class), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(listing)));

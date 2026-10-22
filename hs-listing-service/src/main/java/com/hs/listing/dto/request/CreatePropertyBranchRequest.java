@@ -20,14 +20,10 @@ public class CreatePropertyBranchRequest {
     @NotNull(message = "Loại hình bất động sản không được để trống")
     private ListingCategory category;
 
-    private String streetLine;
-    private String wardCode;
-    private String wardName;
-    private String provinceCode;
-    private String provinceName;
-
-    @NotBlank(message = "Địa chỉ không được để trống")
-    private String fullAddress;
+    @NotBlank(message = "Vui lòng chọn địa chỉ từ Vietmap")
+    private String refId;
+    @jakarta.validation.constraints.Size(max=255)
+    private String addressNote;
 
     private String description;
     private String buildingRules;

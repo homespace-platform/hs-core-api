@@ -1,5 +1,5 @@
 package com.hs.listing.service;
-import com.hs.common.advice.entity.AppException; import com.hs.listing.repository.*; import com.hs.storage.repository.StorageObjectRepository; import com.hs.user.repository.AddressRepository; import org.junit.jupiter.api.Test; import static org.junit.jupiter.api.Assertions.*; import static org.mockito.Mockito.*;
+import com.hs.common.advice.entity.AppException; import com.hs.listing.repository.*; import com.hs.storage.repository.StorageObjectRepository; import com.hs.listing.repository.ListingAddressRepository; import org.junit.jupiter.api.Test; import static org.junit.jupiter.api.Assertions.*; import static org.mockito.Mockito.*;
 class ListingServiceTest {
     @org.junit.jupiter.api.Test
     void adminCannotRemoveRequiredPoliciesFromPublishedListingUsingDraftAction() {
@@ -7,27 +7,30 @@ class ListingServiceTest {
         var listing = new com.hs.listing.model.Listing(); listing.setId("published"); listing.setOwnerId("owner");
         listing.setStatus(com.hs.listing.model.constant.ListingStatus.PUBLISHED);
         when(repository.findByIdAndActiveTrue("published")).thenReturn(java.util.Optional.of(listing));
-        var service = new ListingService(repository,mock(AddressRepository.class),mock(StorageObjectRepository.class),
+        var service = new ListingService(repository,mock(ListingAddressRepository.class),mock(StorageObjectRepository.class),
                 mock(com.hs.storage.service.StorageService.class),mock(AmenityRepository.class),mock(FurnishingItemRepository.class),mock(ListingStatusService.class),mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
         assertThrows(com.hs.common.advice.entity.AppException.class,() -> service.updateByAdmin("admin","published",createDummyRequest(null,"published")));
         verify(repository,never()).flush(); verify(repository,never()).save(any());
     }
     @Test
     void rejectsUnauthenticatedUpsert() {
-        ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),
+        ListingService service = new ListingService(mock(ListingRepository.class), mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
         AppException ex = assertThrows(AppException.class, () -> service.upsert(null, null));
         assertEquals(401, ex.getStatusCode().value());
     }
 
     @Test
     void rejectsOfficeAndCommercialSpaceCategories() {
-        ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),
+        ListingService service = new ListingService(mock(ListingRepository.class), mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
                 java.math.BigDecimal.valueOf(10000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
@@ -79,13 +82,14 @@ class ListingServiceTest {
     void rejectsListingWithIncompleteBranchCharges() {
         var branchRepo = mock(PropertyBranchRepository.class);
         var listingRepo = mock(ListingRepository.class);
-        var addressRepo = mock(AddressRepository.class);
+        var addressRepo = mock(ListingAddressRepository.class);
         var storageRepo = mock(StorageObjectRepository.class);
         var amenityRepo = mock(AmenityRepository.class);
         var furnishingRepo = mock(FurnishingItemRepository.class);
         var statusService = mock(ListingStatusService.class);
 
         ListingService service = new ListingService(listingRepo, addressRepo, storageRepo, mock(com.hs.storage.service.StorageService.class), amenityRepo, furnishingRepo, statusService, branchRepo);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         String branchId = "branch-incomplete";
         com.hs.listing.model.PropertyBranch branch = com.hs.listing.model.PropertyBranch.builder()
@@ -98,6 +102,8 @@ class ListingServiceTest {
                 ))
                 .build();
         branch.setActive(true);
+        var branchAddress=new com.hs.listing.model.BranchAddress();branchAddress.setRefId("vm:branch");branchAddress.setDisplay("Branch address");
+        branch.setAddress(branchAddress);
 
         when(branchRepo.findByIdAndOwnerIdAndActiveTrue(branchId, "owner-1")).thenReturn(java.util.Optional.of(branch));
         when(branchRepo.findByIdAndActiveTrue(branchId)).thenReturn(java.util.Optional.of(branch));
@@ -108,7 +114,7 @@ class ListingServiceTest {
                 java.math.BigDecimal.valueOf(5000000), null,
                 com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
 
-        var address = new com.hs.listing.dto.request.ListingAddressRequest("P1", "Province", "W1", "Ward", "123 Street", "123 Street, Ward, Province");
+        var address = new com.hs.listing.dto.request.ListingAddressRequest("vm:test", null);
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
                 null, address);
@@ -151,10 +157,11 @@ class ListingServiceTest {
 
     @Test
     void testUpsert_rejectsAvailableFromInPast() {
-        ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),
+        ListingService service = new ListingService(mock(ListingRepository.class), mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
                 java.math.BigDecimal.valueOf(3500000), "VND",
@@ -193,7 +200,7 @@ class ListingServiceTest {
     @Test
     void upsert_duplicateListing_copiesMediaAndCreatesNewIndependentListing() {
         var listingRepo = mock(ListingRepository.class);
-        var addressRepo = mock(AddressRepository.class);
+        var addressRepo = mock(ListingAddressRepository.class);
         var storageRepo = mock(StorageObjectRepository.class);
         var storageService = mock(com.hs.storage.service.StorageService.class);
         var amenityRepo = mock(AmenityRepository.class);
@@ -203,6 +210,7 @@ class ListingServiceTest {
 
         ListingService service = new ListingService(listingRepo, addressRepo, storageRepo, storageService,
                 amenityRepo, furnishingRepo, statusService, branchRepo);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         // Source listing with 2 photos and 1 video
         String sourceId = "source-listing-1";
@@ -283,7 +291,7 @@ class ListingServiceTest {
 
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
-                null, new com.hs.listing.dto.request.ListingAddressRequest("P1", "Province", "W1", "Ward", "123 Street", "123 Street, Ward, Province"));
+                null, new com.hs.listing.dto.request.ListingAddressRequest("vm:test", null));
 
         var roomDetail = new com.hs.listing.dto.request.RoomDetailRequest(
                 "R202", 2, com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE,
@@ -328,10 +336,11 @@ class ListingServiceTest {
     @Test
     void upsert_duplicateListing_forbiddenWhenSourceBelongsToAnotherOwner() {
         var listingRepo = mock(ListingRepository.class);
-        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+        ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         com.hs.listing.model.Listing foreignListing = new com.hs.listing.model.Listing();
         foreignListing.setId("source-foreign");
@@ -347,10 +356,11 @@ class ListingServiceTest {
     @Test
     void upsert_duplicateListing_forbiddenWhenSourceIsViolation() {
         var listingRepo = mock(ListingRepository.class);
-        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+        ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         com.hs.listing.model.Listing violationListing = new com.hs.listing.model.Listing();
         violationListing.setId("source-violation");
@@ -365,10 +375,11 @@ class ListingServiceTest {
 
     @Test
     void upsert_duplicateListing_rejectsWhenIdIsSpecified() {
-        ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),
+        ListingService service = new ListingService(mock(ListingRepository.class), mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         var req = createDummyRequest("source-1", "cannot-have-id-in-duplicate");
         AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", req));
@@ -378,10 +389,11 @@ class ListingServiceTest {
     @Test
     void upsert_duplicateListing_rejectsForeignSourceMedia() {
         var listingRepo = mock(ListingRepository.class);
-        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+        ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         com.hs.listing.model.Listing sourceListing = new com.hs.listing.model.Listing();
         sourceListing.setId("source-1");
@@ -397,7 +409,7 @@ class ListingServiceTest {
 
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
-                null, new com.hs.listing.dto.request.ListingAddressRequest("P1", "Province", "W1", "Ward", "123 Street", "123 Street, Ward, Province"));
+                null, new com.hs.listing.dto.request.ListingAddressRequest("vm:test", null));
 
         var roomDetail = new com.hs.listing.dto.request.RoomDetailRequest(
                 "R202", 2, com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE,
@@ -432,10 +444,11 @@ class ListingServiceTest {
         var listingRepo = mock(ListingRepository.class);
         var storageRepo = mock(StorageObjectRepository.class);
         var storageService = mock(com.hs.storage.service.StorageService.class);
-        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+        ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
                 storageRepo, storageService,
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         com.hs.listing.model.Listing sourceListing = new com.hs.listing.model.Listing();
         sourceListing.setId("source-cleanup");
@@ -478,7 +491,7 @@ class ListingServiceTest {
 
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
-                null, new com.hs.listing.dto.request.ListingAddressRequest("P1", "Province", "W1", "Ward", "123 Street", "123 Street, Ward, Province"));
+                null, new com.hs.listing.dto.request.ListingAddressRequest("vm:test", null));
 
         var roomDetail = new com.hs.listing.dto.request.RoomDetailRequest(
                 "R202", 2, com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE,
@@ -511,10 +524,11 @@ class ListingServiceTest {
 
     @Test
     void rejectsRoomWithoutCodeEvenForDraft() {
-        ListingService service = new ListingService(mock(ListingRepository.class), mock(AddressRepository.class),
+        ListingService service = new ListingService(mock(ListingRepository.class), mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         for (String roomCode : new String[] { "", "   " }) {
             AppException ex = assertThrows(AppException.class,
@@ -532,10 +546,11 @@ class ListingServiceTest {
         var listingRepo = mock(ListingRepository.class);
         var statusService = mock(ListingStatusService.class);
         var storageService = mock(com.hs.storage.service.StorageService.class);
-        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+        ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), storageService,
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 statusService, mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
         rentedListing.setId("listing-rented-1");
@@ -561,10 +576,11 @@ class ListingServiceTest {
     void rejectsUpsertWhenListingIsRentedForSubmitForReview() {
         var listingRepo = mock(ListingRepository.class);
         var statusService = mock(ListingStatusService.class);
-        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+        ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 statusService, mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
         rentedListing.setId("listing-rented-1");
@@ -588,10 +604,11 @@ class ListingServiceTest {
     void rejectsUpsertWhenListingIsRentedExternally() {
         var listingRepo = mock(ListingRepository.class);
         var statusService = mock(ListingStatusService.class);
-        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+        ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 statusService, mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
         rentedListing.setId("listing-rented-ext-1");
@@ -614,10 +631,11 @@ class ListingServiceTest {
     @Test
     void rejectsUpdateByAdminWhenListingIsRented() {
         var listingRepo = mock(ListingRepository.class);
-        ListingService service = new ListingService(listingRepo, mock(AddressRepository.class),
+        ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
                 mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 mock(ListingStatusService.class), mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
         rentedListing.setId("listing-rented-1");
@@ -641,12 +659,13 @@ class ListingServiceTest {
         var statusService = mock(ListingStatusService.class);
         var storageService = mock(com.hs.storage.service.StorageService.class);
         var storageObjRepo = mock(StorageObjectRepository.class);
-        var addressRepo = mock(AddressRepository.class);
+        var addressRepo = mock(ListingAddressRepository.class);
 
         ListingService service = new ListingService(listingRepo, addressRepo,
                 storageObjRepo, storageService,
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
                 statusService, mock(PropertyBranchRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
 
         com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
         rentedListing.setId("source-rented-1");
@@ -701,7 +720,7 @@ class ListingServiceTest {
 
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
-                null, new com.hs.listing.dto.request.ListingAddressRequest("P1", "Province", "W1", "Ward", "123 Street", "123 Street, Ward, Province"));
+                null, new com.hs.listing.dto.request.ListingAddressRequest("vm:test", null));
 
         var roomDetail = new com.hs.listing.dto.request.RoomDetailRequest(
                 roomCode, 2, com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE,

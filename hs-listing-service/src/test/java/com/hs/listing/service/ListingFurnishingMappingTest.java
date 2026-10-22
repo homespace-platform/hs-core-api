@@ -7,7 +7,7 @@ import com.hs.listing.model.constant.HandoverCondition;
 import com.hs.listing.model.constant.ListingCategory;
 import com.hs.listing.repository.*;
 import com.hs.storage.config.StorageProperties;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.repository.ListingAddressRepository;
 import com.hs.user.repository.UserRepository;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -23,7 +23,7 @@ class ListingFurnishingMappingTest {
         var desk = asset("WORK_DESK", "Bàn làm việc", 1, 20);
         var listing = Listing.builder().id("listing").ownerId("owner").category(category)
                 .furnishings(List.of(desk, bed)).build();
-        var query = new ListingQueryService(mock(ListingRepository.class), mock(AddressRepository.class),
+        var query = new ListingQueryService(mock(ListingRepository.class), mock(ListingAddressRepository.class),
                 mock(UserRepository.class), mock(StorageProperties.class), mock(RentalRequestRepository.class),
                 mock(PropertyBranchRepository.class));
         var detail = query.toDetail(listing);
@@ -34,7 +34,7 @@ class ListingFurnishingMappingTest {
         assertEquals("Còn tốt — Xác nhận khi bàn giao", detail.furnishings().getFirst().conditionText());
 
         var requests = new RentalRequestService(mock(RentalRequestRepository.class), mock(ListingRepository.class),
-                mock(ListingStatusService.class), mock(AddressRepository.class), mock(StorageProperties.class),
+                mock(ListingStatusService.class), mock(ListingAddressRepository.class), mock(StorageProperties.class),
                 mock(RentalCostCalculator.class), mock(ParkingReservationService.class),
                 mock(PropertyBranchRepository.class), new ObjectMapper(), 60);
         var snapshot = requests.buildListingSnapshotDto(listing);

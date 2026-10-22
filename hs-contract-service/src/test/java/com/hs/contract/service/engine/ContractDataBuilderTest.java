@@ -91,7 +91,7 @@ class ContractDataBuilderTest {
         UserRepository userRepository = mock(UserRepository.class);
         AddressRepository addressRepository = mock(AddressRepository.class);
         Address landlordAddress = new Address();
-        landlordAddress.setFullAddress("12 Nguyễn Huệ, Phường Sài Gòn, TP. Hồ Chí Minh");
+        landlordAddress.setDisplay("12 Nguyễn Huệ, Phường Sài Gòn, TP. Hồ Chí Minh");
         when(addressRepository.findByUser_IdAndActiveTrue("landlord-id"))
                 .thenReturn(Optional.of(landlordAddress));
 

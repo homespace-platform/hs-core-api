@@ -13,8 +13,8 @@ import com.hs.listing.repository.ListingRepository;
 import com.hs.storage.config.StorageProperties;
 import com.hs.storage.model.StorageObject;
 import com.hs.storage.model.constant.StorageVisibility;
-import com.hs.user.model.Address;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.model.ListingAddress;
+import com.hs.listing.repository.ListingAddressRepository;
 import com.hs.listing.dto.response.ListingOwnerResponse;
 import com.hs.listing.model.constant.FurnishingStatus;
 import com.hs.listing.model.constant.ListingEnums.PositionType;
@@ -40,7 +40,7 @@ public class ListingPublicService {
             "newest", "price_asc", "price_desc", "area_asc", "area_desc");
 
     private final ListingRepository listingRepository;
-    private final AddressRepository addressRepository;
+    private final ListingAddressRepository addressRepository;
     private final UserRepository userRepository;
     private final StorageProperties storageProperties;
 
@@ -49,7 +49,10 @@ public class ListingPublicService {
         int size = Math.min(Math.max(request.size(), 1), MAX_PAGE_SIZE);
         var pageable = PageRequest.of(Math.max(request.page() - 1, 0), size, resolveSort(request.sort()));
         Specification<Listing> spec = buildSpecification(request);
-        return new PageResponse<>(listingRepository.findAll(spec, pageable).map(this::toSummary));
+        var page=listingRepository.findAll(spec, pageable);
+        var addresses=addressRepository.findAllByListingIdInAndActiveTrue(page.getContent().stream().map(Listing::getId).toList())
+            .stream().collect(java.util.stream.Collectors.toMap(ListingAddress::getListingId, java.util.function.Function.identity()));
+        return new PageResponse<>(page.map(listing -> toSummary(listing,addresses.get(listing.getId()))));
     }
 
     // ── Specification builder ───────────────────────────────────────────
@@ -96,16 +99,16 @@ public class ListingPublicService {
                 var titlePred = cb.like(cb.lower(root.get("title")), pattern);
                 var descPred = cb.like(cb.lower(root.get("description")), pattern);
                 var subquery = query.subquery(String.class);
-                var addrRoot = subquery.from(Address.class);
+                var addrRoot = subquery.from(ListingAddress.class);
                 subquery.select(addrRoot.get("listingId"))
                         .where(cb.and(
                                 cb.equal(addrRoot.get("listingId"), root.get("id")),
                                 cb.isTrue(addrRoot.get("active")),
                                 cb.or(
-                                        cb.like(cb.lower(addrRoot.get("fullAddress")), pattern),
-                                        cb.like(cb.lower(addrRoot.get("streetLine")), pattern),
-                                        cb.like(cb.lower(addrRoot.get("wardName")), pattern),
-                                        cb.like(cb.lower(addrRoot.get("provinceName")), pattern)
+                                        cb.like(cb.lower(addrRoot.get("display")), pattern),
+                                        cb.like(cb.lower(addrRoot.get("street")), pattern),
+                                        cb.like(cb.lower(addrRoot.get("ward")), pattern),
+                                        cb.like(cb.lower(addrRoot.get("city")), pattern)
                                 )));
                 return cb.or(titlePred, descPred, cb.exists(subquery));
             });
@@ -116,28 +119,28 @@ public class ListingPublicService {
             spec = spec.and(bedroomSpec(request.category(), request.bedrooms()));
         }
 
-        // Province / Ward — subquery on Address table (not a direct JPA relation on Listing)
-        if (request.provinceCode() != null && !request.provinceCode().isBlank()) {
+        // Province / Ward — subquery on ListingAddress table (not a direct JPA relation on Listing)
+        if (request.cityId() != null && !request.cityId().isBlank()) {
             spec = spec.and((root, query, cb) -> {
                 var subquery = query.subquery(String.class);
-                var addrRoot = subquery.from(Address.class);
+                var addrRoot = subquery.from(ListingAddress.class);
                 subquery.select(addrRoot.get("listingId"))
                         .where(cb.and(
                                 cb.equal(addrRoot.get("listingId"), root.get("id")),
                                 cb.isTrue(addrRoot.get("active")),
-                                cb.equal(addrRoot.get("provinceCode"), request.provinceCode().trim())));
+                                cb.equal(addrRoot.get("cityId"), request.cityId().trim())));
                 return cb.exists(subquery);
             });
         }
-        if (request.wardCode() != null && !request.wardCode().isBlank()) {
+        if (request.wardId() != null && !request.wardId().isBlank()) {
             spec = spec.and((root, query, cb) -> {
                 var subquery = query.subquery(String.class);
-                var addrRoot = subquery.from(Address.class);
+                var addrRoot = subquery.from(ListingAddress.class);
                 subquery.select(addrRoot.get("listingId"))
                         .where(cb.and(
                                 cb.equal(addrRoot.get("listingId"), root.get("id")),
                                 cb.isTrue(addrRoot.get("active")),
-                                cb.equal(addrRoot.get("wardCode"), request.wardCode().trim())));
+                                cb.equal(addrRoot.get("wardId"), request.wardId().trim())));
                 return cb.exists(subquery);
             });
         }
@@ -318,6 +321,9 @@ public class ListingPublicService {
     // ── Mapping ─────────────────────────────────────────────────────────
 
     public PublicListingSummaryResponse toSummary(Listing listing) {
+        return toSummary(listing,addressRepository.findByListingIdAndActiveTrue(listing.getId()).orElse(null));
+    }
+    private PublicListingSummaryResponse toSummary(Listing listing,ListingAddress address) {
         // All images sorted: cover first, then by sortOrder
         java.util.List<String> imageUrls = listing.getMedia().stream()
                 .filter(m -> m.getMediaType() == MediaType.IMAGE)
@@ -345,9 +351,7 @@ public class ListingPublicService {
         boolean hasVideo = listing.getMedia().stream()
                 .anyMatch(m -> m.getMediaType() == MediaType.VIDEO);
 
-        // Address
-        Address address = addressRepository.findByListingIdAndActiveTrue(listing.getId()).orElse(null);
-
+        // ListingAddress
         // Bedroom & Bathroom counts from detail tables
         Integer bedroomCount = extractBedroomCount(listing);
         Integer bathroomCount = extractBathroomCount(listing);
@@ -387,11 +391,11 @@ public class ListingPublicService {
                 coverImageUrl,
                 imageUrls,
                 hasVideo,
-                address == null ? null : address.getFullAddress(),
-                address == null ? null : address.getProvinceCode(),
-                address == null ? null : address.getProvinceName(),
-                address == null ? null : address.getWardCode(),
-                address == null ? null : address.getWardName(),
+                address == null ? null : address.getDisplay(),
+                address == null ? null : address.getCityId(),
+                address == null ? null : address.getCity(),
+                address == null ? null : address.getWardId(),
+                address == null ? null : address.getWard(),
                 bedroomCount,
                 bathroomCount,
                 floorNumber,

@@ -15,7 +15,7 @@ import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.PropertyBranchRepository;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.storage.config.StorageProperties;
-import com.hs.user.repository.AddressRepository;
+import com.hs.listing.repository.ListingAddressRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -110,7 +110,7 @@ class RentalRequestServiceTest {
     private RentalRequestRepository rentalRequestRepository;
     private ListingRepository listingRepository;
     private ListingStatusService listingStatusService;
-    private AddressRepository addressRepository;
+    private ListingAddressRepository addressRepository;
     private StorageProperties storageProperties;
     private RentalCostCalculator rentalCostCalculator;
     private ParkingReservationService parkingReservationService;
@@ -124,7 +124,7 @@ class RentalRequestServiceTest {
         rentalRequestRepository = mock(RentalRequestRepository.class);
         listingRepository = mock(ListingRepository.class);
         listingStatusService = mock(ListingStatusService.class);
-        addressRepository = mock(AddressRepository.class);
+        addressRepository = mock(ListingAddressRepository.class);
         storageProperties = mock(StorageProperties.class);
         parkingReservationService = mock(ParkingReservationService.class);
         rentalPaymentLifecyclePort = mock(RentalPaymentLifecyclePort.class);

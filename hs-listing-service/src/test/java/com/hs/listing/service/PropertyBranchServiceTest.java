@@ -61,6 +61,7 @@ class PropertyBranchServiceTest {
                 storageObjectRepository,
                 storageProperties
         );
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
     }
 
     @Test
@@ -99,7 +100,7 @@ class PropertyBranchServiceTest {
         CreatePropertyBranchRequest request = CreatePropertyBranchRequest.builder()
                 .name("Chi nhánh Thảo Điền")
                 .category(ListingCategory.ROOM)
-                .fullAddress("123 Nguyễn Văn Hưởng, Thảo Điền, TP. Thủ Đức")
+                .refId("vm:test")
                 .motorbikeParkingCapacity(20)
                 .carParkingCapacity(0)
                 .coverImageId(storageId)
@@ -135,7 +136,7 @@ class PropertyBranchServiceTest {
         CreatePropertyBranchRequest request = CreatePropertyBranchRequest.builder()
                 .name("Chi nhánh Test")
                 .category(ListingCategory.ROOM)
-                .fullAddress("123 Test")
+                .refId("vm:test")
                 .coverImageId(storageId)
                 .build();
 
@@ -185,7 +186,7 @@ class PropertyBranchServiceTest {
         CreatePropertyBranchRequest updateReq = CreatePropertyBranchRequest.builder()
                 .name("Tòa nhà Sunrise Cập Nhật")
                 .category(ListingCategory.ROOM)
-                .fullAddress("456 Lê Văn Việt")
+                .refId("vm:test")
                 .motorbikeParkingCapacity(10)
                 .carParkingCapacity(5)
                 .defaultCharges(newCharges)
