@@ -119,8 +119,10 @@ public class ListingPublicService {
             spec = spec.and(bedroomSpec(request.category(), request.bedrooms()));
         }
 
-        // Province / Ward — subquery on ListingAddress table (not a direct JPA relation on Listing)
-        if (request.cityId() != null && !request.cityId().isBlank()) {
+        // Vietmap admin_new IDs on the SAME active listing_addresses row; never legacy province/ward codes.
+        boolean hasCity = request.cityId() != null && !request.cityId().isBlank();
+        boolean hasWard = request.wardId() != null && !request.wardId().isBlank();
+        if (hasCity || hasWard) {
             spec = spec.and((root, query, cb) -> {
                 var subquery = query.subquery(String.class);
                 var addrRoot = subquery.from(ListingAddress.class);
@@ -128,19 +130,8 @@ public class ListingPublicService {
                         .where(cb.and(
                                 cb.equal(addrRoot.get("listingId"), root.get("id")),
                                 cb.isTrue(addrRoot.get("active")),
-                                cb.equal(addrRoot.get("cityId"), request.cityId().trim())));
-                return cb.exists(subquery);
-            });
-        }
-        if (request.wardId() != null && !request.wardId().isBlank()) {
-            spec = spec.and((root, query, cb) -> {
-                var subquery = query.subquery(String.class);
-                var addrRoot = subquery.from(ListingAddress.class);
-                subquery.select(addrRoot.get("listingId"))
-                        .where(cb.and(
-                                cb.equal(addrRoot.get("listingId"), root.get("id")),
-                                cb.isTrue(addrRoot.get("active")),
-                                cb.equal(addrRoot.get("wardId"), request.wardId().trim())));
+                                hasCity ? cb.equal(addrRoot.get("cityId"), request.cityId().trim()) : cb.conjunction(),
+                                hasWard ? cb.equal(addrRoot.get("wardId"), request.wardId().trim()) : cb.conjunction()));
                 return cb.exists(subquery);
             });
         }
@@ -315,7 +306,8 @@ public class ListingPublicService {
             default -> Sort.by(Sort.Direction.DESC, "publishedAt");
         };
         // Secondary sort for stable ordering
-        return primary.and(Sort.by(Sort.Direction.DESC, "publishedAt"));
+        return primary.and(Sort.by(Sort.Direction.DESC, "publishedAt"))
+                .and(Sort.by(Sort.Direction.ASC, "id"));
     }
 
     // ── Mapping ─────────────────────────────────────────────────────────
