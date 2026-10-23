@@ -1,0 +1,523 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Phân hiệu Học viện Hành chính và Quản trị công tại Thành phố Hồ Chí Minh",
+                "country": "Việt Nam",
+                "country_code": "vn",
+                "city": "Thuận An",
+                "postcode": "71400",
+                "district": "Khu phố 33",
+                "suburb": "Phường Gò Vấp",
+                "street": "Đường Lê Đức Thọ",
+                "housenumber": "17",
+                "iso3166_2": "VN-SG",
+                "lon": 106.680446,
+                "lat": 10.8366588,
+                "formatted": "Phân hiệu Học viện Hành chính và Quản trị công tại Thành phố Hồ Chí Minh, 17, Đường Lê Đức Thọ, Phường Gò Vấp, Thuận An, 71400, Việt Nam",
+                "address_line1": "Phân hiệu Học viện Hành chính và Quản trị công tại Thành phố Hồ Chí Minh",
+                "address_line2": "17, Đường Lê Đức Thọ, Phường Gò Vấp, Thuận An, 71400, Việt Nam",
+                "categories": [
+                    "education",
+                    "education.university"
+                ],
+                "details": [
+                    "details.contact"
+                ],
+                "datasource": {
+                    "sourcename": "openstreetmap",
+                    "attribution": "© OpenStreetMap contributors",
+                    "license": "Open Database License",
+                    "url": "https://www.openstreetmap.org/copyright",
+                    "raw": {
+                        "lat": 10.836715696276123,
+                        "lon": 106.68035256037301,
+                        "name": "Phân hiệu Học viện Hành chính và Quản trị công tại Thành phố Hồ Chí Minh",
+                        "phone": "+84 838 943 717",
+                        "osm_id": 377269812,
+                        "street": "Đường Lê Đức Thọ",
+                        "amenity": "university",
+                        "osm_type": "w",
+                        "housenumber": 17
+                    }
+                },
+                "contact": {
+                    "phone": "+84 838 943 717"
+                },
+                "distance": 1064,
+                "place_id": "51532377e58aab5a4059941cefff65ac2540f00102f90134ae7c160000000092035f5068c3a26e206869e1bb87752048e1bb8d63207669e1bb876e2048c3a06e68206368c3ad6e682076c3a0205175e1baa36e207472e1bb8b2063c3b46e672074e1baa169205468c3a06e68207068e1bb912048e1bb93204368c3ad204d696e68"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.68035256037301,
+                    10.836715696276123
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Trường Đại học Văn Lang",
+                "country": "Việt Nam",
+                "country_code": "vn",
+                "city": "Thành phố Thủ Đức",
+                "postcode": "71400",
+                "district": "Khu phố 46",
+                "suburb": "Phường Bình Lợi Trung",
+                "street": "Hẻm 41F Đặng Thùy Trâm",
+                "iso3166_2": "VN-SG",
+                "lon": 106.699643,
+                "lat": 10.8273194,
+                "formatted": "Trường Đại học Văn Lang, Hẻm 41F Đặng Thùy Trâm, Phường Bình Lợi Trung, Thành phố Thủ Đức, 71400, Việt Nam",
+                "address_line1": "Trường Đại học Văn Lang",
+                "address_line2": "Hẻm 41F Đặng Thùy Trâm, Phường Bình Lợi Trung, Thành phố Thủ Đức, 71400, Việt Nam",
+                "categories": [
+                    "education",
+                    "education.university"
+                ],
+                "details": [],
+                "datasource": {
+                    "sourcename": "openstreetmap",
+                    "attribution": "© OpenStreetMap contributors",
+                    "license": "Open Database License",
+                    "url": "https://www.openstreetmap.org/copyright",
+                    "raw": {
+                        "lat": 10.82746167562646,
+                        "lon": 106.69930119589506,
+                        "name": "Trường Đại học Văn Lang",
+                        "osm_id": 493157641,
+                        "amenity": "university",
+                        "osm_type": "w",
+                        "education": "university"
+                    }
+                },
+                "distance": 1265,
+                "place_id": "51129bcd59c1ac5a40599c04870ea9a72540f00102f90109fd641d000000009203205472c6b0e1bb9d6e6720c490e1baa1692068e1bb8d632056c4836e204c616e67"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.69930119589506,
+                    10.82746167562646
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Trường Đại học Công nghiệp Thành phố Hồ Chí Minh",
+                "country": "Việt Nam",
+                "country_code": "vn",
+                "city": "Thành phố Thủ Đức",
+                "postcode": "71400",
+                "district": "Khu phố 24",
+                "suburb": "Phường Hạnh Thông",
+                "street": "Nguyễn Văn Bảo",
+                "housenumber": "12",
+                "iso3166_2": "VN-SG",
+                "lon": 106.6875689,
+                "lat": 10.8220244,
+                "formatted": "Trường Đại học Công nghiệp Thành phố Hồ Chí Minh, 12, Nguyễn Văn Bảo, Phường Hạnh Thông, Thành phố Thủ Đức, 71400, Việt Nam",
+                "address_line1": "Trường Đại học Công nghiệp Thành phố Hồ Chí Minh",
+                "address_line2": "12, Nguyễn Văn Bảo, Phường Hạnh Thông, Thành phố Thủ Đức, 71400, Việt Nam",
+                "categories": [
+                    "education",
+                    "education.university"
+                ],
+                "details": [],
+                "datasource": {
+                    "sourcename": "openstreetmap",
+                    "attribution": "© OpenStreetMap contributors",
+                    "license": "Open Database License",
+                    "url": "https://www.openstreetmap.org/copyright",
+                    "raw": {
+                        "lat": 10.822119234957787,
+                        "lon": 106.68747310240599,
+                        "name": "Trường Đại học Công nghiệp Thành phố Hồ Chí Minh",
+                        "osm_id": 326052098,
+                        "street": "Nguyễn Văn Bảo",
+                        "amenity": "university",
+                        "osm_type": "w",
+                        "housenumber": 12
+                    }
+                },
+                "distance": 1296,
+                "place_id": "51a8ed2e8fffab5a4059cb1cf7cfeca42540f00102f90102296f13000000009203415472c6b0e1bb9d6e6720c490e1baa1692068e1bb8d632043c3b46e67206e676869e1bb8770205468c3a06e68207068e1bb912048e1bb93204368c3ad204d696e68"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.68747310240599,
+                    10.822119234957787
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "country": "Việt Nam",
+                "country_code": "vn",
+                "city": "Thành phố Thủ Đức",
+                "postcode": "71400",
+                "district": "Khu phố 24",
+                "suburb": "Phường Hạnh Thông",
+                "street": "Nguyễn Văn Bảo",
+                "housenumber": "12",
+                "iso3166_2": "VN-SG",
+                "lon": 106.6874662,
+                "lat": 10.8221129,
+                "formatted": "12, Nguyễn Văn Bảo, Phường Hạnh Thông, Thành phố Thủ Đức, 71400, Việt Nam",
+                "address_line1": "12, Nguyễn Văn Bảo",
+                "address_line2": "Phường Hạnh Thông, Thành phố Thủ Đức, 71400, Việt Nam",
+                "categories": [
+                    "education",
+                    "education.university"
+                ],
+                "details": [],
+                "datasource": {
+                    "sourcename": "openstreetmap",
+                    "attribution": "© OpenStreetMap contributors",
+                    "license": "Open Database License",
+                    "url": "https://www.openstreetmap.org/copyright",
+                    "raw": {
+                        "lat": 10.8221129,
+                        "lon": 106.6874662,
+                        "osm_id": 11676270271,
+                        "street": "Nguyễn Văn Bảo",
+                        "amenity": "university",
+                        "osm_type": "n",
+                        "_inherited": "",
+                        "housenumber": 12
+                    }
+                },
+                "distance": 1297,
+                "place_id": "51bf863b72ffab5a40594c3d66fbeba42540f00103f901bfbef5b702000000"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.6874662,
+                    10.8221129
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Trường Sĩ Quan Kỹ Thuật Quân Sự",
+                "country": "Việt Nam",
+                "country_code": "vn",
+                "city": "Thuận An",
+                "postcode": "72100",
+                "suburb": "Phường Gò Vấp",
+                "street": "Đường Số 8",
+                "iso3166_2": "VN-SG",
+                "lon": 106.6723147,
+                "lat": 10.8357623,
+                "formatted": "Trường Sĩ Quan Kỹ Thuật Quân Sự, Đường Số 8, Phường Gò Vấp, Thuận An, 72100, Việt Nam",
+                "address_line1": "Trường Sĩ Quan Kỹ Thuật Quân Sự",
+                "address_line2": "Đường Số 8, Phường Gò Vấp, Thuận An, 72100, Việt Nam",
+                "categories": [
+                    "education",
+                    "education.university"
+                ],
+                "details": [],
+                "datasource": {
+                    "sourcename": "openstreetmap",
+                    "attribution": "© OpenStreetMap contributors",
+                    "license": "Open Database License",
+                    "url": "https://www.openstreetmap.org/copyright",
+                    "raw": {
+                        "lat": 10.8357623,
+                        "lon": 106.6723147,
+                        "name": "Trường Sĩ Quan Kỹ Thuật Quân Sự",
+                        "osm_id": 2930677006,
+                        "amenity": "university",
+                        "osm_type": "n"
+                    }
+                },
+                "distance": 1902,
+                "place_id": "51af473c3407ab5a4059a1754309e9ab2540f00103f9010e95aeae0000000092032a5472c6b0e1bb9d6e672053c4a9205175616e204be1bbb920546875e1baad74205175c3a26e2053e1bbb1"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.6723147,
+                    10.8357623
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Trường Đại học Gia Định (cơ sở Nguyễn Kiệm)",
+                "country": "Việt Nam",
+                "country_code": "vn",
+                "city": "Thành phố Thủ Đức",
+                "postcode": "70048",
+                "district": "Khu phố 20",
+                "suburb": "Phường Hạnh Thông",
+                "street": "Hẻm 477 Nguyễn Văn Công",
+                "iso3166_2": "VN-SG",
+                "lon": 106.6775227,
+                "lat": 10.8173667,
+                "formatted": "Trường Đại học Gia Định (cơ sở Nguyễn Kiệm), Hẻm 477 Nguyễn Văn Công, Phường Hạnh Thông, Thành phố Thủ Đức, 70048, Việt Nam",
+                "address_line1": "Trường Đại học Gia Định (cơ sở Nguyễn Kiệm)",
+                "address_line2": "Hẻm 477 Nguyễn Văn Công, Phường Hạnh Thông, Thành phố Thủ Đức, 70048, Việt Nam",
+                "categories": [
+                    "education",
+                    "education.university"
+                ],
+                "details": [],
+                "datasource": {
+                    "sourcename": "openstreetmap",
+                    "attribution": "© OpenStreetMap contributors",
+                    "license": "Open Database License",
+                    "url": "https://www.openstreetmap.org/copyright",
+                    "raw": {
+                        "lat": 10.817356842767179,
+                        "lon": 106.67752822427892,
+                        "name": "Trường Đại học Gia Định (cơ sở Nguyễn Kiệm)",
+                        "osm_id": 1057874333,
+                        "amenity": "university",
+                        "osm_type": "w"
+                    }
+                },
+                "distance": 2232,
+                "place_id": "514659579f5cab5a405996b199987ca22540f00102f9019de10d3f0000000092033d5472c6b0e1bb9d6e6720c490e1baa1692068e1bb8d632047696120c490e1bb8b6e68202863c6a12073e1bb9f204e677579e1bb856e204b69e1bb876d29"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.67752822427892,
+                    10.817356842767179
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Trường Đại Học Văn Lang - Cơ Sở 2",
+                "country": "Việt Nam",
+                "country_code": "vn",
+                "city": "Thành phố Thủ Đức",
+                "postcode": "72317",
+                "district": "Khu phố 16",
+                "suburb": "Phường Bình Lợi Trung",
+                "street": "Hẻm 233 Phan Văn Trị",
+                "iso3166_2": "VN-SG",
+                "lon": 106.6947329,
+                "lat": 10.8131239,
+                "formatted": "Trường Đại Học Văn Lang - Cơ Sở 2, Hẻm 233 Phan Văn Trị, Phường Bình Lợi Trung, Thành phố Thủ Đức, 72317, Việt Nam",
+                "address_line1": "Trường Đại Học Văn Lang - Cơ Sở 2",
+                "address_line2": "Hẻm 233 Phan Văn Trị, Phường Bình Lợi Trung, Thành phố Thủ Đức, 72317, Việt Nam",
+                "categories": [
+                    "education",
+                    "education.university"
+                ],
+                "details": [],
+                "datasource": {
+                    "sourcename": "openstreetmap",
+                    "attribution": "© OpenStreetMap contributors",
+                    "license": "Open Database License",
+                    "url": "https://www.openstreetmap.org/copyright",
+                    "raw": {
+                        "lat": 10.8131239,
+                        "lon": 106.6947329,
+                        "name": "Trường Đại Học Văn Lang - Cơ Sở 2",
+                        "osm_id": 9585835374,
+                        "amenity": "university",
+                        "osm_type": "n",
+                        "education": "university"
+                    }
+                },
+                "distance": 2339,
+                "place_id": "51233dfb8076ac5a405924319cc651a02540f00103f9016e3d5c3b0200000092032d5472c6b0e1bb9d6e6720c490e1baa1692048e1bb8d632056c4836e204c616e67202d2043c6a12053e1bb9f2032"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.6947329,
+                    10.8131239
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Trường Đại học Luật Thành phố Hồ Chí Minh (cơ sở 2)",
+                "country": "Việt Nam",
+                "country_code": "vn",
+                "city": "Thành phố Thủ Đức",
+                "postcode": "72309",
+                "district": "Khu phố 19",
+                "suburb": "Phường Hiệp Bình",
+                "street": "Quốc lộ 13",
+                "housenumber": "123",
+                "iso3166_2": "VN-SG",
+                "lon": 106.7137341,
+                "lat": 10.8300825,
+                "formatted": "Trường Đại học Luật Thành phố Hồ Chí Minh (cơ sở 2), 123, Quốc lộ 13, Phường Hiệp Bình, Thành phố Thủ Đức, 72309, Việt Nam",
+                "address_line1": "Trường Đại học Luật Thành phố Hồ Chí Minh (cơ sở 2)",
+                "address_line2": "123, Quốc lộ 13, Phường Hiệp Bình, Thành phố Thủ Đức, 72309, Việt Nam",
+                "categories": [
+                    "education",
+                    "education.university"
+                ],
+                "details": [],
+                "datasource": {
+                    "sourcename": "openstreetmap",
+                    "attribution": "© OpenStreetMap contributors",
+                    "license": "Open Database License",
+                    "url": "https://www.openstreetmap.org/copyright",
+                    "raw": {
+                        "lat": 10.829923686832634,
+                        "lon": 106.71374272742815,
+                        "name": "Trường Đại học Luật Thành phố Hồ Chí Minh (cơ sở 2)",
+                        "osm_id": 325249009,
+                        "street": "Quốc lộ 13",
+                        "amenity": "university",
+                        "osm_type": "w",
+                        "housenumber": 123
+                    }
+                },
+                "distance": 2675,
+                "place_id": "51f403faf5adad5a40596b3eeac1eba82540f00102f901f1e76213000000009203465472c6b0e1bb9d6e6720c490e1baa1692068e1bb8d63204c75e1baad74205468c3a06e68207068e1bb912048e1bb93204368c3ad204d696e68202863c6a12073e1bb9f203229"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.71374272742815,
+                    10.829923686832634
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Trường Đại học Tài chính - Marketing",
+                "country": "Việt Nam",
+                "country_code": "vn",
+                "city": "Thành phố Thủ Đức",
+                "postcode": "71409",
+                "district": "Khu phố 38",
+                "suburb": "Phường Hạnh Thông",
+                "street": "Hẻm 26/72 Đường Số 7",
+                "iso3166_2": "VN-SG",
+                "lon": 106.6803664,
+                "lat": 10.8110817,
+                "formatted": "Trường Đại học Tài chính - Marketing, Hẻm 26/72 Đường Số 7, Phường Hạnh Thông, Thành phố Thủ Đức, 71409, Việt Nam",
+                "address_line1": "Trường Đại học Tài chính - Marketing",
+                "address_line2": "Hẻm 26/72 Đường Số 7, Phường Hạnh Thông, Thành phố Thủ Đức, 71409, Việt Nam",
+                "categories": [
+                    "education",
+                    "education.university"
+                ],
+                "details": [
+                    "details"
+                ],
+                "datasource": {
+                    "sourcename": "openstreetmap",
+                    "attribution": "© OpenStreetMap contributors",
+                    "license": "Open Database License",
+                    "url": "https://www.openstreetmap.org/copyright",
+                    "raw": {
+                        "lat": 10.811233427256347,
+                        "lon": 106.68036967576839,
+                        "name": "Trường Đại học Tài chính - Marketing",
+                        "osm_id": 125586360,
+                        "amenity": "university",
+                        "name:en": "University of Finance - Marketing",
+                        "name:vi": "Trường Đại học Tài chính - Marketing",
+                        "osm_type": "w"
+                    }
+                },
+                "name_international": {
+                    "en": "University of Finance - Marketing",
+                    "vi": "Trường Đại học Tài chính - Marketing"
+                },
+                "distance": 2676,
+                "place_id": "5162a7402d8bab5a4059dcf9defc599f2540f00102f901b84b7c070000000092032e5472c6b0e1bb9d6e6720c490e1baa1692068e1bb8d632054c3a069206368c3ad6e68202d204d61726b6574696e67"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.68036967576839,
+                    10.811233427256347
+                ]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "name": "Học viện Cán bộ Thành phố Hồ Chí Minh",
+                "country": "Việt Nam",
+                "country_code": "vn",
+                "city": "Thành phố Thủ Đức",
+                "postcode": "72308",
+                "district": "Khu phố 26",
+                "suburb": "Phường Bình Thạnh",
+                "street": "Cầu Chu Văn An",
+                "housenumber": "324",
+                "iso3166_2": "VN-SG",
+                "lon": 106.7024133,
+                "lat": 10.812343,
+                "formatted": "Học viện Cán bộ Thành phố Hồ Chí Minh, 324, Cầu Chu Văn An, Phường Bình Thạnh, Thành phố Thủ Đức, 72308, Việt Nam",
+                "address_line1": "Học viện Cán bộ Thành phố Hồ Chí Minh",
+                "address_line2": "324, Cầu Chu Văn An, Phường Bình Thạnh, Thành phố Thủ Đức, 72308, Việt Nam",
+                "categories": [
+                    "education",
+                    "education.university",
+                    "office",
+                    "office.educational_institution"
+                ],
+                "details": [
+                    "details",
+                    "details.contact"
+                ],
+                "datasource": {
+                    "sourcename": "openstreetmap",
+                    "attribution": "© OpenStreetMap contributors",
+                    "license": "Open Database License",
+                    "url": "https://www.openstreetmap.org/copyright",
+                    "raw": {
+                        "lat": 10.81241795182653,
+                        "lon": 106.70239577388509,
+                        "city": "Ho Chi Minh City",
+                        "name": "Học viện Cán bộ Thành phố Hồ Chí Minh",
+                        "phone": "+84 28 2243 7830",
+                        "office": "educational_institution",
+                        "osm_id": 289042058,
+                        "street": "Chu Văn An",
+                        "amenity": "university",
+                        "barrier": "fence",
+                        "website": "http://hocviencanbo.hochiminhcity.gov.vn/web/guest/home",
+                        "district": "Bình Thạnh",
+                        "osm_type": "w",
+                        "education": "university",
+                        "housenumber": 324,
+                        "subdistrict": 12,
+                        "opening_hours": "Mo-Sa 08:00-20:00"
+                    }
+                },
+                "website": "http://hocviencanbo.hochiminhcity.gov.vn/web/guest/home",
+                "opening_hours": "Mo-Sa 08:00-20:00",
+                "contact": {
+                    "phone": "+84 28 2243 7830"
+                },
+                "distance": 2735,
+                "place_id": "51d86b670df4ac5a4059778eeb3ef59f2540f00102f9018a6e3a110000000092033248e1bb8d63207669e1bb876e2043c3a16e2062e1bb99205468c3a06e68207068e1bb912048e1bb93204368c3ad204d696e68"
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    106.70239577388509,
+                    10.81241795182653
+                ]
+            }
+        }
+    ]
+}
