@@ -47,6 +47,21 @@ class RentalRequestServiceTest {
         assertThrows(AppException.class,()->rentalRequestService.getOwnerRequests("",null,null,1,8));
         verifyNoMoreInteractions(changes);
     }
+    @Test void ownerConflictsListOnlyListingsWithAtLeastTwoPendingRequests() {
+        var contested=Listing.builder().id("contested").title("Phòng A").build();
+        var single=Listing.builder().id("single").title("Phòng B").build();
+        when(rentalRequestRepository.findActiveByOwnerAndStatus("owner",RentalRequestStatus.PENDING)).thenReturn(List.of(
+            RentalRequest.builder().id("r1").listing(contested).build(),
+            RentalRequest.builder().id("r2").listing(single).build(),
+            RentalRequest.builder().id("r3").listing(contested).build()));
+        when(addressRepository.findByListingIdAndActiveTrue("contested")).thenReturn(Optional.empty());
+        var result=rentalRequestService.getOwnerConflicts("owner");
+        assertEquals(1,result.size());
+        assertEquals("contested",result.getFirst().listingId());
+        assertEquals(2,result.getFirst().pendingCount());
+        assertEquals(List.of("r1","r3"),result.getFirst().requestIds());
+        assertThrows(AppException.class,()->rentalRequestService.getOwnerConflicts(" "));
+    }
     @Test void missingOrFalseConsentCannotCreateRequestEvenWhenCallingTheServiceDirectly() {
         for(var request:List.of(
             new CreateRentalRequest("listing",LocalDate.now().plusDays(5),12,1,0,0,"Tenant","0900000000",null,null,null),

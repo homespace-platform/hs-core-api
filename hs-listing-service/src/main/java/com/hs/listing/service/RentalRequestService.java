@@ -489,6 +489,28 @@ public class RentalRequestService {
         return new PageResponse<>(pageResult.map(r -> toResponse(r, paymentsMap.get(r.getId()), changesMap.get(r.getId()))));
     }
 
+    /** Listings of this owner that have two or more PENDING requests (the owner can then ask AI which one is better). */
+    @Transactional(readOnly = true)
+    public List<com.hs.listing.dto.response.RentalRequestConflictResponse> getOwnerConflicts(String ownerId) {
+        if (ownerId == null || ownerId.isBlank()) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        Map<String, List<RentalRequest>> byListing = rentalRequestRepository
+                .findActiveByOwnerAndStatus(ownerId, RentalRequestStatus.PENDING).stream()
+                .filter(r -> r.getListing() != null)
+                .collect(Collectors.groupingBy(r -> r.getListing().getId(), LinkedHashMap::new, Collectors.toList()));
+        return byListing.values().stream()
+                .filter(group -> group.size() >= 2)
+                .map(group -> {
+                    Listing listing = group.get(0).getListing();
+                    String address = addressRepository.findByListingIdAndActiveTrue(listing.getId())
+                            .map(ListingAddress::getDisplay).orElse(null);
+                    return new com.hs.listing.dto.response.RentalRequestConflictResponse(
+                            listing.getId(), listing.getTitle(), address, group.size(),
+                            group.stream().map(RentalRequest::getId).toList());
+                })
+                .toList();
+    }
     // 8. KIỂM TRA XEM KHÁCH CÓ YÊU CẦU ACTIVE TRÊN BÀI ĐĂNG NÀY KHÔNG
     @Transactional(readOnly = true)
     public RentalRequestResponse getMyRequestByListing(String renterId, String listingId) {

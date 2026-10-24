@@ -126,6 +126,14 @@ public class RentalRequestController {
         return rentalRequestService.getOwnerRequests(ownerId, listingId, status, page, size);
     }
 
+    /** Listings where two or more PENDING requests compete; drives the "ask AI" button. */
+    @GetMapping("/owner/conflicts")
+    public ApiResponse<java.util.List<com.hs.listing.dto.response.RentalRequestConflictResponse>> getOwnerConflicts() {
+        return ApiResponse.<java.util.List<com.hs.listing.dto.response.RentalRequestConflictResponse>>builder()
+                .result(rentalRequestService.getOwnerConflicts(requireUserId()))
+                .build();
+    }
+
     @PutMapping("/{id}/accept")
     public ApiResponse<RentalRequestResponse> acceptRentalRequest(@PathVariable String id) {
         String ownerId = requireUserId();
