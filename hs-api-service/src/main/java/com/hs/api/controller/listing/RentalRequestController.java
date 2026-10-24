@@ -45,6 +45,11 @@ public class RentalRequestController {
             .result(java.util.Map.of("holdMinutes",holdDurationMinutes,"responseHours",responseHours)).build();
     }
 
+    @GetMapping("/reservation-policy")
+    public ApiResponse<java.util.Map<String,String>> reservationPolicy() {
+        return ApiResponse.<java.util.Map<String,String>>builder().result(java.util.Map.of("version",com.hs.common.payment.ReservationPolicy.VERSION,"text",com.hs.common.payment.ReservationPolicy.TEXT)).build();
+    }
+
     // =========================================================================
     // 1. DÀNH CHO KHÁCH HÀNG (RENTER)
     // =========================================================================

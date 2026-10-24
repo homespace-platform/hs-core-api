@@ -203,6 +203,8 @@ public class MonthlyBillingService {
     public List<MonthlyInvoiceResponse> list(String contractId, String actorId) {
         Contract contract = contracts.findByIdForUpdate(contractId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if (com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))
+            throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED, "Hồ sơ cọc không có hóa đơn thuê hàng tháng.");
         if (!actorId.equals(contract.getLandlordId()) && !actorId.equals(contract.getTenantId()))
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         if (billable(contract)) syncContract(contractId);
@@ -796,6 +798,7 @@ public class MonthlyBillingService {
             page = contracts.findByStatus(billingStatus, PageRequest.of(pageNumber++, 100));
             if (page == null) break;
             for (Contract contract : page.getContent()) {
+                if (com.hs.contract.deposit.DepositAgreementService.isDeposit(contract)) continue;
                 try {
                     new TransactionTemplate(transactionManager)
                             .executeWithoutResult(status -> syncContract(contract.getId()));
@@ -1119,11 +1122,13 @@ public class MonthlyBillingService {
     }
 
     private Integer leaseMonths(Contract c, RentalRequest r) { return c.getEffectiveLeaseMonths()==null?r.getLeaseMonths():c.getEffectiveLeaseMonths(); }
-    private boolean billable(Contract c) { return c!=null && c.getParentContractId()==null
+    private boolean billable(Contract c) { return c!=null && !com.hs.contract.deposit.DepositAgreementService.isDeposit(c) && c.getParentContractId()==null
             && (c.getStatus()==ContractStatus.ACTIVE || c.getStatus()==ContractStatus.EXPIRED); }
 
     private Contract requireParty(String id, String actor) {
         Contract contract = contracts.findById(id).orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        if (com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))
+            throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED, "Hồ sơ cọc không có hóa đơn thuê hàng tháng.");
         if (!actor.equals(contract.getLandlordId()) && !actor.equals(contract.getTenantId()))
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         return contract;

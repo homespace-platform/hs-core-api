@@ -413,7 +413,7 @@ public class ContractLifecycleService {
     private DepositRecord deposit(Contract c) { return deposits.findByRentalRequestIdForUpdate(c.getRentalRequestId()).orElseThrow(this::notAllowed); }
     private Contract root(String id,String actor) {
         Contract c=contracts.findByIdForUpdate(id).orElseThrow(this::notAllowed);
-        if(c.getParentContractId()!=null || (!actor.equals(c.getLandlordId())&&!actor.equals(c.getTenantId())))
+        if(com.hs.contract.deposit.DepositAgreementService.isDeposit(c) || c.getParentContractId()!=null || (!actor.equals(c.getLandlordId())&&!actor.equals(c.getTenantId())))
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN); return c;
     }
     private void owner(Contract c,String actor) { if(!actor.equals(c.getLandlordId())) throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN); }

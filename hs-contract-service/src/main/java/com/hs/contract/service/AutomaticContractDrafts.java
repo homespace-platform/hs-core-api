@@ -13,6 +13,8 @@ import org.springframework.transaction.event.TransactionalEventListener;
 /** Immediate post-commit attempt plus durable retries from the onboarding sweep. */
 @Service @Slf4j
 public class AutomaticContractDrafts {
+    @org.springframework.beans.factory.annotation.Autowired
+    private ObjectProvider<com.hs.contract.deposit.DepositAgreementService> deposits;
     private final ObjectProvider<ContractServiceImpl> contracts;
     private final TaskExecutor executor;
 
@@ -33,6 +35,10 @@ public class AutomaticContractDrafts {
     }
 
     public void tryCreate(String rentalRequestId) {
+        if(deposits!=null) try {
+            var c=deposits.getObject().createAutomatically(rentalRequestId);
+            if(c!=null && c.getStatus()==ContractStatus.DRAFT) contracts.getObject().prepareDepositPreviewAutomatically(rentalRequestId,c.getId());
+        } catch(Exception failure) { log.error("AUTOMATIC_DEPOSIT_DOCUMENT_FAILED rental={}; receipt remains confirmed; retry available",rentalRequestId,failure); }
         try {
             var service = contracts.getObject();
             var draft = service.createDraftAutomatically(rentalRequestId);

@@ -131,6 +131,8 @@ public class RentalRequest extends BaseEntity {
     /** Consent captured before funds are requested; never infer it from an unsigned draft. */
     @Column(length=40) private String reservationPolicyVersion;
     private Instant reservationPolicyAcceptedAt;
+    @Column(columnDefinition="TEXT") private String reservationPolicyText;
+    @Column(length=64) private String reservationPolicyHash;
     @Column(length=30) private String defaultNoticeKind;
     private Instant defaultNoticeAt;
     private Instant defaultRespondBy;

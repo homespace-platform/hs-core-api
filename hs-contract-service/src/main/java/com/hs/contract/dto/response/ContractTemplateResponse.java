@@ -19,6 +19,8 @@ public class ContractTemplateResponse {
     private String name;
     private String description;
     private ListingCategory category;
+
+    private String documentKind;
     private ContractTemplateSource source;
     private String ownerUserId;
     private ContractTemplateStatus status;

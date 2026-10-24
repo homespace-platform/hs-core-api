@@ -26,14 +26,17 @@ public interface ContractTemplateVersionRepository extends JpaRepository<Contrac
     @Query("SELECT v FROM ContractTemplateVersion v JOIN v.template t WHERE " +
            "(t.source IS NULL OR t.source = com.hs.contract.model.constant.ContractTemplateSource.SYSTEM) " +
            "AND t.status = com.hs.contract.model.constant.ContractTemplateStatus.ACTIVE " +
-           "AND t.active = true AND t.category = :category " +
+           "AND (t.documentKind IS NULL OR t.documentKind = 'LEASE') AND t.active = true AND t.category = :category " +
            "AND t.latestPublishedVersionId = v.id " +
            "AND v.status = com.hs.contract.model.constant.TemplateVersionStatus.PUBLISHED")
     List<ContractTemplateVersion> findCurrentPublishedSystemVersions(@Param("category") ListingCategory category);
 
+    @Query("SELECT v FROM ContractTemplateVersion v JOIN v.template t WHERE t.documentKind = 'DEPOSIT' AND t.category = :category AND t.source = com.hs.contract.model.constant.ContractTemplateSource.SYSTEM AND t.status = com.hs.contract.model.constant.ContractTemplateStatus.ACTIVE AND t.active = true AND t.latestPublishedVersionId = v.id AND v.status = com.hs.contract.model.constant.TemplateVersionStatus.PUBLISHED")
+    List<ContractTemplateVersion> findPublishedDepositVersions(@Param("category") ListingCategory category);
+
     @Query("SELECT COUNT(t) FROM ContractTemplate t WHERE " +
            "(t.source IS NULL OR t.source = com.hs.contract.model.constant.ContractTemplateSource.SYSTEM) " +
            "AND t.status = com.hs.contract.model.constant.ContractTemplateStatus.ACTIVE " +
-           "AND t.active = true AND t.category = :category")
+           "AND (t.documentKind IS NULL OR t.documentKind = 'LEASE') AND t.active = true AND t.category = :category")
     long countActiveSystemTemplates(@Param("category") ListingCategory category);
 }

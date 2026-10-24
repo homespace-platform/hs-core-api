@@ -48,9 +48,9 @@ public class ContractAdminController {
      * Lấy danh mục mã trường (placeholder catalog) được hệ thống hỗ trợ
      */
     @GetMapping("/contract-template-fields")
-    public ApiResponse<List<TemplateFieldDefinition>> getCatalogFields() {
+    public ApiResponse<List<TemplateFieldDefinition>> getCatalogFields(@RequestParam(defaultValue="LEASE") String documentKind) {
         return ApiResponse.<List<TemplateFieldDefinition>>builder()
-                .result(templateService.getCatalogFields())
+                .result(templateService.getCatalogFields(documentKind))
                 .build();
     }
 
@@ -61,10 +61,11 @@ public class ContractAdminController {
     public PageResponse<ContractTemplateResponse> listTemplates(
             @RequestParam(required = false) ContractTemplateStatus status,
             @RequestParam(required = false) ListingCategory category,
+            @RequestParam(defaultValue="LEASE") String documentKind,
             @RequestParam(defaultValue = "1") @Min(1) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size
     ) {
-        return templateService.listTemplates(status, category, page, size);
+        return templateService.listTemplates(status, category, page, size, documentKind);
     }
 
     /**
@@ -192,10 +193,11 @@ public class ContractAdminController {
     public PageResponse<ContractResponse> getAllContracts(
             @RequestParam(required = false) ContractStatus status,
             @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue="ALL") String documentKind,
             @RequestParam(defaultValue = "1") @Min(1) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size
     ) {
-        return contractService.getAllContractsForAdmin(status, keyword, page, size);
+        return contractService.getAllContractsForAdmin(status, keyword, page, size, documentKind);
     }
 
     /**

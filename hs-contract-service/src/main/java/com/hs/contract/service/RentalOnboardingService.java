@@ -36,6 +36,8 @@ import java.util.*;
 public class RentalOnboardingService {
     @org.springframework.beans.factory.annotation.Autowired
     private AutomaticContractDrafts automaticDrafts;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.contract.deposit.DepositAgreementService depositAgreements;
     private final ContractTemplateVersionRepository draftTemplates;
     private final RentalRequestRepository rentals;
     private final RentalStartChangeRepository changes;
@@ -69,7 +71,7 @@ public class RentalOnboardingService {
                        boolean canSign,boolean canRequestEarlierStart,long holdMinutes,
                        List<PaymentRequestResponse> payments,List<RentalStartChange> startChanges,String message,String askerRole,
                        Instant cancellationRequestedAt,String cancellationReason,List<RentalOnboardingEvent> history,
-                       DefaultView defaultCase,DepositView deposit,boolean canRequestCancellation) {}
+                       DefaultView defaultCase,DepositView deposit,boolean canRequestCancellation, String depositAgreementContractId, String depositAgreementStatus) {}
     public record DepositView(String status,java.math.BigDecimal heldAmount,java.math.BigDecimal retainedAmount,
                               java.math.BigDecimal refundableAmount,String retainedReason) {}
     public record DefaultView(String eligibleKind,Instant notifiedAt,Instant respondBy,String reason,
@@ -133,10 +135,13 @@ public class RentalOnboardingService {
                 && "TENANT_SIGNING".equals(r.getDefaultNoticeKind()) && r.getDefaultDisputedAt()==null
                 && defaultFingerprint(r,"TENANT_SIGNING").equals(r.getDefaultNoticeFingerprint())
                 && (signDue==null||signDue.isBefore(r.getDefaultRespondBy())))signDue=r.getDefaultRespondBy();
+        boolean depositSigned=depositAgreements==null || depositAgreements.signedOrExempt(r);
+        var depositDocument=depositAgreements==null?null:depositAgreements.find(r.getId()).orElse(null);
+        if(!depositSigned)signDue=null;
         boolean paid=confirmed(rent)&&(deposit==null||confirmed(deposit));
         boolean signingOpen=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null
             &&r.getListing().getStatus()==com.hs.listing.model.constant.ListingStatus.RESERVED
-            &&paid&&!time.now().isBefore(opens)&&signDue!=null&&time.now().isBefore(signDue);
+            &&paid&&depositSigned&&!time.now().isBefore(opens)&&signDue!=null&&time.now().isBefore(signDue);
         String stage,message;
         if(r.getStatus()==RentalRequestStatus.COMPLETED){stage="COMPLETED";message="Đã ký đủ và bắt đầu hợp đồng.";}
         else if(r.getStatus()!=RentalRequestStatus.ACCEPTED){stage=r.getStatus().name();message="Yêu cầu chưa được chấp nhận hoặc không còn hiệu lực.";}
@@ -144,6 +149,7 @@ public class RentalOnboardingService {
         else if(unresolved(deposit)||unresolved(rent)){stage="REQUIRES_REVIEW";message="Cần đối soát khoản chuyển; phòng tiếp tục được giữ, không tự xác nhận hay hoàn tiền.";}
         else if(!depositReady(r)&&(deposit!=null&&deposit.getStatus()==PaymentStatus.TRANSFER_REPORTED||rent!=null&&rent.getStatus()==PaymentStatus.TRANSFER_REPORTED)){stage="AWAITING_DEPOSIT_CONFIRMATION";message="Đã báo chuyển khoản giữ chỗ, chờ chủ nhà xác nhận nhận đủ tiền.";}
         else if(!depositReady(r)){stage="AWAITING_DEPOSIT";message="Chờ chuyển khoản giữ chỗ trước hạn ghi trên yêu cầu thanh toán.";}
+        else if(!depositSigned){stage="AWAITING_DEPOSIT_SIGNATURE";message=depositDocument==null?"Đã xác nhận cọc. Đang chuẩn bị hợp đồng cọc; kiểm tra mẫu và dữ liệu nếu chưa có văn bản. Không chuyển tiền thêm.":"Đã xác nhận tiền. Hai bên cần ký số hợp đồng cọc trước khi ký hợp đồng thuê.";}
         else if(rent==null){stage="WAITING_START";message="Đã xác nhận cọc. Tiền tháng đầu và ký hợp đồng mở vào ngày bắt đầu thuê.";}
         else if(!paid){
             boolean reported=rent.getStatus()==PaymentStatus.TRANSFER_REPORTED;
@@ -166,7 +172,7 @@ public class RentalOnboardingService {
         return new View(time.now(),BillingTime.ZONE.toString(),stage,r.getMoveInDate(),r.getMoveInDate().plusMonths(r.getLeaseMonths()),
             opens,rent!=null?rent.getDueAt():null,signDue,r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&paid&&(contract==null||contract.getStatus()==ContractStatus.DRAFT),signingOpen&&contract!=null,earlier,holdMinutes,
             rows,changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()),message,actor.equals(r.getOwnerId())?"LANDLORD":"TENANT",r.getCancellationRequestedAt(),r.getCancellationReason(),events.findByRentalRequestIdOrderByOccurredAtDesc(r.getId()),
-            defaultView(r),deposits.findByRentalRequestId(r.getId()).map(d->new DepositView(d.getStatus().name(),d.getHeldAmount(),d.getRetainedAmount(),d.getRefundableAmount(),d.getRetainedReason())).orElse(null),canCancel(r,contract));
+            defaultView(r),deposits.findByRentalRequestId(r.getId()).map(d->new DepositView(d.getStatus().name(),d.getHeldAmount(),d.getRetainedAmount(),d.getRefundableAmount(),d.getRetainedReason())).orElse(null),canCancel(r,contract),depositDocument==null?null:depositDocument.getId(),depositDocument==null?null:depositDocument.getStatus().name());
     }
     @Transactional public View requestEarlier(String id,String actor,StartRequest request) {
         var r=rental(id,actor);sync(r);
@@ -274,6 +280,10 @@ public class RentalOnboardingService {
         if(!canCancel(r,contract))throw invalid("Đã ký đủ hoặc chữ ký chưa rõ kết quả; cần đối soát trước khi hủy hồ sơ nhận nhà.");
     }
     private boolean canCancel(RentalRequest r,com.hs.contract.model.Contract c) {
+        if(depositAgreements!=null) {
+            var dc=depositAgreements.find(r.getId()).orElse(null);
+            if(dc!=null && dc.getStatus()!=ContractStatus.ACTIVE && signatureNeedsReconciliation(dc))return false;
+        }
         return r.getStatus()==RentalRequestStatus.ACCEPTED && (c==null || c.getSignedAt()==null
             && Set.of(ContractStatus.DRAFT,ContractStatus.PENDING_REVIEW,ContractStatus.TENANT_SIGNATURE_PENDING).contains(c.getStatus())
             && !signatureNeedsReconciliation(c));
@@ -343,8 +353,9 @@ public class RentalOnboardingService {
     }
 
     private String defaultKind(RentalRequest r) {
+        if(depositAgreements!=null && !depositAgreements.signedOrExempt(r))return null;
         if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getCancellationRequestedAt()!=null || r.getDefaultDisputedAt()!=null
-                || !"RESERVATION_DEFAULT_V1".equals(r.getReservationPolicyVersion()) || r.getReservationPolicyAcceptedAt()==null
+                || !Set.of("RESERVATION_DEFAULT_V1","RESERVATION_DEFAULT_V2").contains(Objects.toString(r.getReservationPolicyVersion(),"")) || r.getReservationPolicyAcceptedAt()==null
                 || r.getListing().getStatus()!=com.hs.listing.model.constant.ListingStatus.RESERVED)return null;
         var d=deposits.findByRentalRequestId(r.getId()).orElse(null);
         if(d==null || d.getStatus()!=DepositStatus.HELD || d.getHeldAmount()==null || d.getHeldAmount().signum()<=0)return null;

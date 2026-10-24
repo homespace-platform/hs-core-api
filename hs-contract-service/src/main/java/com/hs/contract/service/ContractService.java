@@ -54,6 +54,8 @@ public interface ContractService {
 
     List<ContractDocumentResponse> getDocumentsByContract(String contractId);
 
+    PageResponse<ContractResponse> getAllContractsForAdmin(ContractStatus status, String keyword, int page, int size, String documentKind);
+
     PageResponse<ContractResponse> getAllContractsForAdmin(ContractStatus status, String keyword, int page, int size);
 
     List<ContractResponse> getAllContractsForAdmin(ContractStatus status, String keyword);
@@ -64,4 +66,3 @@ public interface ContractService {
 
     List<ContractDocumentResponse> getDocumentsForAdmin(String contractId);
 }
-

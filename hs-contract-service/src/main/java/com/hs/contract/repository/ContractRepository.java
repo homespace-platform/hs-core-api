@@ -19,12 +19,13 @@ import jakarta.persistence.LockModeType;
 @Repository
 public interface ContractRepository extends JpaRepository<Contract, String>, JpaSpecificationExecutor<Contract> {
 
-    @Query("select c from Contract c where c.rentalRequestId = :rentalRequestId and c.parentContractId is null")
+    @Query("select c from Contract c where c.rentalRequestId = :rentalRequestId and c.parentContractId is null and (c.agreementKind is null or c.agreementKind <> 'DEPOSIT')")
     Optional<Contract> findByRentalRequestId(@Param("rentalRequestId") String rentalRequestId);
 
+    @Query("select c from Contract c where c.parentContractId is null and (c.agreementKind is null or c.agreementKind <> 'DEPOSIT') and c.status in :statuses")
     Page<Contract> findByParentContractIdIsNullAndStatusIn(java.util.Collection<ContractStatus> statuses, Pageable pageable);
 
-    @Query("select c.id from Contract c where c.parentContractId is null and c.status in :statuses "
+    @Query("select c.id from Contract c where c.parentContractId is null and (c.agreementKind is null or c.agreementKind <> 'DEPOSIT') and c.status in :statuses "
             + "and (:afterId is null or c.id > :afterId) order by c.id")
     List<String> findLifecycleIdsAfter(@Param("statuses") java.util.Collection<ContractStatus> statuses,
                                       @Param("afterId") String afterId, Pageable pageable);
@@ -47,7 +48,8 @@ public interface ContractRepository extends JpaRepository<Contract, String>, Jpa
 
     Page<Contract> findByStatus(ContractStatus status, Pageable pageable);
 
-    boolean existsByRentalRequestId(String rentalRequestId);
+    @Query("select (count(c)>0) from Contract c where c.rentalRequestId=:rentalRequestId and (c.agreementKind is null or c.agreementKind <> 'DEPOSIT')")
+    boolean existsByRentalRequestId(@Param("rentalRequestId") String rentalRequestId);
 
     boolean existsByRentalRequestIdAndStatusIn(String rentalRequestId, Set<ContractStatus> statuses);
 
@@ -58,7 +60,7 @@ public interface ContractRepository extends JpaRepository<Contract, String>, Jpa
     @Query("select new com.hs.contract.dto.ai.ContractLeaseRow(c.id, c.contractNumber, c.status, c.landlordId, "
             + "c.tenantId, c.createdAt, c.signedAt, c.effectiveLeaseMonths, r.moveInDate, r.leaseMonths, "
             + "c.currentRevisionId) from Contract c, RentalRequest r where r.id = c.rentalRequestId "
-            + "and c.parentContractId is null and c.active = true and (c.landlordId = :userId or "
+            + "and c.parentContractId is null and (c.agreementKind is null or c.agreementKind <> 'DEPOSIT') and c.active = true and (c.landlordId = :userId or "
             + "(c.tenantId = :userId and c.status <> com.hs.contract.model.constant.ContractStatus.DRAFT)) "
             + "order by c.createdAt desc")
     List<com.hs.contract.dto.ai.ContractLeaseRow> findLeaseRowsForUser(@Param("userId") String userId, Pageable limit);

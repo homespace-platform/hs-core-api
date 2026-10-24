@@ -76,6 +76,18 @@ class RentalOnboardingServiceTest {
         var duplicate=service.refresh("rental","owner");assertEquals("CONTRACT_TEMPLATE_REQUIRED",duplicate.stage());
         assertTrue(duplicate.message().contains("bị trùng"));
     }
+    @Test void positiveDepositRequiresItsOwnSignatureBeforeLeaseSigning() {
+        var agreementService=mock(com.hs.contract.deposit.DepositAgreementService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",agreementService);
+        when(agreementService.find("rental")).thenReturn(Optional.of(Contract.builder().id("deposit-doc").agreementKind("DEPOSIT").status(ContractStatus.DRAFT).build()));
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(Contract.builder().id("lease").status(ContractStatus.TENANT_SIGNATURE_PENDING).build()));
+        rental.setMoveInDate(LocalDate.of(2026,10,21));rent(PaymentStatus.CONFIRMED);
+        var blocked=service.refresh("rental","tenant");assertEquals("AWAITING_DEPOSIT_SIGNATURE",blocked.stage());
+        assertFalse(blocked.canSign());assertNull(blocked.signingDueAt());assertEquals("deposit-doc",blocked.depositAgreementContractId());
+        assertNull(blocked.defaultCase().eligibleKind());
+        when(agreementService.signedOrExempt(rental)).thenReturn(true);
+        assertTrue(service.refresh("rental","tenant").canSign());
+    }
     private RentalStartChange pending() {
         var c=RentalStartChange.builder().id("change").rentalRequestId("rental").previousDate(rental.getMoveInDate())
             .requestedDate(LocalDate.of(2026,10,25)).status("REQUESTED").respondBy(now.plusSeconds(86400)).build();

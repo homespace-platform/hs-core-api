@@ -85,7 +85,9 @@ class RentalRequestServiceTest {
                 assertTrue(factory.getValidator().validate(request).stream()
                     .anyMatch(v->v.getPropertyPath().toString().equals("reservationPolicyAccepted")));
             }
-            var accepted=mapper.readValue(base.formatted(",\"reservationPolicyAccepted\":true"),CreateRentalRequest.class);
+            var missingVersion=mapper.readValue(base.formatted(",\"reservationPolicyAccepted\":true"),CreateRentalRequest.class);
+            assertTrue(factory.getValidator().validate(missingVersion).stream().anyMatch(v->v.getPropertyPath().toString().equals("reservationPolicyVersion")));
+            var accepted=mapper.readValue(base.formatted(",\"reservationPolicyAccepted\":true,\"reservationPolicyVersion\":\""+com.hs.common.payment.ReservationPolicy.VERSION+"\""),CreateRentalRequest.class);
             assertTrue(factory.getValidator().validate(accepted).isEmpty());
         }
     }
@@ -241,7 +243,9 @@ class RentalRequestServiceTest {
         assertEquals(RentalRequestStatus.PENDING, res.status());
         var saved=org.mockito.ArgumentCaptor.forClass(RentalRequest.class);
         verify(rentalRequestRepository).save(saved.capture());
-        assertEquals("RESERVATION_DEFAULT_V1",saved.getValue().getReservationPolicyVersion());
+        assertEquals(com.hs.common.payment.ReservationPolicy.VERSION,saved.getValue().getReservationPolicyVersion());
+        assertEquals(com.hs.common.payment.ReservationPolicy.TEXT,saved.getValue().getReservationPolicyText());
+        assertEquals(com.hs.common.payment.ReservationPolicy.hash(com.hs.common.payment.ReservationPolicy.TEXT),saved.getValue().getReservationPolicyHash());
         assertNotNull(saved.getValue().getReservationPolicyAcceptedAt());
         assertEquals(2, res.occupantCount());
         assertEquals(1, res.motorbikeCount());

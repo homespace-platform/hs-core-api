@@ -164,7 +164,7 @@ public class RentalRequestService {
         if (renterId == null || renterId.isBlank()) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
-        if(req==null || !req.reservationPolicyAccepted())
+        if(req==null || !req.reservationPolicyAccepted() || !com.hs.common.payment.ReservationPolicy.VERSION.equals(req.reservationPolicyVersion()))
             throw new AppException(ListingErrorCode.RESERVATION_POLICY_ACCEPTANCE_REQUIRED);
         validateMoveIn(req.moveInDate());
 
@@ -239,7 +239,9 @@ public class RentalRequestService {
                 .costBreakdownSnapshot(costBreakdownJson)
                 .excludedChargesSnapshot(excludedChargesJson)
                 .renterNote(req.renterNote() != null && !req.renterNote().isBlank() ? req.renterNote().trim() : null)
-                .reservationPolicyVersion("RESERVATION_DEFAULT_V1")
+                .reservationPolicyVersion(com.hs.common.payment.ReservationPolicy.VERSION)
+                .reservationPolicyText(com.hs.common.payment.ReservationPolicy.TEXT)
+                .reservationPolicyHash(com.hs.common.payment.ReservationPolicy.hash(com.hs.common.payment.ReservationPolicy.TEXT))
                 .reservationPolicyAcceptedAt(now())
                 .status(RentalRequestStatus.PENDING)
                 .respondBy(now().plus(Duration.ofHours(responseHours)))

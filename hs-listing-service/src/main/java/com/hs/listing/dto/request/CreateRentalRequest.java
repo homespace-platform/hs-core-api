@@ -43,11 +43,17 @@ public record CreateRentalRequest(
         @Size(max = 500, message = "renterNote cannot exceed 500 characters")
         String renterNote,
         @AssertTrue(message = "Bạn cần đồng ý điều kiện giữ chỗ trước khi gửi yêu cầu thuê.")
-        boolean reservationPolicyAccepted
+        boolean reservationPolicyAccepted,
+        @NotBlank String reservationPolicyVersion
 ) {
     public CreateRentalRequest(String listingId, java.time.LocalDate moveInDate,Integer leaseMonths,Integer occupantCount,
             Integer motorbikeCount,Integer carCount,String renterName,String renterPhone,String renterEmail,
+            java.math.BigDecimal depositAmount,String renterNote,boolean accepted) {
+        this(listingId,moveInDate,leaseMonths,occupantCount,motorbikeCount,carCount,renterName,renterPhone,renterEmail,depositAmount,renterNote,accepted,com.hs.common.payment.ReservationPolicy.VERSION);
+    }
+    public CreateRentalRequest(String listingId, java.time.LocalDate moveInDate,Integer leaseMonths,Integer occupantCount,
+            Integer motorbikeCount,Integer carCount,String renterName,String renterPhone,String renterEmail,
             java.math.BigDecimal depositAmount,String renterNote) {
-        this(listingId,moveInDate,leaseMonths,occupantCount,motorbikeCount,carCount,renterName,renterPhone,renterEmail,depositAmount,renterNote,false);
+        this(listingId,moveInDate,leaseMonths,occupantCount,motorbikeCount,carCount,renterName,renterPhone,renterEmail,depositAmount,renterNote,false,com.hs.common.payment.ReservationPolicy.VERSION);
     }
 }

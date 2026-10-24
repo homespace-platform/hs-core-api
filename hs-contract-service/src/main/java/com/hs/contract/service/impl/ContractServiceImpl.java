@@ -82,6 +82,7 @@ import org.springframework.beans.factory.annotation.Value;
 @Service
 public class ContractServiceImpl implements ContractService {
     @Autowired(required=false) private com.hs.contract.service.RentalOnboardingService onboarding;
+    @Autowired private com.hs.contract.deposit.DepositAgreementService depositAgreements;
     private static final String SIGNING_CITY = "Thành phố Hồ Chí Minh";
 
     private final ContractRepository contractRepository;
@@ -357,6 +358,7 @@ public class ContractServiceImpl implements ContractService {
             }
             predicates.add(cb.isTrue(root.get("active")));
             predicates.add(cb.isNull(root.get("parentContractId")));
+            predicates.add(cb.or(cb.isNull(root.get("agreementKind")),cb.notEqual(root.get("agreementKind"),"DEPOSIT")));
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
@@ -387,7 +389,7 @@ public class ContractServiceImpl implements ContractService {
                 : contractRepository.findByUserInvolved(userId);
 
         return list.stream()
-                .filter(contract -> contract.getParentContractId() == null)
+                .filter(contract -> contract.getParentContractId() == null && !com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))
                 .filter(contract -> userId.equals(contract.getLandlordId())
                         || contract.getStatus() != ContractStatus.DRAFT || canTenantReviewRootDraft(contract))
                 .map(this::toContractResponse)
@@ -397,12 +399,18 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<ContractResponse> getAllContractsForAdmin(ContractStatus status, String keyword, int page, int size) {
+        return getAllContractsForAdmin(status,keyword,page,size,"ALL");
+    }
+    @Override @Transactional(readOnly=true)
+    public PageResponse<ContractResponse> getAllContractsForAdmin(ContractStatus status, String keyword, int page, int size, String documentKind) {
         Specification<Contract> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.isTrue(root.get("active")));
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
+            if("DEPOSIT".equals(documentKind))predicates.add(cb.equal(root.get("agreementKind"),"DEPOSIT"));
+            else if("LEASE".equals(documentKind))predicates.add(cb.or(cb.isNull(root.get("agreementKind")),cb.notEqual(root.get("agreementKind"),"DEPOSIT")));
             if (keyword != null && !keyword.isBlank()) {
                 String pattern = "%" + keyword.trim().toLowerCase() + "%";
                 predicates.add(cb.or(
@@ -472,6 +480,7 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional
     public ContractRevisionResponse updateRevision(String contractId, UpdateContractRevisionRequest request) {
+        rejectDepositEdits(findContractAndCheckAccess(contractId));
         Contract contract = findContractForUpdateAndCheckAccess(contractId);
         if(contract.getParentContractId()!=null) throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,
                 "Văn bản liên kết giữ nguyên điều kiện đã thống nhất; không sửa bản nháp sau khi duyệt yêu cầu.");
@@ -566,6 +575,15 @@ public class ContractServiceImpl implements ContractService {
     }
 
     private ContractCompletenessResponse assessCompleteness(Contract contract, ContractRevision revision) {
+        if(com.hs.contract.deposit.DepositAgreementService.isDeposit(contract)) {
+            var model=depositAgreements.dataModel(contract);
+            var category=templateVersionRepository.findById(contract.getTemplateVersionId()).orElseThrow().getTemplate().getCategory();
+            var fields=new com.hs.contract.deposit.DepositFieldCatalog(fieldCatalog);
+            var missing=com.hs.contract.deposit.DepositDataModel.missing(model,fields,category);
+            return ContractCompletenessResponse.builder().contractId(contract.getId()).revisionId(revision.getId()).complete(missing.isEmpty())
+                .totalFields(fields.required(category).size()-1).filledFields(fields.required(category).size()-1-missing.size())
+                .missingFields(missing.stream().map(k->ContractCompletenessResponse.MissingField.builder().key(k).label(k).group("Hợp đồng cọc").section("deposit").build()).toList()).warnings(List.of()).build();
+        }
 
         ContractTemplateVersion templateVersion = templateVersionRepository.findById(contract.getTemplateVersionId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
@@ -762,10 +780,20 @@ public class ContractServiceImpl implements ContractService {
         return renderPreview(contract, true);
     }
 
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+    public ContractDocumentResponse prepareDepositPreviewAutomatically(String rentalId,String contractId) {
+        rentalRequestRepository.findByIdForUpdate(rentalId).orElseThrow();
+        var contract=contractRepository.findByIdForUpdate(contractId).orElseThrow();
+        if(!rentalId.equals(contract.getRentalRequestId()) || !com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        if(contract.getStatus()!=ContractStatus.DRAFT)return null;
+        depositAgreements.validateSigning(contract);
+        return renderPreview(contract,true);
+    }
+
     private ContractDocumentResponse renderPreview(Contract contract, boolean requirePdf) {
         String contractId = contract.getId();
         ContractRevision revision = requireCurrentRevision(contract);
-        if(contract.getParentContractId()==null && onboarding!=null) {
+        if(!com.hs.contract.deposit.DepositAgreementService.isDeposit(contract) && contract.getParentContractId()==null && onboarding!=null) {
             var rental=rentalRequestRepository.findById(contract.getRentalRequestId()).orElseThrow();
             var payment=paymentRequestRepository.findByRentalRequestIdAndType(rental.getId(),PaymentType.INITIAL).orElse(null);
             revision.setInitialPaymentSnapshot(toJson(dataBuilder.onboardingPayment(rental,payment,Map.of(),List.of())));
@@ -918,6 +946,7 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional
     public ContractResponse sendToTenant(String contractId) {
+        rejectDepositEdits(findContractAndCheckAccess(contractId));
         if ("SMARTCA".equalsIgnoreCase(signatureMode)) {
             throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED,
                     "Trong chế độ SmartCA, chủ nhà phải ký số trước khi hợp đồng được gửi cho người thuê.");
@@ -1223,6 +1252,7 @@ public class ContractServiceImpl implements ContractService {
 
     /** Trải các snapshot của revision thành data model phẳng mà poi-tl dùng để render. */
     private Map<String, Object> buildDataModel(Contract contract, ContractRevision revision) {
+        if(com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))return depositAgreements.dataModel(contract);
         Map<String, Object> policies = fromJson(revision.getPoliciesSnapshot(), MAP_TYPE);
         String specialTerms = revision.getSpecialTerms() == null ? "" : revision.getSpecialTerms().trim();
         return renderService.buildDataModelFromSnapshots(
@@ -1293,7 +1323,12 @@ public class ContractServiceImpl implements ContractService {
         }
     }
 
+    private void rejectDepositEdits(Contract c) {
+        if(com.hs.contract.deposit.DepositAgreementService.isDeposit(c))throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED,"Snapshot cọc bất biến; dùng luồng ký SmartCA cho chính tài liệu cọc.");
+    }
+
     private void requireTenant(Contract contract) {
+        rejectDepositEdits(contract);
         if (!contract.getTenantId().equals(getCurrentUserId())) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }

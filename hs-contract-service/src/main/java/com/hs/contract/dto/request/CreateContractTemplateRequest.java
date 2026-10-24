@@ -25,8 +25,16 @@ public class CreateContractTemplateRequest {
     @NotNull(message = "Phải chọn loại hình bất động sản áp dụng cho mẫu hợp đồng")
     private ListingCategory category;
 
+    @jakarta.validation.constraints.Pattern(regexp="LEASE|DEPOSIT")
+    private String documentKind;
+
     @NotBlank(message = "storageObjectId file Word mẫu không được để trống")
     private String storageObjectId;
 
     private String originalFileName;
+
+    /** Source compatibility for integrations that only create lease templates. */
+    public CreateContractTemplateRequest(String name,String description,ListingCategory category,String storageObjectId,String originalFileName) {
+        this(name,description,category,"LEASE",storageObjectId,originalFileName);
+    }
 }

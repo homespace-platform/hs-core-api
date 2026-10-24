@@ -496,7 +496,7 @@ public class ContractAmendmentService {
     private boolean immediate(Map<String,Object> changes) { return changes != null && Boolean.TRUE.equals(changes.get("applyImmediately")); }
     private List<ContractAmendment> history(Contract c) { return amendments.findByContractIdOrderByCreatedAtDesc(c.getId()); }
     private ContractAmendment proposal(Contract c, String id) { return amendments.findById(id).filter(a -> c.getId().equals(a.getContractId())).orElseThrow(this::forbidden); }
-    private Contract root(String id, String actor) { Contract c = contracts.findByIdForUpdate(id).orElseThrow(this::forbidden); if (c.getParentContractId() != null || actor == null || !actor.equals(c.getLandlordId()) && !actor.equals(c.getTenantId())) throw forbidden(); return c; }
+    private Contract root(String id, String actor) { Contract c = contracts.findByIdForUpdate(id).orElseThrow(this::forbidden); if (com.hs.contract.deposit.DepositAgreementService.isDeposit(c) || c.getParentContractId() != null || actor == null || !actor.equals(c.getLandlordId()) && !actor.equals(c.getTenantId())) throw forbidden(); return c; }
     private AppException forbidden() { return new AppException(ContractErrorCode.CONTRACT_FORBIDDEN); }
     private List<String> readIds(String json) { try { return json == null ? List.of() : mapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { throw invalid("Không đọc được minh chứng."); } }
     private List<String> validateEvidence(Contract c, String actor, List<String> ids) {

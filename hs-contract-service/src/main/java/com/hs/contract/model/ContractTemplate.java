@@ -13,7 +13,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "contract_templates", uniqueConstraints = {
-        @UniqueConstraint(name = "uq_contract_template_category", columnNames = "category")
+        @UniqueConstraint(name = "uq_contract_template_kind_category", columnNames = {"document_kind", "category"})
 }, indexes = {
         @Index(name = "idx_contract_template_status", columnList = "status"),
         @Index(name = "idx_contract_template_category", columnList = "category"),
@@ -40,6 +40,11 @@ public class ContractTemplate extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "category", nullable = false, length = 30)
     private ListingCategory category;
+
+    /** LEASE for existing templates; DEPOSIT has an independent catalog and publication. */
+    @Builder.Default
+    @Column(name="document_kind", length=20)
+    private String documentKind = "LEASE";
 
     /** SYSTEM = mẫu admin; LANDLORD = mẫu chủ nhà tự tạo. */
     @Builder.Default

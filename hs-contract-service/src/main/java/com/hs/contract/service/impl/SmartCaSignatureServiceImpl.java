@@ -68,6 +68,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private com.hs.contract.service.RentalOnboardingService onboarding;
     @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.contract.deposit.DepositAgreementService depositAgreements;
+    @org.springframework.beans.factory.annotation.Autowired
     private com.hs.contract.service.ContractLifecycleService lifecycle;
 
     private final SignatureRequestRepository requestRepository;
@@ -748,7 +750,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 }
                 contract.setStatus(ContractStatus.TENANT_SIGNATURE_PENDING);
                 contract.setLandlordConfirmedAt(Instant.now());
-                if(contract.getParentContractId()==null && onboarding!=null)onboarding.landlordSigned(contract);
+                if(com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))depositAgreements.landlordSigned(contract);
+                else if(contract.getParentContractId()==null && onboarding!=null)onboarding.landlordSigned(contract);
                 log.info("Contract {} landlord signed — now TENANT_SIGNATURE_PENDING", ctx.contractId());
             } else {
                 if (contract.getStatus() != ContractStatus.TENANT_SIGNATURE_PENDING
@@ -757,7 +760,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                         .filter(r -> r.getStatus() == SignatureRequestStatus.SIGNED).isEmpty()) {
                     throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED);
                 }
-                activateAfterBothSignatures(contract);
+                if(com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))depositAgreements.bothSigned(contract);
+                else activateAfterBothSignatures(contract);
                 contract.setStatus(ContractStatus.ACTIVE);
                 contract.setSignedAt(Instant.now());
                 log.info("Contract {} tenant signed — now ACTIVE", ctx.contractId());
@@ -893,7 +897,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     }
 
     private void validateContractStatusForSigning(Contract contract, SignerRole role) {
-        if(contract.getParentContractId()==null && onboarding!=null)onboarding.validateSigning(contract.getRentalRequestId(),contract.getTenantId());
+        if(com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))depositAgreements.validateSigning(contract);
+        else if(contract.getParentContractId()==null && onboarding!=null)onboarding.validateSigning(contract.getRentalRequestId(),contract.getTenantId());
         if(contract.getParentContractId()!=null) lifecycle.validateAgreementSigning(contract);
         if (contract.getRentalPaymentId() != null) {
             PaymentRequest payment = paymentRequestRepository.findById(contract.getRentalPaymentId())

@@ -69,6 +69,12 @@
             <scope>test</scope>
         </dependency>
 
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- PDF signing: Apache PDFBox (Apache 2.0) + Bouncy Castle -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>

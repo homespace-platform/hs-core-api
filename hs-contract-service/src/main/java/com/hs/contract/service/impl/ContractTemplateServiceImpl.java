@@ -71,10 +71,21 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     }
 
     @Override
+    public List<TemplateFieldDefinition> getCatalogFields(String kind) {
+        return "DEPOSIT".equals(requireKind(kind)) ? new com.hs.contract.deposit.DepositFieldCatalog(catalog).fields() : catalog.getAllDefinitions();
+    }
+
+    private static String requireKind(String kind) {
+        if(kind==null) return "LEASE";
+        if(!Set.of("LEASE","DEPOSIT").contains(kind)) throw new IllegalArgumentException("Loại văn bản không hợp lệ");
+        return kind;
+    }
+
+    @Override
     @Transactional
     public ContractTemplateResponse createTemplate(CreateContractTemplateRequest request) {
         requireSupportedCategory(request.getCategory());
-        if (!templateRepository.findSystemTemplatesByCategory(request.getCategory()).isEmpty()) {
+        if (!("LEASE".equals(requireKind(request.getDocumentKind())) ? templateRepository.findSystemTemplatesByCategory(request.getCategory()) : templateRepository.findSystemTemplatesByCategoryAndKind(request.getCategory(),"DEPOSIT")).isEmpty()) {
             throw new AppException(ContractErrorCode.SYSTEM_TEMPLATE_ALREADY_EXISTS);
         }
         return createTemplateInternal(request, ContractTemplateSource.SYSTEM, null);
@@ -95,6 +106,7 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
                 .name(request.getName().trim())
                 .description(request.getDescription())
                 .category(request.getCategory())
+                .documentKind(requireKind(request.getDocumentKind()))
                 .source(source)
                 .ownerUserId(ownerUserId)
                 .status(ContractTemplateStatus.ACTIVE)
@@ -104,7 +116,7 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
         byte[] docxBytes = downloadStorageFile(request.getStorageObjectId());
         TemplateValidationResult validation = analysisService.analyzeTemplate(
-                new ByteArrayInputStream(docxBytes), template.getCategory());
+                new ByteArrayInputStream(docxBytes), template.getCategory(), requireKind(template.getDocumentKind()));
 
         ContractTemplateVersion version = newVersion(template, 1, request.getStorageObjectId(),
                 request.getOriginalFileName() != null ? request.getOriginalFileName() : "template_v1.docx",
@@ -140,10 +152,17 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     @Transactional(readOnly = true)
     public PageResponse<ContractTemplateResponse> listTemplates(
             ContractTemplateStatus status, ListingCategory category, int page, int size) {
+        return listTemplates(status, category, page, size, "LEASE");
+    }
+
+    @Override @Transactional(readOnly=true)
+    public PageResponse<ContractTemplateResponse> listTemplates(ContractTemplateStatus status, ListingCategory category, int page, int size, String kind) {
+        String resolvedKind = requireKind(kind);
         // Admin chỉ quản lý mẫu hệ thống (kể cả bản ghi cũ chưa có source)
         Specification<ContractTemplate> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.isTrue(root.get("active")));
+            predicates.add(cb.equal(cb.coalesce(root.<String>get("documentKind"),"LEASE"),resolvedKind));
             predicates.add(cb.or(
                     cb.equal(root.get("source"), ContractTemplateSource.SYSTEM),
                     cb.isNull(root.get("source"))
@@ -268,7 +287,7 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
         byte[] docxBytes = downloadStorageFile(request.getStorageObjectId());
         TemplateValidationResult validation = analysisService.analyzeTemplate(
-                new ByteArrayInputStream(docxBytes), template.getCategory());
+                new ByteArrayInputStream(docxBytes), template.getCategory(), requireKind(template.getDocumentKind()));
 
         ContractTemplateVersion version = newVersion(template, nextVersion, request.getStorageObjectId(),
                 request.getOriginalFileName() != null ? request.getOriginalFileName() : "template_v" + nextVersion + ".docx",
@@ -319,7 +338,7 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
         if (targetVersion.getStatus() == TemplateVersionStatus.DRAFT) {
             byte[] docxBytes = downloadStorageFile(targetVersion.getStorageObjectId());
             TemplateValidationResult validation = analysisService.analyzeTemplate(
-                    new ByteArrayInputStream(docxBytes), template.getCategory());
+                    new ByteArrayInputStream(docxBytes), template.getCategory(), requireKind(template.getDocumentKind()));
             targetVersion.setPlaceholdersJson(serializeJson(validation.getDetectedPlaceholders()));
             targetVersion.setValidationErrorsJson(serializeJson(validation.getWarnings()));
             targetVersion.setInvalidPlaceholdersJson(serializeJson(validation.getInvalidPlaceholders()));
@@ -371,6 +390,7 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
         byte[] templateDocxBytes = downloadStorageFile(version.getStorageObjectId());
         Map<String, Object> dummyData = renderService.buildDummyDataModel();
+        if("DEPOSIT".equals(version.getTemplate().getDocumentKind())) dummyData = com.hs.contract.deposit.DepositDataModel.dummy(dummyData);
 
         try {
             byte[] filledDocx = renderService.renderDocx(new ByteArrayInputStream(templateDocxBytes), dummyData);
@@ -485,6 +505,7 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
                 .name(t.getName())
                 .description(t.getDescription())
                 .category(t.getCategory())
+                .documentKind(requireKind(t.getDocumentKind()))
                 .source(t.getSource() != null ? t.getSource() : ContractTemplateSource.SYSTEM)
                 .ownerUserId(t.getOwnerUserId())
                 .status(t.getStatus())

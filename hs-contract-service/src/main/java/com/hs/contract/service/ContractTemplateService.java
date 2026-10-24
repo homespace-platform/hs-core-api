@@ -15,6 +15,7 @@ import java.util.List;
 public interface ContractTemplateService {
 
     List<TemplateFieldDefinition> getCatalogFields();
+    List<TemplateFieldDefinition> getCatalogFields(String kind);
 
     /** Admin: tạo mẫu hệ thống. */
     ContractTemplateResponse createTemplate(CreateContractTemplateRequest request);
@@ -31,6 +32,8 @@ public interface ContractTemplateService {
     ContractTemplateResponse getTemplateForLandlord(String userId, String templateId);
 
     /** Admin: danh sách mẫu hệ thống. */
+    PageResponse<ContractTemplateResponse> listTemplates(ContractTemplateStatus status, ListingCategory category, int page, int size, String kind);
+
     PageResponse<ContractTemplateResponse> listTemplates(ContractTemplateStatus status, ListingCategory category, int page, int size);
 
     List<ContractTemplateResponse> listTemplates(ContractTemplateStatus status, ListingCategory category);

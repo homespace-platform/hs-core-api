@@ -112,6 +112,14 @@ class MonthlyBillingServiceTest {
                 .thenReturn(PaymentRequest.builder().id("monthly-payment").build());
     }
 
+    @Test void depositEnvelopeIsNeverBillableEvenAfterBothSignatures() {
+        contracts.findById("contract").orElseThrow().setAgreementKind("DEPOSIT");
+        service.syncContract("contract");
+        verify(invoices,never()).save(any());
+        assertThrows(AppException.class,()->service.list("contract","landlord"));
+        verifyNoInteractions(payments);
+    }
+
     @Test
     void firstPeriodSettlesMetersAndExtrasWithoutChargingRentTwice() {
         MonthlyInvoiceResponse result = service.issue("invoice", "landlord",

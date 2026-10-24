@@ -33,6 +33,12 @@ public class TemplateAnalysisService {
      *                 Truyền null cho mẫu chưa gắn loại hình: chỉ áp bộ trường bắt buộc chung.
      */
     public TemplateValidationResult analyzeTemplate(InputStream inputStream, ListingCategory category) {
+        return analyzeTemplate(inputStream, category, "LEASE");
+    }
+
+    public TemplateValidationResult analyzeTemplate(InputStream inputStream, ListingCategory category, String kind) {
+        var deposit = new com.hs.contract.deposit.DepositFieldCatalog(catalog);
+        boolean isDeposit = "DEPOSIT".equals(kind);
         Set<String> detected = new LinkedHashSet<>();
         List<String> warnings = new ArrayList<>();
 
@@ -66,6 +72,22 @@ public class TemplateAnalysisService {
                     extractPlaceholders(p.getText(), detected);
                 }
             }
+            if(isDeposit) {
+                var paragraphs=new ArrayList<XWPFParagraph>(document.getParagraphs());
+                for(var table:document.getTables())for(var row:table.getRows())for(var cell:row.getTableCells())paragraphs.addAll(cell.getParagraphs());
+                for(var header:document.getHeaderList())paragraphs.addAll(header.getParagraphs());
+                for(var footer:document.getFooterList())paragraphs.addAll(footer.getParagraphs());
+                var counts=new HashMap<String,Integer>();
+                for(var p:paragraphs) {
+                    var matches=PLACEHOLDER_PATTERN.matcher(p.getText());
+                    while(matches.find()) {
+                        String tag=matches.group();counts.merge(matches.group(1).trim(),1,Integer::sum);
+                        if(p.getRuns().stream().noneMatch(r->r.text().contains(tag)))warnings.add("Marker bị tách run: "+tag);
+                    }
+                }
+                for(String key:List.of("depositAgreement.reservationTerms","depositAgreement.nextStepsText","#depositOptionalInfoTable"))
+                    if(counts.getOrDefault(key,0)>1)warnings.add("Marker chỉ được đặt một lần: "+key);
+            }
         } catch (Exception e) {
             log.error("Lỗi khi đọc file Word mẫu DOCX: {}", e.getMessage(), e);
             return TemplateValidationResult.builder()
@@ -78,7 +100,7 @@ public class TemplateAnalysisService {
         List<String> invalidList = new ArrayList<>();
 
         for (String ph : detected) {
-            if (catalog.isValidPlaceholder(ph)) {
+            if (isDeposit ? deposit.valid(ph) : catalog.isValidPlaceholder(ph)) {
                 validList.add(ph);
             } else {
                 invalidList.add(ph);
@@ -87,7 +109,7 @@ public class TemplateAnalysisService {
 
         // Kiểm tra các trường bắt buộc theo đúng loại hình BĐS của mẫu
         List<TemplateFieldIssue> missingRequired = new ArrayList<>();
-        for (TemplateFieldDefinition def : catalog.getRequiredDefinitions(category)) {
+        for (TemplateFieldDefinition def : (isDeposit ? deposit.required(category) : catalog.getRequiredDefinitions(category))) {
             if (!detected.contains(def.getKey())) {
                 missingRequired.add(new TemplateFieldIssue(def.getKey(), def.getLabel()));
             }
@@ -104,7 +126,7 @@ public class TemplateAnalysisService {
                     .toList()));
         }
 
-        boolean isValid = invalidList.isEmpty();
+        boolean isValid = invalidList.isEmpty() && (!isDeposit || warnings.isEmpty());
 
         return TemplateValidationResult.builder()
                 .valid(isValid)

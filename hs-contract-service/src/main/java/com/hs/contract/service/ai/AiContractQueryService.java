@@ -435,7 +435,7 @@ public class AiContractQueryService {
         boolean landlord = userId.equals(c.getLandlordId());
         boolean tenant = userId.equals(c.getTenantId()) && c.getStatus() != ContractStatus.DRAFT;
         // Same answer for "missing" and "not yours": no existence oracle.
-        if (c.getParentContractId() != null || !Boolean.TRUE.equals(c.getActive()) || !(landlord || tenant)) throw notFound();
+        if (com.hs.contract.deposit.DepositAgreementService.isDeposit(c) || c.getParentContractId() != null || !Boolean.TRUE.equals(c.getActive()) || !(landlord || tenant)) throw notFound();
         RentalRequest rental = rentals.findById(c.getRentalRequestId()).orElse(null);
         return new Access(c, rental, landlord ? "LANDLORD" : "TENANT");
     }

@@ -5,7 +5,6 @@ import com.hs.common.context.UserContextHolder;
 import com.hs.payment.service.BankAccountService;
 import com.hs.user.dto.response.AddressResponse;
 import com.hs.user.dto.response.UserProfileResponse;
-import com.hs.user.service.AddressService;
 import com.hs.user.service.UserService;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.AfterEach;
@@ -15,7 +14,7 @@ import static org.mockito.Mockito.*;
 
 class OnboardingFacadeTest {
     private final UserService users=mock(UserService.class);
-    private final OnboardingFacade facade=new OnboardingFacade(users,mock(AddressService.class),mock(BankAccountService.class));
+    private final OnboardingFacade facade=new OnboardingFacade(users,mock(BankAccountService.class));
 
     @AfterEach void clearContext() { UserContextHolder.clear(); }
 
