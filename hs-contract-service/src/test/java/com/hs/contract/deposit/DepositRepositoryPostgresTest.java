@@ -30,13 +30,57 @@ import static org.junit.jupiter.api.Assertions.*;
     "spring.jpa.hibernate.ddl-auto=create-drop","spring.jpa.open-in-view=false"})
 class DepositRepositoryPostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs")
-    @EnableJpaRepositories(basePackageClasses={ContractRepository.class,DepositAgreementRepository.class})
-    static class Config {}
+    @EnableJpaRepositories(basePackageClasses={ContractRepository.class,DepositAgreementRepository.class,com.hs.listing.repository.RentalRequestRepository.class})
+    static class Config {
+        @org.springframework.context.annotation.Bean
+        DepositAgreementService agreementReader(DepositAgreementRepository agreements,ContractRepository contracts,
+                com.hs.listing.repository.RentalRequestRepository rentals) {
+            var time=org.mockito.Mockito.mock(com.hs.common.time.BillingTime.class);
+            org.mockito.Mockito.when(time.now()).thenReturn(java.time.Instant.parse("2026-10-25T16:00:00Z"));
+            return new DepositAgreementService(agreements,contracts,
+                org.mockito.Mockito.mock(ContractRevisionRepository.class),org.mockito.Mockito.mock(ContractTemplateVersionRepository.class),rentals,
+                org.mockito.Mockito.mock(com.hs.listing.repository.RentalOnboardingEventRepository.class),
+                org.mockito.Mockito.mock(com.hs.payment.repository.DepositRecordRepository.class),
+                org.mockito.Mockito.mock(com.hs.payment.repository.PaymentRequestRepository.class),
+                org.mockito.Mockito.mock(com.hs.payment.repository.PaymentLineItemRepository.class),
+                org.mockito.Mockito.mock(com.hs.contract.service.engine.ContractDataBuilder.class),
+                new com.hs.contract.service.engine.ContractFieldCatalog(),new com.fasterxml.jackson.databind.ObjectMapper(),time);
+        }
+    }
     @Autowired ContractRepository contracts;
     @Autowired ContractTemplateRepository templates;
     @Autowired ContractTemplateVersionRepository versions;
     @Autowired DepositAgreementRepository deposits;
     @Autowired JdbcTemplate jdbc;
+    @Autowired com.hs.listing.repository.RentalRequestRepository rentals;
+    @Autowired com.hs.listing.repository.ListingRepository listings;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
+    @Autowired DepositAgreementService agreementReader;
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional(propagation=org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void readsTheLazyListingWithinTheServiceAndReturnsAUsableDtoAfterTheTransactionCloses() {
+        new org.springframework.transaction.support.TransactionTemplate(transactions).executeWithoutResult(tx->{
+            var listing=listings.saveAndFlush(com.hs.listing.model.Listing.builder().id("read-listing").ownerId("owner")
+                .title("Test room").description("Disposable integration fixture").category(ListingCategory.ROOM)
+                .status(com.hs.listing.model.constant.ListingStatus.RESERVED).availableFrom(java.time.LocalDate.of(2026,10,25))
+                .areaM2(java.math.BigDecimal.valueOf(20)).priceAmount(java.math.BigDecimal.valueOf(3400000)).currency("VND")
+                .priceUnit(com.hs.listing.model.constant.PriceUnit.MONTH).depositType(com.hs.listing.model.constant.DepositType.NONE)
+                .paymentCycle(com.hs.listing.model.constant.PaymentCycle.MONTHLY).minimumLeaseMonths(1).build());
+            rentals.saveAndFlush(com.hs.listing.model.RentalRequest.builder().id("read-rental").listing(listing).ownerId("owner").renterId("tenant")
+                .renterName("Test tenant").renterPhone("0900000000").moveInDate(java.time.LocalDate.of(2026,11,1)).leaseMonths(3)
+                .monthlyRentPrice(java.math.BigDecimal.valueOf(3400000)).depositAmount(java.math.BigDecimal.valueOf(3400000))
+                .status(com.hs.listing.model.constant.RentalRequestStatus.ACCEPTED).build());
+        });
+        var detached=rentals.findById("read-rental").orElseThrow();
+        assertFalse(org.hibernate.Hibernate.isInitialized(detached.getListing()));
+        assertThrows(org.hibernate.LazyInitializationException.class,()->detached.getListing().getStatus(),"Reproduce the old controller access with OSIV disabled");
+        var result=agreementReader.overview("read-rental","tenant");
+        assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+        assertTrue(result.required());assertTrue(result.signingAllowed());assertNull(result.blockedReason());
+        assertNull(result.signingContractId());
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->agreementReader.overview("read-rental","stranger"));
+    }
 
     @Test void migratesOldTemplateConstraintAndKeepsLeaseQueriesSeparateFromDepositEnvelopes() {
         // Simulate the previous unique-category constraint before introducing a deposit template.
@@ -61,6 +105,37 @@ class DepositRepositoryPostgresTest {
         contracts.delete(leaseEnvelope);contracts.flush();assertFalse(contracts.existsByRentalRequestId("rental"));
         assertTrue(contracts.findByRentalRequestId("rental").isEmpty());
     }
+    @Test void primaryAgreementSelectionPrefersTheReadableLeaseBeforeFilteringAndPagination() {
+        var version=version(template("LEASE"));
+        var deposit=contracts.saveAndFlush(envelope("DC-PRIMARY","DEPOSIT",version));
+        assertEquals(List.of(deposit.getId()), primary("owner",ContractPartyRole.LANDLORD,null,0).getContent().stream().map(Contract::getId).toList());
+        assertEquals(1, primary("tenant",ContractPartyRole.TENANT,null,0).getTotalElements());
+        assertEquals(0, primary("stranger",ContractPartyRole.TENANT,null,0).getTotalElements());
+
+        var lease=contracts.saveAndFlush(envelope("HD-PRIMARY",null,version));
+        assertEquals(List.of(lease.getId()), primary("owner",ContractPartyRole.LANDLORD,null,0).getContent().stream().map(Contract::getId).toList());
+        lease.setStatus(ContractStatus.DRAFT); contracts.saveAndFlush(lease);
+        assertEquals(0, primary("owner",ContractPartyRole.LANDLORD,ContractStatus.ACTIVE,0).getTotalElements(),"A status filter must not resurrect the superseded deposit card");
+        assertEquals(List.of(deposit.getId()), primary("tenant",ContractPartyRole.TENANT,null,0).getContent().stream().map(Contract::getId).toList(),"An unreadable draft must not hide the tenant's deposit agreement");
+        lease.setStatus(ContractStatus.ACTIVE); contracts.saveAndFlush(lease);
+        var second=envelope("DC-SECOND","DEPOSIT",version);second.setRentalRequestId("second-rental");contracts.saveAndFlush(second);
+        var page1=primary("owner",ContractPartyRole.LANDLORD,null,0);var page2=primary("owner",ContractPartyRole.LANDLORD,null,1);
+        assertEquals(2,page1.getTotalElements());assertEquals(2,page1.getTotalPages());
+        assertNotEquals(page1.getContent().getFirst().getId(),page2.getContent().getFirst().getId());
+        assertEquals(2,contracts.findDepositsForRentals(List.of("rental","second-rental")).size());
+        assertEquals(1,contracts.findByParentContractIdIsNullAndStatusIn(Set.of(ContractStatus.ACTIVE),PageRequest.of(0,10)).getTotalElements(),"Billing/lifecycle query remains lease-only");
+    }
+
+    private org.springframework.data.domain.Page<Contract> primary(String actor,ContractPartyRole role,ContractStatus status,int page) {
+        org.springframework.data.jpa.domain.Specification<Contract> spec=(root,query,cb)->cb.and(
+            cb.equal(root.get(role==ContractPartyRole.LANDLORD?"landlordId":"tenantId"),actor),
+            cb.isTrue(root.get("active")),cb.isNull(root.get("parentContractId")),
+            role==ContractPartyRole.TENANT?com.hs.contract.service.ContractDraftVisibility.tenantReadable(root,query,cb):cb.conjunction(),
+            com.hs.contract.service.ContractAgreementSelection.primary(root,query,cb,actor,role),
+            status==null?cb.conjunction():cb.equal(root.get("status"),status));
+        return contracts.findAll(spec,PageRequest.of(page,1,org.springframework.data.domain.Sort.by("id")));
+    }
+
     private ContractTemplate template(String kind) {
         return templates.saveAndFlush(ContractTemplate.builder().name(kind).documentKind(kind).category(ListingCategory.HOUSE).build());
     }

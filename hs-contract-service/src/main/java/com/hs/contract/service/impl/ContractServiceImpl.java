@@ -305,7 +305,7 @@ public class ContractServiceImpl implements ContractService {
     @Transactional(readOnly = true)
     public ContractResponse getContract(String contractId) {
         Contract contract = findContractAndCheckAccess(contractId);
-        return toContractResponse(contract);
+        return withDepositLinks(List.of(toContractResponse(contract))).getFirst();
     }
 
     @Override
@@ -329,12 +329,26 @@ public class ContractServiceImpl implements ContractService {
                 && contract.getStatus() == ContractStatus.DRAFT && !canTenantReviewRootDraft(contract)) {
             return null;
         }
-        return toContractResponse(contract);
+        return withDepositLinks(List.of(toContractResponse(contract))).getFirst();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ContractResponse findPrimaryByRentalRequestId(String rentalRequestId) {
+        var lease = findByRentalRequestId(rentalRequestId);
+        if (lease != null) return lease;
+        return depositAgreements.find(rentalRequestId).map(c -> getContract(c.getId())).orElse(null);
     }
 
     @Override
     @Transactional(readOnly = true)
     public PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size) {
+        return getContractsForCurrentUser(userId, status, role, billableOnly, page, size, false);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size, boolean includeDepositFallback) {
         String currentUserId = (userId != null && !userId.isBlank()) ? userId : getCurrentUserId();
         if (currentUserId == null || currentUserId.isBlank() || "system".equals(currentUserId)) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
@@ -358,7 +372,9 @@ public class ContractServiceImpl implements ContractService {
             }
             predicates.add(cb.isTrue(root.get("active")));
             predicates.add(cb.isNull(root.get("parentContractId")));
-            predicates.add(cb.or(cb.isNull(root.get("agreementKind")),cb.notEqual(root.get("agreementKind"),"DEPOSIT")));
+            predicates.add(includeDepositFallback && !billableOnly
+                ? com.hs.contract.service.ContractAgreementSelection.primary(root, query, cb, currentUserId, role)
+                : com.hs.contract.service.ContractAgreementSelection.lease(root, cb));
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
@@ -374,10 +390,25 @@ public class ContractServiceImpl implements ContractService {
             return cb.and(predicates.toArray(new Predicate[0]));
         };
 
-        var sort = Sort.by(Sort.Order.desc("createdAt"));
+        var sort = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
         var pageable = PageRequest.of(Math.max(page - 1, 0), Math.min(Math.max(size, 1), 100), sort);
         Page<Contract> pageResult = contractRepository.findAll(spec, pageable);
-        return new PageResponse<>(pageResult.map(this::toContractResponse));
+        var responses = pageResult.map(this::toContractResponse);
+        if (includeDepositFallback && !billableOnly) withDepositLinks(responses.getContent());
+        return new PageResponse<>(responses);
+    }
+
+    private List<ContractResponse> withDepositLinks(List<ContractResponse> rows) {
+        var rentalIds = rows.stream().map(ContractResponse::getRentalRequestId).filter(Objects::nonNull).distinct().toList();
+        if (rentalIds.isEmpty()) return rows;
+        // One metadata query per page, never one document/storage request per card.
+        var deposits = contractRepository.findDepositsForRentals(rentalIds);
+        for (var row : rows) {
+            deposits.stream().filter(d -> Objects.equals(d.getRentalRequestId(), row.getRentalRequestId())
+                && Objects.equals(d.getLandlordId(), row.getLandlordId()) && Objects.equals(d.getTenantId(), row.getTenantId()))
+                .findFirst().ifPresent(d -> row.setDepositAgreementContractId(d.getId()));
+        }
+        return rows;
     }
 
     @Override

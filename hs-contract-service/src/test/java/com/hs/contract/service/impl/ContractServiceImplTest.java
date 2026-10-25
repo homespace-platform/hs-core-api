@@ -1067,6 +1067,30 @@ class ContractServiceImplTest {
         assertThrows(AppException.class, () -> service.updateRevision("contract-1", new com.hs.contract.dto.request.UpdateContractRevisionRequest()));
     }
 
+    @Test void primaryNavigationKeepsLeaseSemanticsAndBatchesOnlyMatchingDepositLinks() {
+        var contracts=mock(ContractRepository.class);
+        var service=createService(contracts,mock(ContractRevisionRepository.class),mock(ContractDocumentRepository.class),mock(ContractTemplateVersionRepository.class));
+        var deposits=mock(com.hs.contract.deposit.DepositAgreementService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",deposits);
+        var lease=Contract.builder().id("lease").rentalRequestId("rental").landlordId("owner").tenantId("tenant").status(ContractStatus.ACTIVE).build();
+        var deposit=Contract.builder().id("deposit").agreementKind("DEPOSIT").rentalRequestId("rental").landlordId("owner").tenantId("tenant").status(ContractStatus.ACTIVE).build();
+        var unrelated=Contract.builder().id("other-deposit").agreementKind("DEPOSIT").rentalRequestId("rental").landlordId("someone-else").tenantId("tenant").build();
+        UserContextHolder.set(new UserContext("owner",null));
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(lease));
+        when(contracts.findDepositsForRentals(List.of("rental"))).thenReturn(List.of(unrelated,deposit));
+        var response=service.findPrimaryByRentalRequestId("rental");
+        assertEquals("lease",response.getId());assertEquals("deposit",response.getDepositAgreementContractId());
+        verifyNoInteractions(deposits);
+
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.empty());
+        when(deposits.find("rental")).thenReturn(Optional.of(deposit));
+        when(contracts.findById("deposit")).thenReturn(Optional.of(deposit));
+        assertNull(service.findByRentalRequestId("rental"),"Default rental lookup remains lease-only");
+        assertEquals("deposit",service.findPrimaryByRentalRequestId("rental").getId());
+        UserContextHolder.set(new UserContext("stranger",null));
+        assertThrows(AppException.class,()->service.findPrimaryByRentalRequestId("rental"));
+    }
+
     private ContractServiceImpl createService(
             ContractRepository contractRepository,
             ContractRevisionRepository revisionRepository,

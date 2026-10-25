@@ -22,7 +22,12 @@ public interface ContractService {
     /** Trả về hợp đồng gắn với yêu cầu thuê (nếu có), null nếu chưa tạo. */
     ContractResponse findByRentalRequestId(String rentalRequestId);
 
+    /** Read-only document navigation: lease first, deposit while no readable lease exists. */
+    ContractResponse findPrimaryByRentalRequestId(String rentalRequestId);
+
     PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size);
+
+    PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size, boolean includeDepositFallback);
 
     List<ContractResponse> getContractsForCurrentUser(ContractStatus status);
 

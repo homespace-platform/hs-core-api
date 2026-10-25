@@ -26,6 +26,7 @@ public class ContractResponse {
     private String currentRevisionId;
     private String parentContractId;
     private String agreementKind;
+    private String depositAgreementContractId;
     private Integer effectiveLeaseMonths;
     private ContractStatus status;
     private ContractPaymentStatus paymentStatus;

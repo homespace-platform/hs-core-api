@@ -18,20 +18,14 @@ import java.util.List;
 public class DepositAgreementController {
     private final DepositAgreementService deposits;
     private final ContractServiceImpl contracts;
-    private final com.hs.common.time.BillingTime time;
     public record View(boolean required,boolean signingAllowed,String blockedReason,ContractResponse agreement,List<ContractDocumentResponse> documents) {}
     private String actor(){var c=UserContextHolder.get();if(c==null||c.userId()==null)throw new AppException(ErrorCode.UNAUTHENTICATED);return c.userId();}
     private View read(String rentalId,String actor) {
-        var rental=deposits.participant(rentalId,actor);var found=deposits.find(rentalId);
-        boolean eligible=rental.getStatus()==com.hs.listing.model.constant.RentalRequestStatus.ACCEPTED
-            && rental.getCancellationRequestedAt()==null && rental.getListing()!=null
-            && rental.getListing().getStatus()==com.hs.listing.model.constant.ListingStatus.RESERVED;
-        boolean expired=found.filter(c->c.getStatus()==com.hs.contract.model.constant.ContractStatus.TENANT_SIGNATURE_PENDING
-            && c.getTenantSigningDueAt()!=null && !time.now().isBefore(c.getTenantSigningDueAt())).isPresent();
-        String blocked=!eligible?"Hồ sơ đã chuyển bước hoặc đang chờ hủy/đối soát. Tài liệu đã ký vẫn được giữ để tra cứu.":expired?"Hết hạn ký cọc; chủ nhà cần mở lại hạn ký. Tiền đã xác nhận không bị đảo.":null;
-        return new View(rental.getDepositAmount()!=null&&rental.getDepositAmount().signum()>0,eligible&&!expired,blocked,
-            found.map(c->contracts.getContract(c.getId())).orElse(null),
-            found.map(c->contracts.getDocumentsByContract(c.getId())).orElse(List.of()));
+        var overview=deposits.overview(rentalId,actor);
+        String contractId=overview.signingContractId();
+        return new View(overview.required(),overview.signingAllowed(),overview.blockedReason(),
+            contractId==null?null:contracts.getContract(contractId),
+            contractId==null?List.of():contracts.getDocumentsByContract(contractId));
     }
     @GetMapping public ApiResponse<View> view(@PathVariable String rentalId) {
         return ApiResponse.<View>builder().result(read(rentalId,actor())).build();

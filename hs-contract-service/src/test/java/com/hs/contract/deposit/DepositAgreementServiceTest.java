@@ -122,4 +122,29 @@ class DepositAgreementServiceTest {
         assertEquals(ListingStatus.RESERVED,rental.getListing().getStatus());assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());
         verify(rentals,never()).save(any());
     }
+    @Test void depositOverviewIsReadableBeforeTheMoveInDateAndContainsOnlyScalarData() {
+        var envelope=Contract.builder().id("deposit-doc").agreementKind("DEPOSIT").status(ContractStatus.DRAFT).build();
+        var document=new DepositAgreement();document.setSigningContractId(envelope.getId());
+        when(agreements.findByRentalRequestId("rental")).thenReturn(Optional.of(document));
+        when(contracts.findById(envelope.getId())).thenReturn(Optional.of(envelope));
+        assertTrue(rental.getMoveInDate().isAfter(time.today()));
+        var view=service.overview("rental","tenant");
+        assertTrue(view.required());assertTrue(view.signingAllowed());assertNull(view.blockedReason());
+        assertEquals("deposit-doc",view.signingContractId());
+        assertThrows(AppException.class,()->service.overview("rental","stranger"));
+        verify(rentals,never()).save(any());verify(payments,never()).save(any());
+    }
+    @Test void expiredOrCancelledDepositOverviewStillIdentifiesTheDocumentWithoutOpeningSigning() {
+        var envelope=Contract.builder().id("deposit-doc").agreementKind("DEPOSIT").status(ContractStatus.TENANT_SIGNATURE_PENDING)
+            .tenantSigningDueAt(now.minusSeconds(1)).build();
+        var document=new DepositAgreement();document.setSigningContractId(envelope.getId());
+        when(agreements.findByRentalRequestId("rental")).thenReturn(Optional.of(document));
+        when(contracts.findById(envelope.getId())).thenReturn(Optional.of(envelope));
+        var expired=service.overview("rental","owner");
+        assertFalse(expired.signingAllowed());assertTrue(expired.blockedReason().contains("Hết hạn"));
+        assertEquals("deposit-doc",expired.signingContractId());
+        rental.setCancellationRequestedAt(now);
+        var cancelled=service.overview("rental","tenant");assertFalse(cancelled.signingAllowed());
+        assertEquals("deposit-doc",cancelled.signingContractId());
+    }
 }

@@ -58,6 +58,23 @@ public class DepositAgreementService {
     public Optional<Contract> find(String rentalId) {
         return agreements.findByRentalRequestId(rentalId).flatMap(d->contracts.findById(d.getSigningContractId()));
     }
+    /** Resolve lazy associations in this transaction; only scalar values may leave the service. */
+    public record Overview(boolean required, boolean signingAllowed, String blockedReason, String signingContractId) {}
+
+    @Transactional(readOnly=true)
+    public Overview overview(String rentalId, String actor) {
+        var rental=participant(rentalId,actor);
+        var found=find(rentalId);
+        boolean eligible=rental.getStatus()==RentalRequestStatus.ACCEPTED
+            && rental.getCancellationRequestedAt()==null && rental.getListing()!=null
+            && rental.getListing().getStatus()==ListingStatus.RESERVED;
+        boolean expired=found.filter(c->c.getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING
+            && c.getTenantSigningDueAt()!=null && !time.now().isBefore(c.getTenantSigningDueAt())).isPresent();
+        String blocked=!eligible?"Hồ sơ đã chuyển bước hoặc đang chờ hủy/đối soát. Tài liệu đã ký vẫn được giữ để tra cứu."
+            :expired?"Hết hạn ký cọc; chủ nhà cần mở lại hạn ký. Tiền đã xác nhận không bị đảo.":null;
+        return new Overview(rental.getDepositAmount()!=null && rental.getDepositAmount().signum()>0,
+            eligible&&!expired,blocked,found.map(Contract::getId).orElse(null));
+    }
     /** Zero-deposit exemption; no synthetic receipt or deposit signing document. */
     @Transactional(readOnly=true)
     public boolean signedOrExempt(RentalRequest r) {

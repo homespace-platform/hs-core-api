@@ -128,9 +128,11 @@ public class ContractController {
     }
 
     @GetMapping("/by-rental-request/{rentalRequestId}")
-    public ApiResponse<ContractResponse> getByRentalRequest(@PathVariable String rentalRequestId) {
+    public ApiResponse<ContractResponse> getByRentalRequest(@PathVariable String rentalRequestId,
+            @RequestParam(defaultValue = "false") boolean includeDepositFallback) {
         return ApiResponse.<ContractResponse>builder()
-                .result(contractService.findByRentalRequestId(rentalRequestId))
+                .result(includeDepositFallback ? contractService.findPrimaryByRentalRequestId(rentalRequestId)
+                    : contractService.findByRentalRequestId(rentalRequestId))
                 .build();
     }
 
@@ -152,10 +154,13 @@ public class ContractController {
             @RequestParam(required = false) ContractStatus status,
             @RequestParam(required = false) ContractPartyRole role,
             @RequestParam(defaultValue = "false") boolean billableOnly,
+            @RequestParam(defaultValue = "false") boolean includeDepositFallback,
             @RequestParam(defaultValue = "1") @Min(1) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size
     ) {
-        return contractService.getContractsForCurrentUser(requireUserId(), status, role, billableOnly, page, size);
+        return includeDepositFallback
+            ? contractService.getContractsForCurrentUser(requireUserId(), status, role, billableOnly, page, size, true)
+            : contractService.getContractsForCurrentUser(requireUserId(), status, role, billableOnly, page, size);
     }
 
     @GetMapping("/{contractId}")
