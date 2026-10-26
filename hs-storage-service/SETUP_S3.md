@@ -356,7 +356,7 @@ Sau khi thay đổi biến môi trường, phải dừng và khởi động lạ
 Import collection:
 
 ```text
-hs-infrastructure/postman/Storage Service - Gateway.postman_collection.json
+hs-infra/postman/Storage Service - Gateway.postman_collection.json
 ```
 
 Chạy theo thứ tự:

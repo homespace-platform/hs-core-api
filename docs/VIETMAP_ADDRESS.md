@@ -1,7 +1,7 @@
 # Vietmap v4 — địa chỉ theo schema mới
 
 Thay thế cấu trúc địa chỉ cũ; không backfill, không ánh xạ mã cũ, không sửa/chạy listing seed trong đợt này.
-Nguồn hợp đồng API: 4 phần đầu của `hs-infrastructure/postman/vietmap/response.txt` và mẫu gọi thật tại `postman/vietmap/verified-v4-sample.json`.
+Nguồn hợp đồng API: 4 phần đầu của `hs-infra/postman/vietmap/response.txt` và mẫu gọi thật tại `postman/vietmap/verified-v4-sample.json`.
 
 ## Lưu trữ
 

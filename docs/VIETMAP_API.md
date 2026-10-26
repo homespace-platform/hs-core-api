@@ -120,7 +120,7 @@ Chỉ gọi endpoint cần dùng, debounce khi nhập; không gọi đủ bốn 
 
 ## Postman
 
-Import `hs-infrastructure/postman/vietmap/HomeSpace_Address_API_Gateway.postman_collection.json`.
+Import `hs-infra/postman/vietmap/HomeSpace_Address_API_Gateway.postman_collection.json`.
 Điền `access_token`, kiểm tra `base_url`, chạy từng request thủ công.
 Chọn một dòng từ Autocomplete/Geocode/Reverse rồi dán `refId` vào biến `ref_id` để chạy Place.
 Các request có kiểm tra HTTP/envelope/shape; không tự gửi request nối tiếp hoặc tự ghi CSDL.

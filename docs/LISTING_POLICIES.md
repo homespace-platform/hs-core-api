@@ -18,12 +18,12 @@ Phạt đóng trễ nhập lúc soạn hợp đồng, cùng quy trình chốt c�
 
 ## Word và prompt
 
-Backend thêm `{{#policiesTable}}`, hai cột Chính sách | Quy định áp dụng; catalog có 64 mã. CONTRACT_PROMPT.md ở hs-infrastructure/prompts là nguồn hướng dẫn duy nhất để tạo mới hoàn toàn ba DOCX, kiểm tra và upload/activate phiên bản template mới. Không cần mẫu Word cũ hoặc file prompt phụ. Các DOCX hiện có chưa được sửa/xóa trực tiếp trong tác vụ này.
+Backend thêm `{{#policiesTable}}`, hai cột Chính sách | Quy định áp dụng; catalog có 64 mã. CONTRACT_PROMPT.md ở hs-infra/prompts là nguồn hướng dẫn duy nhất để tạo mới hoàn toàn ba DOCX, kiểm tra và upload/activate phiên bản template mới. Không cần mẫu Word cũ hoặc file prompt phụ. Các DOCX hiện có chưa được sửa/xóa trực tiếp trong tác vụ này.
 
 Template cũ chưa có marker: in policy trong khối thỏa thuận để không mất dữ liệu, trả warning completeness. Template mới có marker: không lặp đoạn fallback. Cần sửa mẫu để bỏ câu mặc định trái Listing, nhất là thú cưng dẫn về Bảng tiện ích hoặc giờ cố định. Không sửa PDF đã ký. Chỉ kiểm tra XML/placeholder, chưa xác minh bố cục bằng ảnh do runtime thiếu bundled LibreOffice.
 
 ## Reset và kiểm thử
 
-Người dùng tự reset DB; tác vụ không drop DB. Sau reset, khởi động Core để JPA tạo bảng/initializer tạo catalog rồi chạy hs-infrastructure/postgres/listings_seed_hcm.sql. Seed chọn policy theo catalog/category, sinh giá trị hợp lệ đa dạng; không có phạt. Không seed trước bootstrap Core.
+Người dùng tự reset DB; tác vụ không drop DB. Sau reset, khởi động Core để JPA tạo bảng/initializer tạo catalog rồi chạy hs-infra/postgres/seed/listings_seed_hcm.sql. Seed chọn policy theo catalog/category, sinh giá trị hợp lệ đa dạng; không có phạt. Không seed trước bootstrap Core.
 
 Kiểm tra tạo/sửa/nhân bản cả ba loại, đổi category không gửi field loại khác, thiếu required bị chặn. Xem detail/preview, gửi yêu cầu thuê, đối chiếu snapshot khi Listing đổi về sau. Trên DRAFT nhập phạt và công tơ; Listing không có phạt. Kiểm tra Word/cảnh báo template cũ. Khi ACTIVE, chỉnh policy qua phụ lục, đối chiếu trước/sau và đủ hai chữ ký; dữ liệu gốc giữ nguyên.

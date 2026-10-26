@@ -7,7 +7,7 @@
 Import collection:
 
 ```text
-hs-infrastructure/postman/Storage Service - Gateway.postman_collection.json
+hs-infra/postman/Storage Service - Gateway.postman_collection.json
 ```
 
 File thật được upload trực tiếp từ Postman lên S3. Core API chỉ tạo URL tạm thời và quản lý metadata của file.
