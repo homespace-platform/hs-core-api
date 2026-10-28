@@ -20,10 +20,10 @@ Chưa làm: tự trích tiền ngân hàng, thanh toán từng phần, bàn giao
 
 ## Dev test thời gian
 
-Trong `hs-core-api/.env`, khi Core chạy profile `dev`/`test` (Run/Debug Core hiện có đã nạp file này):
+Trong `hs-api-service/src/main/resources/application.properties`, khi Core chạy profile `dev`/`test`:
 
 ```properties
-HOMESPACE_TIME_SIMULATED_AT=2026-11-01T10:00:00
+homespace.time.simulated-at=2026-11-01T10:00:00
 ```
 
 Giá trị không có `Z`/offset được hiểu là **giờ Việt Nam** (`Asia/Ho_Chi_Minh`), không cần tự đổi sang UTC. Giá trị ISO-8601 có `Z` hoặc offset vẫn được hỗ trợ để tương thích với cấu hình cũ. Để trống để dùng giờ thực. Chỉ cho phép giá trị khác rỗng ở profile `dev`/`test`. Sau khi đổi giá trị, khởi động lại core API; log khởi động sẽ hiện giờ Việt Nam và UTC đã áp dụng. Job đồng bộ trong vòng một phút hoặc tải lại trang chi tiết hợp đồng để đồng bộ ngay. Chỉ đồng hồ của nghiệp vụ hóa đơn/thanh toán tháng được giả lập; OTP, SmartCA, lưu trữ và audit dùng giờ thực.

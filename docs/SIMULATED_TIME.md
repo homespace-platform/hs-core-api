@@ -1,10 +1,10 @@
 # Kịch bản test độc lập — hợp đồng 3 tháng, hiệu lực 21/10/2026
 
-## Mốc hôm nay — 26/10/2026
+## Mốc giả lập ví dụ — 26/10/2026
 
-Mốc giả lập cho hôm nay là **26/10/2026 lúc 10:00:00, giờ Việt Nam (UTC+7)**: `HOMESPACE_TIME_SIMULATED_AT=2026-10-26T10:00:00`. Nếu muốn dùng đúng ngày/giờ thực hiện tại, để `HOMESPACE_TIME_SIMULATED_AT=` trống; ví dụ giả lập này không tự cập nhật theo thời gian thực.
+Mốc giả lập ví dụ là **26/10/2026 lúc 10:00:00, giờ Việt Nam (UTC+7)**: `homespace.time.simulated-at=2026-10-26T10:00:00`. Nếu muốn dùng đúng ngày/giờ thực hiện tại, để `homespace.time.simulated-at=` trống trong properties; ví dụ giả lập này không tự cập nhật theo thời gian thực.
 
-Các UC bên dưới vẫn giữ ngày bắt đầu hợp đồng **21/10/2026** và các mốc tương ứng để không thay đổi lịch hóa đơn/phụ lục của fixture đã tạo. Không coi ngày 21/10 trong các UC là hôm nay và không lùi đồng hồ trên dữ liệu đã tiến lịch. Việc cập nhật tài liệu này không tự thay đổi `.env` hoặc đồng hồ Core đang chạy.
+Các UC bên dưới vẫn giữ ngày bắt đầu hợp đồng **21/10/2026** và các mốc tương ứng để không thay đổi lịch hóa đơn/phụ lục của fixture đã tạo. Không coi ngày 21/10 trong các UC là hôm nay và không lùi đồng hồ trên dữ liệu đã tiến lịch. Việc cập nhật tài liệu này không tự thay đổi đồng hồ của tiến trình Core đang chạy.
 
 ## Luồng nhận nhà mới — 22/10/2026
 
@@ -22,29 +22,23 @@ Hạn chủ nhà phản hồi 24 giờ; giữ chỗ chưa báo chuyển 60 phút
 - Không lùi giờ để chạy lại một nhánh trên HĐ đã tiến tới tháng 12 hoặc tháng 01. Đổi giờ giả lập **không hoàn tác** hóa đơn, phí phạt, yêu cầu, công nợ hoặc chữ ký.
 - Khi chuyển UC, có thể đặt lại 21/10 để **tạo HĐ mới với tin/chỗ thuê khác**, nhưng mọi dữ liệu HĐ cũ vẫn còn. Không tái sử dụng HĐ cũ làm fixture mới.
 - Scheduler xử lý **tất cả HĐ gốc ACTIVE/EXPIRED**, không chỉ HĐ đang mở. **Không tạo sẵn toàn bộ HĐ các UC rồi chạy một UC tới tháng 01**: các HĐ kia cũng sẽ bị tiến lịch. Tạo HĐ của ca sắp chạy; muốn cách ly hoàn toàn thì dùng dữ liệu/CSDL dev riêng hoặc snapshot dev riêng, không reset CSDL thật.
-- Mỗi hàng: sửa `HOMESPACE_TIME_SIMULATED_AT` trong `hs-core-api/.env` theo mốc `homespace.time.simulated-at` của bảng, dừng/chạy lại Core để nạp lại biến môi trường, chờ khoảng 1 phút, làm mới cả hai tài khoản rồi mới thao tác. Các hàng cùng ngày nhưng khác giờ vẫn là các bước riêng.
+- Mỗi hàng: sửa `homespace.time.simulated-at` trong `hs-core-api/hs-api-service/src/main/resources/application.properties` theo mốc của bảng, build/restart Core để nạp lại cấu hình, chờ khoảng 1 phút, làm mới cả hai tài khoản rồi mới thao tác. Các hàng cùng ngày nhưng khác giờ vẫn là các bước riêng.
 - Giờ trong file là **giờ Việt Nam UTC+7**, không có `Z`. Đồng hồ đứng yên ở mốc đã đặt; chờ ngoài đời không tự tăng giờ giả lập. Job chạy ở lượt đầu sau mốc, không bảo đảm đúng từng giây.
 - Không thực hiện thao tác thanh toán, giữ cọc/chấm dứt/bàn giao giả trên hợp đồng thật. Các ca đó chỉ dành cho dữ liệu demo.
-- Cuối buổi để `HOMESPACE_TIME_SIMULATED_AT=` rỗng trong `.env` và dừng/chạy lại Core. Không chỉ dựa vào DevTools reload vì môi trường của tiến trình Java cũ không tự cập nhật.
+- Cuối buổi để `homespace.time.simulated-at=` rỗng trong properties và build/restart Core. Không chỉ dựa vào DevTools reload vì tiến trình Java cũ không tự nạp lại cấu hình.
 
 ## Cấu hình test
 
-Riêng đồng hồ giả lập đặt trong `hs-core-api/.env`, khi Core chạy profile dev/test:
-
-```dotenv
-HOMESPACE_TIME_SIMULATED_AT=2026-10-26T10:00:00
-```
-
-`application.properties` chỉ ánh xạ biến (không ghi cứng ngày). Các cấu hình nghiệp vụ khác vẫn ở file này:
+Đồng hồ giả lập và cấu hình nghiệp vụ đặt trực tiếp trong `hs-api-service/src/main/resources/application.properties`, khi Core chạy profile dev/test:
 
 ```properties
-homespace.time.simulated-at=${HOMESPACE_TIME_SIMULATED_AT:}
+homespace.time.simulated-at=2026-10-26T10:00:00
 homespace.billing.sync-delay-ms=60000
 homespace.billing.extension-response-hours=48
 homespace.closure.response-hours=48
 ```
 
-Các giá trị nghiệp vụ khác được ghi trực tiếp trong properties. Chỉ giá trị đồng hồ giả lập chuyển sang `.env`/`.env.example`. Cấu hình Run/Debug Core trong `.vscode/launch.json` đã nạp `hs-core-api/.env`; chạy bằng terminal/JAR cần truyền biến môi trường tương ứng qua launcher (Java không tự đọc `.env`). Khi kết thúc test, để `HOMESPACE_TIME_SIMULATED_AT=` rỗng rồi dừng/chạy lại Core; đổi giá trị này không cần build lại. Việc trở về giờ thực không xóa hóa đơn/công nợ đã tạo trước đó.
+Không dùng biến `.env` cho đồng hồ giả lập nữa. Khi kết thúc test, để `homespace.time.simulated-at=` rỗng rồi restart Core; nếu chạy JAR thì build lại để đóng gói properties mới. Các key bí mật vẫn do launcher nạp từ `.env`. Việc trở về giờ thực không xóa hóa đơn/công nợ đã tạo trước đó.
 
 Không cần SQL vá riêng. Nếu tạo lại DB dev, Hibernate với `JPA_DDL_AUTO=update` tạo schema; `validate/none` không tạo schema trên DB trống. Không drop DB khi Core đang chạy.
 

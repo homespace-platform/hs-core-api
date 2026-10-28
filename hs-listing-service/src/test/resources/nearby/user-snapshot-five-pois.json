@@ -1,0 +1,156 @@
+{
+  "summary": {
+    "queryType": "NEARBY",
+    "queryTime": 20,
+    "numResults": 5,
+    "offset": 0,
+    "totalResults": 100,
+    "fuzzyLevel": 1,
+    "geoBias": {
+      "lat": 10.8209195,
+      "lon": 106.6872986
+    }
+  },
+  "results": [
+    {
+      "type": "POI",
+      "id": "SVxbmlJ-f0i3GNli51c41A",
+      "dist": 24.193703,
+      "poi": {
+        "name": "Trường Ngoại Ngữ-Tin Học Quốc Tế Thái Bình Dương",
+        "categorySet": [
+          {
+            "id": 7372010
+          }
+        ],
+        "categories": [
+          "language school",
+          "school"
+        ],
+        "classifications": [
+          {
+            "code": "SCHOOL",
+            "names": [
+              {
+                "nameLocale": "en-US",
+                "name": "language school"
+              },
+              {
+                "nameLocale": "en-US",
+                "name": "school"
+              }
+            ]
+          }
+        ]
+      },
+      "position": {
+        "lat": 10.821082,
+        "lon": 106.687152
+      },
+      "address": {
+        "streetNumber": "8",
+        "streetName": "Đường Nguyễn Văn Bảo",
+        "municipalitySubdivision": "Phường 4",
+        "municipality": "Hạnh Thông",
+        "countrySubdivision": "Hồ Chí Minh",
+        "countrySubdivisionName": "Hồ Chí Minh",
+        "countrySubdivisionCode": "SG",
+        "postalCode": "71423",
+        "countryCode": "VN",
+        "country": "Việt Nam",
+        "countryCodeISO3": "VNM",
+        "freeformAddress": "Số 8, Đường Nguyễn Văn Bảo, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+        "localName": "Hồ Chí Minh"
+      },
+      "info": "search:ta:704007000015959-VN",
+      "score": 99.9758071899,
+      "viewport": {
+        "topLeftPoint": {
+          "lat": 10.82198,
+          "lon": 106.68624
+        },
+        "btmRightPoint": {
+          "lat": 10.82018,
+          "lon": 106.68807
+        }
+      },
+      "entryPoints": [
+        {
+          "type": "main",
+          "position": {
+            "lat": 10.82112,
+            "lon": 106.68724
+          }
+        }
+      ]
+    },
+    {
+      "type": "POI",
+      "id": "K2X_D_ae7Iv3GkKNXtxhxQ",
+      "dist": 28.075152,
+      "poi": {
+        "name": "Trung Tâm Tin Học Ngoại Ngữ Dương Hùng Mạnh",
+        "categorySet": [
+          {
+            "id": 7372010
+          }
+        ]
+      },
+      "position": {
+        "lat": 10.820742,
+        "lon": 106.687481
+      }
+    },
+    {
+      "type": "POI",
+      "id": "qGyQP9zeugpguorbq2yxwg",
+      "dist": 49.667827,
+      "poi": {
+        "name": "Trường Ngoại Ngữ Ngọc Nam",
+        "categorySet": [
+          {
+            "id": 7372010
+          }
+        ]
+      },
+      "position": {
+        "lat": 10.820516,
+        "lon": 106.687104
+      }
+    },
+    {
+      "type": "POI",
+      "id": "PD2I_Oe3mWp_DaqB618XFQ",
+      "dist": 57.278134,
+      "poi": {
+        "name": "Bồi Dưỡng Văn Hóa",
+        "categorySet": [
+          {
+            "id": 7372
+          }
+        ]
+      },
+      "position": {
+        "lat": 10.820466,
+        "lon": 106.68705
+      }
+    },
+    {
+      "type": "POI",
+      "id": "BIyEIsLrvlMYnezZQI7ZPg",
+      "dist": 63.251334,
+      "poi": {
+        "name": "Trường Tiểu Học Dân Lập Bán Trú-Nội Trú Nhựt Tân",
+        "categorySet": [
+          {
+            "id": 7372005
+          }
+        ]
+      },
+      "position": {
+        "lat": 10.821474,
+        "lon": 106.687168
+      }
+    }
+  ]
+}

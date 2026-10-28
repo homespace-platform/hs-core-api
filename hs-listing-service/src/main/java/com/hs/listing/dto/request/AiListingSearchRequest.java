@@ -7,10 +7,14 @@ import java.util.List;
  * {@code keyword} is a free-text place/landmark term matched like the public /rent keyword search
  * (title, description or address), used for landmarks such as "ĐH Quốc gia" that are not an administrative unit.
  */
-public record AiListingSearchRequest(List<Filter> filters, String sort, Integer limit, String keyword) {
+public record AiListingSearchRequest(List<Filter> filters, String sort, Integer limit, String keyword, NearbyCriteria nearby) {
+    public AiListingSearchRequest(List<Filter> filters, String sort, Integer limit, String keyword) {
+        this(filters, sort, limit, keyword, null);
+    }
     public AiListingSearchRequest(List<Filter> filters, String sort, Integer limit) {
         this(filters, sort, limit, null);
     }
 
     public record Filter(String field, String op, Object value) {}
+    public record NearbyCriteria(String placeId, com.hs.listing.nearby.NearbyTypes.Group group, Integer radiusMeters) {}
 }

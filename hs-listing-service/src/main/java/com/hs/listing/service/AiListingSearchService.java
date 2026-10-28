@@ -25,6 +25,8 @@ public class AiListingSearchService {
     private static final Map<String, Field> FIELDS = buildFields();
     private final NamedParameterJdbcTemplate jdbc;
     private final int maxResults;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.hs.listing.nearby.NearbyQueryService nearbyQuery;
 
     public AiListingSearchService(NamedParameterJdbcTemplate jdbc) {
         this(jdbc,20);
@@ -54,6 +56,10 @@ public class AiListingSearchService {
 
         StringBuilder where = new StringBuilder("l.active = true AND l.status = 'PUBLISHED' AND (l.expires_at IS NULL OR l.expires_at > now())");
         MapSqlParameterSource params = new MapSqlParameterSource().addValue("limit", limit);
+        if (request.nearby() != null) {
+            if (nearbyQuery == null) throw new IllegalArgumentException("Nearby query is unavailable");
+            where.append(nearbyQuery.searchPredicate(request.nearby().placeId(), request.nearby().group(), request.nearby().radiusMeters(), params));
+        }
         for (int index = 0; index < filters.size(); index++) {
             AiListingSearchRequest.Filter filter = filters.get(index);
             if (filter == null || filter.field() == null || filter.op() == null) {

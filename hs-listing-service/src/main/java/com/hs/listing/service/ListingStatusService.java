@@ -18,6 +18,8 @@ import java.util.Set;
 
 @Service
 public class ListingStatusService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.context.ApplicationEventPublisher nearbyEvents;
     /**
      * Owner may hide a published listing or mark it rented outside the platform.
      * {@link ListingStatus#RENTED} is reserved for the contract flow and is not owner-initiated.
@@ -231,6 +233,9 @@ public class ListingStatusService {
             listing.setExpiresAt(now.plus(publicationDurationDays, ChronoUnit.DAYS));
         }
         listingRepository.save(listing);
+
+        if (nearbyEvents != null && target == ListingStatus.PUBLISHED)
+            nearbyEvents.publishEvent(new com.hs.listing.nearby.NearbyTypes.ScanChanged(listing.getId()));
 
         // Nếu tin đăng rời khỏi trạng thái PUBLISHED (bị ẩn, hết hạn, đã thuê, vi phạm...)
         // -> Tự động hủy toàn bộ lịch hẹn xem nhà đang active (PENDING hoặc CONFIRMED)

@@ -28,6 +28,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 public class ListingService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.context.ApplicationEventPublisher nearbyEvents;
     private final ListingRepository listingRepository;
     private final ListingAddressRepository addressRepository;
     private final StorageObjectRepository storageObjectRepository;
@@ -630,6 +632,8 @@ public class ListingService {
         target.setListingId(listingId);
         target.setActive(true);
         addressRepository.save(target);
+        if (nearbyEvents != null && listing.getStatus() == ListingStatus.PUBLISHED)
+            nearbyEvents.publishEvent(new com.hs.listing.nearby.NearbyTypes.ScanChanged(listing.getId()));
     }
 
     private Set<String> normalized(List<String> values) {

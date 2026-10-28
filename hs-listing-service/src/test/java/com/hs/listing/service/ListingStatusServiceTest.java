@@ -45,12 +45,15 @@ class ListingStatusServiceTest {
     void approvingPendingListingSetsPublicationWindow() {
         Listing listing = listing(ListingStatus.PENDING_REVIEW);
         when(listings.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+        var nearbyEvents = mock(org.springframework.context.ApplicationEventPublisher.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "nearbyEvents", nearbyEvents);
 
         service.changeByAdmin("admin-1", "listing-1", ListingStatus.PUBLISHED, null);
 
         assertEquals(ListingStatus.PUBLISHED, listing.getStatus());
         assertNotNull(listing.getPublishedAt());
         assertEquals(30, ChronoUnit.DAYS.between(listing.getPublishedAt(), listing.getExpiresAt()));
+        verify(nearbyEvents).publishEvent(new com.hs.listing.nearby.NearbyTypes.ScanChanged("listing-1"));
     }
 
     @Test
