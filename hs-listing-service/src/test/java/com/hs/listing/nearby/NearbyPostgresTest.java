@@ -43,7 +43,7 @@ class NearbyPostgresTest {
  NamedParameterJdbcTemplate jdbc;NearbySettings settings;NearbyRepository repo;NearbyQueryService query;
  @BeforeEach void setup()throws Exception {
   jdbc=new NamedParameterJdbcTemplate(dataSource);settings=NearbyConfigurationTest.configured();
-  settings.setLicenseApproved(true);settings.setLicensePolicyId("offline-test-only");settings.setQueryEnabled(true);settings.setMaxPagesPerGroup(1);
+  settings.setLicenseApproved(true);settings.setLicensePolicyId("offline-test-only");settings.setQueryEnabled(true);
   repo=new NearbyRepository(jdbc,new DataSourceTransactionManager(dataSource),settings);query=new NearbyQueryService(repo,settings);
   new NearbyCategoryInitializer(categories).run();
   jdbc.getJdbcTemplate().execute("TRUNCATE listings CASCADE");
@@ -69,7 +69,8 @@ class NearbyPostgresTest {
     Map<String,Set<String>> m=new HashMap<>();
     for(String id:List.of("7372","7377","9913","7321","7326","9373","9374","9663","9956","7391","7332","9361","7373","7327",
       "7315","9376","7328","7397","9942","7311","7309","7369","7313","7380","9362","7342","7317","7318","7319","9378","9900","9902","9927","7376","7305","7320","7338","7374","9369","9911","9371"))m.put(id,Set.of());
-    m.put("7372010",Set.of("7372"));m.put("7372005",Set.of("7372"));return m;
+    m.put("7372010",Set.of("7372"));m.put("7372005",Set.of("7372"));
+    m.put("7332005",Set.of("7332"));m.put("9361009",Set.of("9361"));m.put("9942002",Set.of("9942"));return m;
    }
    public Page search(Location l,int r,Set<String> c,int offset) {
     try{Page p=TomTomNearbyClient.parse(NearbyParserTest.fixture(),0);
@@ -84,6 +85,143 @@ class NearbyPostgresTest {
  }
  long count(String table){return jdbc.queryForObject("SELECT count(*) FROM "+table,Map.of(),Long.class);}
  long links(String listing){return jdbc.queryForObject("SELECT count(*) FROM listing_nearby_places WHERE listing_id=:id",Map.of("id",listing),Long.class);}
+ void onlyA(){jdbc.update("UPDATE listings SET status='HIDDEN' WHERE id=:id",Map.of("id",B));}
+ void due(Job job){jdbc.update("UPDATE nearby_scan_jobs SET next_attempt_at=now()-interval '1 second' WHERE id=:id",Map.of("id",job.id()));}
+ List<Poi> extraPois(Location l){return List.of(
+  new Poi("new-bank","Bank",l.latitude()+0.001,l.longitude(),null,null,Set.of("7328"),null,null,null),
+  new Poi("new-pharmacy","Pharmacy and school",l.latitude()+0.002,l.longitude(),null,null,Set.of("7326","7372"),null,null,null));}
+ @Test void combinedQueryUsesExactlyTenCategoriesAndCreatesOneRunPerListing(){
+  var calls=new ArrayList<String>();NearbyProvider base=fake(true);
+  NearbyProvider combined=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int r,Set<String> c,int offset){
+    assertEquals("7372,7377,7321,7326,7332005,9361009,7315,7328,9942002,9362",String.join(",",c));
+    assertEquals(0,offset);calls.add(l.listingId());return base.search(l,r,c,offset);
+   }
+  };
+  repo.reconcile(2000,25);var worker=new NearbyWorker(settings,repo,combined,new NearbyCatalog());
+  Job job;while((job=repo.claim())!=null)worker.process(job);
+  assertEquals(2,calls.size());assertEquals(2,count("nearby_scan_runs"));
+  assertEquals(5,count("nearby_places"));assertEquals(5,count("nearby_place_sources"));assertEquals(10,count("listing_nearby_places"));
+  var summary=query.summaries(new BatchRequest(List.of(A),2000,null,1)).getFirst();
+  assertEquals(7,summary.groups().size());
+  assertTrue(summary.groups().stream().allMatch(g->g.coverageStatus().equals("COMPLETE_PROVIDER_RESPONSE")));
+  assertEquals("NOT_REQUESTED",query.summaries(new BatchRequest(List.of(A),2000,Set.of(Group.SPORTS),1)).getFirst().groups().getFirst().coverageStatus());
+ }
+ @Test void emptyAreaFinishesAfterOneRequestAndDoesNotSearchForMissingGroups(){
+  onlyA();NearbyProvider base=fake(true);var calls=new ArrayList<Integer>();
+  NearbyProvider empty=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int r,Set<String> c,int offset){calls.add(offset);return new Page(0,0,0,List.of(),0);}
+  };
+  repo.reconcile(2000,25);new NearbyWorker(settings,repo,empty,new NearbyCatalog()).process(repo.claim());
+  assertEquals(List.of(0),calls);assertEquals(0,links(A));
+  var summary=query.summaries(new BatchRequest(List.of(A),2000,null,1)).getFirst();
+  assertTrue(summary.groups().stream().allMatch(g->g.knownCount()==0&&g.coverageStatus().equals("COMPLETE_PROVIDER_RESPONSE")));
+  repo.reconcile(2000,25);assertNull(repo.claim());
+ }
+ @Test void onePoiWithMultipleCategoriesIsLinkedToEachGroupWithoutCopyingThePoi(){
+  onlyA();NearbyProvider base=fake(true);
+  NearbyProvider mixed=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int r,Set<String> c,int offset){return new Page(0,2,2,extraPois(l),0);}
+  };
+  repo.reconcile(2000,25);new NearbyWorker(settings,repo,mixed,new NearbyCatalog()).process(repo.claim());
+  assertEquals(2,count("nearby_places"));assertEquals(2,links(A));
+  assertEquals(2L,jdbc.queryForObject("SELECT count(*) FROM nearby_place_categories c JOIN nearby_place_sources s ON s.place_id=c.place_id WHERE s.external_id='new-pharmacy'",Map.of(),Long.class));
+ }
+ @Test void oneRequestStoresAtMostOneHundredWithoutFillingMissingCategories(){
+  onlyA();NearbyProvider base=fake(true);var offsets=new ArrayList<Integer>();
+  NearbyProvider capped=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int r,Set<String> c,int offset){
+    assertEquals(settings.categoryIds(),c);assertEquals(0,offset);offsets.add(offset);
+    var pois=new ArrayList<Poi>();
+    for(int i=0;i<100;i++)pois.add(new Poi("single-"+i,"Place "+i,l.latitude()+i*0.000001,l.longitude(),null,null,
+     Set.of(i<95?"7315":"7326"),null,null,null));
+    return new Page(0,100,900,pois,0);
+   }
+  };
+  repo.reconcile(2000,25);var worker=new NearbyWorker(settings,repo,capped,new NearbyCatalog());Job job=repo.claim();worker.process(job);
+  assertEquals(List.of(0),offsets);assertEquals(100,links(A));assertEquals(100,count("nearby_places"));assertEquals(1,count("nearby_scan_runs"));
+  var summary=query.summaries(new BatchRequest(List.of(A),2000,null,1)).getFirst();
+  assertTrue(summary.groups().stream().allMatch(g->g.coverageStatus().equals("LIMITED_PROVIDER_RESPONSE")));
+  assertEquals(0,summary.groups().stream().filter(g->g.code()==Group.EDUCATION).findFirst().orElseThrow().knownCount());
+  assertEquals(0,summary.groups().stream().filter(g->g.code()==Group.SHOPPING).findFirst().orElseThrow().knownCount());
+  assertEquals(95,summary.groups().stream().filter(g->g.code()==Group.FOOD_DRINK).findFirst().orElseThrow().knownCount());
+  assertEquals(5,query.places(A,2000,null,1,null).items().size());assertEquals(100,query.places(A,2000,null,1,null).total());
+  assertEquals("SUCCESS",jdbc.queryForObject("SELECT status FROM nearby_scan_jobs WHERE id=:id",Map.of("id",job.id()),String.class));
+  assertEquals(1L,jdbc.queryForObject("SELECT pages_fetched::bigint FROM nearby_scan_runs",Map.of(),Long.class));
+  repo.reconcile(2000,25);assertNull(repo.claim());assertEquals(1,offsets.size());
+ }
+ @Test void quotaCanRetryAFailedRequestButNeverFetchesANextPageAfterSuccess(){
+  onlyA();NearbyProvider base=fake(true);var offsets=new ArrayList<Integer>();
+  NearbyProvider transientFailure=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int r,Set<String> c,int offset){
+    offsets.add(offset);if(offsets.size()==1)throw new Failure("QUOTA_MINUTE",true,60);
+    return new Page(0,5,500,base.search(l,r,c,0).places(),0);
+   }
+  };
+  repo.reconcile(2000,25);var worker=new NearbyWorker(settings,repo,transientFailure,new NearbyCatalog());
+  Job first=repo.claim();worker.process(first);due(first);worker.process(repo.claim());
+  assertEquals(List.of(0,0),offsets);assertEquals(1,count("nearby_scan_runs"));assertEquals(5,links(A));
+  assertEquals("SUCCESS",jdbc.queryForObject("SELECT status FROM nearby_scan_jobs WHERE id=:id",Map.of("id",first.id()),String.class));
+  repo.reconcile(2000,25);assertNull(repo.claim());
+ }
+ @Test void duplicateItemsInOneResponseAreDeduplicatedWithoutRequestingReplacements(){
+  onlyA();NearbyProvider base=fake(true);var calls=new ArrayList<Integer>();
+  NearbyProvider repeated=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int r,Set<String> c,int offset){
+    calls.add(offset);var pois=new ArrayList<>(base.search(l,r,c,0).places());pois.add(pois.getFirst());
+    return new Page(0,6,200,pois,0);
+   }
+  };
+  repo.reconcile(2000,25);new NearbyWorker(settings,repo,repeated,new NearbyCatalog()).process(repo.claim());
+  assertEquals(List.of(0),calls);assertEquals(5,count("nearby_places"));assertEquals(5,count("nearby_place_sources"));assertEquals(5,links(A));
+  assertEquals("PARTIAL",query.summaries(new BatchRequest(List.of(A),2000,Set.of(Group.EDUCATION),1)).getFirst().groups().getFirst().coverageStatus());
+ }
+ @Test void unknownCategoryIsStoredWithoutGuessingItsGroupOrReportingCompleteCoverage(){
+  onlyA();NearbyProvider base=fake(true);
+  NearbyProvider unknown=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int r,Set<String> c,int offset){return new Page(0,1,1,List.of(
+    new Poi("unknown-category","Unknown school-like label",l.latitude(),l.longitude(),null,null,Set.of("737299999"),null,null,null)),0);}
+  };
+  repo.reconcile(2000,25);new NearbyWorker(settings,repo,unknown,new NearbyCatalog()).process(repo.claim());
+  assertEquals(1,count("nearby_places"));assertEquals(1,links(A));assertEquals(0,count("nearby_place_categories"));
+  assertEquals("PARTIAL",query.summaries(new BatchRequest(List.of(A),2000,Set.of(Group.EDUCATION),1)).getFirst().groups().getFirst().coverageStatus());
+ }
+ @Test void changingQueryScopeCannotReuseOldJobsOrEvidence(){
+  scanBoth(true);settings.setCategorySet("7372");assertNull(repo.claim());
+  assertEquals(0,query.places(A,3000,null,1,5).total());
+  assertEquals("NOT_READY",query.summaries(new BatchRequest(List.of(A),3000,Set.of(Group.EDUCATION),1)).getFirst().groups().getFirst().coverageStatus());
+  repo.reconcile(3000,25);assertNotNull(repo.claim());assertEquals(4,count("nearby_scan_jobs"));
+ }
+ @Test void aSavedResponseIsFinalizedAfterACrashWithoutAnotherProviderRequest(){
+  onlyA();NearbyProvider base=fake(true);repo.reconcile(2000,25);Job job=repo.claim();Location l=repo.locations(List.of(A)).getFirst();
+  var catalog=new NearbyCatalog();String run=repo.startRun(job,l,catalog.requestedGroups(settings.categoryIds()),settings.categoryIds());
+  repo.savePage(job,l,run,new Page(0,5,500,base.search(l,2000,settings.categoryIds(),0).places(),0),base.categoryParents(),catalog,true);
+  NearbyProvider noMoreRequests=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location center,int r,Set<String> c,int offset){throw new AssertionError("Already stored the response");}
+  };
+  new NearbyWorker(settings,repo,noMoreRequests,catalog).process(job);
+  assertEquals(1,count("nearby_scan_runs"));assertEquals(5,links(A));
+  assertEquals("LIMITED_PROVIDER_RESPONSE",query.summaries(new BatchRequest(List.of(A),2000,Set.of(Group.EDUCATION),1)).getFirst().groups().getFirst().coverageStatus());
+ }
+ @Test void limitedRefreshReplacesOnlyThisListingsLinksAndKeepsTheSharedPoiWarehouse(){
+  scanBoth(true);NearbyProvider base=fake(true);
+  NearbyProvider refreshed=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int r,Set<String> c,int offset){return new Page(0,1,500,List.of(base.search(l,r,c,0).places().getFirst()),0);}
+  };
+  repo.enqueue(A,3000);new NearbyWorker(settings,repo,refreshed,new NearbyCatalog()).process(repo.claim());
+  assertEquals(1,links(A));assertEquals(5,links(B));assertEquals(5,count("nearby_places"));assertEquals(5,count("nearby_place_sources"));
+  assertEquals(1,query.places(A,3000,null,1,5).total());assertEquals(5,query.places(B,3000,null,1,5).total());
+  assertEquals("LIMITED_PROVIDER_RESPONSE",query.summaries(new BatchRequest(List.of(A),3000,Set.of(Group.EDUCATION),1)).getFirst().groups().getFirst().coverageStatus());
+ }
  @Test void hibernateCreatesNearbyTablesAndReferenceGroupsWithoutExternalDdl(){
   repo.validateSchema();
   assertEquals(8,count("nearby_categories"));
@@ -110,10 +248,10 @@ class NearbyPostgresTest {
    assertEquals("Giáo dục",category.getCategory().getDisplayNameVi());
   }
  }
- @Test void twoListingsReuseFivePlacesButHaveDifferentDistancesAndPartialCoverage(){
+ @Test void twoListingsReuseFivePlacesButHaveDifferentDistancesAndLimitedCoverage(){
   scanBoth(false);assertEquals(5,count("nearby_places"));assertEquals(5,count("nearby_place_sources"));assertEquals(10,count("listing_nearby_places"));
   var summaries=query.summaries(new BatchRequest(List.of(A,B),3000,Set.of(Group.EDUCATION),3));
-  assertEquals("PARTIAL",summaries.getFirst().groups().getFirst().coverageStatus());
+  assertEquals("LIMITED_PROVIDER_RESPONSE",summaries.getFirst().groups().getFirst().coverageStatus());
   assertTrue(summaries.getFirst().groups().getFirst().nearest().getFirst().distanceMeters()<100);
   assertTrue(summaries.getLast().groups().getFirst().nearest().getFirst().distanceMeters()>900);
   repo.enqueue(A,3000);Job retry=repo.claim();new NearbyWorker(settings,repo,fake(false),new NearbyCatalog()).process(retry);
@@ -223,7 +361,7 @@ class NearbyPostgresTest {
  @Test void inFlightPageAtThePreviousAddressCannotRecreateRemovedRelations(){
   scanBoth(true);repo.enqueue(A,3000);Job old=repo.claim();
   Location previous=repo.locations(List.of(A)).getFirst();NearbyProvider provider=fake(true);
-  String run=repo.startRun(old,previous,Group.EDUCATION,Set.of("7372"));
+  String run=repo.startRun(old,previous,Set.of(Group.EDUCATION),Set.of("7372"));
   Page page=provider.search(previous,3000,Set.of("7372"),0);
   jdbc.update("UPDATE listing_addresses SET latitude=10.8259195,updated_at=now() WHERE listing_id=:id",Map.of("id",A));
   repo.enqueue(A,3000);
@@ -254,7 +392,7 @@ class NearbyPostgresTest {
  }
  @Test void lostLeaseAndNewLocationCannotCommitOldResults() {
   repo.reconcile(3000,1);Job job=repo.claim();Location l=repo.locations(List.of(job.listingId())).getFirst();
-  String run=repo.startRun(job,l,Group.EDUCATION,Set.of("7372"));
+  String run=repo.startRun(job,l,Set.of(Group.EDUCATION),Set.of("7372"));
   jdbc.update("UPDATE nearby_scan_jobs SET lease_token=:token WHERE id=:id",Map.of("token",UUID.randomUUID().toString(),"id",job.id()));
   assertThrows(NearbyProvider.Failure.class,()->repo.savePage(job,l,run,new Page(0,0,0,List.of(),0),Map.of(),new NearbyCatalog()));
  }

@@ -6,6 +6,14 @@ import static org.junit.jupiter.api.Assertions.*;
 import static com.hs.listing.nearby.NearbyTypes.*;
 
 class NearbyParserTest {
+ @Test void parsesTheUsersCombinedResponseAndKeepsLeafCategoryIds()throws Exception {
+  var root=new ObjectMapper().readTree(getClass().getResourceAsStream("/nearby/user-snapshot-combined-fifty-pois.json"));
+  Page page=TomTomNearbyClient.parse(root,0);
+  assertEquals(50,page.numResults());assertEquals(100,page.totalResults());assertEquals(50,page.places().size());
+  assertEquals(0,page.malformedCount());assertEquals(50,page.places().stream().map(Poi::externalId).distinct().count());
+  assertTrue(page.places().stream().anyMatch(p->p.categoryIds().contains("7315078")));
+  assertEquals("28 Đường Lê Lợi, Hạnh Thông, Hồ Chí Minh",page.places().getFirst().address());
+ }
  static JsonNode fixture() throws Exception {return new ObjectMapper().readTree(NearbyParserTest.class.getResourceAsStream("/nearby/user-snapshot-five-pois.json"));}
  @Test void parsesActualFiveRowsWithoutInventingMissingHouseNumbers()throws Exception {
   Page p=TomTomNearbyClient.parse(fixture(),0);
@@ -28,7 +36,7 @@ class NearbyParserTest {
   assertEquals(Set.of(Group.EDUCATION),c.classify(Set.of("7372010"),parents));
   assertTrue(c.classify(Set.of("7372999"),parents).isEmpty());
   assertTrue(c.classify(Set.of("9362003"),parents).isEmpty());
-  assertEquals(Set.of("7372"),c.requestCategories(Group.EDUCATION,parents));
+  assertEquals(Set.of(Group.EDUCATION),c.requestedGroups(Set.of("7372")));
  }
  @Test void invalidOffsetCannotBecomeCompleteCoverage()throws Exception {
   assertThrows(NearbyProvider.Failure.class,()->TomTomNearbyClient.parse(fixture(),100));

@@ -8,7 +8,7 @@ import static com.hs.listing.nearby.NearbyTypes.*;
 
 @Component
 public class NearbyCatalog {
- public static final String VERSION="2026-10-28-v1";
+ public static final String VERSION="2026-10-29-v3";
  private final Map<String,Set<Group>> mapping=new LinkedHashMap<>();
  private final Set<String> excluded=new HashSet<>();
  public NearbyCatalog() {
@@ -32,13 +32,21 @@ public class NearbyCatalog {
   }
   return result;
  }
- public Set<String> requestCategories(Group group,Map<String,Set<String>> parents) {
-  Set<String> ids=new TreeSet<>();
-  mapping.forEach((id,groups)->{if(groups.contains(group)&&parents.containsKey(id)&&!excluded.contains(id))ids.add(id);});
-  Set<String> redundant=new HashSet<>();
-  for(String id:ids) for(String parent:ancestors(id,parents)) if(!parent.equals(id)&&ids.contains(parent))redundant.add(id);
-  ids.removeAll(redundant);
-  return ids;
+ public Set<Group> requestedGroups(Set<String> ids) {
+  Set<Group> groups=EnumSet.noneOf(Group.class);
+  for(String id:ids) {
+   if(!mapping.containsKey(id)||mapping.get(id).isEmpty()||excluded.contains(id))
+    throw new IllegalStateException("Nearby category ID has no approved group mapping: "+id);
+   groups.addAll(mapping.get(id));
+  }
+  return groups;
+ }
+ public void verifyRequested(Set<String> ids,Map<String,Set<String>> parents) {
+  requestedGroups(ids);
+  if(!parents.keySet().containsAll(ids))throw new NearbyProvider.Failure("UNVERIFIED_CATEGORY",false);
+ }
+ public boolean unverified(Set<String> ids,Map<String,Set<String>> parents) {
+  return ids.isEmpty()||!parents.keySet().containsAll(ids);
  }
  public Map<String,Set<String>> evidence(Set<String> ids,Map<String,Set<String>> parents){
   Map<String,Set<String>> proof=new TreeMap<>();

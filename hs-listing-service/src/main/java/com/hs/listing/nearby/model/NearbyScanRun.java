@@ -18,7 +18,7 @@ import java.util.Map;
 @Getter
 @Setter
 @Table(name = "nearby_scan_runs", indexes = {
-    @Index(name = "idx_nearby_run_coverage", columnList = "job_id,category_group,expires_at")
+    @Index(name = "idx_nearby_run_coverage", columnList = "job_id,expires_at")
 })
 public class NearbyScanRun extends NearbyIdEntity {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -29,9 +29,11 @@ public class NearbyScanRun extends NearbyIdEntity {
     private String provider;
     @Column(name = "api_version", nullable = false, length = 16)
     private String apiVersion;
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "category_group", nullable = false)
-    private NearbyCategory categoryGroup;
+    // One run covers the combined query, rather than duplicating a run for every group.
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "requested_groups", nullable = false, columnDefinition = "jsonb")
+    @ColumnDefault("'[]'::jsonb")
+    private List<String> requestedGroups = new ArrayList<>();
     @Column(name = "center_lat", nullable = false, precision = 10, scale = 7)
     private BigDecimal centerLat;
     @Column(name = "center_lon", nullable = false, precision = 10, scale = 7)
@@ -56,6 +58,9 @@ public class NearbyScanRun extends NearbyIdEntity {
     @Column(name = "unique_count", nullable = false)
     @ColumnDefault("0")
     private int uniqueCount;
+    @Column(name = "response_consistent", nullable = false)
+    @ColumnDefault("true")
+    private boolean responseConsistent = true;
     @Column(name = "total_results_reported")
     private Integer totalResultsReported;
     @JdbcTypeCode(SqlTypes.JSON)

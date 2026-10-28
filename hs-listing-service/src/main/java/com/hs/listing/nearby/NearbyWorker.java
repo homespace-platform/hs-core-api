@@ -57,39 +57,42 @@ public class NearbyWorker {
   try {
    Location l=repo.locations(List.of(job.listingId())).stream().findFirst().orElse(null);
    if(l==null||!l.hash().equals(job.locationHash())) {repo.finishJob(job,"SUPERSEDED",null,86400);return;}
-   Map<String,Set<String>> parents=provider.categoryParents();boolean complete=true;
-   for(Group group:Group.values()) {
-    Set<String> requested=catalog.requestCategories(group,parents);
-    run=repo.startRun(job,l,group,requested);
-    if(requested.isEmpty()){repo.finishRun(run,"PARTIAL","UNVERIFIED_CATEGORY");complete=false;run=null;continue;}
-    boolean finished=false,clean=true;int offset=0;Set<String> seen=new HashSet<>();Integer reported=null;
-    for(int pageIndex=0;pageIndex<settings.getMaxPagesPerGroup();pageIndex++) {
-     repo.heartbeat(job);
-     Page page=provider.search(l,job.radiusM(),requested,offset);
-     if(reported!=null&&reported!=page.totalResults())clean=false;
-     reported=page.totalResults();
-     int before=seen.size();for(Poi p:page.places())seen.add(p.externalId());
-     repo.savePage(job,l,run,page,parents,catalog);
-     clean &= page.malformedCount()==0;
-     if(page.numResults()>0&&seen.size()==before){clean=false;break;}
-     int next=page.offset()+page.numResults();
-     if(next>=page.totalResults()){finished=true;break;}
-     if(page.numResults()==0||next<=offset){clean=false;break;}
-     offset=next;
+   Set<String> requested=settings.categoryIds();
+   Map<String,Set<String>> parents=provider.categoryParents();
+   catalog.verifyRequested(requested,parents);
+   run=repo.startRun(job,l,catalog.requestedGroups(requested),requested);
+   NearbyRepository.Snapshot snapshot=repo.snapshot(run);
+   // A saved response survives a crash before finishRun; never fetch it a second time.
+   if(snapshot.pagesFetched()==0) {
+    repo.heartbeat(job);
+    Page page=provider.search(l,job.radiusM(),requested,0);
+    if(page.offset()!=0||page.numResults()>settings.getResultLimit())throw new NearbyProvider.Failure("INCONSISTENT_PAGE",false);
+    boolean clean=page.malformedCount()==0;Set<String> seen=new HashSet<>();
+    for(Poi p:page.places()) {
+     if(!seen.add(p.externalId()))clean=false;
+     if(distance(l.latitude(),l.longitude(),p.latitude(),p.longitude())>job.radiusM()+1)clean=false;
+     if(catalog.unverified(p.categoryIds(),parents))clean=false;
     }
-    boolean full=finished&&clean;complete &= full;
-    repo.finishRun(run,full?"COMPLETE_PROVIDER_RESPONSE":"PARTIAL",full?null:"PAGE_BUDGET_OR_INCONSISTENT_RESPONSE");
-    run=null;
+    // Store the single response and deduplicate it. Missing groups never trigger extra calls.
+    repo.savePage(job,l,run,page,parents,catalog,clean);
+    snapshot=repo.snapshot(run);
    }
-   repo.finishJob(job,complete?"SUCCESS":"PARTIAL",null,settings.getRetentionHours()*3600L);
+   boolean clean=snapshot.consistent();
+   boolean limited=snapshot.total()!=null&&snapshot.returnedCount()<snapshot.total();
+   String coverage=!clean?"PARTIAL":limited?"LIMITED_PROVIDER_RESPONSE":"COMPLETE_PROVIDER_RESPONSE";
+   String reason=!clean?"INVALID_OR_UNVERIFIED_ITEMS":limited?"SINGLE_REQUEST_LIMIT":null;
+   repo.finishRun(job,run,coverage,reason);
+   run=null;
+   // A deliberate limit is a successful scan, not a reason to schedule another page.
+   repo.finishJob(job,clean?"SUCCESS":"PARTIAL",null,settings.getRetentionHours()*3600L);
   } catch(NearbyProvider.Failure failure) {
-   if(run!=null)repo.finishRun(run,"PARTIAL",failure.code());
-   boolean quota=failure.code().startsWith("QUOTA_")||failure.code().equals("PROVIDER_PAUSED");
+   boolean quota=failure.code().startsWith("QUOTA_")||failure.code().equals("PROVIDER_PAUSED")||failure.code().equals("TOMTOM_HTTP_429");
    boolean retry=failure.retryable()&&(quota||job.attempts()<settings.getMaxAttempts());
+   if(run!=null){if(retry)repo.deferRun(run,failure.code());else repo.finishRun(job,run,"PARTIAL",failure.code());}
    repo.finishJob(job,failure.code().equals("SUPERSEDED")?"SUPERSEDED":retry?"RETRY_WAIT":"FAILED",failure.code(),Math.max(failure.retryAfterSeconds(),Math.min(3600,60L*(1L<<Math.min(job.attempts(),5)))));
    log.warn("nearby_sync_failed jobId={} code={} retry={}",job.id(),failure.code(),retry);
   } catch(Exception failure) {
-   if(run!=null)repo.finishRun(run,"PARTIAL","INTERNAL_ERROR");
+   if(run!=null)repo.finishRun(job,run,"PARTIAL","INTERNAL_ERROR");
    repo.finishJob(job,job.attempts()<settings.getMaxAttempts()?"RETRY_WAIT":"FAILED","INTERNAL_ERROR",300);
    log.warn("nearby_sync_failed jobId={} errorClass={}",job.id(),failure.getClass().getSimpleName());
   }

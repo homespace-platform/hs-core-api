@@ -13,6 +13,7 @@ import static com.hs.listing.nearby.NearbyTypes.*;
 @Transactional(readOnly=true)
 public class NearbyQueryService {
  private final NearbyRepository repo;private final NearbySettings settings;
+ private final NearbyCatalog catalog=new NearbyCatalog();
  // Rebuild display addresses for already cached rows too; no provider fetch or SQL repair is needed.
  private static final String SOURCE_ADDRESS="""
   (SELECT s.source_address FROM nearby_place_sources s WHERE s.place_id=p.id AND s.provider='TOMTOM'
@@ -27,7 +28,9 @@ public class NearbyQueryService {
   JOIN listings l ON l.id=lp.listing_id JOIN listing_addresses a ON a.listing_id=l.id AND a.active=true
   WHERE l.active=true AND l.status='PUBLISHED' AND (l.expires_at IS NULL OR l.expires_at>now())
    AND lp.listing_location_hash=HASH AND lp.place_position_revision=p.position_revision
-   AND EXISTS(SELECT 1 FROM nearby_scan_runs evidence WHERE evidence.id=lp.evidence_run_id AND evidence.expires_at>now() AND evidence.license_policy_id=:policy)
+   AND EXISTS(SELECT 1 FROM nearby_place_categories scoped WHERE scoped.place_id=p.id AND scoped.category_code IN (:scopeGroups))
+   AND EXISTS(SELECT 1 FROM nearby_scan_runs evidence JOIN nearby_scan_jobs job ON job.id=evidence.job_id
+    WHERE evidence.id=lp.evidence_run_id AND evidence.expires_at>now() AND evidence.license_policy_id=:policy AND job.mapping_version=:version)
    AND EXISTS(SELECT 1 FROM nearby_place_sources s WHERE s.place_id=p.id AND s.content_expires_at>now()
      AND s.license_policy_id=:policy)
   """.replace("HASH",NearbyRepository.HASH);
@@ -37,7 +40,8 @@ public class NearbyQueryService {
   ids.forEach(v->UUID.fromString(v));int radius=settings.radius(request.radiusMeters());
   int nearest=request.nearestPerGroup()==null?3:request.nearestPerGroup();
   if(nearest<1||nearest>5)throw new IllegalArgumentException("nearestPerGroup must be between 1 and 5");
-  Set<Group> groups=request.groups()==null||request.groups().isEmpty()?EnumSet.allOf(Group.class):request.groups();
+  Set<Group> scannedGroups=catalog.requestedGroups(settings.categoryIds());
+  Set<Group> groups=request.groups()==null||request.groups().isEmpty()?scannedGroups:request.groups();
   if(groups.stream().anyMatch(Objects::isNull))throw new IllegalArgumentException("Invalid nearby group");
   if(!enabled())return ids.stream().map(id->new Summary(id,false,radius,List.of(),"Tính năng tiện ích xung quanh chưa được bật.")).toList();
   List<Location> locations=repo.locations(ids);
@@ -71,7 +75,7 @@ public class NearbyQueryService {
    List<GroupSummary> output=new ArrayList<>();
    for(Group group:Group.values())if(groups.contains(group)){
     var items=results.stream().filter(e->e.listing.equals(id)&&e.group==group).toList();
-    Map<String,Object> coverage=coverages.getOrDefault(id+":"+group.name(),Map.of("state","NOT_READY"));
+    Map<String,Object> coverage=coverages.getOrDefault(id+":"+group.name(),Map.of("state",scannedGroups.contains(group)?"NOT_READY":"NOT_REQUESTED"));
     output.add(new GroupSummary(group,items.isEmpty()?0:items.getFirst().count,items.stream().map(Evidence::place).toList(),
       (String)coverage.get("state"),(Instant)coverage.get("at"),(Integer)coverage.get("radius")));
    }
@@ -81,7 +85,7 @@ public class NearbyQueryService {
     double meters=distance(l.latitude(),l.longitude(),target.latitude(),target.longitude());
     targetDistance=new TargetDistance(target.id(),target.name(),meters,meters<=radius,"STRAIGHT_LINE");
    }
-   summaries.add(new Summary(id,true,radius,output,"Khoảng cách đường chim bay. Chỉ phản ánh dữ liệu nguồn đã thu thập; không chứng minh hiện trạng ngoài thực tế.",targetDistance));
+   summaries.add(new Summary(id,true,radius,output,"Khoảng cách đường chim bay. Mỗi lượt lấy tối đa "+settings.getResultLimit()+" địa điểm từ một phản hồi TomTom; nhóm có 0 kết quả chưa chứng minh không có tiện ích trong khu vực.",targetDistance));
   }
   return summaries;
  }
@@ -89,15 +93,15 @@ public class NearbyQueryService {
  private Map<String,Map<String,Object>> coverage(List<String> ids,Set<Group> groups,int radius) {
   Map<String,Map<String,Object>> result=new HashMap<>();
   repo.jdbc().query("""
-   WITH ranked AS (SELECT j.listing_id,r.category_group,r.coverage_status,r.finished_at,r.radius_m,
-    row_number() OVER(PARTITION BY j.listing_id,r.category_group ORDER BY
-     CASE WHEN r.radius_m>=:radius AND r.coverage_status='COMPLETE_PROVIDER_RESPONSE' THEN 0 ELSE 1 END,r.finished_at DESC NULLS LAST) n
+   WITH ranked AS (SELECT j.listing_id,requested.category_group,r.coverage_status,r.finished_at,r.radius_m,
+    row_number() OVER(PARTITION BY j.listing_id,requested.category_group ORDER BY r.started_at DESC,r.id DESC) n
    FROM nearby_scan_runs r JOIN nearby_scan_jobs j ON j.id=r.job_id
+    CROSS JOIN LATERAL jsonb_array_elements_text(r.requested_groups) requested(category_group)
     JOIN listing_addresses a ON a.listing_id=j.listing_id AND a.active=true
-   WHERE j.listing_id IN (:ids) AND j.location_hash=HASH AND r.category_group IN (:groups) AND r.expires_at>now()
+   WHERE j.listing_id IN (:ids) AND j.location_hash=HASH AND requested.category_group IN (:groups) AND r.expires_at>now()
     AND j.mapping_version=:version AND r.license_policy_id=:policy
    ) SELECT * FROM ranked WHERE n=1
-   """.replace("HASH",NearbyRepository.HASH),Map.of("ids",ids,"groups",groups.stream().map(Enum::name).toList(),"radius",radius,"version",NearbyCatalog.VERSION,"policy",settings.getLicensePolicyId()),
+   """.replace("HASH",NearbyRepository.HASH),Map.of("ids",ids,"groups",groups.stream().map(Enum::name).toList(),"radius",radius,"version",settings.scanVersion(),"policy",settings.getLicensePolicyId()),
     (org.springframework.jdbc.core.RowCallbackHandler)rs->{
      Map<String,Object> m=new HashMap<>();String state=rs.getString("coverage_status");int covered=rs.getInt("radius_m");
      m.put("state",covered<radius?"PARTIAL":state);m.put("radius",covered);
@@ -160,7 +164,7 @@ public class NearbyQueryService {
   requireEnabled();int meters=settings.radius(radius);
   if(placeId==null&&group==null)throw new IllegalArgumentException("A place or group is required");
   if(placeId!=null)UUID.fromString(placeId);
-  params.addValue("nearRadius",meters).addValue("nearPolicy",settings.getLicensePolicyId());
+  params.addValue("nearRadius",meters).addValue("nearPolicy",settings.getLicensePolicyId()).addValue("nearVersion",settings.scanVersion());
   String match=placeId!=null?" AND np.id=:nearPlace":" AND EXISTS(SELECT 1 FROM nearby_place_categories nc WHERE nc.place_id=np.id AND nc.category_code=:nearGroup)";
   if(placeId!=null)params.addValue("nearPlace",placeId);else params.addValue("nearGroup",group.name());
   return """
@@ -169,11 +173,13 @@ public class NearbyQueryService {
     WHERE nl.listing_id=l.id AND nl.straight_distance_m<=:nearRadius
      AND nl.listing_location_hash=md5(na.id||':'||na.latitude::text||':'||na.longitude::text)
      AND nl.place_position_revision=np.position_revision
-     AND EXISTS(SELECT 1 FROM nearby_scan_runs evidence WHERE evidence.id=nl.evidence_run_id AND evidence.expires_at>now() AND evidence.license_policy_id=:nearPolicy)
+     AND EXISTS(SELECT 1 FROM nearby_scan_runs evidence JOIN nearby_scan_jobs job ON job.id=evidence.job_id
+      WHERE evidence.id=nl.evidence_run_id AND evidence.expires_at>now() AND evidence.license_policy_id=:nearPolicy AND job.mapping_version=:nearVersion)
      AND EXISTS(SELECT 1 FROM nearby_place_sources ns WHERE ns.place_id=np.id AND ns.content_expires_at>now() AND ns.license_policy_id=:nearPolicy)
    """+match+")";
  }
- private MapSqlParameterSource params(int radius){return new MapSqlParameterSource().addValue("policy",settings.getLicensePolicyId()).addValue("radius",radius);}
+ private MapSqlParameterSource params(int radius){return new MapSqlParameterSource().addValue("policy",settings.getLicensePolicyId()).addValue("radius",radius)
+  .addValue("version",settings.scanVersion()).addValue("scopeGroups",catalog.requestedGroups(settings.categoryIds()).stream().map(Enum::name).toList());}
  private static Place place(ResultSet rs,List<String> groups)throws SQLException {
   return new Place(rs.getString("id"),rs.getString("name"),rs.getDouble("latitude"),rs.getDouble("longitude"),NearbyAddress.fromStored(rs.getString("source_address")),
    rs.getDouble("straight_distance_m"),"STRAIGHT_LINE",groups,"© TomTom");

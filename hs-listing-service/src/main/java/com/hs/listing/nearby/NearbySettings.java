@@ -15,12 +15,13 @@ public class NearbySettings {
  @Value("${nearby.tomtom.license-policy-id}") private String licensePolicyId;
  @Value("${nearby.tomtom.api-key}") private String apiKey;
  @Value("${nearby.tomtom.base-url}") private String baseUrl;
+ @Value("${nearby.tomtom.category-set}") private String categorySet;
+ @Value("${nearby.tomtom.result-limit}") private int resultLimit;
  @Value("${nearby.default-radius-m}") private int defaultRadiusM;
  @Value("${nearby.scan-radius-m}") private int scanRadiusM;
  @Value("${nearby.public-page-size}") private int publicPageSize;
  @Value("${nearby.max-radius-m}") private int maxRadiusM;
  @Value("${nearby.retention-hours}") private int retentionHours;
- @Value("${nearby.max-pages-per-group}") private int maxPagesPerGroup;
  @Value("${nearby.requests-per-minute}") private int requestsPerMinute;
  @Value("${nearby.requests-per-day}") private int requestsPerDay;
  @Value("${nearby.requests-per-month}") private int requestsPerMonth;
@@ -28,6 +29,22 @@ public class NearbySettings {
  public boolean readable() { return queryEnabled && permitted(); }
  public boolean permitted() { return licenseApproved && licensePolicyId != null && !licensePolicyId.isBlank(); }
  public boolean runnable() { return syncEnabled && permitted() && apiKey != null && !apiKey.isBlank(); }
+ /** One OR query for the configured categories. */
+ public java.util.Set<String> categoryIds() {
+  if(categorySet==null || !categorySet.matches("\\d+(,\\d+)*"))
+   throw new IllegalStateException("nearby.tomtom.category-set must contain comma-separated numeric category IDs");
+  var ids=new java.util.LinkedHashSet<>(java.util.List.of(categorySet.split(",")));
+  if(ids.size()!=categorySet.split(",").length)throw new IllegalStateException("Duplicate nearby category IDs");
+  return java.util.Collections.unmodifiableSet(ids);
+ }
+ /** Changing the query categories must invalidate old jobs and coverage as well as mapping changes. */
+ public String scanVersion() {
+  try {
+   String scope=String.join(",",new java.util.TreeSet<>(categoryIds()))+"|limit="+resultLimit;
+   byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(scope.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+   return NearbyCatalog.VERSION+"-"+java.util.HexFormat.of().formatHex(digest,0,8);
+  }catch(java.security.NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}
+ }
  /** Configurable provider origin; credentials stay in the key variable, not in the URL. */
  public java.net.URI providerBaseUri() {
   try {
@@ -46,8 +63,9 @@ public class NearbySettings {
  }
  @PostConstruct public void validate() {
   providerBaseUri();
+  new NearbyCatalog().requestedGroups(categoryIds());
   if(defaultRadiusM<100 || scanRadiusM<defaultRadiusM || maxRadiusM<scanRadiusM || maxRadiusM>10000
-    || publicPageSize<1 || publicPageSize>50 || retentionHours<1 || retentionHours>720 || maxPagesPerGroup<1 || maxPagesPerGroup>50
+    || publicPageSize<1 || publicPageSize>50 || retentionHours<1 || retentionHours>720 || resultLimit<1 || resultLimit>100
     || requestsPerMinute<1 || requestsPerDay<1 || requestsPerMonth<1 || maxAttempts<1)
    throw new IllegalStateException("Invalid nearby configuration");
   if((syncEnabled || queryEnabled) && !permitted())

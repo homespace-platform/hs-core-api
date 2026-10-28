@@ -10,7 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class NearbyPlacesControllerTest {
  private static NearbySettings disabledSettings(){
-  NearbySettings settings=new NearbySettings();settings.setDefaultRadiusM(2000);settings.setMaxRadiusM(5000);settings.setPublicPageSize(5);return settings;
+  NearbySettings settings=new NearbySettings();settings.setDefaultRadiusM(2000);settings.setMaxRadiusM(5000);settings.setPublicPageSize(5);
+  settings.setCategorySet("7372,7377,7321,7326,7332005,9361009,7315,7328,9942002,9362");return settings;
  }
  @Test void disabledModuleReturnsDisabledWithoutDatabaseOrProviderCalls()throws Exception {
   NearbySettings settings=disabledSettings();NearbyRepository repository=mock(NearbyRepository.class);

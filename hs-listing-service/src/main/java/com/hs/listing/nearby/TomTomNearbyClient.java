@@ -58,7 +58,7 @@ public class TomTomNearbyClient implements NearbyProvider {
  @Override public Page search(Location center,int radiusM,Set<String> categories,int offset) {
   if(categories.isEmpty())throw new Failure("UNVERIFIED_CATEGORY",false);
   JsonNode root=get("/search/2/nearbySearch/.json",Map.of("lat",String.valueOf(center.latitude()),
-   "lon",String.valueOf(center.longitude()),"radius",String.valueOf(radiusM),"limit","100","ofs",String.valueOf(offset),
+   "lon",String.valueOf(center.longitude()),"radius",String.valueOf(radiusM),"limit",String.valueOf(settings.getResultLimit()),"ofs",String.valueOf(offset),
    "countrySet","VN","categorySet",String.join(",",categories)));
   return parse(root,offset);
  }

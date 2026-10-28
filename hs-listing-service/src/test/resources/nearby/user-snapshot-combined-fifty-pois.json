@@ -1,0 +1,3533 @@
+{
+    "summary": {
+        "queryType": "NEARBY",
+        "queryTime": 77,
+        "numResults": 50,
+        "offset": 0,
+        "totalResults": 100,
+        "fuzzyLevel": 1,
+        "geoBias": {
+            "lat": 10.8209195,
+            "lon": 106.6872986
+        }
+    },
+    "results": [
+        {
+            "type": "POI",
+            "id": "dHhuTz15uZ_vi9rKyVpr2A",
+            "score": 99.9898529053,
+            "dist": 10.148594,
+            "info": "search:ta:704009002172692-VN",
+            "poi": {
+                "name": "Quán Sinh Tố",
+                "categorySet": [
+                    {
+                        "id": 7315078
+                    }
+                ],
+                "categories": [
+                    "ice cream parlor",
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "ice cream parlor"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "28",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 28, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820828,
+                "lon": 106.687292
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82173,
+                    "lon": 106.68638
+                },
+                "btmRightPoint": {
+                    "lat": 10.81993,
+                    "lon": 106.68821
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82077,
+                        "lon": 106.68737
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "_-hPHbRBKWMj-Dw5Pusr4w",
+            "score": 99.9898529053,
+            "dist": 10.148594,
+            "info": "search:ta:704009002669094-VN",
+            "poi": {
+                "name": "Quán Trà Sữa",
+                "categorySet": [
+                    {
+                        "id": 7315149
+                    }
+                ],
+                "categories": [
+                    "restaurant",
+                    "yogurt/juice bar"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "yogurt/juice bar"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "26",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 26, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820828,
+                "lon": 106.687292
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82173,
+                    "lon": 106.68638
+                },
+                "btmRightPoint": {
+                    "lat": 10.81993,
+                    "lon": 106.68821
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.8206,
+                        "lon": 106.68711
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "SVxbmlJ-f0i3GNli51c41A",
+            "score": 99.9758071899,
+            "dist": 24.193703,
+            "info": "search:ta:704007000015959-VN",
+            "poi": {
+                "name": "Trường Ngoại Ngữ-Tin Học Quốc Tế Thái Bình Dương",
+                "categorySet": [
+                    {
+                        "id": 7372010
+                    }
+                ],
+                "categories": [
+                    "language school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "language school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "8",
+                "streetName": "Đường Nguyễn Văn Bảo",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 8, Đường Nguyễn Văn Bảo, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821082,
+                "lon": 106.687152
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82198,
+                    "lon": 106.68624
+                },
+                "btmRightPoint": {
+                    "lat": 10.82018,
+                    "lon": 106.68807
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82112,
+                        "lon": 106.68724
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "jE6FY17nYSG0G6sc_qIOiA",
+            "score": 99.9736785889,
+            "dist": 26.322713,
+            "info": "search:ta:704009001391072-VN",
+            "poi": {
+                "name": "Cửa Hàng Shop&Go",
+                "categorySet": [
+                    {
+                        "id": 9361009
+                    }
+                ],
+                "categories": [
+                    "convenience stores",
+                    "shop"
+                ],
+                "classifications": [
+                    {
+                        "code": "SHOP",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "shop"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "convenience stores"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "7",
+                "streetName": "Đường Nguyễn Văn Bảo",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 7, Đường Nguyễn Văn Bảo, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821062,
+                "lon": 106.687106
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82196,
+                    "lon": 106.68619
+                },
+                "btmRightPoint": {
+                    "lat": 10.82016,
+                    "lon": 106.68802
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82112,
+                        "lon": 106.68724
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "5vIMHu5I0ssTt8dGe1x0mA",
+            "score": 99.9724273682,
+            "dist": 27.573512,
+            "info": "search:ta:704009001801161-VN",
+            "poi": {
+                "name": "Circle K",
+                "brands": [
+                    {
+                        "name": "Circle K"
+                    }
+                ],
+                "categorySet": [
+                    {
+                        "id": 9361009
+                    }
+                ],
+                "categories": [
+                    "convenience stores",
+                    "shop"
+                ],
+                "classifications": [
+                    {
+                        "code": "SHOP",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "shop"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "convenience stores"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "29",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 29, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820761,
+                "lon": 106.687492
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82166,
+                    "lon": 106.68658
+                },
+                "btmRightPoint": {
+                    "lat": 10.81986,
+                    "lon": 106.68841
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82083,
+                        "lon": 106.68743
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "K2X_D_ae7Iv3GkKNXtxhxQ",
+            "score": 99.9719238281,
+            "dist": 28.075152,
+            "info": "search:ta:704009002681605-VN",
+            "poi": {
+                "name": "Trung Tâm Tin Học Ngoại Ngữ Dương Hùng Mạnh",
+                "categorySet": [
+                    {
+                        "id": 7372010
+                    }
+                ],
+                "categories": [
+                    "language school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "language school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "8",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 8, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820742,
+                "lon": 106.687481
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82164,
+                    "lon": 106.68657
+                },
+                "btmRightPoint": {
+                    "lat": 10.81984,
+                    "lon": 106.6884
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82077,
+                        "lon": 106.68737
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "R4aKWMfhAiONXYsInPtetA",
+            "score": 99.9676361084,
+            "dist": 32.365497,
+            "info": "search:ta:704009001766652-VN",
+            "poi": {
+                "name": "Cơm Chay Thiện Từ",
+                "categorySet": [
+                    {
+                        "id": 7315050
+                    }
+                ],
+                "categories": [
+                    "restaurant",
+                    "vegetarian"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "vegetarian"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "33",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 33, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.82063,
+                "lon": 106.687329
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82153,
+                    "lon": 106.68641
+                },
+                "btmRightPoint": {
+                    "lat": 10.81973,
+                    "lon": 106.68824
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82074,
+                        "lon": 106.68733
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "2uVSls_SVuEY2gAVvpbhMA",
+            "score": 99.967590332,
+            "dist": 32.413493,
+            "info": "search:ta:704009001803696-VN",
+            "poi": {
+                "name": "Nhà Thuốc Tây Hoàng Mỹ",
+                "categorySet": [
+                    {
+                        "id": 7326
+                    }
+                ],
+                "categories": [
+                    "pharmacy"
+                ],
+                "classifications": [
+                    {
+                        "code": "PHARMACY",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "pharmacy"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "35",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 35, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820629,
+                "lon": 106.687328
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82153,
+                    "lon": 106.68641
+                },
+                "btmRightPoint": {
+                    "lat": 10.81973,
+                    "lon": 106.68824
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82074,
+                        "lon": 106.68732
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "elCNYLKPKnEYfthxVVBfFw",
+            "score": 99.9652862549,
+            "dist": 34.713821,
+            "info": "search:ta:704009002136508-VN",
+            "poi": {
+                "name": "Quán Cơm Cô Chung",
+                "categorySet": [
+                    {
+                        "id": 7315051
+                    }
+                ],
+                "categories": [
+                    "restaurant",
+                    "vietnamese"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "vietnamese"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "13",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 13, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820871,
+                "lon": 106.687613
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82177,
+                    "lon": 106.6867
+                },
+                "btmRightPoint": {
+                    "lat": 10.81997,
+                    "lon": 106.68853
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82094,
+                        "lon": 106.68755
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "IZNTKnKJa_v7l2RQqYbibQ",
+            "score": 99.9650344849,
+            "dist": 34.962901,
+            "info": "search:ta:704009003347895-VN",
+            "poi": {
+                "name": "Quán Cơm 25",
+                "categorySet": [
+                    {
+                        "id": 7315041
+                    }
+                ],
+                "categories": [
+                    "restaurant",
+                    "roadside"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "roadside"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "25",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 25, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820874,
+                "lon": 106.687615
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82177,
+                    "lon": 106.6867
+                },
+                "btmRightPoint": {
+                    "lat": 10.81997,
+                    "lon": 106.68853
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82094,
+                        "lon": 106.68755
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "OuJo-07xDa09sgmmDFTQjw",
+            "score": 99.9630889893,
+            "dist": 36.90404,
+            "info": "search:ta:704009001925328-VN",
+            "poi": {
+                "name": "Mr.Toàn",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "21",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 21, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820895,
+                "lon": 106.687636
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82179,
+                    "lon": 106.68672
+                },
+                "btmRightPoint": {
+                    "lat": 10.82,
+                    "lon": 106.68855
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82096,
+                        "lon": 106.68757
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "rj0OffEJsU1S9A30y73syg",
+            "score": 99.9625854492,
+            "dist": 37.4141,
+            "info": "search:ta:704009001885965-VN",
+            "poi": {
+                "name": "Xôi Lụi",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "21",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 21, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.8209,
+                "lon": 106.687641
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.8218,
+                    "lon": 106.68673
+                },
+                "btmRightPoint": {
+                    "lat": 10.82,
+                    "lon": 106.68856
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82096,
+                        "lon": 106.68757
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "LKRLY0t1u506AI-Y72WvWQ",
+            "score": 99.9583435059,
+            "dist": 41.662232,
+            "info": "search:ta:704009001946181-VN",
+            "poi": {
+                "name": "Cơm 43",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "43",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 43, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820574,
+                "lon": 106.687151
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82147,
+                    "lon": 106.68624
+                },
+                "btmRightPoint": {
+                    "lat": 10.81967,
+                    "lon": 106.68807
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82061,
+                        "lon": 106.68713
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "_wuGrgh1LjTI-XlNkg85nw",
+            "score": 99.9569854736,
+            "dist": 43.009132,
+            "info": "search:ta:704009001760988-VN",
+            "poi": {
+                "name": "Quán Thống Nhất",
+                "categorySet": [
+                    {
+                        "id": 7315012
+                    }
+                ],
+                "categories": [
+                    "chinese",
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "chinese"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "17",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 17, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820952,
+                "lon": 106.687691
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82185,
+                    "lon": 106.68678
+                },
+                "btmRightPoint": {
+                    "lat": 10.82005,
+                    "lon": 106.68861
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82102,
+                        "lon": 106.68762
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "WR6LIdstcUHYpGgYH35KJA",
+            "score": 99.9527359009,
+            "dist": 47.255923,
+            "info": "search:ta:704009001767382-VN",
+            "poi": {
+                "name": "Quán 15 Lê Lợi",
+                "phone": "+84 90 452 29 92",
+                "categorySet": [
+                    {
+                        "id": 7315012
+                    }
+                ],
+                "categories": [
+                    "chinese",
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "chinese"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "15",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 15, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820987,
+                "lon": 106.687726
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82189,
+                    "lon": 106.68681
+                },
+                "btmRightPoint": {
+                    "lat": 10.82009,
+                    "lon": 106.68864
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82105,
+                        "lon": 106.68766
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "qGyQP9zeugpguorbq2yxwg",
+            "score": 99.950340271,
+            "dist": 49.667827,
+            "info": "search:ta:704009002113771-VN",
+            "poi": {
+                "name": "Trường Ngoại Ngữ Ngọc Nam",
+                "categorySet": [
+                    {
+                        "id": 7372010
+                    }
+                ],
+                "categories": [
+                    "language school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "language school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "25",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 25, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820516,
+                "lon": 106.687104
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82142,
+                    "lon": 106.68619
+                },
+                "btmRightPoint": {
+                    "lat": 10.81962,
+                    "lon": 106.68802
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82058,
+                        "lon": 106.68707
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "IKPEQ_eLeL4qO5f8SjOSlw",
+            "score": 99.949798584,
+            "dist": 50.189475,
+            "info": "search:ta:704009002673095-VN",
+            "poi": {
+                "name": "Bánh Tráng Nướng Đà Lạt",
+                "phone": "+84 90 660 97 66",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "13",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 13, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821011,
+                "lon": 106.687749
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82191,
+                    "lon": 106.68683
+                },
+                "btmRightPoint": {
+                    "lat": 10.82011,
+                    "lon": 106.68866
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82108,
+                        "lon": 106.68769
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "U7qnqFLS1VDi9Hb6S87zQw",
+            "score": 99.9475708008,
+            "dist": 52.431651,
+            "info": "search:ta:704009002618206-VN",
+            "poi": {
+                "name": "Cơm Tấm Hương",
+                "phone": "+84 364 297 503",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820501,
+                "lon": 106.687077
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.8214,
+                    "lon": 106.68616
+                },
+                "btmRightPoint": {
+                    "lat": 10.8196,
+                    "lon": 106.68799
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82057,
+                        "lon": 106.68704
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "98sWPbX-kUJZc6_dtmQQ7A",
+            "score": 99.9470214844,
+            "dist": 52.973085,
+            "info": "search:ta:704009002602273-VN",
+            "poi": {
+                "name": "26 We",
+                "phone": "+84 337 669 934",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "26",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 26, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821205,
+                "lon": 106.687687
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.8221,
+                    "lon": 106.68677
+                },
+                "btmRightPoint": {
+                    "lat": 10.82031,
+                    "lon": 106.6886
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82114,
+                        "lon": 106.68775
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "PD2I_Oe3mWp_DaqB618XFQ",
+            "score": 99.9427261353,
+            "dist": 57.278134,
+            "info": "search:ta:704009003311039-VN",
+            "poi": {
+                "name": "Bồi Dưỡng Văn Hóa",
+                "categorySet": [
+                    {
+                        "id": 7372
+                    }
+                ],
+                "categories": [
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820466,
+                "lon": 106.68705
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82137,
+                    "lon": 106.68613
+                },
+                "btmRightPoint": {
+                    "lat": 10.81957,
+                    "lon": 106.68797
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82055,
+                        "lon": 106.68701
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "BIyEIsLrvlMYnezZQI7ZPg",
+            "score": 99.9367446899,
+            "dist": 63.251334,
+            "info": "search:ta:704009002134475-VN",
+            "poi": {
+                "name": "Trường Tiểu Học Dân Lập Bán Trú-Nội Trú Nhựt Tân",
+                "categorySet": [
+                    {
+                        "id": 7372005
+                    }
+                ],
+                "categories": [
+                    "primary school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "primary school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "12",
+                "streetName": "Đường Nguyễn Văn Bảo",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 12, Đường Nguyễn Văn Bảo, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821474,
+                "lon": 106.687168
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82237,
+                    "lon": 106.68625
+                },
+                "btmRightPoint": {
+                    "lat": 10.82057,
+                    "lon": 106.68808
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82144,
+                        "lon": 106.68708
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "-Rb98cc0tbMOW5sbnGMjnA",
+            "score": 99.9341583252,
+            "dist": 65.841222,
+            "info": "search:ta:704009001893566-VN",
+            "poi": {
+                "name": "Đặc Sản Nướng & Lẩu",
+                "phone": "+84 91 423 05 01",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "22",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 22, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821286,
+                "lon": 106.687772
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82219,
+                    "lon": 106.68686
+                },
+                "btmRightPoint": {
+                    "lat": 10.82039,
+                    "lon": 106.68869
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82122,
+                        "lon": 106.68784
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "-3NkE_m18TfDr3i3p_2KKQ",
+            "score": 99.9318313599,
+            "dist": 68.167733,
+            "info": "search:ta:704009001753706-VN",
+            "poi": {
+                "name": "Quán Cơm Sinh Viên",
+                "phone": "+84 93 300 42 31",
+                "categorySet": [
+                    {
+                        "id": 7315012
+                    }
+                ],
+                "categories": [
+                    "chinese",
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "chinese"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "53",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 53, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820411,
+                "lon": 106.68695
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82131,
+                    "lon": 106.68603
+                },
+                "btmRightPoint": {
+                    "lat": 10.81951,
+                    "lon": 106.68787
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82049,
+                        "lon": 106.68691
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "y9AliqodZaxj8yjZL1ZSJw",
+            "score": 99.9296569824,
+            "dist": 70.340588,
+            "info": "search:ta:704009002537153-VN",
+            "poi": {
+                "name": "Trường Tiểu Học Hạnh Thông",
+                "categorySet": [
+                    {
+                        "id": 7372005
+                    }
+                ],
+                "categories": [
+                    "primary school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "primary school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "5",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 5, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821152,
+                "lon": 106.687898
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82205,
+                    "lon": 106.68698
+                },
+                "btmRightPoint": {
+                    "lat": 10.82025,
+                    "lon": 106.68881
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82122,
+                        "lon": 106.68784
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "EsrcTWC7GyZeLu1H-N7UYA",
+            "score": 99.924446106,
+            "dist": 75.54962,
+            "info": "search:ta:704009001905767-VN",
+            "poi": {
+                "name": "Mì Cay Kore",
+                "phone": "+84 90 928 52 86",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "18",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 18, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821345,
+                "lon": 106.687838
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82224,
+                    "lon": 106.68692
+                },
+                "btmRightPoint": {
+                    "lat": 10.82045,
+                    "lon": 106.68875
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82128,
+                        "lon": 106.6879
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "FIHAKYE8-dITzgwIbWqqnQ",
+            "score": 99.9214324951,
+            "dist": 78.560796,
+            "info": "search:ta:704009001832284-VN",
+            "poi": {
+                "name": "Mizu",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "35",
+                "streetName": "Đường Nguyễn Văn Bảo",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 35, Đường Nguyễn Văn Bảo, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821527,
+                "lon": 106.686931
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82243,
+                    "lon": 106.68602
+                },
+                "btmRightPoint": {
+                    "lat": 10.82063,
+                    "lon": 106.68785
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82154,
+                        "lon": 106.68703
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "b0x_AmUaiTUyKwlARSfMFg",
+            "score": 99.9191436768,
+            "dist": 80.851989,
+            "info": "search:ta:704009000462893-VN",
+            "poi": {
+                "name": "Trường Ngoại Ngữ Nguyễn Du Gò Vấp",
+                "categorySet": [
+                    {
+                        "id": 7372002
+                    }
+                ],
+                "categories": [
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "5",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 5, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821219,
+                "lon": 106.687973
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82212,
+                    "lon": 106.68706
+                },
+                "btmRightPoint": {
+                    "lat": 10.82032,
+                    "lon": 106.68889
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82129,
+                        "lon": 106.68791
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "9J_6W9gIs9REBbxjraP63g",
+            "score": 99.9125213623,
+            "dist": 87.469512,
+            "info": "search:ta:704009001957852-VN",
+            "poi": {
+                "name": "Trường Mầm Non 4",
+                "phone": "+84 28 3895 6534",
+                "categorySet": [
+                    {
+                        "id": 7372002
+                    }
+                ],
+                "categories": [
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "9",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 9, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821261,
+                "lon": 106.68802
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82216,
+                    "lon": 106.6871
+                },
+                "btmRightPoint": {
+                    "lat": 10.82036,
+                    "lon": 106.68894
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82133,
+                        "lon": 106.68796
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "gsUb1Ibmc6Auxa1fnTD5Ag",
+            "score": 99.9122619629,
+            "dist": 87.736,
+            "info": "search:ta:704009001934850-VN",
+            "poi": {
+                "name": "Bò Né Số 8",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "10",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 10, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821418,
+                "lon": 106.687921
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82232,
+                    "lon": 106.68701
+                },
+                "btmRightPoint": {
+                    "lat": 10.82052,
+                    "lon": 106.68884
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82135,
+                        "lon": 106.68798
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "1q18fiVeevey3JSCHK5UOQ",
+            "score": 99.9103240967,
+            "dist": 89.676699,
+            "info": "search:ta:704009001956689-VN",
+            "poi": {
+                "name": "Làng Gò",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "57",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 57, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820294,
+                "lon": 106.686781
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82119,
+                    "lon": 106.68587
+                },
+                "btmRightPoint": {
+                    "lat": 10.81939,
+                    "lon": 106.6877
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82037,
+                        "lon": 106.68672
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "B6NpZya1iCYsepnPCwHItA",
+            "score": 99.9099349976,
+            "dist": 90.059481,
+            "info": "search:ta:704009001398297-VN",
+            "poi": {
+                "name": "Cửa Hàng Bs Mart",
+                "categorySet": [
+                    {
+                        "id": 9361009
+                    }
+                ],
+                "categories": [
+                    "convenience stores",
+                    "shop"
+                ],
+                "classifications": [
+                    {
+                        "code": "SHOP",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "shop"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "convenience stores"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "10",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 10, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821433,
+                "lon": 106.687937
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82233,
+                    "lon": 106.68702
+                },
+                "btmRightPoint": {
+                    "lat": 10.82053,
+                    "lon": 106.68885
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82137,
+                        "lon": 106.688
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "TtITI-e9o-r24fnvNQrqoA",
+            "score": 99.9082183838,
+            "dist": 91.776249,
+            "info": "search:ta:704009002632721-VN",
+            "poi": {
+                "name": "Trường Ngoại Ngữ Tin Học Truyền Thông",
+                "phone": "+84 28 3588 6799",
+                "categorySet": [
+                    {
+                        "id": 7372010
+                    }
+                ],
+                "categories": [
+                    "language school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "language school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "8",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 8, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821443,
+                "lon": 106.687948
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82234,
+                    "lon": 106.68703
+                },
+                "btmRightPoint": {
+                    "lat": 10.82054,
+                    "lon": 106.68886
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82138,
+                        "lon": 106.68801
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "OhzQFu_JleVXmMQgzB6U8w",
+            "score": 99.8986358643,
+            "dist": 101.361371,
+            "info": "search:ta:704009002630669-VN",
+            "poi": {
+                "name": "Quán Kem Tươi Lucky",
+                "phone": "+84 90 938 85 23",
+                "categorySet": [
+                    {
+                        "id": 7315078
+                    }
+                ],
+                "categories": [
+                    "ice cream parlor",
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "ice cream parlor"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "6A",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 6A, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821348,
+                "lon": 106.688118
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82225,
+                    "lon": 106.6872
+                },
+                "btmRightPoint": {
+                    "lat": 10.82045,
+                    "lon": 106.68903
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82142,
+                        "lon": 106.68806
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "M-HKmnt7XyvsBkcQ1L-Rww",
+            "score": 99.8961639404,
+            "dist": 103.838112,
+            "info": "search:ta:704007000015966-VN",
+            "poi": {
+                "name": "Trường Mầm Non 4A Gò Vấp",
+                "phone": "+84 28 3894 1647",
+                "categorySet": [
+                    {
+                        "id": 7372002
+                    }
+                ],
+                "categories": [
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "37",
+                "streetName": "Đường Nguyễn Văn Bảo",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 37, Đường Nguyễn Văn Bảo, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.82174,
+                "lon": 106.686844
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82264,
+                    "lon": 106.68593
+                },
+                "btmRightPoint": {
+                    "lat": 10.82084,
+                    "lon": 106.68776
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82178,
+                        "lon": 106.68693
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "-WlXOfcDYycmM0_E3TGUYQ",
+            "score": 99.8850631714,
+            "dist": 114.945082,
+            "info": "search:ta:704009001924520-VN",
+            "poi": {
+                "name": "Quán Osaka",
+                "categorySet": [
+                    {
+                        "id": 7315026
+                    }
+                ],
+                "categories": [
+                    "japanese",
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "japanese"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "66",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 66, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820277,
+                "lon": 106.686474
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82118,
+                    "lon": 106.68556
+                },
+                "btmRightPoint": {
+                    "lat": 10.81938,
+                    "lon": 106.68739
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82021,
+                        "lon": 106.68654
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "gezs1IEYXJYxHTGfE-RfDQ",
+            "score": 99.8848419189,
+            "dist": 115.157766,
+            "info": "search:ta:704009002683742-VN",
+            "poi": {
+                "name": "Trung Tâm Đào Tạo Tin Học An Quốc Việt",
+                "phone": "+84 28 3996 1590",
+                "categorySet": [
+                    {
+                        "id": 7372010
+                    }
+                ],
+                "categories": [
+                    "language school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "language school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "1",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 1, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821431,
+                "lon": 106.688215
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82233,
+                    "lon": 106.6873
+                },
+                "btmRightPoint": {
+                    "lat": 10.82053,
+                    "lon": 106.68913
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.8215,
+                        "lon": 106.68816
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "65yn2G6XOoWyV26cL3TVLw",
+            "score": 99.8823165894,
+            "dist": 117.680942,
+            "info": "search:ta:704007000016086-VN",
+            "poi": {
+                "name": "Trường Mầm Non Hồng Nhung",
+                "phone": "+84 28 3894 1647",
+                "categorySet": [
+                    {
+                        "id": 7372004
+                    }
+                ],
+                "categories": [
+                    "pre school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "pre school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "27",
+                "streetName": "Đường Nguyễn Văn Bảo",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 27, Đường Nguyễn Văn Bảo, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821856,
+                "lon": 106.686796
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82276,
+                    "lon": 106.68588
+                },
+                "btmRightPoint": {
+                    "lat": 10.82096,
+                    "lon": 106.68771
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82189,
+                        "lon": 106.68688
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "GnIMUCegY8vXhGmuqXHNXA",
+            "score": 99.880355835,
+            "dist": 119.656005,
+            "info": "search:ta:704009002536273-VN",
+            "poi": {
+                "name": "Trường Anh Ngữ Quốc Tế Tây Bắc Mỹ",
+                "categorySet": [
+                    {
+                        "id": 7372010
+                    }
+                ],
+                "categories": [
+                    "language school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "language school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "66A",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 66A, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820248,
+                "lon": 106.686442
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82115,
+                    "lon": 106.68553
+                },
+                "btmRightPoint": {
+                    "lat": 10.81935,
+                    "lon": 106.68736
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82018,
+                        "lon": 106.6865
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "jVTuzKC2lzV4u4oZUDWKdw",
+            "score": 99.880355835,
+            "dist": 119.656005,
+            "info": "search:ta:704009002172886-VN",
+            "poi": {
+                "name": "Công Ty TNHH Phát Triển Giáo Dục Trí Thức Việt",
+                "categorySet": [
+                    {
+                        "id": 7372002
+                    }
+                ],
+                "categories": [
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "66A",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 66A, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820248,
+                "lon": 106.686442
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82115,
+                    "lon": 106.68553
+                },
+                "btmRightPoint": {
+                    "lat": 10.81935,
+                    "lon": 106.68736
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82018,
+                        "lon": 106.6865
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "hxRKyvY8w8sSu72H5OfbDg",
+            "score": 99.8797073364,
+            "dist": 120.30312,
+            "info": "search:ta:704009001937879-VN",
+            "poi": {
+                "name": "Anh Ngữ Tây Bắc Âu",
+                "categorySet": [
+                    {
+                        "id": 7372010
+                    }
+                ],
+                "categories": [
+                    "language school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "language school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "68",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 68, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820244,
+                "lon": 106.686438
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82114,
+                    "lon": 106.68552
+                },
+                "btmRightPoint": {
+                    "lat": 10.81934,
+                    "lon": 106.68735
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82017,
+                        "lon": 106.6865
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "y2voiLKOXTovKu2tUVTfdw",
+            "score": 99.8764266968,
+            "dist": 123.565529,
+            "info": "search:ta:704009001929458-VN",
+            "poi": {
+                "name": "Talent English",
+                "phone": "+84 91 979 72 52",
+                "categorySet": [
+                    {
+                        "id": 7372010
+                    }
+                ],
+                "categories": [
+                    "language school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "language school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "1",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 1, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821481,
+                "lon": 106.688275
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82238,
+                    "lon": 106.68736
+                },
+                "btmRightPoint": {
+                    "lat": 10.82058,
+                    "lon": 106.68919
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82155,
+                        "lon": 106.68822
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "TpMYy4oJxxpNnhRzwm_lRA",
+            "score": 99.8753204346,
+            "dist": 124.680129,
+            "info": "search:ta:704009003359380-VN",
+            "poi": {
+                "name": "Quán Ăn An Nguyên",
+                "categorySet": [
+                    {
+                        "id": 7315041
+                    }
+                ],
+                "categories": [
+                    "restaurant",
+                    "roadside"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "roadside"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "69",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 69, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820085,
+                "lon": 106.686536
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82098,
+                    "lon": 106.68562
+                },
+                "btmRightPoint": {
+                    "lat": 10.81919,
+                    "lon": 106.68745
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82015,
+                        "lon": 106.68647
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "pmdqTIh3YEZXpB6pSYIrKA",
+            "score": 99.8727493286,
+            "dist": 127.25978,
+            "info": "search:ta:704009001768283-VN",
+            "poi": {
+                "name": "VinMart",
+                "categorySet": [
+                    {
+                        "id": 9361009
+                    }
+                ],
+                "categories": [
+                    "convenience stores",
+                    "shop"
+                ],
+                "classifications": [
+                    {
+                        "code": "SHOP",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "shop"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "convenience stores"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "70",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 70, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820202,
+                "lon": 106.686391
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.8211,
+                    "lon": 106.68548
+                },
+                "btmRightPoint": {
+                    "lat": 10.8193,
+                    "lon": 106.68731
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82014,
+                        "lon": 106.68645
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "JowJVEda62uJibPpoOYN8w",
+            "score": 99.8725204468,
+            "dist": 127.477148,
+            "info": "search:ta:704009001450120-VN",
+            "poi": {
+                "name": "Bèo",
+                "categorySet": [
+                    {
+                        "id": 7315051
+                    }
+                ],
+                "categories": [
+                    "restaurant",
+                    "vietnamese"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "vietnamese"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "39",
+                "streetName": "Đường Nguyễn Văn Bảo",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 39, Đường Nguyễn Văn Bảo, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821938,
+                "lon": 106.686763
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82284,
+                    "lon": 106.68585
+                },
+                "btmRightPoint": {
+                    "lat": 10.82104,
+                    "lon": 106.68768
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82197,
+                        "lon": 106.68685
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "0tShLk818e3ORpaEq2vypg",
+            "score": 99.8724899292,
+            "dist": 127.506175,
+            "info": "search:ta:704009001924106-VN",
+            "poi": {
+                "name": "Khu Ăn Uống",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "2",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 2, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821654,
+                "lon": 106.688195
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82255,
+                    "lon": 106.68728
+                },
+                "btmRightPoint": {
+                    "lat": 10.82075,
+                    "lon": 106.68911
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82159,
+                        "lon": 106.68826
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "vxn1r_H2ckq-wGLy7CNaUQ",
+            "score": 99.8707351685,
+            "dist": 129.256925,
+            "info": "search:ta:704009002153487-VN",
+            "poi": {
+                "name": "Giải Khát Thức Ăn Nhanh",
+                "categorySet": [
+                    {
+                        "id": 7315015
+                    }
+                ],
+                "categories": [
+                    "fast food",
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "fast food"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetName": "Hẻm Số 1 Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Hẻm Số 1 Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821516,
+                "lon": 106.688315
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82242,
+                    "lon": 106.6874
+                },
+                "btmRightPoint": {
+                    "lat": 10.82062,
+                    "lon": 106.68923
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.8216,
+                        "lon": 106.68837
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "1MCZVp8tAr_W3HgRsp6SiA",
+            "score": 99.8696060181,
+            "dist": 130.396338,
+            "info": "search:ta:704009001789151-VN",
+            "poi": {
+                "name": "Quán Nhậu Bình Dân",
+                "categorySet": [
+                    {
+                        "id": 7315012
+                    }
+                ],
+                "categories": [
+                    "chinese",
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "chinese"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "69",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 69, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.82005,
+                "lon": 106.686497
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82095,
+                    "lon": 106.68558
+                },
+                "btmRightPoint": {
+                    "lat": 10.81915,
+                    "lon": 106.68741
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82012,
+                        "lon": 106.68644
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "4sIYBGzxVtP7FROh_bC3Yg",
+            "score": 99.8684921265,
+            "dist": 131.507965,
+            "info": "search:ta:704009001478417-VN",
+            "poi": {
+                "name": "Văn Phòng Phẩm Tâm",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "41",
+                "streetName": "Đường Nguyễn Văn Bảo",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 41, Đường Nguyễn Văn Bảo, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821972,
+                "lon": 106.686749
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82287,
+                    "lon": 106.68583
+                },
+                "btmRightPoint": {
+                    "lat": 10.82107,
+                    "lon": 106.68766
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82201,
+                        "lon": 106.68683
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "_G_x_EQN_SgBaz2Ajwiojg",
+            "score": 99.8679580688,
+            "dist": 132.036362,
+            "info": "search:ta:704009002691669-VN",
+            "poi": {
+                "name": "Trường Ngoại Ngữ Tân Văn",
+                "categorySet": [
+                    {
+                        "id": 7372010
+                    }
+                ],
+                "categories": [
+                    "language school",
+                    "school"
+                ],
+                "classifications": [
+                    {
+                        "code": "SCHOOL",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "school"
+                            },
+                            {
+                                "nameLocale": "en-US",
+                                "name": "language school"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "1",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 1, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.821681,
+                "lon": 106.688226
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82258,
+                    "lon": 106.68731
+                },
+                "btmRightPoint": {
+                    "lat": 10.82078,
+                    "lon": 106.68914
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82161,
+                        "lon": 106.68829
+                    }
+                }
+            ]
+        },
+        {
+            "type": "POI",
+            "id": "U4umJlp-r8geHKo3GKSQkg",
+            "score": 99.8644561768,
+            "dist": 135.548929,
+            "info": "search:ta:704009001903836-VN",
+            "poi": {
+                "name": "Hủ Tiếu Nam Vang 71",
+                "phone": "+84 93 408 14 82",
+                "categorySet": [
+                    {
+                        "id": 7315
+                    }
+                ],
+                "categories": [
+                    "restaurant"
+                ],
+                "classifications": [
+                    {
+                        "code": "RESTAURANT",
+                        "names": [
+                            {
+                                "nameLocale": "en-US",
+                                "name": "restaurant"
+                            }
+                        ]
+                    }
+                ]
+            },
+            "address": {
+                "streetNumber": "71",
+                "streetName": "Đường Lê Lợi",
+                "municipalitySubdivision": "Phường 4",
+                "municipality": "Hạnh Thông",
+                "countrySubdivision": "Hồ Chí Minh",
+                "countrySubdivisionName": "Hồ Chí Minh",
+                "countrySubdivisionCode": "SG",
+                "postalCode": "71423",
+                "countryCode": "VN",
+                "country": "Việt Nam",
+                "countryCodeISO3": "VNM",
+                "freeformAddress": "Số 71, Đường Lê Lợi, Phường 4, Hồ Chí Minh, Hồ Chí Minh, 71423",
+                "localName": "Hồ Chí Minh"
+            },
+            "position": {
+                "lat": 10.820016,
+                "lon": 106.686465
+            },
+            "viewport": {
+                "topLeftPoint": {
+                    "lat": 10.82092,
+                    "lon": 106.68555
+                },
+                "btmRightPoint": {
+                    "lat": 10.81912,
+                    "lon": 106.68738
+                }
+            },
+            "entryPoints": [
+                {
+                    "type": "main",
+                    "position": {
+                        "lat": 10.82008,
+                        "lon": 106.68639
+                    }
+                }
+            ]
+        }
+    ]
+}

@@ -31,6 +31,11 @@ public class NearbyRepository {
   for(String table:List.of("nearby_places","nearby_place_sources","nearby_categories","nearby_place_categories","nearby_scan_jobs","nearby_scan_runs","listing_nearby_places"))
    if(!Boolean.TRUE.equals(jdbc.queryForObject("SELECT to_regclass(:table) IS NOT NULL",Map.of("table",table),Boolean.class)))
     throw new IllegalStateException("Nearby JPA tables are missing; start Core with JPA_DDL_AUTO=update to create the schema");
+  if(Boolean.TRUE.equals(jdbc.queryForObject("""
+   SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema()
+    AND table_name='nearby_scan_runs' AND column_name='category_group' AND is_nullable='NO')
+   """,Map.of(),Boolean.class)))
+   throw new IllegalStateException("Nearby uses a combined-query schema now; recreate the development database from the Java entities before starting sync");
  }
  public List<Location> locations(List<String> ids) {
   return jdbc.query("SELECT l.id,a.id address_id,a.latitude,a.longitude,"+HASH+" location_hash "+PUBLIC_LOCATION+" AND l.id IN (:ids)",
@@ -49,7 +54,7 @@ public class NearbyRepository {
        OR (j.status IN ('SUCCESS','PARTIAL') AND j.next_attempt_at>now()))))
    ORDER BY l.published_at DESC NULLS LAST,l.id LIMIT :batch
    """.replace("PUBLIC_LOCATION",PUBLIC_LOCATION).replace("HASH",HASH);
-  for(String id:jdbc.queryForList(sql,Map.of("radius",radius,"batch",batch,"version",NearbyCatalog.VERSION),String.class))ensure(id,radius);
+  for(String id:jdbc.queryForList(sql,Map.of("radius",radius,"batch",batch,"version",settings.scanVersion()),String.class))ensure(id,radius);
  }
  public void ensure(String listingId,int radius) {
   schedule(listingId,radius,false);
@@ -85,7 +90,7 @@ public class NearbyRepository {
     WHERE nearby_scan_jobs.status<>'RUNNING' AND (:refresh OR nearby_scan_jobs.status='SUPERSEDED'
      OR (nearby_scan_jobs.status IN ('SUCCESS','PARTIAL') AND nearby_scan_jobs.next_attempt_at<=now()))
     """,Map.of("id",UUID.randomUUID().toString(),"listing",listingId,"hash",l.hash(),"radius",radius,
-      "version",NearbyCatalog.VERSION,"refresh",force||removed>0||superseded>0));
+      "version",settings.scanVersion(),"refresh",force||removed>0||superseded>0));
    return true;
   }));
  }
@@ -96,8 +101,8 @@ public class NearbyRepository {
    var rows=jdbc.query("""
     SELECT id,listing_id,location_hash,radius_m,attempts FROM nearby_scan_jobs
     WHERE ((status IN ('PENDING','RETRY_WAIT') AND next_attempt_at<=now()) OR (status='RUNNING' AND lease_until<now()))
-      AND attempts<:max ORDER BY next_attempt_at,id FOR UPDATE SKIP LOCKED LIMIT 1
-    """,Map.of("max",settings.getMaxAttempts()),(rs,i)->new Job(rs.getString("id"),rs.getString("listing_id"),rs.getString("location_hash"),
+      AND attempts<:max AND mapping_version=:version ORDER BY next_attempt_at,id FOR UPDATE SKIP LOCKED LIMIT 1
+    """,Map.of("max",settings.getMaxAttempts(),"version",settings.scanVersion()),(rs,i)->new Job(rs.getString("id"),rs.getString("listing_id"),rs.getString("location_hash"),
       rs.getInt("radius_m"),rs.getInt("attempts")+1,UUID.randomUUID().toString()));
    if(rows.isEmpty())return null;Job j=rows.getFirst();
    jdbc.update("UPDATE nearby_scan_jobs SET status='RUNNING',attempts=:attempt,lease_token=:token,lease_until=now()+interval '5 minutes',updated_at=now() WHERE id=:id",
@@ -108,16 +113,34 @@ public class NearbyRepository {
   if(jdbc.update("UPDATE nearby_scan_jobs SET lease_until=now()+interval '5 minutes' WHERE id=:id AND lease_token=:token AND status='RUNNING' AND lease_until>now()",
     Map.of("id",j.id(),"token",j.leaseToken()))!=1)throw new NearbyProvider.Failure("LOST_LEASE",false);
  }
- public String startRun(Job j,Location l,Group group,Set<String> categoryIds) {
-  heartbeat(j);String id=UUID.randomUUID().toString();
+ public String startRun(Job j,Location l,Set<Group> groups,Set<String> categoryIds) {
+  heartbeat(j);
+  var unfinished=jdbc.queryForList("""
+   SELECT id FROM nearby_scan_runs WHERE job_id=:job AND finished_at IS NULL AND expires_at>now()
+    AND license_policy_id=:policy AND coverage_status IN ('PENDING','PARTIAL') ORDER BY started_at DESC LIMIT 1
+   """,Map.of("job",j.id(),"policy",settings.getLicensePolicyId()),String.class);
+  if(!unfinished.isEmpty())return unfinished.getFirst();
+  String id=UUID.randomUUID().toString();
   jdbc.update("""
-   INSERT INTO nearby_scan_runs(id,job_id,provider,api_version,category_group,center_lat,center_lon,radius_m,requested_category_ids,page_size,expires_at,license_policy_id)
-   VALUES(:id,:job,'TOMTOM','V2',:group,:lat,:lon,:radius,CAST(:categories AS jsonb),100,now()+(:hours*interval '1 hour'),:policy)
-   """,Map.of("id",id,"job",j.id(),"group",group.name(),"lat",l.latitude(),"lon",l.longitude(),"radius",j.radiusM(),
-     "categories",json(categoryIds),"hours",settings.getRetentionHours(),"policy",settings.getLicensePolicyId()));
+   INSERT INTO nearby_scan_runs(id,job_id,provider,api_version,requested_groups,center_lat,center_lon,radius_m,requested_category_ids,page_size,expires_at,license_policy_id)
+   VALUES(:id,:job,'TOMTOM','V2',CAST(:groups AS jsonb),:lat,:lon,:radius,CAST(:categories AS jsonb),:limit,now()+(:hours*interval '1 hour'),:policy)
+   """,Map.of("id",id,"job",j.id(),"groups",json(groups.stream().map(Enum::name).sorted().toList()),"lat",l.latitude(),"lon",l.longitude(),"radius",j.radiusM(),
+     "categories",json(categoryIds),"hours",settings.getRetentionHours(),"policy",settings.getLicensePolicyId(),"limit",settings.getResultLimit()));
   return id;
  }
+ public record Snapshot(int pagesFetched,int returnedCount,Integer total,boolean consistent) {}
+ public Snapshot snapshot(String run) {
+  return jdbc.queryForObject("SELECT pages_fetched,returned_count,total_results_reported,response_consistent FROM nearby_scan_runs WHERE id=:run",Map.of("run",run),(rs,i)->
+   new Snapshot(rs.getInt(1),rs.getInt(2),(Integer)rs.getObject(3),rs.getBoolean(4)));
+ }
+ public void deferRun(String run,String reason){
+  jdbc.update("UPDATE nearby_scan_runs SET coverage_status='PARTIAL',stopped_reason=:reason WHERE id=:id AND finished_at IS NULL",
+   Map.of("id",run,"reason",reason));
+ }
  public void savePage(Job j,Location l,String runId,Page page,Map<String,Set<String>> parents,NearbyCatalog catalog) {
+  savePage(j,l,runId,page,parents,catalog,page.malformedCount()==0);
+ }
+ public void savePage(Job j,Location l,String runId,Page page,Map<String,Set<String>> parents,NearbyCatalog catalog,boolean consistent) {
   tx.executeWithoutResult(status->{
    var current=jdbc.query("SELECT l.id,a.id address_id,a.latitude,a.longitude,"+HASH+" location_hash "+PUBLIC_LOCATION+
     " AND l.id=:listing FOR SHARE OF a",Map.of("listing",j.listingId()),this::location);
@@ -126,7 +149,8 @@ public class NearbyRepository {
     Map.of("id",j.id(),"token",j.leaseToken()),String.class);
    if(locked.isEmpty())throw new NearbyProvider.Failure("SUPERSEDED",false);
    Set<String> seen=new HashSet<>();
-   for(Poi p:page.places()) {
+   // A consistent lock order avoids two overlapping listings locking the same POIs in reverse order.
+   for(Poi p:page.places().stream().sorted(Comparator.comparing(Poi::externalId)).toList()) {
     if(!seen.add(p.externalId())||distance(l.latitude(),l.longitude(),p.latitude(),p.longitude())>j.radiusM()+1)continue;
     jdbc.getJdbcTemplate().queryForObject("SELECT pg_advisory_xact_lock(hashtextextended(?,0))",Object.class,"TOMTOM:V2:"+p.externalId());
     var old=jdbc.queryForList("SELECT place_id FROM nearby_place_sources WHERE provider='TOMTOM' AND api_version='V2' AND external_id=:external",
@@ -173,14 +197,30 @@ public class NearbyRepository {
    jdbc.update("""
     UPDATE nearby_scan_runs SET pages_fetched=pages_fetched+1,next_offset=:next,returned_count=returned_count+:count,
      unique_count=(SELECT count(*) FROM listing_nearby_places WHERE evidence_run_id=:id),
-     total_results_reported=:total,page_summaries=page_summaries||CAST(:summary AS jsonb) WHERE id=:id
-    """,Map.of("id",runId,"next",page.offset()+page.numResults(),"count",page.numResults(),"total",page.totalResults(),
+     total_results_reported=:total,response_consistent=response_consistent AND :consistent,
+     page_summaries=page_summaries||CAST(:summary AS jsonb) WHERE id=:id
+    """,Map.of("id",runId,"next",page.offset()+page.numResults(),"count",page.numResults(),"total",page.totalResults(),"consistent",consistent,
       "summary",json(List.of(Map.of("offset",page.offset(),"numResults",page.numResults(),"totalResults",page.totalResults(),"malformed",page.malformedCount())))));
   });
  }
- public void finishRun(String run,String state,String reason) {
-  jdbc.update("UPDATE nearby_scan_runs SET coverage_status=:state,stopped_reason=:reason,finished_at=now() WHERE id=:id",
-   new MapSqlParameterSource().addValue("state",state).addValue("reason",reason).addValue("id",run));
+ public void finishRun(Job job,String run,String state,String reason) {
+  tx.executeWithoutResult(status->{
+   var location=jdbc.query("SELECT "+HASH+" hash "+PUBLIC_LOCATION+" AND l.id=:listing FOR SHARE OF a",
+    Map.of("listing",job.listingId()),(rs,i)->rs.getString("hash"));
+   if(location.stream().noneMatch(job.locationHash()::equals))return;
+   var leased=jdbc.queryForList("SELECT id FROM nearby_scan_jobs WHERE id=:id AND lease_token=:token AND status='RUNNING' AND lease_until>now() FOR UPDATE",
+    Map.of("id",job.id(),"token",job.leaseToken()),String.class);
+   if(leased.isEmpty())return;
+   jdbc.update("UPDATE nearby_scan_runs SET coverage_status=:state,stopped_reason=:reason,finished_at=now() WHERE id=:id AND job_id=:job",
+    new MapSqlParameterSource().addValue("state",state).addValue("reason",reason).addValue("id",run).addValue("job",job.id()));
+   // Any successfully saved response replaces this listing's snapshot, even if some items were invalid.
+   jdbc.update("""
+    DELETE FROM listing_nearby_places WHERE listing_id=:listing AND listing_location_hash=:hash
+     AND straight_distance_m<=:radius AND evidence_run_id IS DISTINCT FROM :run
+     AND EXISTS(SELECT 1 FROM nearby_scan_runs WHERE id=:run AND pages_fetched>0)
+    """,Map.of("listing",job.listingId(),"hash",job.locationHash(),"radius",job.radiusM(),"run",run));
+   // Shared POIs and other listings' links are never deleted by refresh.
+  });
  }
  public void finishJob(Job job,String state,String error,long delaySeconds) {
   int updated=jdbc.update("""
@@ -188,7 +228,7 @@ public class NearbyRepository {
    attempts=CASE WHEN :quota THEN greatest(0,attempts-1) ELSE attempts END,
    lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=:id AND lease_token=:token AND status='RUNNING'
    """,new MapSqlParameterSource().addValue("state",state).addValue("error",error).addValue("delay",delaySeconds)
-     .addValue("id",job.id()).addValue("token",job.leaseToken()).addValue("quota",error!=null&&(error.startsWith("QUOTA_")||error.equals("PROVIDER_PAUSED"))));
+     .addValue("id",job.id()).addValue("token",job.leaseToken()).addValue("quota",error!=null&&(error.startsWith("QUOTA_")||error.equals("PROVIDER_PAUSED")||error.equals("TOMTOM_HTTP_429"))));
   if(updated==1&&metrics!=null)metrics.job(state);
  }
  public List<Map<String,Object>> jobs(int limit){return jdbc.queryForList("""

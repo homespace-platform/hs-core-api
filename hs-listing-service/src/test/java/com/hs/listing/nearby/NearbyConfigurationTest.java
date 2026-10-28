@@ -85,5 +85,23 @@ class NearbyConfigurationTest {
         assertEquals(2000,settings.radius(null));
         assertEquals(2000,settings.getScanRadiusM());
         assertEquals(5,settings.getPublicPageSize());
+        assertEquals(100,settings.getResultLimit());
+        assertEquals("7372,7377,7321,7326,7332005,9361009,7315,7328,9942002,9362",String.join(",",settings.categoryIds()));
+        assertEquals(7,new NearbyCatalog().requestedGroups(settings.categoryIds()).size());
+    }
+    @Test void categoryScopeChangesInvalidateJobsButOrderingDoesNot() {
+        NearbySettings settings=configured();String version=settings.scanVersion();
+        var ids=new java.util.ArrayList<>(settings.categoryIds());java.util.Collections.reverse(ids);
+        settings.setCategorySet(String.join(",",ids));assertEquals(version,settings.scanVersion());
+        settings.setCategorySet("7372");assertNotEquals(version,settings.scanVersion());
+        for(String invalid:java.util.List.of("", "7372,7372", "7372,invalid", "99999999")){
+            settings.setCategorySet(invalid);assertThrows(IllegalStateException.class,settings::validate);
+        }
+    }
+    @Test void providerResultLimitCannotExceedOneHundred(){
+        NearbySettings settings=configured();
+        for(int value:java.util.List.of(0,101)){
+            settings.setResultLimit(value);assertThrows(IllegalStateException.class,settings::validate);
+        }
     }
 }
