@@ -161,23 +161,78 @@ public class NearbyQueryService {
  }
  /** Embedded in the existing typed listing compiler BEFORE count/order/LIMIT. */
  public String searchPredicate(String placeId,Group group,Integer radius,MapSqlParameterSource params) {
-  requireEnabled();int meters=settings.radius(radius);
   if(placeId==null&&group==null)throw new IllegalArgumentException("A place or group is required");
-  if(placeId!=null)UUID.fromString(placeId);
-  params.addValue("nearRadius",meters).addValue("nearPolicy",settings.getLicensePolicyId()).addValue("nearVersion",settings.scanVersion())
-   .addValue("nearRetentionHours",settings.getRetentionHours());
-  String match=placeId!=null?" AND np.id=:nearPlace":" AND EXISTS(SELECT 1 FROM nearby_place_categories nc WHERE nc.place_id=np.id AND nc.category_code=:nearGroup)";
-  if(placeId!=null)params.addValue("nearPlace",placeId);else params.addValue("nearGroup",group.name());
-  return """
-   AND EXISTS(SELECT 1 FROM listing_nearby_places nl JOIN nearby_places np ON np.id=nl.place_id AND np.active=true
+  return " AND ("+(placeId!=null?targetPredicate(requireTarget(placeId),radius,params,""):groupPredicate(group,null,radius,params,""))+")";
+ }
+ public record TargetPoint(String id,String name,double latitude,double longitude){}
+ /** Validated once per search: active, licensed and retained. Its coordinates are then bound as parameters. */
+ public TargetPoint requireTarget(String placeId) {
+  requireEnabled();
+  try{UUID.fromString(placeId);}catch(RuntimeException invalid){throw new IllegalArgumentException("Invalid target place ID");}
+  var targets=repo.jdbc().query("SELECT p.id,p.name,p.latitude,p.longitude FROM nearby_places p WHERE p.id=:id AND p.active=true AND EXISTS(SELECT 1 FROM nearby_place_sources s WHERE s.place_id=p.id AND (:retentionHours=0 OR s.content_expires_at>now()) AND s.license_policy_id=:policy)",
+   Map.of("id",placeId,"policy",settings.getLicensePolicyId(),"retentionHours",settings.getRetentionHours()),
+   (rs,i)->new TargetPoint(rs.getString("id"),rs.getString("name"),rs.getDouble("latitude"),rs.getDouble("longitude")));
+  if(targets.isEmpty())throw new IllegalArgumentException("Target place is unavailable");
+  return targets.getFirst();
+ }
+ /** Same Haversine radius as {@link NearbyTypes#distance}; NULL (unknown) when the listing has no stored coordinates. */
+ public static String distanceSql(String lat,String lon) {
+  return ("(SELECT 2*6371008.8*asin(least(1,sqrt(power(sin(radians(CAST(da.latitude AS double precision)-:LAT)/2),2)"
+   +"+cos(radians(:LAT))*cos(radians(CAST(da.latitude AS double precision)))*power(sin(radians(CAST(da.longitude AS double precision)-:LON)/2),2))))"
+   +" FROM listing_addresses da WHERE da.listing_id=l.id AND da.active=true AND da.latitude IS NOT NULL AND da.longitude IS NOT NULL)")
+   .replace("LAT",lat).replace("LON",lon);
+ }
+ /** Distance to the named target from stored listing coordinates. It needs no listing-to-POI link or scan. */
+ public String targetPredicate(TargetPoint target,Integer radius,MapSqlParameterSource params,String suffix) {
+  int meters=settings.radius(radius);
+  params.addValue("targetLat"+suffix,target.latitude()).addValue("targetLon"+suffix,target.longitude()).addValue("targetRadius"+suffix,meters);
+  return distanceSql("targetLat"+suffix,"targetLon"+suffix)+"<=:targetRadius"+suffix;
+ }
+ public List<NearbyKinds.Kind> kinds(){return NearbyKinds.available(settings.categoryIds());}
+ /**
+  * TRUE with a current cached link, FALSE only when complete provider coverage for this location, scope and radius
+  * proves absence, otherwise NULL: an unscanned or limited listing is unknown, not "not near".
+  */
+ public String groupPredicate(Group group,String kindCode,Integer radius,MapSqlParameterSource params,String suffix) {
+  requireEnabled();int meters=settings.radius(radius);
+  if(group==null&&kindCode==null)throw new IllegalArgumentException("A nearby group or kind is required");
+  NearbyKinds.Kind kind=null;
+  if(kindCode!=null){
+   kind=kinds().stream().filter(k->k.code().equals(kindCode)).findFirst()
+    .orElseThrow(()->new IllegalArgumentException("Unsupported nearby kind: "+kindCode));
+   if(group!=null&&group!=kind.group())throw new IllegalArgumentException("Nearby kind does not belong to the group");
+   group=kind.group();
+  }
+  if(!catalog.requestedGroups(settings.categoryIds()).contains(group))throw new IllegalArgumentException("Nearby group is not collected: "+group);
+  params.addValue("nearPolicy",settings.getLicensePolicyId()).addValue("nearVersion",settings.scanVersion())
+   .addValue("nearRetentionHours",settings.getRetentionHours()).addValue("nearRadius"+suffix,meters).addValue("nearGroup"+suffix,group.name());
+  String kindMatch="";
+  if(kind!=null){
+   params.addValue("nearKind"+suffix,kind.categoryId());
+   kindMatch=" AND EXISTS(SELECT 1 FROM nearby_place_sources ks WHERE ks.place_id=np.id AND ks.license_policy_id=:nearPolicy"
+    +" AND (:nearRetentionHours=0 OR ks.content_expires_at>now()) AND jsonb_exists(ks.classifications->'verifiedCategoryParents',:nearKind"+suffix+"))";
+  }
+  String link="""
+   EXISTS(SELECT 1 FROM listing_nearby_places nl JOIN nearby_places np ON np.id=nl.place_id AND np.active=true
     JOIN listing_addresses na ON na.listing_id=nl.listing_id AND na.active=true
-    WHERE nl.listing_id=l.id AND nl.straight_distance_m<=:nearRadius
+    WHERE nl.listing_id=l.id AND nl.straight_distance_m<=:nearRadiusS
      AND nl.listing_location_hash=md5(na.id||':'||na.latitude::text||':'||na.longitude::text)
      AND nl.place_position_revision=np.position_revision
      AND EXISTS(SELECT 1 FROM nearby_scan_runs evidence JOIN nearby_scan_jobs job ON job.id=evidence.job_id
       WHERE evidence.id=nl.evidence_run_id AND (:nearRetentionHours=0 OR evidence.expires_at>now()) AND evidence.license_policy_id=:nearPolicy AND job.mapping_version=:nearVersion)
      AND EXISTS(SELECT 1 FROM nearby_place_sources ns WHERE ns.place_id=np.id AND (:nearRetentionHours=0 OR ns.content_expires_at>now()) AND ns.license_policy_id=:nearPolicy)
-   """+match+")";
+     AND EXISTS(SELECT 1 FROM nearby_place_categories nc WHERE nc.place_id=np.id AND nc.category_code=:nearGroupS)KIND)
+   """.replace("KIND",kindMatch);
+  String complete="""
+   EXISTS(SELECT 1 FROM nearby_scan_runs cr JOIN nearby_scan_jobs cj ON cj.id=cr.job_id
+    JOIN listing_addresses ca ON ca.listing_id=cj.listing_id AND ca.active=true
+    WHERE cj.listing_id=l.id AND cj.location_hash=md5(ca.id||':'||ca.latitude::text||':'||ca.longitude::text)
+     AND cj.mapping_version=:nearVersion AND cr.license_policy_id=:nearPolicy AND (:nearRetentionHours=0 OR cr.expires_at>now())
+     AND cr.coverage_status='COMPLETE_PROVIDER_RESPONSE' AND cr.radius_m>=:nearRadiusS AND jsonb_exists(cr.requested_groups,:nearGroupS))
+   AND NOT EXISTS(SELECT 1 FROM listing_nearby_places sl JOIN nearby_places sp ON sp.id=sl.place_id
+    WHERE sl.listing_id=l.id AND sl.place_position_revision<>sp.position_revision)
+   """;
+  return ("(CASE WHEN "+link.strip()+" THEN true WHEN "+complete.strip()+" THEN false ELSE NULL END)").replace(":nearRadiusS",":nearRadius"+suffix).replace(":nearGroupS",":nearGroup"+suffix);
  }
  private MapSqlParameterSource params(int radius){return new MapSqlParameterSource().addValue("policy",settings.getLicensePolicyId()).addValue("radius",radius)
   .addValue("version",settings.scanVersion()).addValue("retentionHours",settings.getRetentionHours())

@@ -42,12 +42,27 @@ public class PublicListingController {
                 .result(aiListingSearchService.fields()).build();
     }
 
+    /** Versioned field catalog: labels, enum values, operators, units, null meaning and unsupported concepts. */
+    @GetMapping("/ai/catalog")
+    public com.hs.common.dto.ApiResponse<com.hs.listing.service.AiListingFieldCatalog.CatalogView> aiSearchCatalog() {
+        return com.hs.common.dto.ApiResponse.<com.hs.listing.service.AiListingFieldCatalog.CatalogView>builder()
+                .result(aiListingSearchService.catalog()).build();
+    }
+
     @org.springframework.web.bind.annotation.PostMapping("/ai/search")
-    public com.hs.common.dto.ApiResponse<AiListingSearchResponse> aiSearch(
+    public org.springframework.http.ResponseEntity<com.hs.common.dto.ApiResponse<Object>> aiSearch(
             @org.springframework.web.bind.annotation.RequestBody AiListingSearchRequest request) {
         try {
-            return com.hs.common.dto.ApiResponse.<AiListingSearchResponse>builder()
-                    .result(aiListingSearchService.search(request)).build();
+            return org.springframework.http.ResponseEntity.ok(com.hs.common.dto.ApiResponse.<Object>builder()
+                    .result(aiListingSearchService.search(request)).build());
+        } catch (com.hs.listing.service.AiSearchValidationException error) {
+            // Structured so the AI can ask or repair instead of treating a rejected predicate as "no results".
+            java.util.Map<String, Object> detail = new java.util.LinkedHashMap<>();
+            detail.put("reason", error.reason());
+            detail.put("field", error.field());
+            detail.put("allowed", error.allowed());
+            return org.springframework.http.ResponseEntity.badRequest().body(com.hs.common.dto.ApiResponse.<Object>builder()
+                    .code(4000).message(error.getMessage()).result(detail).build());
         } catch (IllegalArgumentException error) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.BAD_REQUEST, error.getMessage());

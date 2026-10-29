@@ -12,13 +12,26 @@ import com.hs.listing.repository.ListingAddressRepository;
 import com.hs.listing.dto.request.PublicListingSearchRequest;
 import com.hs.listing.service.ListingPublicService;
 import com.hs.listing.service.AiListingSearchService;
+import com.hs.listing.nearby.NearbyCatalog;
+import com.hs.listing.nearby.NearbyProvider;
+import com.hs.listing.nearby.NearbyQueryService;
+import com.hs.listing.nearby.NearbyRepository;
+import com.hs.listing.nearby.NearbySettings;
+import com.hs.listing.nearby.NearbyTypes;
+import com.hs.listing.nearby.NearbyWorker;
 import com.hs.storage.config.StorageProperties;
 import com.hs.user.repository.UserRepository;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.HashMap;
+import java.util.HashSet;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -35,6 +48,9 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
+import org.springframework.core.env.PropertiesPropertySource;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Destructive schema creation is opt-in and restricted to a disposable database named hs_seed_test. */
@@ -72,7 +88,9 @@ class ListingSeedPostgresTest {
     private String counts() {
         return List.of("listings","listing_addresses","listing_house_details","listing_apartment_details",
             "listing_room_details","listing_charges","listing_furnishing_assets","listing_amenities",
-            "listing_policy_values","listing_media","listing_viewing_days","listing_viewing_slots").stream()
+            "listing_policy_values","listing_media","listing_viewing_days","listing_viewing_slots",
+            "nearby_places","nearby_place_sources","nearby_categories","nearby_place_categories",
+            "listing_nearby_places","nearby_scan_jobs","nearby_scan_runs").stream()
             .map(table -> table + ":" + count(table)).toList().toString();
     }
 
@@ -133,14 +151,46 @@ class ListingSeedPostgresTest {
             assertEquals(expectedWard,address.get("ward_id"));
         }
         verifyPublicFilters();
+        verifyOfflineNearby(sqlPath);
         verifyDenseWardAiSearch();
         // Re-running also repairs the previous seed version's missing IDs, without replacing source coordinates.
         execute("UPDATE listing_addresses SET ward_id=NULL");
         // Unrelated and legacy-seed listing IDs must survive all reruns unchanged.
         execute("INSERT INTO listings SELECT (jsonb_populate_record(NULL::listings, to_jsonb(l) || jsonb_build_object('id','unrelated-listing','title','DO NOT TOUCH'))).* FROM listings l LIMIT 1");
         execute("INSERT INTO listings SELECT (jsonb_populate_record(NULL::listings, to_jsonb(l) || jsonb_build_object('id',md5('homespace-hcm-200-listing-v2-1')::uuid::text,'title','OLD SEED KEEP'))).* FROM listings l LIMIT 1");
+        // A place is shared across listings. Re-seeding must not delete the canonical place
+        // and cascade a link owned by a listing outside this seed.
+        execute("INSERT INTO listing_nearby_places SELECT (jsonb_populate_record(NULL::listing_nearby_places, to_jsonb(lp) || jsonb_build_object('listing_id','unrelated-listing'))).* FROM listing_nearby_places lp LIMIT 1");
+        // A historical live response may be newer than the source snapshot. Replacing
+        // this job's links with the offline cache must invalidate its COMPLETE claim,
+        // while preserving the run itself and its original timestamps for diagnostics.
+        String historicalListing=jdbc.queryForObject("select listing_id from nearby_scan_jobs order by listing_id limit 1",String.class);
+        String historicalRunId=java.util.UUID.randomUUID().toString();
+        jdbc.update("""
+            INSERT INTO nearby_scan_runs
+            SELECT (jsonb_populate_record(NULL::nearby_scan_runs,to_jsonb(r) || jsonb_build_object(
+                'id',?::text,'provider','TOMTOM','api_version','V2',
+                'coverage_status','COMPLETE_PROVIDER_RESPONSE','stopped_reason',NULL,
+                'started_at',now(),'finished_at',now()))).*
+            FROM nearby_scan_runs r JOIN nearby_scan_jobs j ON j.id=r.job_id
+            WHERE j.listing_id=? AND r.provider='OFFLINE_SEED' LIMIT 1
+            """,historicalRunId,historicalListing);
+        Object historicalStartedAt=jdbc.queryForObject("select started_at from nearby_scan_runs where id=?",java.sql.Timestamp.class,historicalRunId);
+        var historicalSettings=offlineNearbySettings();
+        var historicalQuery=new NearbyQueryService(new NearbyRepository(
+            new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource),transactions,historicalSettings),historicalSettings);
+        assertTrue(historicalQuery.summaries(new NearbyTypes.BatchRequest(List.of(historicalListing),2000,null,1)).getFirst().groups()
+            .stream().allMatch(group->group.coverageStatus().equals("COMPLETE_PROVIDER_RESPONSE")),"The newer historical run must exercise the coverage precedence regression");
         String before=counts(); execute(sql); assertEquals(before,counts());
+        assertEquals(1L,jdbc.queryForObject("select count(*) from listing_nearby_places where listing_id='unrelated-listing'",Long.class));
+        var historicalRun=jdbc.queryForMap("select * from nearby_scan_runs where id=?",historicalRunId);
+        assertEquals("TOMTOM",historicalRun.get("provider"));assertEquals("V2",historicalRun.get("api_version"));
+        assertEquals("PARTIAL",historicalRun.get("coverage_status"));assertEquals("REPLACED_BY_OFFLINE_CACHE_REPLAY",historicalRun.get("stopped_reason"));
+        assertEquals(historicalStartedAt,historicalRun.get("started_at"));
+        assertTrue(historicalQuery.summaries(new NearbyTypes.BatchRequest(List.of(historicalListing),2000,null,1)).getFirst().groups()
+            .stream().allMatch(group->group.coverageStatus().equals("PARTIAL")),"The historical run must not falsely restore COMPLETE coverage after offline links replace it");
         verifyPublicFilters();
+        verifyOfflineNearby(sqlPath);
         assertEquals("DO NOT TOUCH",jdbc.queryForObject("select title from listings where id='unrelated-listing'",String.class));
         assertEquals("OLD SEED KEEP",jdbc.queryForObject("select title from listings where id=md5('homespace-hcm-200-listing-v2-1')::uuid::text",String.class));
         // Force an error AFTER listing/address writes to prove the complete transaction rolls back.
@@ -149,6 +199,126 @@ class ListingSeedPostgresTest {
         assertTrue(badCatalog.getMessage().contains("nội thất"));
         assertEquals(before,counts());
         assertEquals(300L,jdbc.queryForObject("select count(*) from listing_addresses where ref_id is null and ward_id is not null and resolved_at is null and house_number is null",Long.class));
+    }
+
+    /** Use the application's real scan fingerprint and explicit properties, never a developer key. */
+    private NearbySettings offlineNearbySettings() throws Exception {
+        Path root=Path.of("").toAbsolutePath();
+        while(root!=null&&!Files.exists(root.resolve("hs-api-service/src/main/resources/application.properties")))root=root.getParent();
+        assertNotNull(root);
+        Properties properties=new Properties();
+        try(var reader=Files.newBufferedReader(root.resolve("hs-api-service/src/main/resources/application.properties"),StandardCharsets.UTF_8)) {
+            properties.load(reader);
+        }
+        properties.setProperty("TOMTOM_API_KEY","offline-seed-test-only");
+        properties.setProperty("nearby.sync-enabled","true");
+        properties.setProperty("nearby.query-enabled","true");
+        properties.setProperty("nearby.tomtom.license-approved","true");
+        try(var context=new AnnotationConfigApplicationContext()) {
+            var sources=context.getEnvironment().getPropertySources();
+            sources.remove("systemProperties");sources.remove("systemEnvironment");
+            sources.addFirst(new PropertiesPropertySource("offline-seed-test-configuration",properties));
+            context.registerBean(PropertySourcesPlaceholderConfigurer.class);
+            context.register(NearbySettings.class);context.refresh();
+            return context.getBean(NearbySettings.class);
+        }
+    }
+
+    private void verifyOfflineNearby(Path sqlPath) throws Exception {
+        var mapper=new ObjectMapper();
+        JsonNode snapshot=mapper.readTree(Files.readString(sqlPath.resolveSibling("nearby_places_tomtom_snapshot.json")));
+        assertTrue(snapshot.has("provenance"),"The offline fixture must retain coordinate provenance");
+        JsonNode places=snapshot.path("places");assertTrue(places.isArray()&&!places.isEmpty());
+        NearbySettings settings=offlineNearbySettings();
+        assertEquals(2000,settings.getScanRadiusM());assertEquals(100,settings.getResultLimit());
+        assertEquals(0,settings.getRetentionHours(),"Seed snapshots must not trigger TTL refreshes");
+        Set<String> fixtureIds=new HashSet<>();
+        for(JsonNode place:places) {
+            String id=place.path("id").asText();assertTrue(fixtureIds.add(id));
+            var row=jdbc.queryForMap("select * from nearby_places where id=?",id);
+            assertEquals(place.path("name").asText(),row.get("name"));
+            assertEquals(0,new BigDecimal(place.path("latitude").asText()).compareTo((BigDecimal)row.get("latitude")));
+            assertEquals(0,new BigDecimal(place.path("longitude").asText()).compareTo((BigDecimal)row.get("longitude")));
+            JsonNode source=place.path("source");
+            var stored=jdbc.queryForMap("select * from nearby_place_sources where place_id=?",id);
+            assertEquals(source.path("id").asText(),stored.get("id"));
+            assertEquals("TOMTOM",stored.get("provider"));assertEquals("V2",stored.get("api_version"));
+            assertEquals(source.path("externalId").asText(),stored.get("external_id"));
+            assertEquals(source.path("licensePolicyId").asText(),stored.get("license_policy_id"));
+            assertEquals(settings.getLicensePolicyId(),stored.get("license_policy_id"));
+            assertEquals(source.path("categoryIds"),mapper.readTree(stored.get("category_ids").toString()));
+            assertEquals(source.path("sourceAddress"),mapper.readTree(stored.get("source_address").toString()));
+        }
+        assertEquals(places.size(),count("nearby_places"));assertEquals(places.size(),count("nearby_place_sources"));
+        assertEquals(0L,jdbc.queryForObject("select count(*) from (select provider,api_version,external_id from nearby_place_sources group by 1,2,3 having count(*)>1) duplicates",Long.class));
+        assertEquals(0L,jdbc.queryForObject("select count(*) from (select listing_id,place_id from listing_nearby_places group by 1,2 having count(*)>1) duplicates",Long.class));
+        assertTrue(jdbc.queryForObject("select count(*) from (select place_id from listing_nearby_places group by place_id having count(distinct listing_id)>1) shared",Long.class)>0,
+            "Real POIs must be reused across listings instead of copied per listing");
+
+        var locations=jdbc.queryForList("select a.listing_id,a.latitude,a.longitude,md5(a.id||':'||a.latitude::text||':'||a.longitude::text) hash from listing_addresses a");
+        assertEquals(300,locations.size());
+        Map<String,List<Map<String,Object>>> links=new HashMap<>();
+        for(var link:jdbc.queryForList("select lp.*,p.latitude,p.longitude,p.position_revision from listing_nearby_places lp join nearby_places p on p.id=lp.place_id where lp.listing_id in (select listing_id from listing_addresses)"))
+            links.computeIfAbsent((String)link.get("listing_id"),ignored->new java.util.ArrayList<>()).add(link);
+        Map<String,Long> expectedCounts=new HashMap<>();
+        for(var location:locations) {
+            String listing=(String)location.get("listing_id");double lat=((Number)location.get("latitude")).doubleValue(),lon=((Number)location.get("longitude")).doubleValue();
+            long within=0;
+            for(JsonNode place:places)if(NearbyTypes.distance(lat,lon,place.path("latitude").asDouble(),place.path("longitude").asDouble())<=2000)within++;
+            long expected=Math.min(100,within);expectedCounts.put(listing,expected);
+            var current=links.getOrDefault(listing,List.of());assertEquals(expected,current.size(),"Only real fixture POIs inside 2 km may be linked: "+listing);
+            for(var link:current) {
+                assertTrue(fixtureIds.contains(link.get("place_id")));assertEquals(location.get("hash"),link.get("listing_location_hash"));
+                assertEquals(((Number)link.get("position_revision")).longValue(),((Number)link.get("place_position_revision")).longValue());
+                double exact=NearbyTypes.distance(lat,lon,((Number)link.get("latitude")).doubleValue(),((Number)link.get("longitude")).doubleValue());
+                assertTrue(exact<=2000);assertEquals(exact,((Number)link.get("straight_distance_m")).doubleValue(),0.002);
+                assertNotNull(link.get("evidence_run_id"));
+            }
+            var job=jdbc.queryForMap("select * from nearby_scan_jobs where listing_id=?",listing);
+            assertEquals("PARTIAL",job.get("status"));assertEquals(location.get("hash"),job.get("location_hash"));
+            assertEquals(2000,((Number)job.get("radius_m")).intValue());assertEquals(settings.scanVersion(),job.get("mapping_version"));
+            assertEquals(0,((Number)job.get("attempts")).intValue());assertNull(job.get("lease_token"));assertNull(job.get("lease_until"));
+            var run=jdbc.queryForMap("select * from nearby_scan_runs where job_id=? and provider='OFFLINE_SEED'",job.get("id"));
+            assertEquals("OFFLINE_SEED",run.get("provider"));assertEquals("CACHE_V1",run.get("api_version"));
+            assertEquals("PARTIAL",run.get("coverage_status"));assertEquals("OFFLINE_CACHE_REPLAY",run.get("stopped_reason"));
+            assertEquals(2000,((Number)run.get("radius_m")).intValue());assertEquals(100,((Number)run.get("page_size")).intValue());
+            assertEquals(0,((BigDecimal)location.get("latitude")).compareTo((BigDecimal)run.get("center_lat")));
+            assertEquals(0,((BigDecimal)location.get("longitude")).compareTo((BigDecimal)run.get("center_lon")));
+            assertEquals(0,((Number)run.get("pages_fetched")).intValue());assertEquals(0,((Number)run.get("returned_count")).intValue());
+            assertEquals(expected,((Number)run.get("unique_count")).longValue());assertNull(run.get("total_results_reported"));assertNotNull(run.get("finished_at"));
+            assertEquals(settings.getLicensePolicyId(),run.get("license_policy_id"));
+            Set<String> groups=new HashSet<>(),categoryIds=new HashSet<>();
+            mapper.readTree(run.get("requested_groups").toString()).forEach(group->groups.add(group.asText()));
+            mapper.readTree(run.get("requested_category_ids").toString()).forEach(category->categoryIds.add(category.asText()));
+            assertEquals(new NearbyCatalog().requestedGroups(settings.categoryIds()).stream().map(Enum::name).collect(java.util.stream.Collectors.toSet()),groups);
+            assertEquals(settings.categoryIds(),categoryIds);
+        }
+        assertEquals(300,count("nearby_scan_jobs"));
+        assertEquals(300L,jdbc.queryForObject("select count(*) from nearby_scan_runs where provider='OFFLINE_SEED'",Long.class));
+        assertTrue(count("nearby_scan_runs")>=300,"Historical runs must be retained rather than deleted on seed replay");
+
+        var repo=new NearbyRepository(new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource),transactions,settings);
+        var query=new NearbyQueryService(repo,settings);
+        // Check one full, one sparse and one empty real area without falsely padding to 100.
+        for(var condition:List.<java.util.function.LongPredicate>of(n->n==100,n->n>0&&n<100,n->n==0)) {
+            String listing=expectedCounts.entrySet().stream().filter(entry->condition.test(entry.getValue())).map(Map.Entry::getKey).findFirst().orElseThrow();
+            long expected=expectedCounts.get(listing);
+            var page=query.places(listing,2000,null,1,null);
+            assertTrue(page.enabled());assertEquals(expected,page.total());assertEquals(10,page.size());assertEquals(Math.min(10,expected),page.items().size());
+            assertTrue(page.coverage().groups().stream().allMatch(group->group.coverageStatus().equals("PARTIAL")),"Offline replay must not pretend a complete fresh provider response");
+            if(expected>10) {
+                var firstIds=page.items().stream().map(NearbyTypes.Place::id).toList();
+                assertTrue(query.places(listing,2000,null,2,null).items().stream().noneMatch(place->firstIds.contains(place.id())));
+            }
+        }
+        // With sync actually enabled, reconciliation and a worker tick still have no work.
+        // A mock provider fails this assertion if the seed fingerprint/status is incomplete.
+        repo.reconcile(2000,300);assertNull(repo.claim());
+        NearbyProvider provider=org.mockito.Mockito.mock(NearbyProvider.class);
+        var worker=new NearbyWorker(settings,repo,provider,new NearbyCatalog());worker.initialize();worker.tick();
+        org.mockito.Mockito.verifyNoInteractions(provider);
+        assertNull(repo.claim());
+        System.out.println("NEARBY SEED PASS: "+places.size()+" real shared POIs; "+links.values().stream().mapToLong(List::size).sum()+" links; all distances <=2km; 300 terminal offline snapshots; zero provider calls");
     }
 
     private void verifyPublicFilters() {
