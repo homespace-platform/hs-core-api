@@ -149,7 +149,7 @@ class NearbyPostgresTest {
   assertEquals(0,summary.groups().stream().filter(g->g.code()==Group.EDUCATION).findFirst().orElseThrow().knownCount());
   assertEquals(0,summary.groups().stream().filter(g->g.code()==Group.SHOPPING).findFirst().orElseThrow().knownCount());
   assertEquals(95,summary.groups().stream().filter(g->g.code()==Group.FOOD_DRINK).findFirst().orElseThrow().knownCount());
-  assertEquals(5,query.places(A,2000,null,1,null).items().size());assertEquals(100,query.places(A,2000,null,1,null).total());
+  assertEquals(10,query.places(A,2000,null,1,null).items().size());assertEquals(100,query.places(A,2000,null,1,null).total());
   assertEquals("SUCCESS",jdbc.queryForObject("SELECT status FROM nearby_scan_jobs WHERE id=:id",Map.of("id",job.id()),String.class));
   assertEquals(1L,jdbc.queryForObject("SELECT pages_fetched::bigint FROM nearby_scan_runs",Map.of(),Long.class));
   repo.reconcile(2000,25);assertNull(repo.claim());assertEquals(1,offsets.size());
@@ -288,25 +288,25 @@ class NearbyPostgresTest {
   assertEquals(2L,jdbc.queryForObject("SELECT count(*) FROM nearby_scan_jobs WHERE status='SUCCESS' AND radius_m=2000",Map.of(),Long.class));
   assertEquals(5,query.places(A,null,null,1,20).total());
  }
- @Test void publicPaginationCapsAtFiveAndUsesTheSameLimitForItsOffset(){
+ @Test void publicPaginationCapsAtTenAndUsesTheSameLimitForItsOffset(){
   jdbc.update("UPDATE listings SET status='HIDDEN' WHERE id=:id",Map.of("id",B));
   NearbyProvider base=fake(true);
-  NearbyProvider sevenPlaces=new NearbyProvider(){
+  NearbyProvider twelvePlaces=new NearbyProvider(){
    public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
    public Page search(Location l,int radius,Set<String> categories,int offset){
     Page page=base.search(l,radius,categories,offset);if(page.places().isEmpty())return page;
     var pois=new ArrayList<>(page.places());
-    for(int i=1;i<=2;i++)pois.add(new Poi("pagination-"+i,"Pagination school "+i,l.latitude()+i*0.001,l.longitude(),null,null,Set.of("7372"),null,null,null));
+    for(int i=1;i<=7;i++)pois.add(new Poi("pagination-"+i,"Pagination school "+i,l.latitude()+i*0.001,l.longitude(),null,null,Set.of("7372"),null,null,null));
     return new Page(0,pois.size(),pois.size(),pois,0);
    }
   };
-  repo.reconcile(2000,25);new NearbyWorker(settings,repo,sevenPlaces,new NearbyCatalog()).process(repo.claim());
+  repo.reconcile(2000,25);new NearbyWorker(settings,repo,twelvePlaces,new NearbyCatalog()).process(repo.claim());
   var first=query.places(A,2000,null,1,null);
   var second=query.places(A,2000,null,2,20);
-  assertEquals(7,first.total());assertEquals(5,first.size());assertEquals(5,first.items().size());
-  assertEquals(7,second.total());assertEquals(5,second.size());assertEquals(2,second.items().size());
+  assertEquals(12,first.total());assertEquals(10,first.size());assertEquals(10,first.items().size());
+  assertEquals(12,second.total());assertEquals(10,second.size());assertEquals(2,second.items().size());
   Set<String> ids=new HashSet<>();first.items().forEach(p->assertTrue(ids.add(p.id())));second.items().forEach(p->assertTrue(ids.add(p.id())));
-  assertEquals(7,ids.size());assertTrue(first.items().getLast().distanceMeters()<=second.items().getFirst().distanceMeters());
+  assertEquals(12,ids.size());assertTrue(first.items().getLast().distanceMeters()<=second.items().getFirst().distanceMeters());
   assertTrue(query.places(A,2000,null,3,null).items().isEmpty());
  }
  @Test void movedCoordinatesAndHiddenListingsCannotLeakStaleEvidence(){
@@ -386,6 +386,7 @@ class NearbyPostgresTest {
   assertEquals(3,count("nearby_scan_jobs"));assertNull(repo.claim());
  }
  @Test void expiredSourceIsExcludedAndPurgedWithoutDeletingListings(){
+  settings.setRetentionHours(24);
   scanBoth(true);jdbc.update("UPDATE nearby_place_sources SET content_expires_at=now()-interval '1 second'",Map.of());
   assertEquals(0,query.places(A,3000,null,1,20).total());
   repo.purgeExpired();assertEquals(0,count("nearby_places"));assertEquals(0,count("listing_nearby_places"));assertEquals(2,count("listings"));
@@ -448,14 +449,44 @@ class NearbyPostgresTest {
   jdbc.update("UPDATE listing_addresses SET active=false WHERE listing_id=:id",Map.of("id",A));
   repo.reconcile(3000,25);assertEquals(1,count("nearby_scan_jobs"));
  }
- @Test void reconciliationRefreshesExpiredJobsWithoutDuplicatingFreshScans(){
+ @Test void reconciliationAndPublicationHintsNeverRepeatCompletedOrPartialSnapshotsBecauseTimePassed(){
   scanBoth(true);
   repo.reconcile(3000,25);assertNull(repo.claim());
-  jdbc.update("UPDATE nearby_scan_jobs SET next_attempt_at=now()-interval '1 second' WHERE listing_id=:id",Map.of("id",A));
-  repo.reconcile(3000,25);Job refreshed=repo.claim();
-  assertEquals(A,refreshed.listingId());
-  assertEquals(1,refreshed.attempts());
+  jdbc.update("UPDATE nearby_scan_jobs SET next_attempt_at=now()-interval '30 days'",Map.of());
+  repo.reconcile(3000,25);repo.ensure(A,3000);assertNull(repo.claim());
+  jdbc.update("UPDATE nearby_scan_jobs SET status='PARTIAL'",Map.of());
+  repo.reconcile(3000,25);repo.ensure(A,3000);assertNull(repo.claim());
   assertEquals(2,count("nearby_scan_jobs"));
+ }
+ @Test void snapshotsSurviveThirtyDaysAndRestartAndOnlyAChangedLocationFetchesAgain(){
+  onlyA();settings.setSyncEnabled(true);assertEquals(0,settings.getRetentionHours());
+  NearbyProvider base=fake(true);var calls=new java.util.concurrent.atomic.AtomicInteger();
+  NearbyProvider provider=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int radius,Set<String> categories,int offset){
+    calls.incrementAndGet();return base.search(l,radius,categories,offset);
+   }
+  };
+  var worker=new NearbyWorker(settings,repo,provider,new NearbyCatalog());
+  worker.initialize();worker.tick();assertEquals(1,calls.get());
+  jdbc.update("UPDATE nearby_scan_jobs SET next_attempt_at=now()-interval '30 days'",Map.of());
+  jdbc.update("UPDATE nearby_scan_runs SET expires_at=now()-interval '30 days',started_at=now()-interval '31 days',finished_at=now()-interval '31 days'",Map.of());
+  jdbc.update("UPDATE nearby_place_sources SET content_expires_at=now()-interval '30 days',last_seen_at=now()-interval '31 days'",Map.of());
+  repo.purgeExpired();assertEquals(5,count("nearby_places"));assertEquals(5,count("nearby_place_sources"));
+  var restarted=new NearbyWorker(settings,repo,provider,new NearbyCatalog());
+  restarted.initialize();restarted.tick();restarted.changed(new ScanChanged(A));restarted.tick();
+  assertEquals(1,calls.get());assertNull(repo.claim());
+  assertEquals(5,query.places(A,2000,null,1,5).total());
+  String target=query.targets("Thái Bình Dương").getFirst().id();
+  var summary=query.summaries(new BatchRequest(List.of(A),2000,Set.of(Group.EDUCATION),1,target)).getFirst();
+  assertEquals("COMPLETE_PROVIDER_RESPONSE",summary.groups().getFirst().coverageStatus());
+  assertNotNull(summary.target());
+  var params=new org.springframework.jdbc.core.namedparam.MapSqlParameterSource();
+  String predicate=query.searchPredicate(target,null,2000,params);
+  assertEquals(1L,jdbc.queryForObject("SELECT count(*) FROM listings l WHERE l.id='"+A+"'"+predicate,params,Long.class));
+  jdbc.update("UPDATE listing_addresses SET latitude=10.8219195 WHERE listing_id=:id",Map.of("id",A));
+  restarted.changed(new ScanChanged(A));restarted.tick();restarted.tick();
+  assertEquals(2,calls.get());assertEquals(5,count("nearby_places"));assertEquals(5,links(A));
   assertNull(repo.claim());
  }
  @Test void providerPrecisionBeyondSevenDecimalsDoesNotInvalidateOtherListingDistances(){
@@ -476,6 +507,7 @@ class NearbyPostgresTest {
   assertEquals(5,query.places(B,3000,null,1,20).total());
  }
  @Test void movedSharedPoiMakesCoverageStaleAndExpiredRelationCannotReuseAnotherListingsSource(){
+  settings.setRetentionHours(24);
   scanBoth(true);
   jdbc.update("UPDATE nearby_places SET latitude=latitude+0.001,position_revision=position_revision+1",Map.of());
   assertEquals(0,query.places(A,3000,null,1,20).total());

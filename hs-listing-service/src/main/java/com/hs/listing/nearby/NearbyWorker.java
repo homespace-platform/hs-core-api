@@ -83,8 +83,8 @@ public class NearbyWorker {
    String reason=!clean?"INVALID_OR_UNVERIFIED_ITEMS":limited?"SINGLE_REQUEST_LIMIT":null;
    repo.finishRun(job,run,coverage,reason);
    run=null;
-   // A deliberate limit is a successful scan, not a reason to schedule another page.
-   repo.finishJob(job,clean?"SUCCESS":"PARTIAL",null,settings.getRetentionHours()*3600L);
+   // Terminal snapshots are not requeued by time, including empty or limited responses.
+   repo.finishJob(job,clean?"SUCCESS":"PARTIAL",null,0);
   } catch(NearbyProvider.Failure failure) {
    boolean quota=failure.code().startsWith("QUOTA_")||failure.code().equals("PROVIDER_PAUSED")||failure.code().equals("TOMTOM_HTTP_429");
    boolean retry=failure.retryable()&&(quota||job.attempts()<settings.getMaxAttempts());

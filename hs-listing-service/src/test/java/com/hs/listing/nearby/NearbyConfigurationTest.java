@@ -84,8 +84,9 @@ class NearbyConfigurationTest {
         assertTrue(settings.readable());
         assertEquals(2000,settings.radius(null));
         assertEquals(2000,settings.getScanRadiusM());
-        assertEquals(5,settings.getPublicPageSize());
+        assertEquals(10,settings.getPublicPageSize());
         assertEquals(100,settings.getResultLimit());
+        assertEquals(0,settings.getRetentionHours());
         assertEquals("7372,7377,7321,7326,7332005,9361009,7315,7328,9942002,9362",String.join(",",settings.categoryIds()));
         assertEquals(7,new NearbyCatalog().requestedGroups(settings.categoryIds()).size());
     }
@@ -103,5 +104,12 @@ class NearbyConfigurationTest {
         for(int value:java.util.List.of(0,101)){
             settings.setResultLimit(value);assertThrows(IllegalStateException.class,settings::validate);
         }
+    }
+    @Test void zeroRetentionKeepsSnapshotsAndNegativeRetentionFails(){
+        Properties properties=properties();
+        properties.setProperty("nearby.retention-hours","0");
+        assertEquals(0,configured(properties).getRetentionHours());
+        properties.setProperty("nearby.retention-hours","-1");
+        assertThrows(BeanCreationException.class,()->configured(properties));
     }
 }

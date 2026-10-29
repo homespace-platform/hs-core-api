@@ -65,7 +65,7 @@ public class NearbySettings {
   providerBaseUri();
   new NearbyCatalog().requestedGroups(categoryIds());
   if(defaultRadiusM<100 || scanRadiusM<defaultRadiusM || maxRadiusM<scanRadiusM || maxRadiusM>10000
-    || publicPageSize<1 || publicPageSize>50 || retentionHours<1 || retentionHours>720 || resultLimit<1 || resultLimit>100
+    || publicPageSize<1 || publicPageSize>50 || retentionHours<0 || retentionHours>720 || resultLimit<1 || resultLimit>100
     || requestsPerMinute<1 || requestsPerDay<1 || requestsPerMonth<1 || maxAttempts<1)
    throw new IllegalStateException("Invalid nearby configuration");
   if((syncEnabled || queryEnabled) && !permitted())

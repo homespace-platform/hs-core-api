@@ -50,8 +50,7 @@ public class NearbyRepository {
      OR EXISTS(SELECT 1 FROM nearby_scan_jobs old WHERE old.listing_id=l.id AND old.location_hash<>HASH AND old.status<>'SUPERSEDED')
      OR NOT EXISTS(SELECT 1 FROM nearby_scan_jobs j WHERE j.listing_id=l.id AND j.location_hash=HASH
       AND j.radius_m=:radius AND j.mapping_version=:version
-      AND (j.status IN ('PENDING','RUNNING','RETRY_WAIT','FAILED','CANCELLED')
-       OR (j.status IN ('SUCCESS','PARTIAL') AND j.next_attempt_at>now()))))
+      AND j.status IN ('PENDING','RUNNING','RETRY_WAIT','FAILED','CANCELLED','SUCCESS','PARTIAL')))
    ORDER BY l.published_at DESC NULLS LAST,l.id LIMIT :batch
    """.replace("PUBLIC_LOCATION",PUBLIC_LOCATION).replace("HASH",HASH);
   for(String id:jdbc.queryForList(sql,Map.of("radius",radius,"batch",batch,"version",settings.scanVersion()),String.class))ensure(id,radius);
@@ -87,8 +86,7 @@ public class NearbyRepository {
     VALUES(:id,:listing,:hash,:radius,:version)
     ON CONFLICT(listing_id,location_hash,radius_m,mapping_version) DO UPDATE
     SET status='PENDING',attempts=0,next_attempt_at=now(),updated_at=now(),last_error_code=NULL
-    WHERE nearby_scan_jobs.status<>'RUNNING' AND (:refresh OR nearby_scan_jobs.status='SUPERSEDED'
-     OR (nearby_scan_jobs.status IN ('SUCCESS','PARTIAL') AND nearby_scan_jobs.next_attempt_at<=now()))
+    WHERE nearby_scan_jobs.status<>'RUNNING' AND (:refresh OR nearby_scan_jobs.status='SUPERSEDED')
     """,Map.of("id",UUID.randomUUID().toString(),"listing",listingId,"hash",l.hash(),"radius",radius,
       "version",settings.scanVersion(),"refresh",force||removed>0||superseded>0));
    return true;
@@ -116,9 +114,9 @@ public class NearbyRepository {
  public String startRun(Job j,Location l,Set<Group> groups,Set<String> categoryIds) {
   heartbeat(j);
   var unfinished=jdbc.queryForList("""
-   SELECT id FROM nearby_scan_runs WHERE job_id=:job AND finished_at IS NULL AND expires_at>now()
+   SELECT id FROM nearby_scan_runs WHERE job_id=:job AND finished_at IS NULL AND (:hours=0 OR expires_at>now())
     AND license_policy_id=:policy AND coverage_status IN ('PENDING','PARTIAL') ORDER BY started_at DESC LIMIT 1
-   """,Map.of("job",j.id(),"policy",settings.getLicensePolicyId()),String.class);
+   """,Map.of("job",j.id(),"policy",settings.getLicensePolicyId(),"hours",settings.getRetentionHours()),String.class);
   if(!unfinished.isEmpty())return unfinished.getFirst();
   String id=UUID.randomUUID().toString();
   jdbc.update("""
@@ -236,6 +234,8 @@ public class NearbyRepository {
   """,Map.of("limit",limit));}
  public boolean cancel(String id){return jdbc.update("UPDATE nearby_scan_jobs SET status='CANCELLED',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=:id AND status IN ('PENDING','RUNNING','RETRY_WAIT','PARTIAL')",Map.of("id",id))==1;}
  public void purgeExpired() {
+  // A zero retention policy also preserves existing snapshots with legacy expiry timestamps.
+  if(settings.getRetentionHours()==0)return;
   tx.executeWithoutResult(status->{
    jdbc.update("DELETE FROM nearby_place_sources WHERE content_expires_at<=now()",Map.of());
    jdbc.update("DELETE FROM nearby_places p WHERE NOT EXISTS(SELECT 1 FROM nearby_place_sources s WHERE s.place_id=p.id)",Map.of());
