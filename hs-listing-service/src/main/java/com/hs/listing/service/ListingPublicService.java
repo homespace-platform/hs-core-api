@@ -1,6 +1,8 @@
 package com.hs.listing.service;
 
+import com.hs.common.advice.entity.AppException;
 import com.hs.common.dto.PageResponse;
+import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.dto.request.PublicListingSearchRequest;
 import com.hs.listing.dto.response.PublicListingSummaryResponse;
 import com.hs.listing.model.Listing;
@@ -46,6 +48,11 @@ public class ListingPublicService {
 
     @Transactional(readOnly = true)
     public PageResponse<PublicListingSummaryResponse> search(PublicListingSearchRequest request) {
+        boolean hasOwner = request.ownerId() != null && !request.ownerId().isBlank();
+        boolean hasCity = request.cityId() != null && !request.cityId().isBlank();
+        if (!hasOwner && !hasCity) {
+            throw new AppException(ListingErrorCode.CITY_REQUIRED);
+        }
         int size = Math.min(Math.max(request.size(), 1), MAX_PAGE_SIZE);
         var pageable = PageRequest.of(Math.max(request.page() - 1, 0), size, resolveSort(request.sort()));
         Specification<Listing> spec = buildSpecification(request);

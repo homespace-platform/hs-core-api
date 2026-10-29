@@ -105,7 +105,8 @@ Bộ lọc tỉnh/thành và phường dùng `cityId`, `wardId`. Dropdown khu v�
 - GET `/public/locations/cities`
 - GET `/public/locations/cities/{cityId}/wards`
 
-Đây là facets của tin đăng thật, không phải danh mục đầy đủ hành chính. DB chưa có tin thì chọn Toàn quốc.
+Đây là facets của tin đăng thật, không phải danh mục đầy đủ hành chính. Tìm tin công khai bắt buộc có `cityId`
+(trừ khi lọc theo `ownerId`); không có chế độ tìm toàn quốc. DB chưa có tin thì dropdown tỉnh trống cho đến khi có tin PUBLISHED.
 Nhập địa chỉ hồ sơ/tin/Branch không phụ thuộc facets này: luôn tìm trực tiếp bằng 4 API Vietmap.
 Tìm kiếm AI/native SQL và JPQL lịch xem đã chuyển sang listing_addresses cùng field city_id/city/ward_id/ward/street/display.
 

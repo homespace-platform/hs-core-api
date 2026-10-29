@@ -325,6 +325,9 @@ class ListingSeedPostgresTest {
         var storage=new StorageProperties("seed-test","ap-southeast-1",java.time.Duration.ofMinutes(5),java.time.Duration.ofMinutes(5),null,null);
         var service=new ListingPublicService(listings,addresses,org.mockito.Mockito.mock(UserRepository.class),storage);
         new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            var nationwide=org.junit.jupiter.api.Assertions.assertThrows(com.hs.common.advice.entity.AppException.class,
+                    () -> service.search(searchRequest(java.util.Map.of())));
+            assertEquals(com.hs.listing.advice.ListingErrorCode.CITY_REQUIRED.getCode(),nationwide.getCode());
             assertEquals(300,service.search(searchRequest(java.util.Map.of("cityId","12"))).getTotalElements());
             for (var ward:java.util.Map.of("24588",142L,"24332",109L,"24076",49L).entrySet()) {
                 var result=service.search(searchRequest(java.util.Map.of("cityId","12","wardId",ward.getKey())));
