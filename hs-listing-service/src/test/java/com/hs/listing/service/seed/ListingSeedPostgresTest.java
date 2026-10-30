@@ -229,6 +229,12 @@ class ListingSeedPostgresTest {
         JsonNode snapshot=mapper.readTree(Files.readString(sqlPath.resolveSibling("nearby_places_tomtom_snapshot.json")));
         assertTrue(snapshot.has("provenance"),"The offline fixture must retain coordinate provenance");
         JsonNode places=snapshot.path("places");assertTrue(places.isArray()&&!places.isEmpty());
+        JsonNode audit=mapper.readTree(Files.readString(sqlPath.resolveSibling("nearby_seed_audit.json")));
+        Map<String,JsonNode> auditedLocations=new HashMap<>();
+        audit.path("listings").forEach(row->auditedLocations.put(row.path("addressId").asText(),row));
+        assertEquals(300,auditedLocations.size());
+        assertEquals(0,audit.path("summary").path("empty").asInt());
+        assertEquals(30000,audit.path("summary").path("links").asInt());
         NearbySettings settings=offlineNearbySettings();
         assertEquals(2000,settings.getScanRadiusM());assertEquals(100,settings.getResultLimit());
         assertEquals(0,settings.getRetentionHours(),"Seed snapshots must not trigger TTL refreshes");
@@ -255,7 +261,7 @@ class ListingSeedPostgresTest {
         assertTrue(jdbc.queryForObject("select count(*) from (select place_id from listing_nearby_places group by place_id having count(distinct listing_id)>1) shared",Long.class)>0,
             "Real POIs must be reused across listings instead of copied per listing");
 
-        var locations=jdbc.queryForList("select a.listing_id,a.latitude,a.longitude,md5(a.id||':'||a.latitude::text||':'||a.longitude::text) hash from listing_addresses a");
+        var locations=jdbc.queryForList("select a.id,a.listing_id,a.latitude,a.longitude,md5(a.id||':'||a.latitude::text||':'||a.longitude::text) hash from listing_addresses a");
         assertEquals(300,locations.size());
         Map<String,List<Map<String,Object>>> links=new HashMap<>();
         for(var link:jdbc.queryForList("select lp.*,p.latitude,p.longitude,p.position_revision from listing_nearby_places lp join nearby_places p on p.id=lp.place_id where lp.listing_id in (select listing_id from listing_addresses)"))
@@ -267,6 +273,14 @@ class ListingSeedPostgresTest {
             for(JsonNode place:places)if(NearbyTypes.distance(lat,lon,place.path("latitude").asDouble(),place.path("longitude").asDouble())<=2000)within++;
             long expected=Math.min(100,within);expectedCounts.put(listing,expected);
             var current=links.getOrDefault(listing,List.of());assertEquals(expected,current.size(),"Only real fixture POIs inside 2 km may be linked: "+listing);
+            JsonNode audited=auditedLocations.get(location.get("id"));assertNotNull(audited);
+            Set<String> selected=new HashSet<>();audited.path("selectedPlaceIds").forEach(id->selected.add(id.asText()));
+            assertEquals(selected,current.stream().map(link->(String)link.get("place_id")).collect(java.util.stream.Collectors.toSet()),
+                "SQL must match the independent diverse-selection audit, not silently drop categories");
+            assertEquals(100,current.size());
+            var groupCounts=jdbc.queryForList("select c.category_code,count(*) n from listing_nearby_places lp join nearby_place_categories c on c.place_id=lp.place_id where lp.listing_id=? group by c.category_code",listing);
+            assertTrue(groupCounts.size()>=6,"All seeded listings need the six real groups available in their2km pool");
+            for(var group:groupCounts)assertEquals(audited.path("groups").path((String)group.get("category_code")).asLong(),((Number)group.get("n")).longValue());
             for(var link:current) {
                 assertTrue(fixtureIds.contains(link.get("place_id")));assertEquals(location.get("hash"),link.get("listing_location_hash"));
                 assertEquals(((Number)link.get("position_revision")).longValue(),((Number)link.get("place_position_revision")).longValue());
@@ -299,9 +313,8 @@ class ListingSeedPostgresTest {
 
         var repo=new NearbyRepository(new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource),transactions,settings);
         var query=new NearbyQueryService(repo,settings);
-        // Check one full, one sparse and one empty real area without falsely padding to 100.
-        for(var condition:List.<java.util.function.LongPredicate>of(n->n==100,n->n>0&&n<100,n->n==0)) {
-            String listing=expectedCounts.entrySet().stream().filter(entry->condition.test(entry.getValue())).map(Map.Entry::getKey).findFirst().orElseThrow();
+        // All300 areas now have genuine data. Public API must expose it for every location.
+        for(String listing:expectedCounts.keySet()) {
             long expected=expectedCounts.get(listing);
             var page=query.places(listing,2000,null,1,null);
             assertTrue(page.enabled());assertEquals(expected,page.total());assertEquals(10,page.size());assertEquals(Math.min(10,expected),page.items().size());
