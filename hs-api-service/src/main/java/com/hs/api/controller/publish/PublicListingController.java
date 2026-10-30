@@ -35,6 +35,7 @@ public class PublicListingController {
     private final ListingQueryService listingQueryService;
     private final com.hs.listing.service.ListingViewService listingViewService;
     private final AiListingSearchService aiListingSearchService;
+    private final com.hs.listing.service.AiListingValueService aiListingValueService;
 
     @GetMapping("/ai/fields")
     public com.hs.common.dto.ApiResponse<java.util.Map<String, String>> aiSearchFields() {
@@ -66,6 +67,21 @@ public class PublicListingController {
         } catch (IllegalArgumentException error) {
             throw new org.springframework.web.server.ResponseStatusException(
                     org.springframework.http.HttpStatus.BAD_REQUEST, error.getMessage());
+        }
+    }
+
+    /** Optional value comparison: bounded database lookup; never a maps/model/provider call. */
+    @org.springframework.web.bind.annotation.PostMapping("/ai/value-opportunity")
+    public org.springframework.http.ResponseEntity<com.hs.common.dto.ApiResponse<Object>> aiValueOpportunity(
+            @org.springframework.web.bind.annotation.RequestBody com.hs.listing.dto.request.AiListingValueRequest request) {
+        try {
+            return org.springframework.http.ResponseEntity.ok(com.hs.common.dto.ApiResponse.<Object>builder()
+                    .result(aiListingValueService.find(request)).build());
+        } catch (com.hs.listing.service.AiSearchValidationException error) {
+            java.util.Map<String, Object> detail = new java.util.LinkedHashMap<>();
+            detail.put("reason", error.reason()); detail.put("field", error.field()); detail.put("allowed", error.allowed());
+            return org.springframework.http.ResponseEntity.badRequest().body(com.hs.common.dto.ApiResponse.<Object>builder()
+                    .code(4000).message(error.getMessage()).result(detail).build());
         }
     }
 

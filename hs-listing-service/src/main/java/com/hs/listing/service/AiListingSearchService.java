@@ -186,8 +186,12 @@ public class AiListingSearchService {
                 "SELECT count(*) FROM listings l WHERE " + base + " AND (" + tree + ") IS NULL", params, Long.class);
         List<AiListingSearchResponse.ListingEvidence> evidence = Boolean.FALSE.equals(request.evidence()) || ids.isEmpty()
                 ? List.of() : evidence(ids, compiler.units, targetDistance, params);
+        // Pagination excludes previously shown IDs but must not shrink the all-matching count a second time.
+        // This clause is a fixed server-owned SQL fragment; user input is never SQL text.
+        long matchedTotal = request.excludeIds() == null || request.excludeIds().isEmpty() ? total : jdbc.queryForObject(
+                "SELECT count(*)" + from.replace(" AND l.id NOT IN (:excludeIds)", ""), params, Long.class);
         return new AiListingSearchResponse(ids, total, Instant.now(), AiListingFieldCatalog.VERSION, catalog.version(),
-                unknown, compiler.missingContext(context), evidence);
+                unknown, compiler.missingContext(context), evidence, matchedTotal);
     }
 
     private List<AiListingSearchResponse.ListingEvidence> evidence(List<String> ids, List<Unit> units, String distance,

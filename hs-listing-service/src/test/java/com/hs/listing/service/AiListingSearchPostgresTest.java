@@ -232,12 +232,84 @@ class AiListingSearchPostgresTest {
 
         var invalid = assertThrows(AiSearchValidationException.class, () -> search(List.of(Condition.leaf("room.restroom_type", "eq", "PRIVATE_ONLY"))));
         assertEquals("INVALID_VALUE", invalid.reason());
+        verifyValueAdvice(named);
         assertEquals(before, scanState(), "Search and evidence reads never enqueue, lease or write scan data");
         System.out.println("AI SEARCH PG PASS: ward/category/price, amenity, room enum, integer policy, furnishing total, OR, per-person rent"
                 + " (unknown=" + perPerson + "), scope/exclude, target distance (" + near.size() + " within 1 km; " + far.size() + " within 5 km, "
                 + unlinkedBeyondScan + " unlinked beyond 2 km), convenience 2 km ("
                 + convenience.size() + "), supermarket 0 (unknown=" + supermarket.unknownTotal() + "), hospital vs pharmacy-only (" + hospital.size() + "/" + pharmacyOnly.size()
                 + "); scan tables unchanged");
+    }
+
+    private void verifyValueAdvice(NamedParameterJdbcTemplate named) {
+        // Controlled retrieval positives/negatives in this disposable PostgreSQL only.
+        var ids = jdbc.queryForList("SELECT id FROM listings WHERE category='APARTMENT' ORDER BY id LIMIT 16", String.class);
+        assertEquals(16, ids.size());
+        for (int i = 0; i < ids.size(); i++) {
+            jdbc.update("UPDATE listings SET title='VALUE_TEST',price_amount=?,price_unit='MONTH',currency='VND',area_m2=?,"
+                    + "available_from=current_date,status='PUBLISHED',expires_at=now()+interval '1 day' WHERE id=?",
+                    i < 4 ? 3000000 + i * 400000 : 4800000, 20 + i, ids.get(i));
+            jdbc.update("UPDATE listing_addresses SET city_id='12',ward_id='24332' WHERE listing_id=?", ids.get(i));
+            jdbc.update("UPDATE listing_apartment_details SET bedroom_count=1,bathroom_count=1,max_occupants=3,"
+                    + "furnishing_status='FULLY_FURNISHED',floor_number=5 WHERE listing_id=?", ids.get(i));
+        }
+        jdbc.update("UPDATE listings SET price_amount=4600000 WHERE id=?", ids.get(4));
+        jdbc.update("UPDATE listings SET price_amount=5000000 WHERE id=?", ids.get(5));
+        jdbc.update("UPDATE listings SET price_amount=5000001 WHERE id=?", ids.get(6));
+        jdbc.update("UPDATE listings SET price_amount=4400000 WHERE id=?", ids.get(7));
+        jdbc.update("UPDATE listing_addresses SET ward_id='24588' WHERE listing_id=?", ids.get(8));
+        jdbc.update("UPDATE listing_apartment_details SET floor_number=1 WHERE listing_id=?", ids.get(9));
+        jdbc.update("UPDATE listings SET status='DRAFT' WHERE id=?", ids.get(10));
+        jdbc.update("UPDATE listings SET price_amount=4500000 WHERE id=?", ids.get(11));
+        jdbc.update("UPDATE listings SET price_unit='PERSON_MONTH',price_amount=2400000 WHERE id=?", ids.get(12));
+        jdbc.update("UPDATE listings SET currency='USD' WHERE id=?", ids.get(13));
+        jdbc.update("UPDATE listings SET area_m2=1,available_from=current_date+30 WHERE id=?", ids.get(14));
+        jdbc.update("UPDATE listing_apartment_details SET bedroom_count=0,furnishing_status='UNFURNISHED' WHERE listing_id=?", ids.get(14));
+        var where = List.of(Condition.leaf("category", "eq", "APARTMENT"), Condition.leaf("city_id", "eq", "12"),
+                Condition.leaf("ward_id", "eq", "24332"), Condition.leaf("rent.monthly_amount", "lt", "4500000"),
+                Condition.leaf("apartment.floor_number", "gte", "2"));
+        var request = new AiListingSearchRequest(List.of(), "newest", 4, "VALUE_TEST", null, 2,
+                Condition.allOf(where), null, new SearchContext(2, null, null, null, null), null, null, false);
+        var value = new AiListingValueService(named, service, new java.math.BigDecimal("500000"), 8);
+        var input = new com.hs.listing.dto.request.AiListingValueRequest(request, ids.subList(0, 4));
+        long originalTotal = service.search(request).total();
+        var found = value.find(input);
+        assertEquals(0, found.budgetCeiling().compareTo(new java.math.BigDecimal("4500000")));
+        assertEquals("rent.monthly_amount", found.budgetField());
+        assertEquals(Set.of(ids.get(4), ids.get(5), ids.get(11), ids.get(14), ids.get(15)), new HashSet<>(found.candidateIds()),
+                "Boundary is 4.5-5m from BUDGET, preserves location/floor/public state/currency/unit; no fixed area or furnishing gate");
+        assertTrue(found.candidateIds().size() <= 8);
+        assertEquals(originalTotal, service.search(request).total(), "Main result count and original budget remain unchanged");
+        assertEquals("4500000", where.get(3).value());
+        var inclusive = new ArrayList<>(where);
+        inclusive.set(3, Condition.leaf("rent.monthly_amount", "lte", "4500000"));
+        var lte = new AiListingSearchRequest(List.of(), "newest", 4, "VALUE_TEST", null, 2,
+                Condition.allOf(inclusive), null, request.context(), null, null, false);
+        assertFalse(value.find(new com.hs.listing.dto.request.AiListingValueRequest(lte, ids.subList(0, 4))).candidateIds().contains(ids.get(11)),
+                "Exactly 4.5m already belongs to an inclusive main budget, never duplicate it as boundary");
+        var page = new AiListingSearchRequest(List.of(), "newest", 4, "VALUE_TEST", null, 2,
+                Condition.allOf(where), null, request.context(), null, List.of(ids.get(7)), false);
+        var nextPage = service.search(page);
+        assertEquals(originalTotal, nextPage.matchedTotal(), "Pagination retains the full matched count for the customer's main search");
+        assertEquals(originalTotal - 1, nextPage.total(), "The legacy total still counts matches after pagination exclusions");
+        var repeated = value.find(new com.hs.listing.dto.request.AiListingValueRequest(page, ids.subList(0, 4), List.of(ids.get(4))));
+        assertFalse(repeated.candidateIds().contains(ids.get(4)), "Do not repeat an already shown optional suggestion");
+        assertTrue(repeated.candidateIds().contains(ids.get(5)), "Main pagination exclusions must not disable boundary lookup");
+
+        var target = jdbc.queryForMap("SELECT id,latitude,longitude FROM nearby_places WHERE active=true ORDER BY id LIMIT 1");
+        for (int i = 0; i < ids.size(); i++) {
+            double lat = ((Number)target.get("latitude")).doubleValue() + (i == 15 ? 0.1 : 0.0);
+            jdbc.update("UPDATE listing_addresses SET latitude=?,longitude=? WHERE listing_id=?", lat, target.get("longitude"), ids.get(i));
+        }
+        var nearby = new AiListingSearchRequest(List.of(), "newest", 4, "VALUE_TEST", null, 2,
+                Condition.allOf(where), List.of(new NearbyCriteria((String)target.get("id"), null, 1000)), request.context(), null, null, false);
+        var around = value.find(new com.hs.listing.dto.request.AiListingValueRequest(nearby, ids.subList(0, 4))).candidateIds();
+        assertTrue(around.contains(ids.get(4)));
+        assertFalse(around.contains(ids.get(15)), "Named-target distance is preserved before candidate LIMIT");
+        jdbc.update("UPDATE listings SET status='DRAFT' WHERE id=?", ids.get(0));
+        assertTrue(value.find(input).candidateIds().isEmpty(), "Stale/unpublished displayed page cancels optional lookup");
+        jdbc.update("UPDATE listings SET status='PUBLISHED',price_unit='PERSON_MONTH' WHERE id=?", ids.get(0));
+        assertTrue(value.find(input).candidateIds().isEmpty(), "No per-person/monthly comparison without a comparable group");
     }
 
     private Set<String> kindWithin(String categoryId, int meters) {

@@ -10,7 +10,13 @@ import java.util.List;
  */
 public record AiListingSearchResponse(List<String> listingIds, long total, Instant readAt, Integer version,
                                       String catalogVersion, Long unknownTotal, List<String> contextMissing,
-                                      List<ListingEvidence> evidence) {
+                                      List<ListingEvidence> evidence, Long matchedTotal) {
+    /** Backwards-compatible construction; matchedTotal counts before pagination exclusions. */
+    public AiListingSearchResponse(List<String> listingIds, long total, Instant readAt, Integer version,
+                                   String catalogVersion, Long unknownTotal, List<String> contextMissing,
+                                   List<ListingEvidence> evidence) {
+        this(listingIds, total, readAt, version, catalogVersion, unknownTotal, contextMissing, evidence, total);
+    }
     public AiListingSearchResponse(List<String> listingIds, long total, Instant readAt) {
         this(listingIds, total, readAt, null, null, null, null, null);
     }
