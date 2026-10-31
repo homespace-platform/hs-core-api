@@ -84,7 +84,7 @@ class NearbyConfigurationTest {
         assertTrue(settings.readable());
         assertEquals(2000,settings.radius(null));
         assertEquals(2000,settings.getScanRadiusM());
-        assertEquals(10,settings.getPublicPageSize());
+        assertEquals(5,settings.getPublicPageSize());
         assertEquals(100,settings.getResultLimit());
         assertEquals(0,settings.getRetentionHours());
         assertEquals("7372,7377,7321,7326,7332005,9361009,7315,7328,9942002,9362",String.join(",",settings.categoryIds()));

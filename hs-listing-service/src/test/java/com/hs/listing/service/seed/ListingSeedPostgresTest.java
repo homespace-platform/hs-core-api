@@ -317,9 +317,9 @@ class ListingSeedPostgresTest {
         for(String listing:expectedCounts.keySet()) {
             long expected=expectedCounts.get(listing);
             var page=query.places(listing,2000,null,1,null);
-            assertTrue(page.enabled());assertEquals(expected,page.total());assertEquals(10,page.size());assertEquals(Math.min(10,expected),page.items().size());
+            assertTrue(page.enabled());assertEquals(expected,page.total());assertEquals(5,page.size());assertEquals(Math.min(5,expected),page.items().size());
             assertTrue(page.coverage().groups().stream().allMatch(group->group.coverageStatus().equals("PARTIAL")),"Offline replay must not pretend a complete fresh provider response");
-            if(expected>10) {
+            if(expected>5) {
                 var firstIds=page.items().stream().map(NearbyTypes.Place::id).toList();
                 assertTrue(query.places(listing,2000,null,2,null).items().stream().noneMatch(place->firstIds.contains(place.id())));
             }

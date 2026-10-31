@@ -149,7 +149,7 @@ class NearbyPostgresTest {
   assertEquals(0,summary.groups().stream().filter(g->g.code()==Group.EDUCATION).findFirst().orElseThrow().knownCount());
   assertEquals(0,summary.groups().stream().filter(g->g.code()==Group.SHOPPING).findFirst().orElseThrow().knownCount());
   assertEquals(95,summary.groups().stream().filter(g->g.code()==Group.FOOD_DRINK).findFirst().orElseThrow().knownCount());
-  assertEquals(10,query.places(A,2000,null,1,null).items().size());assertEquals(100,query.places(A,2000,null,1,null).total());
+  assertEquals(5,query.places(A,2000,null,1,null).items().size());assertEquals(100,query.places(A,2000,null,1,null).total());
   assertEquals("SUCCESS",jdbc.queryForObject("SELECT status FROM nearby_scan_jobs WHERE id=:id",Map.of("id",job.id()),String.class));
   assertEquals(1L,jdbc.queryForObject("SELECT pages_fetched::bigint FROM nearby_scan_runs",Map.of(),Long.class));
   repo.reconcile(2000,25);assertNull(repo.claim());assertEquals(1,offsets.size());
@@ -288,7 +288,7 @@ class NearbyPostgresTest {
   assertEquals(2L,jdbc.queryForObject("SELECT count(*) FROM nearby_scan_jobs WHERE status='SUCCESS' AND radius_m=2000",Map.of(),Long.class));
   assertEquals(5,query.places(A,null,null,1,20).total());
  }
- @Test void publicPaginationCapsAtTenAndUsesTheSameLimitForItsOffset(){
+ @Test void publicPaginationCapsAtFiveAndMatchesTheAiCategorySummary(){
   jdbc.update("UPDATE listings SET status='HIDDEN' WHERE id=:id",Map.of("id",B));
   NearbyProvider base=fake(true);
   NearbyProvider twelvePlaces=new NearbyProvider(){
@@ -303,11 +303,18 @@ class NearbyPostgresTest {
   repo.reconcile(2000,25);new NearbyWorker(settings,repo,twelvePlaces,new NearbyCatalog()).process(repo.claim());
   var first=query.places(A,2000,null,1,null);
   var second=query.places(A,2000,null,2,20);
-  assertEquals(12,first.total());assertEquals(10,first.size());assertEquals(10,first.items().size());
-  assertEquals(12,second.total());assertEquals(10,second.size());assertEquals(2,second.items().size());
+  var third=query.places(A,2000,null,3,20);
+  assertEquals(12,first.total());assertEquals(5,first.size());assertEquals(5,first.items().size());
+  assertEquals(12,second.total());assertEquals(5,second.size());assertEquals(5,second.items().size());
+  assertEquals(5,third.size());assertEquals(2,third.items().size());
   Set<String> ids=new HashSet<>();first.items().forEach(p->assertTrue(ids.add(p.id())));second.items().forEach(p->assertTrue(ids.add(p.id())));
+  third.items().forEach(p->assertTrue(ids.add(p.id())));
   assertEquals(12,ids.size());assertTrue(first.items().getLast().distanceMeters()<=second.items().getFirst().distanceMeters());
-  assertTrue(query.places(A,2000,null,3,null).items().isEmpty());
+  assertTrue(query.places(A,2000,null,4,null).items().isEmpty());
+  var categoryPage=query.places(A,2000,Set.of(Group.EDUCATION),1,5);
+  var summary=query.summaries(new BatchRequest(List.of(A),2000,Set.of(Group.EDUCATION),5,null)).getFirst();
+  assertEquals(categoryPage.items().stream().map(Place::id).toList(),summary.groups().getFirst().nearest().stream().map(Place::id).toList());
+  assertEquals(5,summary.groups().getFirst().nearest().size());
  }
  @Test void movedCoordinatesAndHiddenListingsCannotLeakStaleEvidence(){
   scanBoth(true);jdbc.update("UPDATE listing_addresses SET latitude=11 WHERE listing_id=:id",Map.of("id",A));
