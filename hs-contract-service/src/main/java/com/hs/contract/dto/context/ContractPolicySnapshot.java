@@ -30,7 +30,6 @@ public class ContractPolicySnapshot {
     private String petPolicy;
     private String smokingPolicy;
     private String propertyInspectionNotice;
-    private String vatPolicy;
     private String disputeResolution;
     private String forceMajeure;
 
@@ -49,7 +48,6 @@ public class ContractPolicySnapshot {
         m.put("petPolicy", petPolicy != null ? petPolicy : "");
         m.put("smokingPolicy", smokingPolicy != null ? smokingPolicy : "");
         m.put("propertyInspectionNotice", propertyInspectionNotice != null ? propertyInspectionNotice : "");
-        m.put("vatPolicy", vatPolicy != null ? vatPolicy : "");
         m.put("disputeResolution", disputeResolution != null ? disputeResolution : "");
         m.put("forceMajeure", forceMajeure != null ? forceMajeure : "");
         return m;

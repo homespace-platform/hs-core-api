@@ -216,7 +216,6 @@ public class ListingService {
         l.setPaymentCycle(p.paymentCycle());
         l.setMinimumLeaseMonths(p.minimumLeaseMonths());
         l.setManagementFeeIncluded(p.managementFeeIncluded());
-        l.setVatIncluded(p.vatIncluded());
         l.setActive(true);
         policyService.attach(l,r.policies(),r.submissionAction() == ListingSubmissionAction.SUBMIT_FOR_REVIEW);
     }

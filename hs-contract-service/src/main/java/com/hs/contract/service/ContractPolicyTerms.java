@@ -23,7 +23,6 @@ public final class ContractPolicyTerms {
                 "Chỉ tại khu vực cho phép", "Không được phép");
         text(lines, policies, "overnightGuestPolicy", "Khách ở qua đêm");
         text(lines, policies, "propertyInspectionNotice", "Kiểm tra tài sản");
-        text(lines, policies, "vatPolicy", "Thuế GTGT");
         text(lines, policies, "disputeResolution", "Giải quyết tranh chấp");
         text(lines, policies, "forceMajeure", "Bất khả kháng");
         return String.join("\n", lines);

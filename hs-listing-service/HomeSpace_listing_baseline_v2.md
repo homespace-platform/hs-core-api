@@ -676,7 +676,7 @@ Field khác:
 
 - Thời hạn thuê tối thiểu: backend tối thiểu 1 tháng.
 - Giá có thương lượng: boolean.
-- Giá đã gồm VAT: chỉ hiển thị với Văn phòng và Mặt bằng.
+
 - `managementFeeIncluded` lấy từ dropdown Phí quản lý có chọn `INCLUDED` hay không.
 - `priceAmount` là giá thuê cơ bản, không cộng tự động các khoản điện/nước/phí phát sinh.
 
