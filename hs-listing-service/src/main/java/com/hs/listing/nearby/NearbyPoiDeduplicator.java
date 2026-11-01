@@ -51,6 +51,11 @@ final class NearbyPoiDeduplicator {
   return largeInstitution(a)&&largeInstitution(b);
  }
 
+ static boolean samePlace(Poi a,Poi b,NearbySettings settings,Map<String,Set<String>> parents) {
+  return samePlace(new Candidate(a,normalizedName(a.name()),kinds(a.categoryIds(),parents,settings.categoryIds()),0),
+    new Candidate(b,normalizedName(b.name()),kinds(b.categoryIds(),parents,settings.categoryIds()),0),settings);
+ }
+
  private static boolean largeInstitution(Candidate candidate) {
   return !Collections.disjoint(candidate.kinds(),Set.of("7372","7377","7321"))
     && distinctiveName(candidate.name())

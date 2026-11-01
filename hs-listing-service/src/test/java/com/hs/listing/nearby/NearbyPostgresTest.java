@@ -324,6 +324,18 @@ class NearbyPostgresTest {
   var ids=jdbc.queryForList("SELECT l.id FROM listings l WHERE l.active=true AND l.status='PUBLISHED' "+predicate+" ORDER BY l.id LIMIT 10",params,String.class);
   assertEquals(List.of(A),ids);
  }
+ @Test void cachedNameSearchMatchesSeparatedTokensAndPastedAddressesBeforeReturningCandidateIds(){
+  scanBoth(true);
+  var actual=query.targets("Thái Bình Dương").getFirst();
+  String label="Trường Đại Học Công Nghiệp Thành Phố Hồ Chí Minh";
+  jdbc.update("UPDATE nearby_places SET name=:name,normalized_name=:normalized WHERE id=:id",
+    Map.of("name",label,"normalized",NearbyRepository.normalize(label),"id",actual.id()));
+  var found=query.targets("Đại học công nghiệp HCM");
+  assertEquals(List.of(actual.id()),found.stream().map(Target::id).toList());
+  assertEquals(actual.id(),query.targets(label+" — "+actual.address()).getFirst().id());
+  assertTrue(query.targets("Đại học Công nghiệp ở tỉnh không tồn tại").isEmpty());
+  assertTrue(query.targets("%' OR 1=1 --").isEmpty());
+ }
  @Test void cachedLegacyAddressesAreRebuiltFromComponentsForAllPublicProjections(){
   scanBoth(true);
   var target=query.targets("Thái Bình Dương").getFirst();
@@ -467,12 +479,54 @@ class NearbyPostgresTest {
   assertFalse(query.places(A,3000,null,1,20).enabled());
   assertThrows(IllegalArgumentException.class,()->query.targets("IUH"));
  }
- @Test void exactTargetUsesCoordinatesEvenWhenItIsNotTheGenericNearestSchool(){
+ @Test void exactTargetSummaryStillReportsTheSelectedSchoolRatherThanTheGenericNearest(){
   scanBoth(true);String target=query.targets("Thái Bình Dương").getFirst().id();
   var summaries=query.summaries(new BatchRequest(List.of(A,B),100,Set.of(Group.EDUCATION),1,target));
   assertTrue(summaries.getFirst().target().withinRadius());
   assertFalse(summaries.getLast().target().withinRadius());
   assertTrue(summaries.getFirst().target().name().contains("Thái Bình Dương"));
+ }
+ @Test void reverseNamedTargetRequiresTheSameCurrentLinkAsListingDetailBeforeFilteringCountingAndPaging(){
+  scanBoth(true);String target=query.targets("Thái Bình Dương").getFirst().id();
+  // Both rooms are geographically close, and both have other EDUCATION links. Only A has THIS target.
+  jdbc.update("DELETE FROM listing_nearby_places WHERE listing_id=:listing AND place_id=:place",Map.of("listing",B,"place",target));
+  assertFalse(query.places(B,2000,Set.of(Group.EDUCATION),1,50).items().stream().anyMatch(p->p.id().equals(target)));
+  var service=new com.hs.listing.service.AiListingSearchService(jdbc);org.springframework.test.util.ReflectionTestUtils.setField(service,"nearbyQuery",query);
+  var where=com.hs.listing.dto.request.AiListingSearchRequest.Condition.allOf(List.of(
+    com.hs.listing.dto.request.AiListingSearchRequest.Condition.leaf("category","eq","ROOM"),
+    com.hs.listing.dto.request.AiListingSearchRequest.Condition.leaf("price_amount","lt","3100000"),
+    com.hs.listing.dto.request.AiListingSearchRequest.Condition.leaf("area_m2","gte","25")));
+  var nearby=List.of(new com.hs.listing.dto.request.AiListingSearchRequest.NearbyCriteria(target,null,2000));
+  var request=new com.hs.listing.dto.request.AiListingSearchRequest(null,"target_distance",1,null,null,2,where,nearby,null,null,null,true);
+  long jobs=count("nearby_scan_jobs");
+  var found=service.search(request);
+  assertEquals(List.of(A),found.listingIds());assertEquals(1,found.total());assertEquals(0,found.unknownTotal());
+  assertEquals(1,found.matchedTotal());assertNotNull(found.evidence().getFirst().targetDistanceMeters());
+  var page=service.search(new com.hs.listing.dto.request.AiListingSearchRequest(null,"target_distance",1,null,null,2,where,nearby,null,null,List.of(A),true));
+  assertTrue(page.listingIds().isEmpty());assertEquals(1,page.matchedTotal());
+  jdbc.update("UPDATE listings SET price_amount=3200000 WHERE id=:id",Map.of("id",B));
+  var boundary=new com.hs.listing.service.AiListingValueService(jdbc,service,new java.math.BigDecimal("500000"),4);
+  assertTrue(boundary.find(new com.hs.listing.dto.request.AiListingValueRequest(request,List.of(A))).candidateIds().isEmpty(),
+    "The higher-priced nearby room still cannot be suggested without the selected POI link");
+  jdbc.update("UPDATE listings SET price_amount=3200000 WHERE id=:id",Map.of("id",A));
+  assertTrue(service.search(request).listingIds().isEmpty(),"A relationship never bypasses the customer's price bound");
+  jdbc.update("UPDATE listings SET price_amount=3000000 WHERE id=:id",Map.of("id",A));
+  jdbc.update("UPDATE listing_addresses SET latitude=latitude+0.0001 WHERE listing_id=:id",Map.of("id",A));
+  assertTrue(service.search(request).listingIds().isEmpty(),"Old address links must be excluded even when the new coordinates are still nearby");
+  assertEquals(jobs,count("nearby_scan_jobs"),"Reading must not rescan the missing relationship");
+ }
+ @Test void wideningRadiusNeverAddsAnUnlinkedRoomOrAnotherPoiWithTheSameName(){
+  scanBoth(true);String target=query.targets("Thái Bình Dương").getFirst().id();
+  jdbc.update("DELETE FROM listing_nearby_places WHERE listing_id=:listing AND place_id=:place",Map.of("listing",B,"place",target));
+  String other=jdbc.queryForObject("SELECT place_id FROM listing_nearby_places WHERE listing_id=:listing AND place_id<>:place ORDER BY place_id LIMIT 1",
+    Map.of("listing",B,"place",target),String.class);
+  jdbc.update("UPDATE nearby_places SET name=(SELECT name FROM nearby_places WHERE id=:target),normalized_name=(SELECT normalized_name FROM nearby_places WHERE id=:target) WHERE id=:other",
+    Map.of("target",target,"other",other));
+  var params=new org.springframework.jdbc.core.namedparam.MapSqlParameterSource();
+  String predicate=query.searchPredicate(target,null,5000,params);
+  assertEquals(List.of(A),jdbc.queryForList("SELECT l.id FROM listings l WHERE true"+predicate,params,String.class));
+  jdbc.update("UPDATE nearby_places SET position_revision=position_revision+1 WHERE id=:id",Map.of("id",target));
+  assertTrue(jdbc.queryForList("SELECT l.id FROM listings l WHERE true"+predicate,params,String.class).isEmpty(),"Moved POI links are stale");
  }
  @Test void cancelledJobCannotBeReclaimedOrWrittenByItsOldWorker(){
   repo.reconcile(3000,1);Job job=repo.claim();assertTrue(repo.cancel(job.id()));

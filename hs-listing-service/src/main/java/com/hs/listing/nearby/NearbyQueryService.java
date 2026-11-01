@@ -156,14 +156,23 @@ public class NearbyQueryService {
  }
  public List<Target> targets(String keyword) {
   requireEnabled();if(keyword==null||keyword.strip().length()<2||keyword.length()>160)throw new IllegalArgumentException("Place query must be 2 to 160 characters");
-  String term=NearbyRepository.normalize(keyword).replace("\\","\\\\").replace("%","\\%").replace("_","\\_");
-  return repo.jdbc().query("""
-   SELECT p.id,p.name,p.latitude,p.longitude,SOURCE_ADDRESS FROM nearby_places p WHERE p.active=true
-    AND p.normalized_name LIKE :term ESCAPE '\\'
+  var search=NearbyTargetMatcher.parse(keyword);
+  if(search.name().length()<2||search.tokens().size()>24)return List.of();
+  var parameters=params(settings.getDefaultRadiusM());List<String> terms=new ArrayList<>();
+  for(int i=0;i<search.tokens().size();i++) {
+   parameters.addValue("word"+i,"%"+search.tokens().get(i)+"%");terms.add("p.normalized_name LIKE :word"+i);
+  }
+  var candidates=repo.jdbc().query("""
+   SELECT p.id,p.name,p.latitude,p.longitude,SOURCE_ADDRESS,
+    (SELECT s.classifications->'verifiedCategoryParents' FROM nearby_place_sources s WHERE s.place_id=p.id
+      AND (:retentionHours=0 OR s.content_expires_at>now()) AND s.license_policy_id=:policy
+      ORDER BY s.last_seen_at DESC,s.id LIMIT 1) AS verified_categories
+   FROM nearby_places p WHERE p.active=true AND NAME_TERMS
     AND EXISTS(SELECT 1 FROM nearby_place_sources s WHERE s.place_id=p.id AND (:retentionHours=0 OR s.content_expires_at>now()) AND s.license_policy_id=:policy)
-   ORDER BY CASE WHEN p.normalized_name=:exact THEN 0 ELSE 1 END,p.name,p.id LIMIT 10
-   """.replace("SOURCE_ADDRESS",SOURCE_ADDRESS),Map.of("term","%"+term+"%","exact",NearbyRepository.normalize(keyword),"policy",settings.getLicensePolicyId(),"retentionHours",settings.getRetentionHours()),
-    (rs,i)->target(rs));
+   ORDER BY length(p.normalized_name),p.name,p.id LIMIT 100
+   """.replace("SOURCE_ADDRESS",SOURCE_ADDRESS).replace("NAME_TERMS",String.join(" AND ",terms)),parameters,
+    (rs,i)->new NearbyTargetMatcher.Candidate(target(rs),NearbyTargetMatcher.categories(rs.getString("verified_categories"))));
+  return NearbyTargetMatcher.select(search,candidates,settings);
  }
  /** Embedded in the existing typed listing compiler BEFORE count/order/LIMIT. */
  public String searchPredicate(String placeId,Group group,Integer radius,MapSqlParameterSource params) {
@@ -181,18 +190,19 @@ public class NearbyQueryService {
   if(targets.isEmpty())throw new IllegalArgumentException("Target place is unavailable");
   return targets.getFirst();
  }
- /** Same Haversine radius as {@link NearbyTypes#distance}; NULL (unknown) when the listing has no stored coordinates. */
- public static String distanceSql(String lat,String lon) {
-  return ("(SELECT 2*6371008.8*asin(least(1,sqrt(power(sin(radians(CAST(da.latitude AS double precision)-:LAT)/2),2)"
-   +"+cos(radians(:LAT))*cos(radians(CAST(da.latitude AS double precision)))*power(sin(radians(CAST(da.longitude AS double precision)-:LON)/2),2))))"
-   +" FROM listing_addresses da WHERE da.listing_id=l.id AND da.active=true AND da.latitude IS NOT NULL AND da.longitude IS NOT NULL)")
-   .replace("LAT",lat).replace("LON",lon);
+ // Reuse exactly the public detail projection, correlated to the listing compiler's outer alias l.
+ // Coordinates alone never establish a relationship with a named target.
+ private static final String TARGET_RELATIONS=CURRENT_PLACES.replace("JOIN listings l ON l.id=lp.listing_id","")
+   +" AND lp.listing_id=l.id";
+ public static String targetDistanceSql(String suffix) {
+  return "(SELECT lp.straight_distance_m "+TARGET_RELATIONS+" AND p.id=:targetPlace"+suffix+")";
  }
- /** Distance to the named target from stored listing coordinates. It needs no listing-to-POI link or scan. */
+ /** Invert only current cached listing-to-POI links, then restrict their recorded radius before COUNT/LIMIT. */
  public String targetPredicate(TargetPoint target,Integer radius,MapSqlParameterSource params,String suffix) {
   int meters=settings.radius(radius);
-  params.addValue("targetLat"+suffix,target.latitude()).addValue("targetLon"+suffix,target.longitude()).addValue("targetRadius"+suffix,meters);
-  return distanceSql("targetLat"+suffix,"targetLon"+suffix)+"<=:targetRadius"+suffix;
+  params.addValues(params(meters).getValues()).addValue("targetPlace"+suffix,target.id()).addValue("targetRadius"+suffix,meters);
+  return "EXISTS(SELECT 1 "+TARGET_RELATIONS+" AND p.id=:targetPlace"+suffix
+    +" AND lp.straight_distance_m<=:targetRadius"+suffix+")";
  }
  public List<NearbyKinds.Kind> kinds(){return NearbyKinds.available(settings.categoryIds());}
  /**

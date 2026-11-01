@@ -29,7 +29,8 @@ public class NearbyPlacesController {
  public ApiResponse<com.hs.listing.dto.response.AiListingSearchResponse> reverse(@PathVariable String id,
    @RequestParam(required=false)Integer radiusMeters,@RequestBody AiListingSearchRequest request) {
   return response(()->search.search(new AiListingSearchRequest(request.filters(),request.sort(),request.limit(),request.keyword(),
-    new AiListingSearchRequest.NearbyCriteria(id,null,radiusMeters))));
+    new AiListingSearchRequest.NearbyCriteria(id,null,radiusMeters),request.version(),request.where(),request.nearbyAll(),
+    request.context(),request.scopeIds(),request.excludeIds(),request.evidence())));
  }
  private static <T> ApiResponse<T> response(java.util.function.Supplier<T> operation) {
   try{return ApiResponse.<T>builder().result(operation.get()).build();}

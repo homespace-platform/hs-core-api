@@ -172,15 +172,15 @@ class AiListingSearchPostgresTest {
         assertEquals(8, scoped.total());
         assertTrue(scope.subList(2, 10).containsAll(scoped.listingIds()));
 
-        // Named target: straight-line distance from stored coordinates, no link or scan needed.
+        // Named target: reverse ONLY stored links, exactly like listing detail; filter before LIMIT.
         String placeId = jdbc.queryForObject("SELECT p.id FROM nearby_places p JOIN listing_nearby_places lp ON lp.place_id = p.id"
                 + " WHERE p.active GROUP BY p.id ORDER BY count(*) DESC, p.id LIMIT 1", String.class);
-        var place = jdbc.queryForMap("SELECT latitude, longitude FROM nearby_places WHERE id = ?", placeId);
-        double lat = ((Number) place.get("latitude")).doubleValue(), lon = ((Number) place.get("longitude")).doubleValue();
         Map<String, Double> near = new LinkedHashMap<>();
-        for (var row : jdbc.queryForList("SELECT l.id, a.latitude, a.longitude FROM listings l JOIN listing_addresses a ON a.listing_id = l.id AND a.active"
-                + " WHERE " + PUBLIC + " AND l.category = 'ROOM' AND a.latitude IS NOT NULL")) {
-            double d = NearbyTypes.distance(lat, lon, ((Number) row.get("latitude")).doubleValue(), ((Number) row.get("longitude")).doubleValue());
+        for (var row : jdbc.queryForList("SELECT l.id, lp.straight_distance_m FROM listings l JOIN listing_addresses a ON a.listing_id = l.id AND a.active"
+                + " JOIN listing_nearby_places lp ON lp.listing_id=l.id JOIN nearby_places p ON p.id=lp.place_id"
+                + " WHERE " + PUBLIC + " AND l.category = 'ROOM' AND lp.place_id=?"
+                + " AND lp.listing_location_hash=md5(a.id||':'||a.latitude::text||':'||a.longitude::text) AND lp.place_position_revision=p.position_revision", placeId)) {
+            double d = ((Number)row.get("straight_distance_m")).doubleValue();
             if (d <= 1000) near.put((String) row.get("id"), d);
         }
         var targeted = service.search(v2(List.of(Condition.leaf("category", "eq", "ROOM")), "target_distance", 20, null,
@@ -194,50 +194,57 @@ class AiListingSearchPostgresTest {
             previous = evidence.targetDistanceMeters();
         }
 
-        // Beyond the 2 km scan radius a named target still matches by coordinates, without any listing-place link.
-        Set<String> linked = new HashSet<>(jdbc.queryForList("SELECT listing_id FROM listing_nearby_places WHERE place_id = ?", String.class, placeId));
-        Map<String, Double> far = new LinkedHashMap<>();
-        for (var row : jdbc.queryForList("SELECT l.id, a.latitude, a.longitude FROM listings l JOIN listing_addresses a ON a.listing_id = l.id AND a.active"
-                + " WHERE " + PUBLIC + " AND a.latitude IS NOT NULL")) {
-            double d = NearbyTypes.distance(lat, lon, ((Number) row.get("latitude")).doubleValue(), ((Number) row.get("longitude")).doubleValue());
-            if (d <= 5000) far.put((String) row.get("id"), d);
-        }
-        long unlinkedBeyondScan = far.entrySet().stream().filter(e -> e.getValue() > 2000 && !linked.contains(e.getKey())).count();
-        assertTrue(unlinkedBeyondScan > 0, "fixture has listings 2-5 km from the target with no link to it");
-        var fiveKm = service.search(v2(List.of(), "target_distance", 20, null, List.of(new NearbyCriteria(placeId, null, 5000)), null, null));
-        assertEquals(far.size(), fiveKm.total(), "5 km target distance counts every listing by coordinates");
-        assertEquals(0L, fiveKm.unknownTotal() == null ? 0L : fiveKm.unknownTotal());
+        // A wider requested radius cannot create missing relationships from coordinates.
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            // Remove one real snapshot link in this disposable DB; its nearby coordinates remain unchanged.
+            String unlinked = near.keySet().iterator().next();
+            jdbc.update("DELETE FROM listing_nearby_places WHERE listing_id=? AND place_id=?", unlinked, placeId);
+            Set<String> linked = truth("EXISTS(SELECT 1 FROM listing_nearby_places lp JOIN nearby_places p ON p.id=lp.place_id"
+                    + " WHERE lp.listing_id=l.id AND p.id=? AND lp.straight_distance_m<=5000"
+                    + " AND lp.listing_location_hash=md5(a.id||':'||a.latitude::text||':'||a.longitude::text) AND lp.place_position_revision=p.position_revision)", placeId);
+            var fiveKm = service.search(v2(List.of(), "target_distance", 20, null, List.of(new NearbyCriteria(placeId, null, 5000)), null, null));
+            assertFalse(linked.contains(unlinked));
+            assertEquals(linked.size(), fiveKm.total(), "5 km still counts only linked listings");
+            assertTrue(linked.containsAll(fiveKm.listingIds()));
+            assertEquals(0L, fiveKm.unknownTotal() == null ? 0L : fiveKm.unknownTotal());
+            status.setRollbackOnly();
+        });
 
         // A specific POI kind needs that source category; partial coverage keeps non-matches UNKNOWN, not "none nearby".
-        // The seed's 100 real POIs contain convenience stores but no supermarket (category 7332005).
+        // Expected categories come from the current real POI snapshot, not assumptions about which stores exist.
         Set<String> convenience = kindWithin("9361009", 2000);
         assertMatches(convenience, service.search(v2(List.of(), "newest", 20, null,
                 List.of(new NearbyCriteria(null, null, 2000, "CONVENIENCE_STORE")), null, null)), "convenience store within 2 km");
-        assertTrue(kindWithin("7332005", 2000).isEmpty());
+        Set<String> supermarkets = kindWithin("7332005", 500);
         var supermarket = service.search(v2(List.of(), "newest", 20, null, List.of(new NearbyCriteria(null, null, 500, "SUPERMARKET")), null, null));
-        assertEquals(0, supermarket.total(), "A convenience store in the same SHOPPING group never satisfies a supermarket request");
+        assertEquals(supermarkets.size(), supermarket.total(), "Only verified supermarket categories satisfy this request");
+        assertTrue(supermarkets.containsAll(supermarket.listingIds()));
         Set<String> provenAbsent = truth("EXISTS (SELECT 1 FROM nearby_scan_runs r JOIN nearby_scan_jobs j ON j.id = r.job_id WHERE j.listing_id = l.id"
                 + " AND r.coverage_status = 'COMPLETE_PROVIDER_RESPONSE' AND r.radius_m >= 500 AND jsonb_exists(r.requested_groups, 'SHOPPING'))");
-        assertEquals(truth("true").size() - provenAbsent.size(), supermarket.unknownTotal(),
+        provenAbsent.removeAll(supermarkets);
+        assertEquals(truth("true").size() - supermarkets.size() - provenAbsent.size(), supermarket.unknownTotal(),
                 "Without complete coverage a listing with no supermarket evidence is unknown, not proven absent");
-        Set<String> pharmacyOnly = kindWithin("7326", 1000);
+        Set<String> pharmacies = kindWithin("7326", 1000);
+        Set<String> pharmacyOnly = new HashSet<>(pharmacies);
         Set<String> hospital = kindWithin("7321", 1000);
         pharmacyOnly.removeAll(hospital);
-        assertFalse(pharmacyOnly.isEmpty(), "fixture has listings near a pharmacy but no hospital");
         var hospitalNear = List.of(new NearbyCriteria(null, null, 1000, "HOSPITAL_POLYCLINIC"));
         assertEquals(hospital.size(), service.search(v2(List.of(), "newest", 20, null, hospitalNear, null, null)).total());
-        List<String> pharmacyScope = new ArrayList<>(pharmacyOnly).subList(0, Math.min(20, pharmacyOnly.size()));
-        assertEquals(0, service.search(v2(List.of(), "newest", 20, null, hospitalNear, pharmacyScope, null)).total(),
-                "A pharmacy in the same HEALTHCARE group never satisfies a hospital request");
+        assertFalse(pharmacies.isEmpty(), "The snapshot exercises verified pharmacy evidence");
+        List<String> pharmacyScope = new ArrayList<>(pharmacies).subList(0, Math.min(20, pharmacies.size()));
+        Set<String> expectedHospitals = new HashSet<>(hospital); expectedHospitals.retainAll(pharmacyScope);
+        var scopedHospitals = service.search(v2(List.of(), "newest", 20, null, hospitalNear, pharmacyScope, null));
+        assertEquals(expectedHospitals.size(), scopedHospitals.total(),
+                "Pharmacy-linked rooms still require their own verified hospital evidence");
+        assertTrue(expectedHospitals.containsAll(scopedHospitals.listingIds()));
 
         var invalid = assertThrows(AiSearchValidationException.class, () -> search(List.of(Condition.leaf("room.restroom_type", "eq", "PRIVATE_ONLY"))));
         assertEquals("INVALID_VALUE", invalid.reason());
         verifyValueAdvice(named);
         assertEquals(before, scanState(), "Search and evidence reads never enqueue, lease or write scan data");
         System.out.println("AI SEARCH PG PASS: ward/category/price, amenity, room enum, integer policy, furnishing total, OR, per-person rent"
-                + " (unknown=" + perPerson + "), scope/exclude, target distance (" + near.size() + " within 1 km; " + far.size() + " within 5 km, "
-                + unlinkedBeyondScan + " unlinked beyond 2 km), convenience 2 km ("
-                + convenience.size() + "), supermarket 0 (unknown=" + supermarket.unknownTotal() + "), hospital vs pharmacy-only (" + hospital.size() + "/" + pharmacyOnly.size()
+                + " (unknown=" + perPerson + "), scope/exclude, exact target links (" + near.size() + " within 1 km; unlinked room excluded at 5 km), convenience 2 km ("
+                + convenience.size() + "), supermarket (matched=" + supermarket.total() + ", unknown=" + supermarket.unknownTotal() + "), hospital vs pharmacy-only (" + hospital.size() + "/" + pharmacyOnly.size()
                 + "); scan tables unchanged");
     }
 
@@ -304,8 +311,7 @@ class AiListingSearchPostgresTest {
         var nearby = new AiListingSearchRequest(List.of(), "newest", 4, "VALUE_TEST", null, 2,
                 Condition.allOf(where), List.of(new NearbyCriteria((String)target.get("id"), null, 1000)), request.context(), null, null, false);
         var around = value.find(new com.hs.listing.dto.request.AiListingValueRequest(nearby, ids.subList(0, 4))).candidateIds();
-        assertTrue(around.contains(ids.get(4)));
-        assertFalse(around.contains(ids.get(15)), "Named-target distance is preserved before candidate LIMIT");
+        assertTrue(around.isEmpty(),"Moving the fixture's coordinates makes its old links stale; proximity alone must not qualify a boundary candidate");
         jdbc.update("UPDATE listings SET status='DRAFT' WHERE id=?", ids.get(0));
         assertTrue(value.find(input).candidateIds().isEmpty(), "Stale/unpublished displayed page cancels optional lookup");
         jdbc.update("UPDATE listings SET status='PUBLISHED',price_unit='PERSON_MONTH' WHERE id=?", ids.get(0));

@@ -186,7 +186,7 @@ class AiListingSearchV2Test {
                 () -> service.search(v2(many, null, null))).reason());
     }
 
-    @Test void namedTargetUsesTheBoundTargetDistanceAndCanSortByIt() {
+    @Test void namedTargetSortsByItsStoredRelationshipDistance() {
         NearbyQueryService nearby = mock(NearbyQueryService.class);
         service.setNearbyQuery(nearby);
         String place = "00000000-0000-0000-0000-00000000000a";
@@ -196,8 +196,10 @@ class AiListingSearchV2Test {
                 List.of(new AiListingSearchRequest.NearbyCriteria(place, null, 2000)), null, null, null, false));
         String sql = sql();
         assertTrue(sql.contains("(TARGET_DISTANCE<=:targetRadiusN0)"));
-        assertFalse(sql.contains("listing_nearby_places"));
-        assertTrue(sql.contains("ORDER BY (SELECT 2*6371008.8*asin("));
+        assertTrue(sql.contains("listing_nearby_places"));
+        assertTrue(sql.contains("p.id=:targetPlaceN0"));
+        assertTrue(sql.contains("ORDER BY (SELECT lp.straight_distance_m"));
+        assertFalse(sql.contains("asin("));
         verify(nearby, times(1)).requireTarget(place);
         when(nearby.requireTarget("00000000-0000-0000-0000-00000000000b")).thenThrow(new IllegalArgumentException("Target place is unavailable"));
         var error = assertThrows(AiSearchValidationException.class, () -> service.search(new AiListingSearchRequest(null, "newest", 5, null,

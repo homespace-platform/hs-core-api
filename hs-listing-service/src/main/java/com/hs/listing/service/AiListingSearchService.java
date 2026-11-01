@@ -179,7 +179,7 @@ public class AiListingSearchService {
                     }
                     var target = nearbyQuery.requireTarget(criteria.placeId());
                     String predicate = nearbyQuery.targetPredicate(target, criteria.radiusMeters(), params, suffix);
-                    String distance = com.hs.listing.nearby.NearbyQueryService.distanceSql("targetLat" + suffix, "targetLon" + suffix);
+                    String distance = com.hs.listing.nearby.NearbyQueryService.targetDistanceSql(suffix);
                     if (targetDistance == null) targetDistance = distance;
                     pieces.add(compiler.unit("nearby.target:" + target.id(), predicate, distance));
             } else {

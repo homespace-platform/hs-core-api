@@ -33,7 +33,7 @@ public record AiListingSearchRequest(List<Filter> filters, String sort, Integer 
     }
 
     /**
-     * A named place ({@code placeId}, straight-line distance from stored coordinates) or a cached nearby
+     * A named place ({@code placeId}, only current stored listing-to-place relationships) or a cached nearby
      * group, optionally narrowed to a verified provider category {@code kind}.
      */
     public record NearbyCriteria(String placeId, com.hs.listing.nearby.NearbyTypes.Group group, Integer radiusMeters, String kind) {
