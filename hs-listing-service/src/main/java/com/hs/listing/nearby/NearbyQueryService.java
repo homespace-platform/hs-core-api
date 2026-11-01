@@ -128,7 +128,7 @@ public class NearbyQueryService {
   if(page<1||page>1000||pageSize<1||pageSize>50)throw new IllegalArgumentException("Invalid page or size");
   pageSize=Math.min(pageSize,settings.getPublicPageSize());
   Summary summary=summaries(new BatchRequest(List.of(listingId),radius,groups,3)).getFirst();
-  if(!summary.enabled())return new PlacePage(false,List.of(),0,page,pageSize,summary);
+  if(!summary.enabled())return new PlacePage(false,List.of(),0,page,pageSize,summary,"DISABLED");
   MapSqlParameterSource params=params(summary.radiusRequestedMeters()).addValue("id",listingId).addValue("limit",pageSize).addValue("offset",(page-1)*pageSize);
   String groupFilter="";
   if(groups!=null&&!groups.isEmpty()){
@@ -146,7 +146,13 @@ public class NearbyQueryService {
      (org.springframework.jdbc.core.RowCallbackHandler)rs->categories.computeIfAbsent(rs.getString(1),k->new ArrayList<>()).add(rs.getString(2)));
    items=items.stream().map(p->new Place(p.id(),p.name(),p.latitude(),p.longitude(),p.address(),p.distanceMeters(),p.distanceType(),categories.getOrDefault(p.id(),List.of()),p.attribution())).toList();
   }
-  return new PlacePage(true,items,total,page,pageSize,summary);
+  // Expose the current address's job only. Polling this read endpoint never schedules/fetches POIs.
+  List<String> jobs=repo.jdbc().queryForList("""
+   SELECT j.status FROM nearby_scan_jobs j JOIN listing_addresses a ON a.listing_id=j.listing_id AND a.active=true
+   WHERE j.listing_id=:listing AND j.location_hash=HASH AND j.radius_m=:radius AND j.mapping_version=:version
+   """.replace("HASH",NearbyRepository.HASH),Map.of("listing",listingId,"radius",settings.getScanRadiusM(),"version",settings.scanVersion()),String.class);
+  String syncStatus=jobs.isEmpty()?(settings.runnable()?"PENDING":"DISABLED"):jobs.getFirst();
+  return new PlacePage(true,items,total,page,pageSize,summary,syncStatus);
  }
  public List<Target> targets(String keyword) {
   requireEnabled();if(keyword==null||keyword.strip().length()<2||keyword.length()>160)throw new IllegalArgumentException("Place query must be 2 to 160 characters");

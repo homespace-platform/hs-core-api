@@ -146,10 +146,9 @@ public class NearbyRepository {
    List<String> locked=jdbc.queryForList("SELECT id FROM nearby_scan_jobs WHERE id=:id AND lease_token=:token AND status='RUNNING' AND lease_until>now() FOR UPDATE",
     Map.of("id",j.id(),"token",j.leaseToken()),String.class);
    if(locked.isEmpty())throw new NearbyProvider.Failure("SUPERSEDED",false);
-   Set<String> seen=new HashSet<>();
+   List<Poi> selected=NearbyPoiDeduplicator.select(l,page.places(),j.radiusM(),settings,parents);
    // A consistent lock order avoids two overlapping listings locking the same POIs in reverse order.
-   for(Poi p:page.places().stream().sorted(Comparator.comparing(Poi::externalId)).toList()) {
-    if(!seen.add(p.externalId())||distance(l.latitude(),l.longitude(),p.latitude(),p.longitude())>j.radiusM()+1)continue;
+   for(Poi p:selected.stream().sorted(Comparator.comparing(Poi::externalId)).toList()) {
     jdbc.getJdbcTemplate().queryForObject("SELECT pg_advisory_xact_lock(hashtextextended(?,0))",Object.class,"TOMTOM:V2:"+p.externalId());
     var old=jdbc.queryForList("SELECT place_id FROM nearby_place_sources WHERE provider='TOMTOM' AND api_version='V2' AND external_id=:external",
       Map.of("external",p.externalId()),String.class);

@@ -24,7 +24,7 @@ public final class NearbyTypes {
  public record BatchRequest(List<String> listingIds, Integer radiusMeters, Set<Group> groups, Integer nearestPerGroup,String targetPlaceId) {
   public BatchRequest(List<String> ids,Integer radius,Set<Group> groups,Integer nearest){this(ids,radius,groups,nearest,null);}
  }
- public record PlacePage(boolean enabled, List<Place> items, long total, int page, int size, Summary coverage) {}
+ public record PlacePage(boolean enabled, List<Place> items, long total, int page, int size, Summary coverage, String syncStatus) {}
  public record Target(String id, String name, String address, double latitude, double longitude) {}
  public record ScanChanged(String listingId) {}
  public static double distance(double lat1,double lon1,double lat2,double lon2) {
