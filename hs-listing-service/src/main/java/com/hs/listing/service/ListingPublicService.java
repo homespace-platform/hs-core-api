@@ -415,6 +415,7 @@ public class ListingPublicService {
                 owner == null ? null : owner.avatarUrl(),
                 ownerListingCount,
                 listing.getPublishedAt(),
+                listing.getUpdatedAt(),
                 listing.getAvailableFrom(),
                 listing.getViewCount() != null ? listing.getViewCount() : 0L
         );
