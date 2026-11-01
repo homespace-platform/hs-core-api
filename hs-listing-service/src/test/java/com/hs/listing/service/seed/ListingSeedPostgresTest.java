@@ -362,6 +362,14 @@ class ListingSeedPostgresTest {
                 assertTrue(result.getResult().stream().allMatch(item -> item.category().name().equals(category)));
             }
             assertTrue(service.search(searchRequest(java.util.Map.of("cityId","12","wardId","24588","keyword","Quang Trung"))).getTotalElements()>0);
+            var cityCounts=service.countPopularCities(null);
+            assertEquals(5,cityCounts.size());
+            assertEquals(List.of("12","11","13","15","14"),cityCounts.stream().map(item -> item.cityId()).toList());
+            assertEquals(300L,cityCounts.stream().filter(item -> "12".equals(item.cityId())).findFirst().orElseThrow().count());
+            assertEquals(0L,cityCounts.stream().filter(item -> "11".equals(item.cityId())).findFirst().orElseThrow().count());
+            var apartmentCounts=service.countPopularCities(com.hs.listing.model.constant.ListingCategory.APARTMENT);
+            long expectedApartments=jdbc.queryForObject("select count(*) from listings l join listing_addresses a on a.listing_id=l.id where l.active and l.status='PUBLISHED' and a.active and a.city_id='12' and l.category='APARTMENT'",Long.class);
+            assertEquals(expectedApartments,apartmentCounts.stream().filter(item -> "12".equals(item.cityId())).findFirst().orElseThrow().count());
         });
         System.out.println("FILTER PASS: city/3 wards, invalid/old codes, pagination, category/price/area/keyword against listing_addresses");
     }

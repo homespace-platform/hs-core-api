@@ -6,8 +6,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import com.hs.listing.model.Listing;
+import com.hs.listing.model.constant.ListingCategory;
 import com.hs.listing.model.constant.ListingStatus;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 public interface ListingRepository extends JpaRepository<Listing, String>, JpaSpecificationExecutor<Listing> {
@@ -25,6 +27,22 @@ public interface ListingRepository extends JpaRepository<Listing, String>, JpaSp
 
     @org.springframework.data.jpa.repository.Query("SELECT l.status, COUNT(l) FROM Listing l WHERE l.active = true GROUP BY l.status")
     List<Object[]> countAllGroupedByStatus();
+
+    /** Published counts for the fixed home metros; optional category filter. */
+    @org.springframework.data.jpa.repository.Query("""
+            SELECT a.cityId, COUNT(l)
+            FROM Listing l, ListingAddress a
+            WHERE a.listingId = l.id
+              AND a.active = true
+              AND l.active = true
+              AND l.status = com.hs.listing.model.constant.ListingStatus.PUBLISHED
+              AND a.cityId IN :cityIds
+              AND (:category IS NULL OR l.category = :category)
+            GROUP BY a.cityId
+            """)
+    List<Object[]> countPublishedByCityIds(
+            @org.springframework.data.repository.query.Param("cityIds") Collection<String> cityIds,
+            @org.springframework.data.repository.query.Param("category") ListingCategory category);
 
     @org.springframework.data.jpa.repository.Modifying
     @org.springframework.data.jpa.repository.Query("UPDATE Listing l SET l.viewCount = COALESCE(l.viewCount, 0) + 1 WHERE l.id = :id")

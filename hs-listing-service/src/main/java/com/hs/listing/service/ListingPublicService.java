@@ -4,6 +4,7 @@ import com.hs.common.advice.entity.AppException;
 import com.hs.common.dto.PageResponse;
 import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.dto.request.PublicListingSearchRequest;
+import com.hs.listing.dto.response.CityListingCountResponse;
 import com.hs.listing.dto.response.PublicListingSummaryResponse;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.ListingMedia;
@@ -30,7 +31,11 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -40,6 +45,9 @@ public class ListingPublicService {
     private static final int MAX_PAGE_SIZE = 50;
     private static final Set<String> ALLOWED_SORTS = Set.of(
             "newest", "price_asc", "price_desc", "area_asc", "area_desc");
+
+    /** Hard home metros (Vietmap admin_new): HCM, HN, Đà Nẵng, Cần Thơ, Hải Phòng. */
+    private static final List<String> POPULAR_CITY_IDS = List.of("12", "11", "13", "15", "14");
 
     private final ListingRepository listingRepository;
     private final ListingAddressRepository addressRepository;
@@ -503,6 +511,20 @@ public class ListingPublicService {
     @Transactional(readOnly = true)
     public long getOwnerListingCount(String ownerId) {
         return listingRepository.countByOwnerIdAndStatusAndActiveTrue(ownerId, ListingStatus.PUBLISHED);
+    }
+
+    /** One endpoint for the hard-coded home city cards: always returns the same 5 cityIds. */
+    @Transactional(readOnly = true)
+    public List<CityListingCountResponse> countPopularCities(ListingCategory category) {
+        Map<String, Long> counts = new HashMap<>();
+        for (Object[] row : listingRepository.countPublishedByCityIds(POPULAR_CITY_IDS, category)) {
+            counts.put((String) row[0], ((Number) row[1]).longValue());
+        }
+        List<CityListingCountResponse> result = new ArrayList<>(POPULAR_CITY_IDS.size());
+        for (String cityId : POPULAR_CITY_IDS) {
+            result.add(new CityListingCountResponse(cityId, counts.getOrDefault(cityId, 0L)));
+        }
+        return result;
     }
 
     private String publicUrl(StorageObject object) {

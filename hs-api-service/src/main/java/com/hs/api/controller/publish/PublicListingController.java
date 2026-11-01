@@ -107,6 +107,15 @@ public class PublicListingController {
         return com.hs.common.dto.ApiResponse.<ListingDetailResponse>builder().result(detail).build();
     }
 
+    /** Fixed 5 home metros (HCM/HN/ĐN/CT/HP). Optional category filters the published count. */
+    @GetMapping("/city-counts")
+    public com.hs.common.dto.ApiResponse<java.util.List<com.hs.listing.dto.response.CityListingCountResponse>> cityCounts(
+            @RequestParam(required = false) ListingCategory category) {
+        return com.hs.common.dto.ApiResponse.<java.util.List<com.hs.listing.dto.response.CityListingCountResponse>>builder()
+                .result(listingPublicService.countPopularCities(category))
+                .build();
+    }
+
     @GetMapping("/{listingId}")
     public com.hs.common.dto.ApiResponse<ListingDetailResponse> getPublicListingDetail(@PathVariable String listingId) {
         return com.hs.common.dto.ApiResponse.<ListingDetailResponse>builder()
