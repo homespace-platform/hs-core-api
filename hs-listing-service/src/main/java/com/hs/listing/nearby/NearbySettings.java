@@ -20,6 +20,9 @@ public class NearbySettings {
  @Value("${nearby.default-radius-m}") private int defaultRadiusM;
  @Value("${nearby.scan-radius-m}") private int scanRadiusM;
  @Value("${nearby.public-page-size}") private int publicPageSize;
+ @Value("${nearby.dedup.same-place-radius-m}") private int dedupSamePlaceRadiusM;
+ @Value("${nearby.dedup.institution-radius-m}") private int dedupInstitutionRadiusM;
+ @Value("${nearby.dedup.minimum-name-similarity}") private double dedupMinimumNameSimilarity;
  @Value("${nearby.max-radius-m}") private int maxRadiusM;
  @Value("${nearby.retention-hours}") private int retentionHours;
  @Value("${nearby.requests-per-minute}") private int requestsPerMinute;
@@ -66,6 +69,8 @@ public class NearbySettings {
   new NearbyCatalog().requestedGroups(categoryIds());
   if(defaultRadiusM<100 || scanRadiusM<defaultRadiusM || maxRadiusM<scanRadiusM || maxRadiusM>10000
     || publicPageSize<1 || publicPageSize>50 || retentionHours<0 || retentionHours>720 || resultLimit<1 || resultLimit>100
+    || dedupSamePlaceRadiusM<1 || dedupInstitutionRadiusM<dedupSamePlaceRadiusM || dedupInstitutionRadiusM>500
+    || !Double.isFinite(dedupMinimumNameSimilarity) || dedupMinimumNameSimilarity<0.95 || dedupMinimumNameSimilarity>1
     || requestsPerMinute<1 || requestsPerDay<1 || requestsPerMonth<1 || maxAttempts<1)
    throw new IllegalStateException("Invalid nearby configuration");
   if((syncEnabled || queryEnabled) && !permitted())

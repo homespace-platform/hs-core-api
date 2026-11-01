@@ -83,8 +83,6 @@ public class Listing extends BaseEntity {
     private Integer minimumLeaseMonths;
     @Column(name = "management_fee_included", nullable = false)
     private boolean managementFeeIncluded;
-    @Column(name = "vat_included")
-    private Boolean vatIncluded;
     @Column(name = "max_motorbike_count")
     private Integer maxMotorbikeCount;
     @Column(name = "max_car_count")

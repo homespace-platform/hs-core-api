@@ -339,7 +339,6 @@ public class ContractDataBuilder {
                 .depositAmount(listing.getDepositAmount())
                 .depositMonths(listing.getDepositMonths())
                 .minimumLeaseMonths(listing.getMinimumLeaseMonths())
-                .vatIncluded(listing.getVatIncluded())
                 .managementFeeIncluded(listing.isManagementFeeIncluded())
                 .maxOccupants(resolveMaxOccupants(listing))
                 .maxVehicles(resolveMaxVehicles(listing))
@@ -1143,9 +1142,6 @@ public class ContractDataBuilder {
         map.put("smokingPolicy", "Không hút thuốc tại khu vực chung và các khu vực có nguy cơ cháy nổ cao");
         map.put("propertyInspectionNotice",
                 "Bên A có quyền kiểm tra tài sản định kỳ sau khi thông báo trước cho Bên B ít nhất 24 giờ, trừ tình huống khẩn cấp");
-        map.put("vatPolicy",
-                Boolean.TRUE.equals(snapshot.getVatIncluded()) ? "Giá thuê đã bao gồm thuế GTGT (nếu áp dụng)"
-                        : "Giá thuê chưa bao gồm thuế GTGT");
         map.put("disputeResolution",
                 "Hai bên giải quyết tranh chấp thông qua thương lượng hòa giải; trường hợp không đạt thỏa thuận sẽ đưa ra Tòa án có thẩm quyền tại địa phương nơi có bất động sản");
         map.put("forceMajeure", "Thực hiện theo quy định của Bộ luật Dân sự 2015 về sự kiện bất khả kháng");

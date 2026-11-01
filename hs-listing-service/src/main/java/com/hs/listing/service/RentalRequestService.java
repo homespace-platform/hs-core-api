@@ -865,7 +865,6 @@ public class RentalRequestService {
                 .depositAmount(listing.getDepositAmount())
                 .depositMonths(listing.getDepositMonths())
                 .minimumLeaseMonths(listing.getMinimumLeaseMonths())
-                .vatIncluded(listing.getVatIncluded())
                 .managementFeeIncluded(listing.isManagementFeeIncluded())
                 .maxOccupants(listing.getApartmentDetail() != null ? listing.getApartmentDetail().getMaxOccupants() :
                         (listing.getRoomDetail() != null ? listing.getRoomDetail().getMaxOccupants() :

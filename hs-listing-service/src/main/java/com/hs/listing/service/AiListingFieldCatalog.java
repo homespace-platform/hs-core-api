@@ -231,7 +231,6 @@ public class AiListingFieldCatalog {
         listing(fields, "max_car_count", "Số ô tô tối đa", Kind.INTEGER, "xe", null);
         listing(fields, "negotiable", "Giá có thương lượng", Kind.BOOLEAN, null, null);
         listing(fields, "management_fee_included", "Đã gồm phí quản lý", Kind.BOOLEAN, null, null);
-        listing(fields, "vat_included", "Giá đã gồm VAT", Kind.BOOLEAN, null, null);
         listing(fields, "available_from", "Ngày có thể dọn vào", Kind.DATE, null, null);
         listing(fields, "published_at", "Ngày đăng", Kind.DATE, null, null);
         listing(fields, "expires_at", "Ngày hết hạn tin", Kind.DATE, null, null);

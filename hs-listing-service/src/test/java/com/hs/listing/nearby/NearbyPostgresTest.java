@@ -83,6 +83,24 @@ class NearbyPostgresTest {
   repo.reconcile(3000,25);NearbyWorker worker=new NearbyWorker(settings,repo,fake(complete),new NearbyCatalog());
   Job j;while((j=repo.claim())!=null)worker.process(j);
  }
+
+ @Test void publicPageReportsTheCurrentLocationSyncStatusWithoutSchedulingProviderCalls(){
+  assertEquals("DISABLED",query.places(A,2000,null,1,5).syncStatus());
+  settings.setSyncEnabled(true);
+  assertEquals("PENDING",query.places(A,2000,null,1,5).syncStatus());
+  assertEquals(0,jdbc.getJdbcTemplate().queryForObject("SELECT count(*) FROM nearby_scan_jobs",Integer.class));
+  repo.ensure(A,2000);
+  assertEquals("PENDING",query.places(A,2000,null,1,5).syncStatus());
+  Job job=repo.claim();
+  assertEquals("RUNNING",query.places(A,2000,null,1,5).syncStatus());
+  new NearbyWorker(settings,repo,fake(true),new NearbyCatalog()).process(job);
+  assertEquals("SUCCESS",query.places(A,2000,null,1,5).syncStatus());
+  jdbc.update("UPDATE listing_addresses SET latitude=latitude+0.001 WHERE listing_id=:id",Map.of("id",A));
+  var pending=query.places(A,2000,null,1,5);
+  assertEquals("PENDING",pending.syncStatus());assertTrue(pending.items().isEmpty());
+  repo.ensure(A,2000);
+  assertEquals("PENDING",query.places(A,2000,null,1,5).syncStatus());
+ }
  long count(String table){return jdbc.queryForObject("SELECT count(*) FROM "+table,Map.of(),Long.class);}
  long links(String listing){return jdbc.queryForObject("SELECT count(*) FROM listing_nearby_places WHERE listing_id=:id",Map.of("id",listing),Long.class);}
  void onlyA(){jdbc.update("UPDATE listings SET status='HIDDEN' WHERE id=:id",Map.of("id",B));}
@@ -181,6 +199,46 @@ class NearbyPostgresTest {
   repo.reconcile(2000,25);new NearbyWorker(settings,repo,repeated,new NearbyCatalog()).process(repo.claim());
   assertEquals(List.of(0),calls);assertEquals(5,count("nearby_places"));assertEquals(5,count("nearby_place_sources"));assertEquals(5,links(A));
   assertEquals("PARTIAL",query.summaries(new BatchRequest(List.of(A),2000,Set.of(Group.EDUCATION),1)).getFirst().groups().getFirst().coverageStatus());
+ }
+ @Test void similarUniversityFrontagesAreRemovedBeforeSavingAndRawResponseCountersRemainAccurate(){
+  onlyA();NearbyProvider base=fake(true);var calls=new ArrayList<Integer>();
+  NearbyProvider frontages=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int r,Set<String> c,int offset){
+    calls.add(offset);
+    return new Page(0,2,2,List.of(
+     new Poi("a-far","Đại Học Công Nghiệp Thành Phố Hồ Chí Minh",l.latitude()+0.002,l.longitude(),"12 Đường Nguyễn Văn Nghi",null,Set.of("7377"),null,null,null),
+     new Poi("z-near","Trường Đại Học Công Nghiệp Thành Phố Hồ Chí Minh",l.latitude()+0.0002,l.longitude(),"12 Đường Nguyễn Văn Bảo",null,Set.of("7377"),null,null,null)),0);
+   }
+  };
+  repo.reconcile(2000,25);new NearbyWorker(settings,repo,frontages,new NearbyCatalog()).process(repo.claim());
+  assertEquals(List.of(0),calls);
+  assertEquals(1,count("nearby_places"));assertEquals(1,count("nearby_place_sources"));assertEquals(1,links(A));
+  assertEquals("z-near",jdbc.queryForObject("SELECT external_id FROM nearby_place_sources",Map.of(),String.class));
+  var counters=jdbc.queryForMap("SELECT returned_count,unique_count FROM nearby_scan_runs",Map.of());
+  assertEquals(2,((Number)counters.get("returned_count")).intValue());
+  assertEquals(1,((Number)counters.get("unique_count")).intValue());
+  repo.reconcile(2000,25);assertNull(repo.claim()); // Deduplication never requests replacement POIs.
+ }
+ @Test void deduplicationKeepsSharedPoiRowsAndChoosesNearestSeparatelyForEachListing(){
+  // The two listings face opposite ends of the same campus.
+  Location a=repo.locations(List.of(A)).getFirst();
+  jdbc.update("UPDATE listing_addresses SET latitude=:lat WHERE listing_id=:id",Map.of("lat",a.latitude()+0.002,"id",B));
+  NearbyProvider base=fake(true);List<String> calls=new ArrayList<>();
+  NearbyProvider frontages=new NearbyProvider(){
+   public Map<String,Set<String>> categoryParents(){return base.categoryParents();}
+   public Page search(Location l,int r,Set<String> c,int offset){
+    calls.add(l.listingId());return new Page(0,2,2,List.of(
+     new Poi("front-a","Trường Đại Học Công Nghiệp Thành Phố Hồ Chí Minh",a.latitude(),a.longitude(),"Đường A",null,Set.of("7377"),null,null,null),
+     new Poi("front-b","Đại Học Công Nghiệp Thành Phố Hồ Chí Minh",a.latitude()+0.002,a.longitude(),"Đường B",null,Set.of("7377"),null,null,null)),0);
+   }
+  };
+  repo.reconcile(2000,25);var worker=new NearbyWorker(settings,repo,frontages,new NearbyCatalog());
+  Job job;while((job=repo.claim())!=null)worker.process(job);
+  assertEquals(2,calls.size());assertEquals(1,links(A));assertEquals(1,links(B));
+  assertEquals(2,count("nearby_places")); // Neither listing deletes the other listing's selected entrance.
+  assertEquals("front-a",jdbc.queryForObject("SELECT s.external_id FROM listing_nearby_places lp JOIN nearby_place_sources s ON s.place_id=lp.place_id WHERE lp.listing_id=:id",Map.of("id",A),String.class));
+  assertEquals("front-b",jdbc.queryForObject("SELECT s.external_id FROM listing_nearby_places lp JOIN nearby_place_sources s ON s.place_id=lp.place_id WHERE lp.listing_id=:id",Map.of("id",B),String.class));
  }
  @Test void unknownCategoryIsStoredWithoutGuessingItsGroupOrReportingCompleteCoverage(){
   onlyA();NearbyProvider base=fake(true);

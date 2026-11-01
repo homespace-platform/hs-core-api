@@ -46,7 +46,6 @@ public class ListingSnapshotDto {
     private BigDecimal depositAmount;
     private Integer depositMonths;
     private Integer minimumLeaseMonths;
-    private Boolean vatIncluded;
     private Boolean managementFeeIncluded;
 
     private Integer maxOccupants;

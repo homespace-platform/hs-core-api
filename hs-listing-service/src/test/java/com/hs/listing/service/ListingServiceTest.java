@@ -36,7 +36,7 @@ class ListingServiceTest {
                 java.math.BigDecimal.valueOf(10000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
                 false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
                 java.math.BigDecimal.valueOf(20000000), null,
-                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false);
 
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW, null, null);
@@ -112,7 +112,7 @@ class ListingServiceTest {
                 java.math.BigDecimal.valueOf(5000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
                 false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
                 java.math.BigDecimal.valueOf(5000000), null,
-                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false);
 
         var address = new com.hs.listing.dto.request.ListingAddressRequest("vm:test", null);
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
@@ -167,7 +167,7 @@ class ListingServiceTest {
                 java.math.BigDecimal.valueOf(3500000), "VND",
                 com.hs.listing.model.constant.PriceUnit.MONTH, false,
                 com.hs.listing.model.constant.DepositType.NONE, null, null,
-                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 6, false, false);
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 6, false);
 
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW, null, null);
@@ -287,7 +287,7 @@ class ListingServiceTest {
                 java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
                 false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
                 java.math.BigDecimal.valueOf(4000000), null,
-                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false);
 
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
@@ -405,7 +405,7 @@ class ListingServiceTest {
                 java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
                 false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
                 java.math.BigDecimal.valueOf(4000000), null,
-                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false);
 
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
@@ -487,7 +487,7 @@ class ListingServiceTest {
                 java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
                 false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
                 java.math.BigDecimal.valueOf(4000000), null,
-                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false);
 
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,
@@ -716,7 +716,7 @@ class ListingServiceTest {
                 java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
                 false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
                 java.math.BigDecimal.valueOf(4000000), null,
-                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false, null);
+                com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false);
 
         var addressSource = new com.hs.listing.dto.request.ListingAddressSourceRequest(
                 com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW,

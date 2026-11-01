@@ -198,8 +198,7 @@ public class ListingQueryService {
         return new ListingPricingRequest(
                 listing.getPriceAmount(), listing.getCurrency(), listing.getPriceUnit(), listing.isNegotiable(),
                 listing.getDepositType(), listing.getDepositAmount(), listing.getDepositMonths(),
-                listing.getPaymentCycle(), listing.getMinimumLeaseMonths(), listing.isManagementFeeIncluded(),
-                listing.getVatIncluded());
+                listing.getPaymentCycle(), listing.getMinimumLeaseMonths(), listing.isManagementFeeIncluded());
     }
 
     private ApartmentDetailRequest toApartment(ListingApartmentDetail d) {
