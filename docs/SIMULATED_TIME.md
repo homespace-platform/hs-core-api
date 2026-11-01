@@ -40,7 +40,7 @@ homespace.closure.response-hours=48
 
 Không dùng biến `.env` cho đồng hồ giả lập nữa. Khi kết thúc test, để `homespace.time.simulated-at=` rỗng rồi restart Core; nếu chạy JAR thì build lại để đóng gói properties mới. Các key bí mật vẫn do launcher nạp từ `.env`. Việc trở về giờ thực không xóa hóa đơn/công nợ đã tạo trước đó.
 
-Không cần SQL vá riêng. Nếu tạo lại DB dev, Hibernate với `JPA_DDL_AUTO=update` tạo schema; `validate/none` không tạo schema trên DB trống. Không drop DB khi Core đang chạy.
+Nếu dùng DB dev cũ, chạy `scripts/align-payment-enum-checks.sql` một lần: Hibernate `JPA_DDL_AUTO=update` không cập nhật CHECK constraint khi enum thanh toán có giá trị mới. DB mới sẽ có constraint theo enum hiện tại; `validate/none` không tạo schema trên DB trống. Không drop DB khi Core đang chạy.
 
 Ngày nhận nhà/ký: **21/10/2026**, thuê **3 tháng**, ngày thuê cuối **20/01/2027**, hết hạn lúc **00:00 ngày 21/01/2027**.
 
