@@ -48,6 +48,14 @@ public class BankAccountController {
                 .build();
     }
 
+    @GetMapping("/{id}/reveal")
+    public ApiResponse<BankAccountResponse> revealBankAccount(@PathVariable String id) {
+        String userId = requireUserId();
+        return ApiResponse.<BankAccountResponse>builder()
+                .result(bankAccountService.getBankAccount(id, userId, false))
+                .build();
+    }
+
     @PostMapping
     public ApiResponse<BankAccountResponse> createBankAccount(@RequestBody @Valid BankAccountRequest request) {
         String userId = requireUserId();
