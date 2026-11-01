@@ -70,6 +70,18 @@ public class PublicListingController {
         }
     }
 
+    /** Bounded cost projection using the same calculations as listing search. */
+    @org.springframework.web.bind.annotation.PostMapping("/ai/costs")
+    public com.hs.common.dto.ApiResponse<com.hs.listing.dto.response.AiListingCostResponse> aiCosts(
+            @org.springframework.web.bind.annotation.RequestBody com.hs.listing.dto.request.AiListingCostRequest request) {
+        try {
+            return com.hs.common.dto.ApiResponse.<com.hs.listing.dto.response.AiListingCostResponse>builder()
+                    .result(aiListingSearchService.costs(request)).build();
+        } catch (IllegalArgumentException error) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, error.getMessage());
+        }
+    }
+
     /** Optional value comparison: bounded database lookup; never a maps/model/provider call. */
     @org.springframework.web.bind.annotation.PostMapping("/ai/value-opportunity")
     public org.springframework.http.ResponseEntity<com.hs.common.dto.ApiResponse<Object>> aiValueOpportunity(

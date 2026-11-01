@@ -61,6 +61,50 @@ public class AiListingSearchService {
         this.nearbyQuery = nearbyQuery;
     }
 
+    /** Uses the SAME monetary expressions as search; never filters a room by its computed price. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public com.hs.listing.dto.response.AiListingCostResponse costs(com.hs.listing.dto.request.AiListingCostRequest request) {
+        if (request == null || request.listingIds() == null || request.listingIds().isEmpty()
+                || request.listingIds().size() > maxResults || new HashSet<>(request.listingIds()).size() != request.listingIds().size())
+            throw new AiSearchValidationException("INVALID_SCOPE", "listingIds", "A bounded unique shortlist is required");
+        SearchContext context = validContext(request.context());
+        var params = new MapSqlParameterSource().addValue("ctxOccupants", context.occupants(), Types.INTEGER)
+                .addValue("ctxMotorbikes", context.motorbikes(), Types.INTEGER).addValue("ctxCars", context.cars(), Types.INTEGER)
+                .addValue("ctxElectricityKwh", context.electricityKwh(), Types.INTEGER).addValue("ctxWaterM3", context.waterM3(), Types.INTEGER);
+        var where = new StringBuilder(PUBLIC);
+        appendIds(where, params, request.listingIds(), "scopeIds", "l.id IN (:scopeIds)");
+        String sql = "SELECT l.id, " + Computed.RENT + " AS rent, " + Computed.FIXED_TOTAL + " AS fixed_total, "
+                + Computed.ESTIMATED_TOTAL + " AS estimated_total, (" + Computed.RENT + " + (SELECT coalesce(sum(coalesce(x.v,0)),0)"
+                + " FROM (SELECT " + Computed.FIXED_ROW + " AS v FROM listing_charges t WHERE t.listing_id=l.id AND t.active=true) x)) AS known_fixed, "
+                + Computed.vehicleAllowed("MOTORBIKE_PARKING", "max_motorbike_count", ":ctxMotorbikes") + " AS bikes_allowed, "
+                + Computed.vehicleAllowed("CAR_PARKING", "max_car_count", ":ctxCars") + " AS cars_allowed, "
+                + "(CAST(:ctxOccupants AS integer) IS NULL AND (l.price_unit='PERSON_MONTH' OR " + Computed.needs("t.billing_method='PER_PERSON_MONTH'") + ")) AS need_people, "
+                + "(CAST(:ctxMotorbikes AS integer) IS NULL AND " + Computed.needs("t.charge_type='MOTORBIKE_PARKING'") + ") AS need_bikes, "
+                + "(CAST(:ctxCars AS integer) IS NULL AND " + Computed.needs("t.charge_type='CAR_PARKING'") + ") AS need_cars, "
+                + "(CAST(:ctxElectricityKwh AS integer) IS NULL AND " + Computed.needs("t.billing_method='PER_KWH'", true) + ") AS need_power, "
+                + "(CAST(:ctxWaterM3 AS integer) IS NULL AND " + Computed.needs("t.billing_method='PER_M3'", true) + ") AS need_water"
+                + " FROM listings l WHERE " + where + " ORDER BY l.id";
+        var items = jdbc.query(sql, params, (rs, rowNum) -> {
+            List<String> missing = new ArrayList<>();
+            // Report only inputs that could still affect an unknown computed total. Never fill them with zero.
+            if (rs.getBigDecimal("fixed_total") == null) {
+                if (rs.getBoolean("need_people")) missing.add("occupants");
+                if (rs.getBoolean("need_bikes")) missing.add("motorbikes");
+                if (rs.getBoolean("need_cars")) missing.add("cars");
+                if (missing.isEmpty()) missing.add("chargeData");
+            }
+            if (rs.getBigDecimal("estimated_total") == null) {
+                if (rs.getBoolean("need_power")) missing.add("electricityKwh");
+                if (rs.getBoolean("need_water")) missing.add("waterM3");
+                if (missing.isEmpty()) missing.add("chargeData");
+            }
+            return new com.hs.listing.dto.response.AiListingCostResponse.Item(rs.getString("id"), rs.getBigDecimal("rent"),
+                    rs.getBigDecimal("known_fixed"), rs.getBigDecimal("fixed_total"), rs.getBigDecimal("estimated_total"),
+                    missing, (Boolean) rs.getObject("bikes_allowed"), (Boolean) rs.getObject("cars_allowed"));
+        });
+        return new com.hs.listing.dto.response.AiListingCostResponse(items, Instant.now());
+    }
+
     public Map<String, String> fields() {
         return catalog.legacyFields();
     }
@@ -310,6 +354,18 @@ public class AiListingSearchService {
         }
         static final String FIXED_TOTAL = "(" + RENT + " + " + sum(FIXED_ROW) + ")";
         static final String ESTIMATED_TOTAL = "(" + RENT + " + " + sum(FIXED_ROW) + " + " + sum(USAGE_ROW) + ")";
+
+        private static String vehicleAllowed(String type, String limit, String count) {
+            return "CASE WHEN CAST(" + count + " AS integer) IS NULL THEN NULL WHEN CAST(" + count + " AS integer)=0 THEN true"
+                    + " WHEN " + (type.equals("MOTORBIKE_PARKING") ? ROOM_PARKING_NONE : "false") + " THEN false"
+                    + " WHEN l." + limit + " IS NULL THEN NULL ELSE l." + limit + " >= CAST(" + count + " AS integer) END";
+        }
+
+        private static String needs(String predicate) { return needs(predicate, false); }
+        private static String needs(String predicate, boolean usage) {
+            return "EXISTS (SELECT 1 FROM listing_charges t WHERE t.listing_id=l.id AND t.active=true AND (" + predicate
+                    + ") AND (" + (usage ? USAGE_ROW : FIXED_ROW) + ") IS NULL)";
+        }
         static final String DEPOSIT = "(CASE l.deposit_type WHEN 'NONE' THEN 0 WHEN 'FIXED_AMOUNT' THEN l.deposit_amount"
                 + " WHEN 'MONTH_COUNT' THEN " + RENT + " * l.deposit_months ELSE NULL END)";
         static final String INITIAL = "(" + RENT + " + " + DEPOSIT + ")";
