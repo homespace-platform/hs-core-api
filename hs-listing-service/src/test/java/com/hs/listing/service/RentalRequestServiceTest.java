@@ -182,7 +182,7 @@ class RentalRequestServiceTest {
                 .status(ListingStatus.PUBLISHED)
                 .priceAmount(BigDecimal.valueOf(5000000))
                 .build();
-        when(listingRepository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+        when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
 
         CreateRentalRequest req = new CreateRentalRequest(
                 "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
@@ -200,7 +200,7 @@ class RentalRequestServiceTest {
                 .status(ListingStatus.RESERVED)
                 .priceAmount(BigDecimal.valueOf(5000000))
                 .build();
-        when(listingRepository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+        when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
 
         CreateRentalRequest req = new CreateRentalRequest(
                 "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
@@ -224,7 +224,7 @@ class RentalRequestServiceTest {
                 .maxCarCount(1)
                 .charges(List.of())
                 .build();
-        when(listingRepository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+        when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
         when(rentalRequestRepository.findFirstByListingIdAndRenterIdAndStatusIn(anyString(), anyString(), anyCollection()))
                 .thenReturn(Optional.empty());
         when(rentalRequestRepository.save(any(RentalRequest.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -257,7 +257,7 @@ class RentalRequestServiceTest {
     }
 
     @Test
-    void acceptRentalRequest_marksReservedAndKeepsOtherPending_createsHeldReservation() {
+    void acceptRentalRequest_marksReservedAndRejectsOtherPending_createsHeldReservation() {
         Listing listing = Listing.builder()
                 .id("listing-1")
                 .ownerId("owner-1")
@@ -280,15 +280,7 @@ class RentalRequestServiceTest {
                 .carCount(1)
                 .build();
 
-        RentalRequest req2 = RentalRequest.builder()
-                .id("req-2")
-                .listing(listing)
-                .ownerId("owner-1")
-                .renterId("renter-2")
-                .renterEmail("renter2@gmail.com")
-                .status(RentalRequestStatus.PENDING)
-                .build();
-
+        when(rentalRequestRepository.findListingIdByRequestId("req-1")).thenReturn(Optional.of("listing-1"));
         when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(req1));
         when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
         when(rentalRequestRepository.save(any(RentalRequest.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -304,14 +296,44 @@ class RentalRequestServiceTest {
         // Verify listing marked reserved
         verify(listingStatusService, times(1)).markReserved(listing, "owner-1");
 
-        // Verify req2 was cancelled by system
-        assertEquals(RentalRequestStatus.PENDING, req2.getStatus());
+        // Reject the entire competing set, not only rows visible on the frontend page.
+        verify(rentalRequestRepository).rejectCompetingPendingRequests(
+                eq("listing-1"), eq("req-1"), eq(RentalRequestStatus.PENDING), eq(RentalRequestStatus.REJECTED),
+                contains("Chủ nhà đã chấp thuận"), eq(res.acceptedAt()), eq("owner-1"));
         verify(rentalRequestRepository, times(1)).save(any(RentalRequest.class));
+
+        var order = inOrder(rentalRequestRepository, listingRepository, rentalPaymentLifecyclePort);
+        order.verify(rentalRequestRepository).findListingIdByRequestId("req-1");
+        order.verify(listingRepository).findByIdForUpdate("listing-1");
+        order.verify(rentalRequestRepository).findByIdForUpdate("req-1");
+        order.verify(rentalPaymentLifecyclePort).createInitialPayment(eq(req1), any());
+        order.verify(rentalRequestRepository).rejectCompetingPendingRequests(
+                anyString(), anyString(), any(), any(), anyString(), any(), anyString());
 
         // Verify HELD reservation is created on accept
         verify(parkingReservationService, times(1)).createHeldReservations(
                 eq(req1), eq(listing), eq(req1.getHoldExpiresAt())
         );
+    }
+
+    @Test
+    void acceptRentalRequest_checksTheLockedListingBeforeReservingBranchParking() {
+        var staleListing = Listing.builder().id("listing").ownerId("owner")
+                .branchId("branch").status(ListingStatus.PUBLISHED).build();
+        var reservedListing = Listing.builder().id("listing").ownerId("owner")
+                .branchId("branch").status(ListingStatus.RESERVED).build();
+        var request = RentalRequest.builder().id("request").ownerId("owner").listing(staleListing)
+                .status(RentalRequestStatus.PENDING).moveInDate(LocalDate.now().plusDays(1)).build();
+        when(rentalRequestRepository.findListingIdByRequestId("request")).thenReturn(Optional.of("listing"));
+        when(listingRepository.findByIdForUpdate("listing")).thenReturn(Optional.of(reservedListing));
+        when(rentalRequestRepository.findByIdForUpdate("request")).thenReturn(Optional.of(request));
+
+        var error = assertThrows(AppException.class, () -> rentalRequestService.acceptRentalRequest("owner", "request"));
+
+        assertEquals(ListingErrorCode.LISTING_ALREADY_RESERVED.getCode(), error.getCode());
+        verifyNoInteractions(propertyBranchRepository, parkingReservationService, rentalPaymentLifecyclePort, listingStatusService);
+        verify(rentalRequestRepository, never()).rejectCompetingPendingRequests(
+                anyString(), anyString(), any(), any(), anyString(), any(), anyString());
     }
 
     @Test
@@ -324,7 +346,7 @@ class RentalRequestServiceTest {
                 .status(RentalRequestStatus.PENDING)
                 .build();
 
-        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(req));
         when(rentalRequestRepository.save(any(RentalRequest.class))).thenAnswer(inv -> inv.getArgument(0));
 
         RentalRequestResponse res = rentalRequestService.rejectRentalRequest(
@@ -345,7 +367,7 @@ class RentalRequestServiceTest {
                 .status(RentalRequestStatus.PENDING)
                 .build();
 
-        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(req));
         when(rentalRequestRepository.save(any(RentalRequest.class))).thenAnswer(inv -> inv.getArgument(0));
 
         RentalRequestResponse res = rentalRequestService.cancelRentalRequest("renter-1", "req-1");
@@ -417,7 +439,7 @@ class RentalRequestServiceTest {
                 .apartmentDetail(com.hs.listing.model.ListingApartmentDetail.builder().maxOccupants(2).build())
                 .priceAmount(BigDecimal.valueOf(5000000))
                 .build();
-        when(listingRepository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+        when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
 
         CreateRentalRequest req = new CreateRentalRequest(
                 "listing-1", LocalDate.now().plusDays(5), 12, 3, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true
@@ -437,7 +459,7 @@ class RentalRequestServiceTest {
                 .priceAmount(BigDecimal.valueOf(5000000))
                 .maxMotorbikeCount(0) // capacity = 0
                 .build();
-        when(listingRepository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+        when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
         when(parkingReservationService.getAvailability(any(), any(), eq(com.hs.listing.model.constant.VehicleType.MOTORBIKE), any(), any()))
                 .thenReturn(new VehicleAvailabilityInfo(0, 0, 0));
 
@@ -459,7 +481,7 @@ class RentalRequestServiceTest {
                 .priceAmount(BigDecimal.valueOf(5000000))
                 .maxCarCount(2)
                 .build();
-        when(listingRepository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+        when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
         when(parkingReservationService.getAvailability(any(), any(), eq(com.hs.listing.model.constant.VehicleType.CAR), any(), any()))
                 .thenReturn(new VehicleAvailabilityInfo(2, 1, 1)); // only 1 available
 
@@ -482,7 +504,7 @@ class RentalRequestServiceTest {
                 .status(RentalRequestStatus.PENDING)
                 .build();
 
-        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(req));
         when(rentalRequestRepository.save(any(RentalRequest.class))).thenAnswer(inv -> inv.getArgument(0));
 
         // Reject
@@ -509,7 +531,7 @@ class RentalRequestServiceTest {
                 .maxCarCount(1)
                 .charges(new java.util.ArrayList<>())
                 .build();
-        when(listingRepository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+        when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
         when(rentalRequestRepository.findFirstByListingIdAndRenterIdAndStatusIn(anyString(), anyString(), anyCollection()))
                 .thenReturn(Optional.empty());
         when(rentalRequestRepository.save(any(RentalRequest.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -612,7 +634,7 @@ class RentalRequestServiceTest {
                 .renterId("renter-1")
                 .status(RentalRequestStatus.ACCEPTED)
                 .build();
-        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(req));
         when(rentalPaymentLifecyclePort.isConfirmed("req-1")).thenReturn(true);
 
         AppException ex = assertThrows(AppException.class,
@@ -628,7 +650,7 @@ class RentalRequestServiceTest {
                 .renterId("renter-1")
                 .status(RentalRequestStatus.ACCEPTED)
                 .build();
-        when(rentalRequestRepository.findById("req-1")).thenReturn(Optional.of(req));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(req));
         when(rentalPaymentLifecyclePort.isConfirmed("req-1")).thenReturn(true);
 
         AppException ex = assertThrows(AppException.class,

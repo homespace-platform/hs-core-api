@@ -168,7 +168,9 @@ public class RentalRequestService {
             throw new AppException(ListingErrorCode.RESERVATION_POLICY_ACCEPTANCE_REQUIRED);
         validateMoveIn(req.moveInDate());
 
-        Listing listing = listingRepository.findByIdAndActiveTrue(req.listingId())
+        // Submission and acceptance use the same parent lock: a new PENDING request
+        // cannot slip in after acceptance has rejected the competing requests.
+        Listing listing = listingRepository.findByIdForUpdate(req.listingId())
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
 
         if (listing.getStatus() == ListingStatus.RESERVED) {
@@ -252,13 +254,20 @@ public class RentalRequestService {
         return toResponse(saved);
     }
 
-    // 2. CHỦ NHÀ CHẤP THUẬN YÊU CẦU THUÊ (ACCEPT -> KHÓA BÀI ĐĂNG 24H -> HỦY CÁC YÊU CẦU SONG SONG)
+    // 2. CHẤP THUẬN -> GIỮ CHỖ -> TỪ CHỐI CÁC YÊU CẦU CÒN CHỜ CỦA CÙNG TIN ĐĂNG
     @Transactional
     public RentalRequestResponse acceptRentalRequest(String ownerId, String requestId) {
         if (ownerId == null || ownerId.isBlank()) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
 
+        String listingId = rentalRequestRepository.findListingIdByRequestId(requestId)
+                .orElseThrow(() -> new AppException(ListingErrorCode.RENTAL_REQUEST_NOT_FOUND));
+
+        // Always lock the listing BEFORE a request. Two approvals of different
+        // requests must not each hold a child lock while waiting on one another.
+        Listing listing = listingRepository.findByIdForUpdate(listingId)
+                .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
         RentalRequest req = rentalRequestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.RENTAL_REQUEST_NOT_FOUND));
 
@@ -273,17 +282,13 @@ public class RentalRequestService {
         validateMoveIn(req.getMoveInDate());
         if(req.getRespondBy()!=null && !now().isBefore(req.getRespondBy()))
             throw new AppException(ListingErrorCode.INVALID_RENTAL_REQUEST_STATUS,"Đã hết hạn phản hồi yêu cầu thuê.");
-        Listing listing = req.getListing();
         if (listing.getStatus() != ListingStatus.PUBLISHED) {
             throw new AppException(ListingErrorCode.LISTING_ALREADY_RESERVED);
         }
 
-        // PESSIMISTIC LOCK: Khóa bãi xe của chi nhánh hoặc của listing để ngăn chặn race condition overbooking
+        // The listing is already locked; additionally serialize the shared branch parking pool.
         if (listing.getBranchId() != null) {
             propertyBranchRepository.findByIdForUpdate(listing.getBranchId())
-                    .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
-        } else {
-            listingRepository.findByIdForUpdate(listing.getId())
                     .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
         }
 
@@ -318,15 +323,20 @@ public class RentalRequestService {
         // Chuyển bài đăng sang trạng thái RESERVED
         listingStatusService.markReserved(listing, ownerId);
 
-        // Other requests remain pending until an agreement is actually completed.
-
         // Tạo INITIAL payment trạng thái AWAITING_TRANSFER trong cùng transaction
         if (rentalPaymentLifecyclePort != null) {
             rentalPaymentLifecyclePort.createInitialPayment(saved, holdExpiresAt);
         }
 
-        log.info("Owner [{}] ACCEPTED rental request [{}]. Listing [{}] marked as RESERVED until [{}]",
-                ownerId, requestId, listing.getId(), holdExpiresAt);
+        // PENDING requests have no payment or parking hold. Reject them in one
+        // conditional update, in the SAME transaction as the selected request's
+        // hold/payment. A failed acceptance must leave every contender unchanged.
+        int rejected = rentalRequestRepository.rejectCompetingPendingRequests(
+                listingId, requestId, RentalRequestStatus.PENDING, RentalRequestStatus.REJECTED,
+                "Chủ nhà đã chấp thuận yêu cầu thuê khác cho tin đăng này.", now, ownerId);
+
+        log.info("Owner [{}] ACCEPTED rental request [{}]. Listing [{}] RESERVED until [{}]; rejected [{}] competing requests",
+                ownerId, requestId, listing.getId(), holdExpiresAt, rejected);
 
         return toResponse(saved);
     }
@@ -338,7 +348,7 @@ public class RentalRequestService {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
 
-        RentalRequest req = rentalRequestRepository.findById(requestId)
+        RentalRequest req = rentalRequestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.RENTAL_REQUEST_NOT_FOUND));
 
         if (!ownerId.equals(req.getOwnerId())) {
@@ -377,7 +387,7 @@ public class RentalRequestService {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
 
-        RentalRequest req = rentalRequestRepository.findById(requestId)
+        RentalRequest req = rentalRequestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.RENTAL_REQUEST_NOT_FOUND));
 
         if (!renterId.equals(req.getRenterId())) {

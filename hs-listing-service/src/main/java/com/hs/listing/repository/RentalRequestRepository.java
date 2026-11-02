@@ -14,6 +14,26 @@ import java.util.Optional;
 @Repository
 public interface RentalRequestRepository extends JpaRepository<RentalRequest, String>, JpaSpecificationExecutor<RentalRequest> {
 
+    // Read only the FK before locking the parent; do not cache a stale Listing entity.
+    @org.springframework.data.jpa.repository.Query("SELECT r.listing.id FROM RentalRequest r WHERE r.id = :id AND r.active = true")
+    Optional<String> findListingIdByRequestId(@org.springframework.data.repository.query.Param("id") String id);
+
+    @org.springframework.data.jpa.repository.Modifying(flushAutomatically = true)
+    @org.springframework.data.jpa.repository.Query("""
+            UPDATE RentalRequest r
+            SET r.status = :rejected, r.rejectReason = :reason, r.updatedAt = :at, r.updatedBy = :actorId
+            WHERE r.listing.id = :listingId AND r.id <> :acceptedId
+              AND r.status = :pending AND r.active = true
+            """)
+    int rejectCompetingPendingRequests(
+            @org.springframework.data.repository.query.Param("listingId") String listingId,
+            @org.springframework.data.repository.query.Param("acceptedId") String acceptedId,
+            @org.springframework.data.repository.query.Param("pending") RentalRequestStatus pending,
+            @org.springframework.data.repository.query.Param("rejected") RentalRequestStatus rejected,
+            @org.springframework.data.repository.query.Param("reason") String reason,
+            @org.springframework.data.repository.query.Param("at") Instant at,
+            @org.springframework.data.repository.query.Param("actorId") String actorId);
+
     List<RentalRequest> findByListingIdAndStatus(String listingId, RentalRequestStatus status);
 
     org.springframework.data.domain.Page<RentalRequest> findByStatus(RentalRequestStatus status, org.springframework.data.domain.Pageable pageable);

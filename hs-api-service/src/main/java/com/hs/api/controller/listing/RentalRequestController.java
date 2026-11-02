@@ -144,7 +144,7 @@ public class RentalRequestController {
         String ownerId = requireUserId();
         return ApiResponse.<RentalRequestResponse>builder()
                 .message("Chấp thuận yêu cầu thuê thành công. Bất động sản chuyển sang trạng thái giữ chỗ trong "
-                        + Math.max(holdDurationMinutes, 1L) + " phút.")
+                        + Math.max(holdDurationMinutes, 1L) + " phút. Các yêu cầu còn chờ duyệt của cùng tin đăng đã được từ chối.")
                 .result(rentalRequestService.acceptRentalRequest(ownerId, id))
                 .build();
     }
