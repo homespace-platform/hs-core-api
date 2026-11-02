@@ -29,6 +29,7 @@ class DepositSignatureIsolationTest {
     @Mock ParkingReservationService parking;
     @Mock RentalOnboardingService onboarding;
     @Mock DepositAgreementService depositAgreements;
+    @Mock jakarta.persistence.EntityManager entityManager;
     @InjectMocks SmartCaSignatureServiceImpl service;
 
     @Test void finalTenantSignatureCompletesDepositWithoutActivatingLeaseOrListing() throws Exception {
@@ -48,6 +49,7 @@ class DepositSignatureIsolationTest {
     private Contract run(SignerRole role,ContractStatus status) throws Exception {
         ReflectionTestUtils.setField(service,"depositAgreements",depositAgreements);
         ReflectionTestUtils.setField(service,"onboarding",onboarding);
+        ReflectionTestUtils.setField(service,"entityManager",entityManager);
         var c=Contract.builder().id("deposit").rentalRequestId("rental").agreementKind("DEPOSIT")
             .currentRevisionId("revision").contractNumber("DC-1").status(status).build();
         var request=SignatureRequest.builder().id("request").contractId("deposit").sourceDocumentId("source")

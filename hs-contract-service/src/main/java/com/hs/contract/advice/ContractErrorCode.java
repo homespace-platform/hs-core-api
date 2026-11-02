@@ -65,7 +65,10 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     PAYMENT_EXTENSION_NOT_FOUND(6066, "Yêu cầu gia hạn không tồn tại hoặc không còn chờ duyệt", HttpStatus.CONFLICT),
     LIFECYCLE_NOT_ALLOWED(6067, "Chưa đủ điều kiện gia hạn/bàn giao: kiểm tra thời hạn, chữ ký, công nợ và trạng thái quyết toán", HttpStatus.CONFLICT),
     LIFECYCLE_INVALID(6068, "Dữ liệu gia hạn/quyết toán không hợp lệ hoặc bản xác nhận đã thay đổi", HttpStatus.BAD_REQUEST),
-    CONTRACT_AI_QUERY_INVALID(6069, "Tham số tra cứu hợp đồng không hợp lệ", HttpStatus.BAD_REQUEST);
+    CONTRACT_AI_QUERY_INVALID(6069, "Tham số tra cứu hợp đồng không hợp lệ", HttpStatus.BAD_REQUEST),
+    CONTRACT_DRAFT_READ_ONLY(6070, "Điều khoản bản nháp không khớp hồ sơ thuê đã chấp thuận", HttpStatus.CONFLICT),
+    CONTRACT_DRAFT_INVALID(6071, "Dữ liệu bản nháp hợp đồng không hợp lệ", HttpStatus.BAD_REQUEST),
+    CONTRACT_DRAFT_STALE(6072, "Bản nháp đã có phiên bản mới. Vui lòng tải lại trước khi lưu.", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

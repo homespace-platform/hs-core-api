@@ -30,6 +30,7 @@ class OnboardingPaymentCreationTest {
     @Mock BillingTime billingTime; @Spy ObjectMapper objectMapper=new ObjectMapper(); @InjectMocks PaymentRequestService service;
     RentalRequest rental; Instant now=Instant.parse("2026-10-21T03:00:00Z");
     @BeforeEach void setup() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
         when(billingTime.now()).thenReturn(now);
         var bank=BankAccount.builder().bankBin("970422").bankCode("MB").bankName("MB").accountNumber("123456789").accountHolderName("TEST USER").build();
         when(bankAccountService.getDefaultIncomingAccount("owner")).thenReturn(bank);

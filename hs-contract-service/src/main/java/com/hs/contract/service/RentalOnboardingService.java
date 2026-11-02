@@ -7,6 +7,7 @@ import com.hs.common.time.BillingTime;
 import com.hs.contract.advice.ContractErrorCode;
 import com.hs.contract.model.constant.ContractStatus;
 import com.hs.contract.repository.*;
+import com.hs.contract.service.engine.ContractDataBuilder;
 import com.hs.listing.model.*;
 import com.hs.listing.model.constant.RentalRequestStatus;
 import com.hs.listing.repository.*;
@@ -34,6 +35,8 @@ import java.util.*;
 /** Coordinates only the pre-tenancy workflow. Confirmed funds never expire into a vacant room. */
 @Service @RequiredArgsConstructor @Slf4j
 public class RentalOnboardingService {
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.payment.service.DepositLedgerService depositLedger;
+    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
     @org.springframework.beans.factory.annotation.Autowired
     private AutomaticContractDrafts automaticDrafts;
     @org.springframework.beans.factory.annotation.Autowired
@@ -71,9 +74,7 @@ public class RentalOnboardingService {
                        boolean canSign,boolean canRequestEarlierStart,long holdMinutes,
                        List<PaymentRequestResponse> payments,List<RentalStartChange> startChanges,String message,String askerRole,
                        Instant cancellationRequestedAt,String cancellationReason,List<RentalOnboardingEvent> history,
-                       DefaultView defaultCase,DepositView deposit,boolean canRequestCancellation, String depositAgreementContractId, String depositAgreementStatus) {}
-    public record DepositView(String status,java.math.BigDecimal heldAmount,java.math.BigDecimal retainedAmount,
-                              java.math.BigDecimal refundableAmount,String retainedReason) {}
+                       DefaultView defaultCase,com.hs.payment.dto.DepositLedgerView deposit,boolean canRequestCancellation, String depositAgreementContractId, String depositAgreementStatus) {}
     public record DefaultView(String eligibleKind,Instant notifiedAt,Instant respondBy,String reason,
                               Instant disputedAt,Instant completedAt,boolean canComplete,String policyVersion) {}
     @Value("${rental.hold-duration-minutes:60}") private long holdMinutes=60;
@@ -172,7 +173,7 @@ public class RentalOnboardingService {
         return new View(time.now(),BillingTime.ZONE.toString(),stage,r.getMoveInDate(),r.getMoveInDate().plusMonths(r.getLeaseMonths()),
             opens,rent!=null?rent.getDueAt():null,signDue,r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&paid&&(contract==null||contract.getStatus()==ContractStatus.DRAFT),signingOpen&&contract!=null,earlier,holdMinutes,
             rows,changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()),message,actor.equals(r.getOwnerId())?"LANDLORD":"TENANT",r.getCancellationRequestedAt(),r.getCancellationReason(),events.findByRentalRequestIdOrderByOccurredAtDesc(r.getId()),
-            defaultView(r),deposits.findByRentalRequestId(r.getId()).map(d->new DepositView(d.getStatus().name(),d.getHeldAmount(),d.getRetainedAmount(),d.getRefundableAmount(),d.getRetainedReason())).orElse(null),canCancel(r,contract),depositDocument==null?null:depositDocument.getId(),depositDocument==null?null:depositDocument.getStatus().name());
+            defaultView(r),depositLedger.forRental(r.getId()),canCancel(r,contract),depositDocument==null?null:depositDocument.getId(),depositDocument==null?null:depositDocument.getStatus().name());
     }
     @Transactional public View requestEarlier(String id,String actor,StartRequest request) {
         var r=rental(id,actor);sync(r);
@@ -213,8 +214,7 @@ public class RentalOnboardingService {
                 var rev=revisions.findById(contract.getCurrentRevisionId()).orElseThrow();
                 try {
                     Map<String,Object> lease=mapper.readValue(rev.getLeaseSnapshot(),new TypeReference<>(){});
-                    var fmt=DateTimeFormatter.ofPattern("dd/MM/yyyy");
-                    lease.put("startDateText",r.getMoveInDate().format(fmt));lease.put("endDateText",r.getMoveInDate().plusMonths(r.getLeaseMonths()).minusDays(1).format(fmt));
+                    lease.putAll(ContractDataBuilder.leaseTerms(r));
                     var next=new com.hs.contract.model.ContractRevision();
                     org.springframework.beans.BeanUtils.copyProperties(rev,next,"id","revisionNumber","createdAt","updatedAt");
                     next.setRevisionNumber(revisions.findMaxRevisionNumberByContractId(contract.getId())+1);
@@ -336,12 +336,17 @@ public class RentalOnboardingService {
     }
     @Transactional public View resolveReview(String id,String paymentId,String actor,ReviewDecision decision) {
         var r=rental(id,actor);
+        entityManager.refresh(r);
         if(!actor.equals(r.getOwnerId())||r.getStatus()!=RentalRequestStatus.ACCEPTED)throw invalid("Không có quyền xử lý đối soát.");
-        var p=payments.findByIdForUpdate(paymentId).filter(x->id.equals(x.getRentalRequestId())).orElseThrow(()->invalid("Không tìm thấy khoản chuyển."));
+        var p=payments.findById(paymentId).filter(x->id.equals(x.getRentalRequestId())).orElseThrow(()->invalid("Không tìm thấy khoản chuyển."));
+        entityManager.refresh(p,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        if(p.getStatus()==PaymentStatus.DISPUTED)
+            throw new AppException(com.hs.payment.advice.PaymentErrorCode.DISPUTE_CASE_ACTION_NOT_ALLOWED,
+                "Khoản đang tranh chấp phải xử lý trong hồ sơ đối soát; không mở lại hoặc xác nhận một phía bằng luồng cũ.");
         if(!PaymentRequestService.isOnboarding(p)||!(Set.of(PaymentStatus.DISPUTED,PaymentStatus.REJECTED).contains(p.getStatus())
                 ||p.getStatus()==PaymentStatus.AWAITING_TRANSFER&&p.getDueAt()!=null&&!time.now().isBefore(p.getDueAt())))throw invalid("Khoản chuyển không ở trạng thái cần đối soát.");
         audit(r,actor,decision.received()?"PAYMENT_RECEIPT_VERIFIED":"PAYMENT_REOPENED",decision.reason());
-        if(decision.received()) {p.setStatus(PaymentStatus.TRANSFER_REPORTED);payments.save(p);paymentService.confirmReceipt(p.getId(),actor);}
+        if(decision.received()) {p.setStatus(PaymentStatus.TRANSFER_REPORTED);payments.saveAndFlush(p);paymentService.confirmReceipt(p.getId(),actor);}
         else {p.setStatus(PaymentStatus.AWAITING_TRANSFER);p.setRejectedReason(decision.reason().trim());p.setDueAt(time.now().plus(Duration.ofHours(rentWindowHours)));payments.save(p);r.setHoldExpiresAt(p.getDueAt());rentals.save(r);}
         sync(r);return view(r,actor);
     }

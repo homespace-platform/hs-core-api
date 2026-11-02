@@ -42,9 +42,12 @@ class RentalOnboardingServiceTest {
     @Mock BillingTime time; @Spy ObjectMapper mapper=new ObjectMapper();
     @Mock ContractDataBuilder builder; @Mock PlatformTransactionManager transactions;
     @Mock ContractTemplateVersionRepository draftTemplates;
+    @Mock com.hs.payment.service.DepositLedgerService depositLedger;
     @InjectMocks RentalOnboardingService service;
     Instant now; RentalRequest rental; PaymentRequest deposit;
     @BeforeEach void setup() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositLedger",depositLedger);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
         now=Instant.parse("2026-10-21T03:00:00Z");
         when(time.now()).thenAnswer(i->now);when(time.today()).thenAnswer(i->now.atZone(BillingTime.ZONE).toLocalDate());
         rental=RentalRequest.builder().id("rental").ownerId("owner").renterId("tenant").status(RentalRequestStatus.ACCEPTED)
@@ -127,12 +130,40 @@ class RentalOnboardingServiceTest {
         c.setPreviousDate(rental.getMoveInDate());c.setRequestedDate(LocalDate.of(2026,10,20));
         assertThrows(AppException.class,()->service.decideEarlier("rental","change","owner",new RentalOnboardingService.Decision(true,null)));
     }
+    @Test void earlierApprovalUpdatesDraftHandoverAlongWithCalendarAndKeepsOriginalRevision() throws Exception {
+        pending();
+        var c=Contract.builder().id("contract").currentRevisionId("original").status(ContractStatus.DRAFT).build();
+        var original=com.hs.contract.model.ContractRevision.builder().id("original").contract(c).revisionNumber(1)
+            .leaseSnapshot("{\"startDateText\":\"01/11/2026\",\"endDateText\":\"31/01/2027\",\"durationMonths\":3,\"durationText\":\"3 tháng\",\"handoverDateText\":\"01/11/2026\"}").build();
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(c));
+        when(contracts.findByIdForUpdate("contract")).thenReturn(Optional.of(c));
+        when(revisions.findById("original")).thenReturn(Optional.of(original));
+        when(revisions.findMaxRevisionNumberByContractId("contract")).thenReturn(1);
+        when(revisions.saveAndFlush(any())).thenAnswer(i->{com.hs.contract.model.ContractRevision next=i.getArgument(0);next.setId("updated");return next;});
+        service.decideEarlier("rental","change","owner",new RentalOnboardingService.Decision(true,null));
+        var saved=org.mockito.ArgumentCaptor.forClass(com.hs.contract.model.ContractRevision.class);
+        verify(revisions).saveAndFlush(saved.capture());
+        var lease=mapper.readValue(saved.getValue().getLeaseSnapshot(),Map.class);
+        assertEquals("25/10/2026",lease.get("startDateText"));assertEquals("25/10/2026",lease.get("handoverDateText"));
+        assertEquals("24/01/2027",lease.get("endDateText"));assertEquals(3,lease.get("durationMonths"));
+        assertTrue(original.getLeaseSnapshot().contains("01/11/2026"));assertEquals("updated",c.getCurrentRevisionId());
+    }
     @Test void cancellationFreezesApprovalOfEarlierStart() {
         pending();rental.setCancellationRequestedAt(now);
         assertThrows(AppException.class,()->service.decideEarlier("rental","change","owner",new RentalOnboardingService.Decision(true,null)));
         assertEquals(LocalDate.of(2026,11,1),rental.getMoveInDate());verifyNoInteractions(parking);
     }
     @Test void outstandingDisputeNeverLooksPaid() {deposit.setStatus(PaymentStatus.DISPUTED);var v=service.refresh("rental","tenant");assertEquals("REQUIRES_REVIEW",v.stage());assertFalse(v.canSign());}
+    @Test void legacyReviewCannotUnilaterallyReopenOrConfirmFormalDispute() {
+        var p=rent(PaymentStatus.DISPUTED);
+        when(payments.findById("rent")).thenReturn(Optional.of(p));
+        for(boolean received:List.of(true,false)) {
+            var error=assertThrows(AppException.class,()->service.resolveReview("rental","rent","owner",
+                new RentalOnboardingService.ReviewDecision(received,"Đối soát khoản đang tranh chấp")));
+            assertEquals(7027,error.getCode());assertEquals(PaymentStatus.DISPUTED,p.getStatus());
+        }
+        verifyNoInteractions(paymentService);verify(payments,never()).save(any());
+    }
     @Test void transferReportedIsNotAnotherRequestToPay() {deposit.setStatus(PaymentStatus.TRANSFER_REPORTED);assertEquals("AWAITING_DEPOSIT_CONFIRMATION",service.refresh("rental","tenant").stage());}
     @Test void signingRequiresBothPaymentsAndStartDate() {
         when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(Contract.builder().id("contract").status(ContractStatus.TENANT_SIGNATURE_PENDING).build()));

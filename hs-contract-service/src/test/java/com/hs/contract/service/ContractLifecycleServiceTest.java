@@ -52,6 +52,8 @@ class ContractLifecycleServiceTest {
     @BeforeEach void setup() {
         service=new ContractLifecycleService(contracts,revisions,renewals,closures,rentals,invoices,deposits,paymentRepo,payments,
                 signatures,documents,listings,parking,new ObjectMapper().findAndRegisterModules(),time,mock(PlatformTransactionManager.class),storageObjects);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositLedger",new com.hs.payment.service.DepositLedgerService(deposits,paymentRepo));
         root=Contract.builder().id("root").contractNumber("HD-DEMO").rentalRequestId("rental").listingId("listing")
                 .landlordId("owner").tenantId("tenant").status(ContractStatus.ACTIVE).currentRevisionId("original")
                 .templateId("template").templateVersionId("template-v1").signedAt(Instant.parse("2026-10-12T03:00:00Z"))
@@ -117,6 +119,10 @@ class ContractLifecycleServiceTest {
         clock("2026-12-13T00:00:00");assertTrue(service.get("root","tenant").canRequestRenewal());
         assertThrows(AppException.class,()->service.requestRenewal("root","owner",new RenewalPayload(3,"Nội dung hợp lệ.")));
         request();assertThrows(AppException.class,()->request());
+    }
+    @Test void missingLedgerIsUnknownAndDoesNotAdvertiseSettlementOfZeroDeposit(){
+        finalBills();when(deposits.findByRentalRequestId("rental")).thenReturn(Optional.empty());
+        var result=service.get("root","owner");assertNull(result.deposit());assertNull(result.heldDeposit());assertFalse(result.canProposeClosure());
     }
     @Test void approvalCreatesSeparateImmutableAgreementWithoutExtendingOrChargingAgain() {
         Contract child=approve();assertEquals("root",child.getParentContractId());assertEquals(ContractStatus.DRAFT,child.getStatus());

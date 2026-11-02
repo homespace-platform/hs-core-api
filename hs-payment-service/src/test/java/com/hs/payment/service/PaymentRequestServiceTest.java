@@ -107,7 +107,7 @@ class PaymentRequestServiceTest {
                     .direction(direction).payeeId("receiver").payerId("sender").status(PaymentStatus.TRANSFER_REPORTED).totalAmount(new BigDecimal("5000000")).build();
             var deposit=com.hs.payment.model.DepositRecord.builder().originalAmount(new BigDecimal("20000000")).heldAmount(new BigDecimal("20000000"))
                     .refundableAmount(new BigDecimal("20000000")).status(com.hs.payment.model.constant.DepositStatus.HELD).build();
-            when(paymentRequestRepository.findByIdForUpdate("delta")).thenReturn(Optional.of(payment));
+            when(paymentRequestRepository.findById("delta")).thenReturn(Optional.of(payment));
             when(paymentRequestRepository.save(any())).thenAnswer(i->i.getArgument(0));
             when(depositRecordRepository.findByRentalRequestIdForUpdate("rental")).thenReturn(Optional.of(deposit));
             when(billingTime.now()).thenReturn(Instant.parse("2026-11-15T03:00:00Z"));
@@ -149,7 +149,7 @@ class PaymentRequestServiceTest {
                 .payerId("landlord-1").payeeId("tenant-1").status(PaymentStatus.OVERDUE).totalAmount(new BigDecimal("20000000")).build();
         var deposit=com.hs.payment.model.DepositRecord.builder().refundPaymentRequestId("refund")
                 .status(com.hs.payment.model.constant.DepositStatus.REFUND_DUE).heldAmount(p.getTotalAmount()).refundableAmount(p.getTotalAmount()).build();
-        when(paymentRequestRepository.findByIdForUpdate("refund")).thenReturn(Optional.of(p));
+        when(paymentRequestRepository.findById("refund")).thenReturn(Optional.of(p));
         when(paymentRequestRepository.save(any())).thenAnswer(i->i.getArgument(0));
         when(depositRecordRepository.findByRefundPaymentRequestId("refund")).thenReturn(Optional.of(deposit));
         when(billingTime.now()).thenReturn(Instant.parse("2027-01-30T03:00:00Z"));
@@ -183,6 +183,7 @@ class PaymentRequestServiceTest {
 
     @BeforeEach
     void setUp() {
+        org.springframework.test.util.ReflectionTestUtils.setField(paymentRequestService,"entityManager",mock(jakarta.persistence.EntityManager.class));
         landlordAccount = BankAccount.builder()
                 .id("acc-landlord")
                 .userId("landlord-1")
@@ -297,7 +298,7 @@ class PaymentRequestServiceTest {
         PaymentRequest monthly = PaymentRequest.builder().id("monthly-1").type(PaymentType.MONTHLY_RENT)
                 .rentalRequestId("req-1").payerId("tenant-1").payeeId("landlord-1")
                 .status(PaymentStatus.OVERDUE).totalAmount(new BigDecimal("210000")).build();
-        when(paymentRequestRepository.findByIdForUpdate("monthly-1")).thenReturn(Optional.of(monthly));
+        when(paymentRequestRepository.findById("monthly-1")).thenReturn(Optional.of(monthly));
         when(paymentRequestRepository.save(any())).thenAnswer(i -> i.getArgument(0));
         when(paymentProofUploadSessionService.consumeSession("session-1", "monthly-1", "tenant-1"))
                 .thenReturn("proof-1");
@@ -317,7 +318,7 @@ class PaymentRequestServiceTest {
         PaymentRequest monthly = PaymentRequest.builder().id("monthly-1").type(PaymentType.MONTHLY_RENT)
                 .payerId("tenant-1").payeeId("landlord-1")
                 .status(PaymentStatus.OVERDUE).totalAmount(new BigDecimal("220000")).build();
-        when(paymentRequestRepository.findByIdForUpdate("monthly-1")).thenReturn(Optional.of(monthly));
+        when(paymentRequestRepository.findById("monthly-1")).thenReturn(Optional.of(monthly));
         assertThrows(AppException.class, () -> paymentRequestService.reportTransfer("monthly-1", "tenant-1",
                 ReportTransferRequest.builder().evidenceUploadSessionId("session-1")
                         .expectedAmount(new BigDecimal("210000")).build()));
@@ -336,7 +337,7 @@ class PaymentRequestServiceTest {
                 .totalAmount(new BigDecimal("15000000"))
                 .build();
 
-        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
         when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> i.getArgument(0));
 
         com.hs.storage.model.StorageObject mockStorage = com.hs.storage.model.StorageObject.builder()
@@ -372,7 +373,7 @@ class PaymentRequestServiceTest {
                 .totalAmount(new BigDecimal("15000000"))
                 .build();
 
-        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
         when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> i.getArgument(0));
         when(paymentProofUploadSessionService.consumeSession("sess-123", "pay-1", "tenant-1"))
                 .thenReturn("storage-from-session");
@@ -399,7 +400,7 @@ class PaymentRequestServiceTest {
                 .status(PaymentStatus.AWAITING_TRANSFER)
                 .build();
 
-        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
 
         ReportTransferRequest request = ReportTransferRequest.builder().build();
 
@@ -418,7 +419,7 @@ class PaymentRequestServiceTest {
                 .status(PaymentStatus.AWAITING_TRANSFER)
                 .build();
 
-        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
 
         com.hs.storage.model.StorageObject wrongOwnerStorage = com.hs.storage.model.StorageObject.builder()
                 .id("storage-fake")
@@ -453,7 +454,7 @@ class PaymentRequestServiceTest {
                 .totalAmount(new BigDecimal("15000000"))
                 .build();
 
-        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
         when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> i.getArgument(0));
 
         com.hs.storage.model.StorageObject mockStorage = com.hs.storage.model.StorageObject.builder()
@@ -488,7 +489,7 @@ class PaymentRequestServiceTest {
                 .status(PaymentStatus.AWAITING_TRANSFER)
                 .build();
 
-        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
 
         ReportTransferRequest request = ReportTransferRequest.builder()
                 .proofStorageId("storage-1")
@@ -512,7 +513,7 @@ class PaymentRequestServiceTest {
                 .totalAmount(new BigDecimal("15000000"))
                 .build();
 
-        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
         when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> i.getArgument(0));
 
         PaymentRequestResponse resp = paymentRequestService.confirmReceipt("pay-1", "landlord-1");
@@ -528,7 +529,7 @@ class PaymentRequestServiceTest {
         var payment=PaymentRequest.builder().id("receipt").rentalRequestId("rental").payerId("tenant").payeeId("owner")
             .type(PaymentType.INITIAL).status(PaymentStatus.TRANSFER_REPORTED).totalAmount(new BigDecimal("100"))
             .direction(com.hs.payment.model.constant.PaymentDirection.TENANT_TO_LANDLORD).build();
-        when(paymentRequestRepository.findByIdForUpdate("receipt")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("receipt")).thenReturn(Optional.of(payment));
         when(paymentRequestRepository.save(any())).thenAnswer(i->i.getArgument(0));
         when(billingTime.now()).thenReturn(Instant.parse("2026-11-01T03:00:00Z"));
         assertThrows(AppException.class,()->paymentRequestService.confirmReceipt("receipt","other"));
@@ -550,7 +551,7 @@ class PaymentRequestServiceTest {
                 .totalAmount(new BigDecimal("15000000"))
                 .build();
 
-        when(paymentRequestRepository.findByIdForUpdate("pay-1")).thenReturn(Optional.of(payment));
+        when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
         when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> i.getArgument(0));
 
         RejectReceiptRequest req = new RejectReceiptRequest("Chua thay tien vao tai khoan, vui long kiem tra lai");

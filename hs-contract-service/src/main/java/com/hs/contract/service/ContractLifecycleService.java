@@ -36,6 +36,8 @@ import org.springframework.beans.factory.annotation.Value;
 /** Root lock serializes renewal signatures, expiration, settlement and creation of transfer obligations. */
 @Service @RequiredArgsConstructor @Slf4j
 public class ContractLifecycleService {
+    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.payment.service.DepositLedgerService depositLedger;
     @org.springframework.beans.factory.annotation.Autowired
     private ContractAmendmentService amendments;
     @org.springframework.beans.factory.annotation.Autowired
@@ -118,7 +120,9 @@ public class ContractLifecycleService {
     @Transactional public void applyRenewalAfterSignatures(Contract agreement) {
         if ("AMENDMENT".equals(agreement.getAgreementKind())) { amendments.signed(agreement); return; }
         Contract parent=contracts.findByIdForUpdate(agreement.getParentContractId()).orElseThrow(this::notAllowed);
+        entityManager.refresh(parent,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
         ContractRenewal r=renewals.findByAgreementContractId(agreement.getId()).orElseThrow(this::notAllowed);
+        entityManager.refresh(r);
         if("APPLIED".equals(r.getStatus())) return;
         if(parent.getStatus()!=ContractStatus.ACTIVE || terminationActive(parent) || !"APPROVED".equals(r.getStatus())
                 || !time.now().isBefore(r.getSignBy()) || !end(parent).equals(r.getStartsOn())) throw notAllowed();
@@ -138,7 +142,8 @@ public class ContractLifecycleService {
         if ("AMENDMENT".equals(agreement.getAgreementKind())) { amendments.validateSigning(agreement); return; }
         ContractRenewal r=renewals.findByAgreementContractId(agreement.getId()).orElseThrow(this::notAllowed);
         Contract parent=contracts.findById(agreement.getParentContractId()).orElseThrow(this::notAllowed);
-        if(!"APPROVED".equals(r.getStatus()) || parent.getStatus()!=ContractStatus.ACTIVE || terminationActive(parent) || !time.now().isBefore(r.getSignBy())) throw notAllowed();
+        if(!"APPROVED".equals(r.getStatus()) || parent.getStatus()!=ContractStatus.ACTIVE || terminationActive(parent)
+                || !end(parent).equals(r.getStartsOn()) || !time.now().isBefore(r.getSignBy())) throw notAllowed();
     }
 
     @Transactional public ContractLifecycleResponse proposeClosure(String id,String actor,ClosurePayload p) {
@@ -178,6 +183,20 @@ public class ContractLifecycleService {
         if(close.getUtilityAdjustment()!=null && close.getUtilityAdjustment().signum()!=0)
             throw new AppException(ContractErrorCode.LIFECYCLE_INVALID,"Đề xuất cũ có điện/nước trừ vào cọc; cần đối soát và lập lại sau khi thanh toán hóa đơn.");
         DepositRecord deposit=deposit(c); if(deposit.getStatus()!=DepositStatus.SETTLEMENT_PENDING) throw notAllowed();
+        // A proposal records exact amounts. Do not accept it against a changed deposit balance.
+        BigDecimal held=deposit.getHeldAmount(),deduction=close.getOtherDeduction();
+        var agreedDeductions=closureDeductions(close);
+        if(!moneyValid(held)||!moneyValid(deduction)||!moneyValid(close.getRefundAmount())||!moneyValid(close.getBalanceAmount())
+                || close.getRefundAmount().compareTo(held.subtract(deduction).max(ZERO))!=0
+                || close.getBalanceAmount().compareTo(deduction.subtract(held).max(ZERO))!=0
+                || agreedDeductions.stream().anyMatch(d->d==null||!moneyValid(d.amount()))
+                || agreedDeductions.stream().map(ClosureDeduction::amount).reduce(ZERO,BigDecimal::add).compareTo(deduction)!=0)
+            throw new AppException(ContractErrorCode.LIFECYCLE_INVALID,"Sổ cọc hoặc khoản khấu trừ đã khác đề xuất; cần lập lại để hai bên đối chiếu.");
+        BigDecimal retained=held.min(deduction);
+        BigDecimal previousRetained=deposit.getRetainedAmount()==null?ZERO:deposit.getRetainedAmount();
+        if(!moneyValid(previousRetained))throw invalid();
+        deposit.setRetainedAmount(previousRetained.add(retained));
+        if(retained.signum()>0){deposit.setRetainedAt(time.now());deposit.setRetainedReason(close.getNote());}
         preserveLegacyProposal(close);
         Object configured=read(revision(c).getPoliciesSnapshot()).get("depositRefundDays");
         int days=configured==null?15:Integer.parseInt(String.valueOf(configured));
@@ -192,7 +211,6 @@ public class ContractLifecycleService {
             deposit.setHeldAmount(close.getRefundAmount()); deposit.setRefundableAmount(close.getRefundAmount()); close.setStatus("REFUND_PENDING");
         } else {
             deposit.setHeldAmount(ZERO); deposit.setRefundableAmount(ZERO); deposit.setStatus(DepositStatus.RETAINED_BY_LANDLORD);
-            deposit.setRetainedAt(time.now()); deposit.setRetainedReason(close.getNote());
             if(close.getBalanceAmount().signum()>0) {
                 PaymentRequest balance=payments.createContractSettlement(id,c.getRentalRequestId(),c.getListingId(),c.getTenantId(),c.getLandlordId(),
                         close.getBalanceAmount(),close.getRefundDueAt(),false,"Khoản quyết toán còn thiếu của hợp đồng "+c.getContractNumber());
@@ -349,10 +367,11 @@ public class ContractLifecycleService {
         List<ContractRenewal> history=renewals.findByContractIdOrderByRequestedAtDesc(c.getId());
         history.forEach(r->{ if(r.getAgreementContractId()!=null) contracts.findById(r.getAgreementContractId()).ifPresent(a->r.setAgreementStatus(a.getStatus())); });
         return new ContractLifecycleResponse(time.now(),end(c),opens(c),signBy(c),actor.equals(c.getTenantId())&&canRequest(c),
-                history,close,deposit==null?ZERO:deposit.getHeldAmount(),
+                history,close,deposit==null?null:deposit.getHeldAmount(),
                 actor.equals(c.getLandlordId())&&c.getStatus()==ContractStatus.EXPIRED
+                    && deposit!=null && Set.of(DepositStatus.HELD,DepositStatus.SETTLEMENT_PENDING,DepositStatus.DISPUTED).contains(deposit.getStatus())
                     && allBillsPaid(c) && (close==null || Set.of("WAITING_HANDOVER","PROPOSED","DISPUTED").contains(close.getStatus())),
-                close==null?null:paymentView(close.getRefundPaymentId(),actor),close==null?null:paymentView(close.getBalancePaymentId(),actor),billingView(c,actor,close));
+                close==null?null:paymentView(close.getRefundPaymentId(),actor),close==null?null:paymentView(close.getBalancePaymentId(),actor),billingView(c,actor,close),depositLedger.forRental(c.getRentalRequestId()));
     }
     private com.hs.payment.dto.PaymentRequestResponse paymentView(String id,String actor) {
         return id==null?null:payments.toResponse(paymentRepository.findById(id).orElseThrow(this::notAllowed),actor);
@@ -400,7 +419,8 @@ public class ContractLifecycleService {
         return c.getStatus()==ContractStatus.ACTIVE && !time.now().isBefore(opens(c)) && time.now().isBefore(signBy(c))
                 && (amendments == null || !amendments.hasPending(c))
                 && (c.getTerminationProposedAt()==null || c.getTerminationCancelledAt()!=null || c.getTerminationDeclinedAt()!=null)
-                && renewals.findByContractIdOrderByRequestedAtDesc(c.getId()).stream().noneMatch(r->end(c).equals(r.getStartsOn()));
+                && renewals.findByContractIdOrderByRequestedAtDesc(c.getId()).stream().noneMatch(r->end(c).equals(r.getStartsOn())
+                    && !Set.of("REJECTED","EXPIRED").contains(r.getStatus()));
     }
     @Transactional public void cancelPendingRenewalsForClosedParent(Contract c) { syncLocked(c); }
     private boolean terminationActive(Contract c) { return c.getTerminationProposedAt()!=null && c.getTerminationCancelledAt()==null && c.getTerminationDeclinedAt()==null && c.getTerminationCompletedAt()==null; }
@@ -410,9 +430,16 @@ public class ContractLifecycleService {
     private int months(Contract c) { return ContractLeaseCalc.months(c, rental(c)); }
     private RentalRequest rental(Contract c) { return rentals.findById(c.getRentalRequestId()).orElseThrow(this::notAllowed); }
     private ContractRevision revision(Contract c) { return terms == null ? revisions.findById(c.getCurrentRevisionId()).orElseThrow(this::notAllowed) : terms.at(c,time.today()); }
-    private DepositRecord deposit(Contract c) { return deposits.findByRentalRequestIdForUpdate(c.getRentalRequestId()).orElseThrow(this::notAllowed); }
+    private DepositRecord deposit(Contract c) {
+        var d=deposits.findByRentalRequestIdForUpdate(c.getRentalRequestId()).orElseThrow(this::notAllowed);
+        entityManager.refresh(d);return d;
+    }
     private Contract root(String id,String actor) {
         Contract c=contracts.findByIdForUpdate(id).orElseThrow(this::notAllowed);
+        entityManager.refresh(c,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        // A caller can already have read these rows before waiting for the root lock.
+        renewals.findByContractIdOrderByRequestedAtDesc(id).forEach(entityManager::refresh);
+        closures.findById(id).ifPresent(entityManager::refresh);
         if(com.hs.contract.deposit.DepositAgreementService.isDeposit(c) || c.getParentContractId()!=null || (!actor.equals(c.getLandlordId())&&!actor.equals(c.getTenantId())))
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN); return c;
     }

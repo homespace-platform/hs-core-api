@@ -63,6 +63,15 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 class ContractServiceImplTest {
+    @Test void adminDetailUsesTheSameRecordedDepositLedgerWithoutChangingIt(){
+        var f=new EffectiveDocumentFixture();f.root.setRentalRequestId("rental");
+        var ledger=mock(com.hs.payment.service.DepositLedgerService.class);
+        var snapshot=new com.hs.payment.dto.DepositLedgerView("REFUNDED",new BigDecimal("20000000"),BigDecimal.ZERO,new BigDecimal("100000"),BigDecimal.ZERO,
+            new BigDecimal("20000000"),new BigDecimal("19900000"),java.time.Instant.parse("2026-11-03T03:00:00Z"),"Đã đối chiếu hai bên");
+        when(ledger.forRental("rental")).thenReturn(snapshot);
+        org.springframework.test.util.ReflectionTestUtils.setField(f.service,"depositLedger",ledger);
+        assertEquals(snapshot,f.service.getContractForAdmin("root").getDepositLedger());verify(ledger).forRental("rental");
+    }
     private final class EffectiveDocumentFixture {
         final ContractRepository contracts = mock(ContractRepository.class);
         final ContractRevisionRepository revisions = mock(ContractRevisionRepository.class);
@@ -240,10 +249,16 @@ class ContractServiceImplTest {
         ContractServiceImpl service = createService(contracts, revisions, documents,
                 mock(ContractTemplateVersionRepository.class));
         Contract contract = Contract.builder().id("contract-1").landlordId("landlord-1")
-                .tenantId("tenant-1").status(ContractStatus.DRAFT).build();
+                .tenantId("tenant-1").status(ContractStatus.DRAFT).currentRevisionId("revision-1").build();
+        when(revisions.findById("revision-1")).thenReturn(Optional.of(ContractRevision.builder().id("revision-1").contract(contract).build()));
         when(contracts.findById("contract-1")).thenReturn(Optional.of(contract));
         when(contracts.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
-        when(revisions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(revisions.save(any())).thenAnswer(invocation -> {
+            ContractRevision saved = invocation.getArgument(0);
+            saved.setId(java.util.UUID.randomUUID().toString());
+            when(revisions.findById(saved.getId())).thenReturn(Optional.of(saved));
+            return saved;
+        });
         when(documents.findByContractIdOrderByGeneratedAtDesc("contract-1")).thenReturn(List.of());
         UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
         UpdateContractRevisionRequest request = new UpdateContractRevisionRequest();
@@ -270,7 +285,9 @@ class ContractServiceImplTest {
                 mock(ContractDocumentRepository.class), templates);
         Contract contract = Contract.builder().id("contract-1").landlordId("landlord-1")
                 .tenantId("tenant-1").templateVersionId("template-version-1")
-                .status(ContractStatus.DRAFT).build();
+                .currentRevisionId("revision-1").status(ContractStatus.DRAFT).build();
+        var revisionRepo = (ContractRevisionRepository) org.springframework.test.util.ReflectionTestUtils.getField(service,"revisionRepository");
+        when(revisionRepo.findById("revision-1")).thenReturn(Optional.of(ContractRevision.builder().id("revision-1").contract(contract).build()));
         when(contracts.findById("contract-1")).thenReturn(Optional.of(contract));
         when(contracts.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
         when(templates.findById("template-version-1")).thenReturn(Optional.of(
@@ -442,6 +459,7 @@ class ContractServiceImplTest {
                 .build();
 
         UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
+        when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
         when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
         when(revisionRepository.findById("revision-1")).thenReturn(Optional.of(revision));
 
@@ -486,6 +504,7 @@ class ContractServiceImplTest {
                 .build();
 
         UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
+        when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
         when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
         when(rentalRequestRepository.findById("request-1")).thenReturn(Optional.of(rentalRequest));
         when(contractRepository.save(contract)).thenReturn(contract);
@@ -518,8 +537,8 @@ class ContractServiceImplTest {
                 .landlordId("landlord-1").tenantId("tenant-1").status(ContractStatus.PENDING_REVIEW)
                 .paymentStatus(ContractPaymentStatus.PAID).build();
         UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
-        when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
         when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
+        when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
         when(rentalRequestRepository.findById("request-1")).thenReturn(Optional.of(RentalRequest.builder()
                 .id("request-1").ownerId("landlord-1").renterId("tenant-1").status(RentalRequestStatus.ACCEPTED).build()));
 
@@ -578,6 +597,7 @@ class ContractServiceImplTest {
                 .build();
 
         UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
+        when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
         when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
 
         assertThrows(AppException.class, () -> service.sign("contract-1"));
@@ -775,6 +795,7 @@ class ContractServiceImplTest {
                 .build();
 
         UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
+        when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
         when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
 
         AppException ex = assertThrows(AppException.class, () -> service.payMock("contract-1"));
@@ -823,6 +844,7 @@ class ContractServiceImplTest {
                 .build();
 
         UserContextHolder.set(new UserContext("tenant-1", "tenant@example.com"));
+        when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
         when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
         when(paymentRequestRepository.findById("pay-1")).thenReturn(Optional.of(payment));
         when(rentalRequestRepository.findById("request-1")).thenReturn(Optional.of(rentalRequest));
@@ -1038,6 +1060,7 @@ class ContractServiceImplTest {
 
         // User is tenant-2, not tenant-1
         UserContextHolder.set(new UserContext("tenant-2", "tenant2@example.com"));
+        when(contractRepository.findById("contract-1")).thenReturn(Optional.of(contract));
         when(contractRepository.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
 
         assertThrows(AppException.class, () -> service.sign("contract-1"));
@@ -1135,7 +1158,7 @@ class ContractServiceImplTest {
             ListingStatusService listingStatusService,
             PaymentRequestRepository paymentRequestRepository
     ) {
-        return new ContractServiceImpl(
+        ContractServiceImpl service = new ContractServiceImpl(
                 contractRepository,
                 revisionRepository,
                 documentRepository,
@@ -1151,5 +1174,10 @@ class ContractServiceImplTest {
                 mock(com.hs.listing.service.ParkingReservationService.class),
                 paymentRequestRepository
         );
+        var integrity = mock(com.hs.contract.service.ContractDraftIntegrity.class);
+        when(integrity.prepareUpdate(any(),any(),any())).thenAnswer(i -> i.getArgument(2));
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"draftIntegrity",integrity);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
+        return service;
     }
 }

@@ -14,6 +14,9 @@ import java.util.Map;
 @AllArgsConstructor
 public class UpdateContractRevisionRequest {
 
+    /** Optional for legacy clients; new editors send the revision they actually reviewed. */
+    private String baseRevisionId;
+
     private Map<String, Object> landlord;
 
     private Map<String, Object> tenant;

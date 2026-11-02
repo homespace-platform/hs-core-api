@@ -695,6 +695,11 @@ public class ContractDataBuilder {
     // --- Thời hạn thuê ---
 
     private Map<String, Object> buildLease(RentalRequest request, ListingSnapshotDto snapshot, Listing liveListing) {
+        return leaseTerms(request);
+    }
+
+    /** Shared document calendar: endDateText is the last occupied day (the operational end is exclusive). */
+    public static Map<String, Object> leaseTerms(RentalRequest request) {
         Map<String, Object> map = new LinkedHashMap<>();
         LocalDate start = request.getMoveInDate() != null ? request.getMoveInDate() : LocalDate.now();
         int months = request.getLeaseMonths() != null ? request.getLeaseMonths() : 12;

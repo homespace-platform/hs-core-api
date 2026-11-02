@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class PaymentRequestService {
+    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
 
     private final PaymentRequestRepository paymentRequestRepository;
     private final PaymentLineItemRepository paymentLineItemRepository;
@@ -83,7 +84,18 @@ public class PaymentRequestService {
     private void lockRentalForPayment(String id) {
         if(rentalRequests==null)return;
         var p=paymentRequestRepository.findById(id).orElseThrow(()->new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
-        if(isOnboarding(p))rentalRequests.findByIdForUpdate(p.getRentalRequestId()).orElseThrow();
+        if(isOnboarding(p)) {
+            var rental=rentalRequests.findById(p.getRentalRequestId()).orElseThrow();
+            entityManager.refresh(rental,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        }
+    }
+
+    private PaymentRequest lockTransferAction(String id) {
+        lockRentalForPayment(id);
+        var payment=paymentRequestRepository.findById(id).orElseThrow(()->new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
+        // Refresh-with-lock also replaces the version in an already managed entity before checking status.
+        entityManager.refresh(payment,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        return payment;
     }
 
     @Transactional
@@ -415,9 +427,7 @@ public class PaymentRequestService {
 
     @Transactional
     public PaymentRequestResponse reportTransfer(String paymentRequestId, String actorId, ReportTransferRequest request) {
-        lockRentalForPayment(paymentRequestId);
-        PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)
-                .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
+        PaymentRequest payment = lockTransferAction(paymentRequestId);
 
         if (!actorId.equals(payment.getPayerId())) {
             throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);
@@ -532,9 +542,7 @@ public class PaymentRequestService {
 
     @Transactional
     public PaymentRequestResponse confirmReceipt(String paymentRequestId, String actorId) {
-        lockRentalForPayment(paymentRequestId);
-        PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)
-                .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
+        PaymentRequest payment = lockTransferAction(paymentRequestId);
 
         if (!actorId.equals(payment.getPayeeId())) {
             throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);
@@ -602,9 +610,7 @@ public class PaymentRequestService {
 
     @Transactional
     public PaymentRequestResponse rejectReceipt(String paymentRequestId, String actorId, RejectReceiptRequest request) {
-        lockRentalForPayment(paymentRequestId);
-        PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)
-                .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
+        PaymentRequest payment = lockTransferAction(paymentRequestId);
 
         if (!actorId.equals(payment.getPayeeId())) {
             throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);
@@ -637,9 +643,7 @@ public class PaymentRequestService {
 
     @Transactional
     public PaymentRequestResponse dispute(String paymentRequestId, String actorId, DisputePaymentRequest request) {
-        lockRentalForPayment(paymentRequestId);
-        PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(paymentRequestId)
-                .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
+        PaymentRequest payment = lockTransferAction(paymentRequestId);
 
         if (!actorId.equals(payment.getPayerId()) && !actorId.equals(payment.getPayeeId())) {
             throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);
@@ -650,7 +654,12 @@ public class PaymentRequestService {
             throw new AppException(PaymentErrorCode.DISPUTE_NOT_ALLOWED);
         }
 
+        if(request==null||request.reason()==null||request.reason().isBlank()||request.reason().trim().length()>500)
+            throw new AppException(PaymentErrorCode.DISPUTE_CASE_INVALID);
         PaymentStatus oldStatus = payment.getStatus();
+        var refundRecord=payment.getType()==PaymentType.DEPOSIT_REFUND
+                ?depositRecordRepository.findByRefundPaymentRequestId(payment.getId()).orElse(null):null;
+        var previousDepositStatus=refundRecord==null?null:refundRecord.getStatus();
         payment.setStatus(PaymentStatus.DISPUTED);
         PaymentRequest saved = paymentRequestRepository.save(payment);
 
@@ -658,9 +667,9 @@ public class PaymentRequestService {
         String role = actorId.equals(payment.getPayerId()) ? (reverse?"LANDLORD":"TENANT") : (reverse?"TENANT":"LANDLORD");
         recordEvent(saved.getId(), PaymentEventType.DISPUTED, oldStatus, PaymentStatus.DISPUTED,
                 actorId, role, request.reason().trim(), null);
-        if(payment.getType()==PaymentType.DEPOSIT_REFUND) depositRecordRepository.findByRefundPaymentRequestId(saved.getId()).ifPresent(d->{
-            d.setStatus(DepositStatus.DISPUTED); depositRecordRepository.save(d);
-        });
+        if(refundRecord!=null){refundRecord.setStatus(DepositStatus.DISPUTED);depositRecordRepository.save(refundRecord);}
+        if(receiptEvents!=null)receiptEvents.publishEvent(new com.hs.payment.event.PaymentDisputed(saved.getId(),actorId,
+                request.reason().trim(),oldStatus,previousDepositStatus));
 
         log.info("Actor [{}] [{}] opened DISPUTE on PaymentRequest [{}]", actorId, role, paymentRequestId);
         return toResponse(saved, actorId);

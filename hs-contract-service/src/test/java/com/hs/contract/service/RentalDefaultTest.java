@@ -42,6 +42,7 @@ class RentalDefaultTest {
     @Mock PlatformTransactionManager transactions; @InjectMocks RentalOnboardingService service;
     Instant now;RentalRequest rental;Contract contract;PaymentRequest rent;DepositRecord deposit;ContractRevision revision;
     @BeforeEach void setup() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositLedger",new com.hs.payment.service.DepositLedgerService(deposits,payments));
         now=Instant.parse("2026-11-02T03:00:00Z");
         when(time.now()).thenAnswer(i->now);when(time.today()).thenAnswer(i->now.atZone(BillingTime.ZONE).toLocalDate());
         rental=RentalRequest.builder().id("r").ownerId("o").renterId("t").status(RentalRequestStatus.ACCEPTED)

@@ -29,7 +29,11 @@ public enum PaymentErrorCode implements AppException.ErrorCode {
     PROOF_SESSION_INVALID(7020, "Phiên tải chứng từ không hợp lệ hoặc đã được sử dụng", HttpStatus.BAD_REQUEST),
     PROOF_PUBLIC_BASE_URL_REQUIRED(7021, "Chưa cấu hình URL công khai để tải chứng từ từ điện thoại. Vui lòng cấu hình PAYMENT_PROOF_UPLOAD_PUBLIC_BASE_URL.", HttpStatus.BAD_REQUEST),
     PROOF_PUBLIC_BASE_URL_INVALID(7022, "PAYMENT_PROOF_UPLOAD_PUBLIC_BASE_URL không hợp lệ.", HttpStatus.BAD_REQUEST),
-    MONTHLY_AMOUNT_CHANGED(7023, "Số tiền hóa đơn tháng đã thay đổi (có thể do phí chậm thanh toán). Vui lòng làm mới hóa đơn và chuyển đúng số tiền mới.", HttpStatus.CONFLICT);
+    MONTHLY_AMOUNT_CHANGED(7023, "Số tiền hóa đơn tháng đã thay đổi (có thể do phí chậm thanh toán). Vui lòng làm mới hóa đơn và chuyển đúng số tiền mới.", HttpStatus.CONFLICT),
+    DISPUTE_CASE_NOT_FOUND(7024,"Không tìm thấy hồ sơ đối soát",HttpStatus.NOT_FOUND),
+    DISPUTE_CASE_INVALID(7025,"Nội dung xử lý đối soát không hợp lệ",HttpStatus.BAD_REQUEST),
+    DISPUTE_CASE_STALE(7026,"Hồ sơ đối soát đã thay đổi. Vui lòng tải lại trước khi xử lý.",HttpStatus.CONFLICT),
+    DISPUTE_CASE_ACTION_NOT_ALLOWED(7027,"Thao tác không hợp lệ với trạng thái đối soát hiện tại",HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

@@ -15,6 +15,8 @@ import com.hs.payment.service.PaymentRequestService;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
@@ -38,7 +40,7 @@ import static org.mockito.ArgumentMatchers.*;
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.datasource.url=${HS_TEST_PG_URL}","spring.datasource.username=${HS_TEST_PG_USER:postgres}",
     "spring.datasource.password=${HS_TEST_PG_PASSWORD:test}","spring.jpa.hibernate.ddl-auto=create-drop","spring.jpa.show-sql=false","spring.profiles.active=test"})
-@Import({RentalOnboardingService.class,ParkingReservationService.class})
+@Import({RentalOnboardingService.class,ParkingReservationService.class,com.hs.payment.service.DepositLedgerService.class})
 class OnboardingPersistencePostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs")
     @EnableJpaRepositories(basePackageClasses={RentalRequestRepository.class,PaymentRequestRepository.class,ContractRepository.class})
@@ -56,6 +58,7 @@ class OnboardingPersistencePostgresTest {
     @MockitoBean RentalCostCalculator calculator;
     @MockitoBean ContractDataBuilder builder;
     @MockitoBean AutomaticContractDrafts automaticDrafts;
+    @MockitoBean com.hs.contract.deposit.DepositAgreementService depositAgreements;
     @Autowired RentalOnboardingService service;
     @Autowired RentalRequestRepository rentals;
     @Autowired ListingRepository listings;
@@ -68,11 +71,15 @@ class OnboardingPersistencePostgresTest {
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
     @Autowired com.hs.payment.repository.DepositRecordRepository deposits;
     @Autowired ContractRevisionRepository revisions;
+    @Autowired SignatureRequestRepository signatures;
     @Autowired ContractDocumentRepository documents;
     @Autowired ContractTemplateRepository templates;
     @Autowired ContractTemplateVersionRepository templateVersions;
     String id;
+    ContractDataBuilder sourceBuilder;
     @BeforeEach void fixture() {
+        // These legacy DB scenarios isolate cash/calendar behavior; signature policy has its own suites.
+        when(depositAgreements.signedOrExempt(any())).thenReturn(true);
         ((MutableTime)clock).current=Instant.parse("2026-10-21T03:00:00Z");
         var listing=Listing.builder().id(UUID.randomUUID().toString()).ownerId("owner").title("Phòng kiểm thử nhận nhà").description("Dữ liệu kiểm thử")
             .category(ListingCategory.ROOM).status(ListingStatus.RESERVED).priceAmount(new BigDecimal("5000000"))
@@ -89,6 +96,28 @@ class OnboardingPersistencePostgresTest {
             .status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("10000000")).transferReference("HS"+UUID.randomUUID().toString().substring(0,12))
             .confirmedAt(Instant.parse("2026-10-21T03:00:00Z")).build());
         em.clear();
+    }
+    @ParameterizedTest @ValueSource(booleans={true,false})
+    void legacyRejectedReviewStillPersistsBeforeReceiptAndCanReopen(boolean received) {
+        var rental=rentals.findById(id).orElseThrow();
+        String paymentId=payments.saveAndFlush(PaymentRequest.builder().rentalRequestId(id).listingId(rental.getListing().getId())
+            .payerId("tenant").payeeId("owner").type(PaymentType.INITIAL).direction(PaymentDirection.TENANT_TO_LANDLORD)
+            .status(PaymentStatus.REJECTED).totalAmount(new BigDecimal("5000000"))
+            .transferReference("HS"+UUID.randomUUID().toString().substring(0,12)).dueAt(clock.now().minusSeconds(60)).build()).getId();
+        em.clear();
+        if(received) when(paymentService.confirmReceipt(paymentId,"owner")).thenAnswer(call->{
+            var p=payments.findById(paymentId).orElseThrow();em.refresh(p);
+            assertEquals(PaymentStatus.TRANSFER_REPORTED,p.getStatus(),"Existing receipt path must see flushed state after refresh");
+            p.setStatus(PaymentStatus.CONFIRMED);p.setConfirmedAt(clock.now());payments.saveAndFlush(p);return null;
+        });
+        service.resolveReview(id,paymentId,"owner",new RentalOnboardingService.ReviewDecision(received,"Đã đối chiếu lại khoản bị từ chối"));
+        em.flush();em.clear();
+        var p=payments.findById(paymentId).orElseThrow();var r=rentals.findById(id).orElseThrow();
+        assertEquals(received?PaymentStatus.CONFIRMED:PaymentStatus.AWAITING_TRANSFER,p.getStatus());
+        assertEquals(LocalDate.of(2026,11,1),r.getMoveInDate());assertEquals(3,r.getLeaseMonths());
+        assertEquals(PaymentStatus.CONFIRMED,payments.findByRentalRequestIdAndType(id,PaymentType.RESERVATION_DEPOSIT).orElseThrow().getStatus());
+        if(received) verify(paymentService).confirmReceipt(paymentId,"owner");
+        else {assertEquals(clock.now().plusSeconds(86400),p.getDueAt());assertEquals(p.getDueAt(),r.getHoldExpiresAt());verify(paymentService,never()).confirmReceipt(anyString(),anyString());}
     }
     @Test void defaultCompletionRollsBackFinancialAndParkingChangesThenRetriesSafely() {
         var r=rentals.findById(id).orElseThrow();r.setMoveInDate(LocalDate.of(2026,10,19));
@@ -198,6 +227,9 @@ class OnboardingPersistencePostgresTest {
             new com.hs.contract.service.engine.ContractFieldCatalog(),new com.hs.contract.service.engine.ContractRenderService(new ObjectMapper()),
             converter,storage,new ObjectMapper(),mock(ParkingReservationService.class),payments);
         org.springframework.test.util.ReflectionTestUtils.setField(target,"billingTime",clock);
+        org.springframework.test.util.ReflectionTestUtils.setField(target,"entityManager",em);
+        org.springframework.test.util.ReflectionTestUtils.setField(target,"draftIntegrity",
+            new ContractDraftIntegrity(new ObjectMapper(),rentals,revisions,signatures,payments,builder));
         var proxy=new org.springframework.aop.framework.ProxyFactory(target);proxy.setProxyTargetClass(true);
         proxy.addAdvice(new org.springframework.transaction.interceptor.TransactionInterceptor(
             transactions,new org.springframework.transaction.annotation.AnnotationTransactionAttributeSource()));
@@ -216,7 +248,7 @@ class OnboardingPersistencePostgresTest {
         var template=templates.saveAndFlush(com.hs.contract.model.ContractTemplate.builder().name("Test template")
             .category(ListingCategory.ROOM).build());
         var version=templateVersions.saveAndFlush(com.hs.contract.model.ContractTemplateVersion.builder().template(template).versionNumber(1)
-            .storageObjectId("test-source").placeholdersJson("[\"contract.number\"]").build());
+            .storageObjectId("test-source").placeholdersJson("[\"contract.number\",\"contract.specialTerms\"]").build());
         assertEquals(com.hs.contract.advice.ContractErrorCode.SYSTEM_TEMPLATE_NOT_AVAILABLE,
             ContractDraftTemplates.problem(templateVersions,ListingCategory.ROOM));
         version.setStatus(com.hs.contract.model.constant.TemplateVersionStatus.PUBLISHED);templateVersions.saveAndFlush(version);
@@ -227,7 +259,8 @@ class OnboardingPersistencePostgresTest {
         TestTransaction.flagForCommit();TestTransaction.end();
         var draft=creator.createDraftAutomatically(id);
         try(var word=new org.apache.poi.xwpf.usermodel.XWPFDocument();var out=new java.io.ByteArrayOutputStream()) {
-            word.createParagraph().createRun().setText("Contract {{contract.number}}");word.write(out);
+            word.createParagraph().createRun().setText("Contract {{contract.number}}");
+            word.createParagraph().createRun().setText("{{contract.specialTerms}}");word.write(out);
             when(storage.downloadDirect("test-source")).thenReturn(out.toByteArray());
         }
         when(converter.convertDocxToPdf(any(),anyString())).thenReturn(Optional.empty(),Optional.of("%PDF-test".getBytes()));
@@ -252,7 +285,15 @@ class OnboardingPersistencePostgresTest {
             .type(PaymentType.INITIAL).direction(PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.CONFIRMED)
             .totalAmount(new BigDecimal("5000000")).transferReference("HS"+UUID.randomUUID().toString().substring(0,12))
             .confirmedAt(clock.now()).build());
-        doReturn(ContractDataBuilder.ContractSnapshots.builder().build()).when(builder).build(any(),any(),any());
+        // Capture realistic source terms now that export verifies the operational calendar and amounts.
+        var realBuilder=new ContractDataBuilder(mock(com.hs.user.repository.UserRepository.class),
+            mock(com.hs.user.repository.AddressRepository.class),new ObjectMapper());
+        sourceBuilder=realBuilder;
+        org.springframework.test.util.ReflectionTestUtils.setField(realBuilder,"listingAddresses",mock(com.hs.listing.repository.ListingAddressRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(realBuilder,"payments",payments);
+        doAnswer(i->realBuilder.build(i.getArgument(0),i.getArgument(1),i.getArgument(2))).when(builder).build(any(),any(),any());
+        doAnswer(i->realBuilder.onboardingPayment(i.getArgument(0),i.getArgument(1),i.getArgument(2),i.getArgument(3)))
+            .when(builder).onboardingPayment(any(),any(),any(),any());
     }
     @Test void automaticDraftDoesNotCreateAnythingForDepositAlone() {
         var creator=automaticCreator();TestTransaction.flagForCommit();TestTransaction.end();
@@ -280,12 +321,12 @@ class OnboardingPersistencePostgresTest {
     }
     @Test void snapshotFailureRollsBackOnlyDraftThenRetryRecovers() {
         paidFirstMonth();var creator=automaticCreator();TestTransaction.flagForCommit();TestTransaction.end();
-        when(builder.build(any(),any(),any())).thenThrow(new IllegalStateException("snapshot temporarily unavailable"));
+        doThrow(new IllegalStateException("snapshot temporarily unavailable")).when(builder).build(any(),any(),any());
         assertThrows(IllegalStateException.class,()->creator.createDraftAutomatically(id));
         TestTransaction.start();assertTrue(contracts.findByRentalRequestId(id).isEmpty());
         var rent=payments.findByRentalRequestIdAndType(id,PaymentType.INITIAL).orElseThrow();
         assertEquals(PaymentStatus.CONFIRMED,rent.getStatus());assertNull(rent.getContractId());TestTransaction.end();
-        doReturn(ContractDataBuilder.ContractSnapshots.builder().build()).when(builder).build(any(),any(),any());
+        doAnswer(i->sourceBuilder.build(i.getArgument(0),i.getArgument(1),i.getArgument(2))).when(builder).build(any(),any(),any());
         assertNotNull(creator.createDraftAutomatically(id));
         TestTransaction.start();assertTrue(contracts.findByRentalRequestId(id).isPresent());
     }

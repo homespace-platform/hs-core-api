@@ -68,7 +68,7 @@ public class DepositRecord extends BaseEntity {
     @Column(name = "retained_at")
     Instant retainedAt;
 
-    @Column(name = "retained_reason", length = 500)
+    @Column(name = "retained_reason", length = 2000)
     String retainedReason;
 
     @Column(name = "refund_payment_request_id", length = 36)

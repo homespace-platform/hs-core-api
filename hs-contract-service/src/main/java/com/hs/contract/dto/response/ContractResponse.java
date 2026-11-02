@@ -14,6 +14,7 @@ import java.time.Instant;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ContractResponse {
+    private com.hs.payment.dto.DepositLedgerView depositLedger;
     private String id;
     private String contractNumber;
     private String signingCity;

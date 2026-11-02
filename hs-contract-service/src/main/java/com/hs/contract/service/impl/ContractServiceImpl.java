@@ -81,6 +81,9 @@ import org.springframework.beans.factory.annotation.Value;
 @Slf4j
 @Service
 public class ContractServiceImpl implements ContractService {
+    @Autowired private com.hs.payment.service.DepositLedgerService depositLedger;
+    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
+    @Autowired private com.hs.contract.service.ContractDraftIntegrity draftIntegrity;
     @Autowired(required=false) private com.hs.contract.service.RentalOnboardingService onboarding;
     @Autowired private com.hs.contract.deposit.DepositAgreementService depositAgreements;
     private static final String SIGNING_CITY = "Thành phố Hồ Chí Minh";
@@ -472,7 +475,9 @@ public class ContractServiceImpl implements ContractService {
     public ContractResponse getContractForAdmin(String contractId) {
         Contract contract = contractRepository.findById(contractId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
-        return toContractResponse(contract);
+        var response=toContractResponse(contract);
+        response.setDepositLedger(depositLedger.forRental(contract.getRentalRequestId()));
+        return response;
     }
 
     @Override
@@ -526,6 +531,7 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
         }
 
+        request = draftIntegrity.prepareUpdate(contract, requireCurrentRevision(contract), request);
         Map<String,Object> previousPolicies=contract.getCurrentRevisionId()==null?Map.of():revisionRepository.findById(contract.getCurrentRevisionId())
                 .map(r->fromJson(r.getPoliciesSnapshot(),MAP_TYPE)).orElse(Map.of());
         Map<String,Object> policies=LatePaymentPolicy.forNewAgreement(request.getPolicies(),previousPolicies);
@@ -562,7 +568,7 @@ public class ContractServiceImpl implements ContractService {
                 .contract(contract)
                 .revisionNumber(nextRev)
                 .templateVersionId(contract.getTemplateVersionId())
-                .schemaVersion(2)
+                .schemaVersion(requireCurrentRevision(contract).getSchemaVersion())
                 .landlordSnapshot(toJson(request.getLandlord()))
                 .tenantSnapshot(toJson(request.getTenant()))
                 .propertySnapshot(toJson(request.getProperty()))
@@ -586,7 +592,8 @@ public class ContractServiceImpl implements ContractService {
         // Đánh dấu các tài liệu cũ là STALE
         List<ContractDocument> docs = documentRepository.findByContractIdOrderByGeneratedAtDesc(contractId);
         for (ContractDocument doc : docs) {
-            if (doc.getStatus() == DocumentGenerationStatus.READY) {
+            if (doc.getStatus() == DocumentGenerationStatus.READY
+                    && (doc.getPurpose() == DocumentPurpose.PREVIEW || doc.getPurpose() == DocumentPurpose.OFFICIAL)) {
                 doc.setStatus(DocumentGenerationStatus.STALE);
                 documentRepository.save(doc);
             }
@@ -831,6 +838,7 @@ public class ContractServiceImpl implements ContractService {
             revisionRepository.save(revision);
         }
 
+        draftIntegrity.validateForDocument(contract, revision);
         ContractCompletenessResponse completeness = assessCompleteness(contract, revision);
         if (!completeness.isComplete()) {
             throw new AppException(ContractErrorCode.CONTRACT_DATA_INCOMPLETE);
@@ -989,6 +997,7 @@ public class ContractServiceImpl implements ContractService {
         }
 
         ContractRevision revision = requireCurrentRevision(contract);
+        draftIntegrity.validateForDocument(contract, revision);
         ContractCompletenessResponse completeness = assessCompleteness(contract, revision);
         if (!completeness.isComplete()) {
             throw new AppException(ContractErrorCode.CONTRACT_DATA_INCOMPLETE);
@@ -1072,6 +1081,7 @@ public class ContractServiceImpl implements ContractService {
         if (contract.getParentContractId() == null && onboarding != null) {
             onboarding.validateSigning(contract.getRentalRequestId(), contract.getTenantId());
         }
+        draftIntegrity.validateForDocument(contract);
 
         // Kiểm tra thanh toán:
         // Luồng mới: Kiểm tra PaymentRequest liên kết đã CONFIRMED
@@ -1319,13 +1329,18 @@ public class ContractServiceImpl implements ContractService {
     }
 
     private Contract findContractForUpdateAndCheckAccess(String contractId) {
-        if(onboarding!=null) {
-            var before=contractRepository.findById(contractId).orElseThrow(()->new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
-            checkContractAccess(before);
-            if(before.getParentContractId()==null)rentalRequestRepository.findByIdForUpdate(before.getRentalRequestId()).orElseThrow();
+        var before=contractRepository.findById(contractId).orElseThrow(()->new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        checkContractAccess(before);
+        if (before.getParentContractId() == null && before.getRentalRequestId() != null) {
+            var lockedRental = rentalRequestRepository.findByIdForUpdate(before.getRentalRequestId())
+                    .orElseThrow(() -> new AppException(ContractErrorCode.RENTAL_REQUEST_NOT_APPROVED));
+            entityManager.refresh(lockedRental);
         }
         Contract contract = contractRepository.findByIdForUpdate(contractId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        // The earlier access check may already have loaded this entity before waiting for the rental lock.
+        // A SELECT FOR UPDATE does not refresh an entity already present in the persistence context.
+        entityManager.refresh(contract);
         checkContractAccess(contract);
         return contract;
     }
