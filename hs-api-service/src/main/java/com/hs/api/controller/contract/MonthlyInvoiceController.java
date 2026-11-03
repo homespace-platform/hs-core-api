@@ -13,6 +13,8 @@ import com.hs.contract.dto.billing.AcceptTerminationRequest;
 import com.hs.contract.dto.billing.CompleteTerminationRequest;
 import com.hs.contract.dto.billing.ForceTerminationRequest;
 import com.hs.contract.dto.billing.PaymentExtensionPayload;
+import com.hs.contract.dto.billing.UnilateralTerminationPayloads;
+import com.hs.contract.advice.ContractErrorCode;
 import com.hs.contract.service.MonthlyBillingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -90,9 +92,35 @@ public class MonthlyInvoiceController {
 
     @PostMapping("/{invoiceId}/termination/propose")
     public ApiResponse<MonthlyInvoiceResponse> proposeTermination(@PathVariable String invoiceId) {
-        return ApiResponse.<MonthlyInvoiceResponse>builder()
-                .message("Đã gửi đề nghị chấm dứt; chưa thay đổi hợp đồng, cọc hoặc tin đăng")
-                .result(billing.proposeMutualTermination(invoiceId, requireUserId())).build();
+        requireUserId();
+        throw new AppException(ContractErrorCode.TERMINATION_NOT_ALLOWED,
+                "Luồng quá hạn đã đổi sang quyết định đơn phương. Tải lại trang và đọc quy tắc 24 giờ trước khi gửi.");
+    }
+
+    @PostMapping("/{invoiceId}/unilateral-termination")
+    public ApiResponse<MonthlyInvoiceResponse> unilateral(@PathVariable String invoiceId,
+            @RequestBody @Valid UnilateralTerminationPayloads.Issue payload) {
+        return ApiResponse.<MonthlyInvoiceResponse>builder().result(billing.issueUnilateralTermination(invoiceId, requireUserId(), payload)).build();
+    }
+    @PostMapping("/{invoiceId}/unilateral-termination/{noticeId}/review")
+    public ApiResponse<MonthlyInvoiceResponse> reviewUnilateral(@PathVariable String invoiceId, @PathVariable String noticeId,
+            @RequestBody @Valid UnilateralTerminationPayloads.Review payload) {
+        return ApiResponse.<MonthlyInvoiceResponse>builder().result(billing.requestTerminationReview(invoiceId, noticeId, requireUserId(), payload)).build();
+    }
+    @PostMapping("/{invoiceId}/unilateral-termination/{noticeId}/decision")
+    public ApiResponse<MonthlyInvoiceResponse> decideUnilateral(@PathVariable String invoiceId, @PathVariable String noticeId,
+            @RequestBody @Valid UnilateralTerminationPayloads.Decision payload) {
+        return ApiResponse.<MonthlyInvoiceResponse>builder().result(billing.decideTerminationReview(invoiceId, noticeId, requireUserId(), payload)).build();
+    }
+    @PostMapping("/{invoiceId}/unilateral-termination/{noticeId}/withdraw")
+    public ApiResponse<MonthlyInvoiceResponse> withdrawUnilateral(@PathVariable String invoiceId, @PathVariable String noticeId,
+            @RequestBody @Valid UnilateralTerminationPayloads.Version payload) {
+        return ApiResponse.<MonthlyInvoiceResponse>builder().result(billing.withdrawUnilateralTermination(invoiceId, noticeId, requireUserId(), payload)).build();
+    }
+    @PostMapping("/{invoiceId}/unilateral-termination/{noticeId}/handover")
+    public ApiResponse<MonthlyInvoiceResponse> handoverUnilateral(@PathVariable String invoiceId, @PathVariable String noticeId,
+            @RequestBody @Valid UnilateralTerminationPayloads.Handover payload) {
+        return ApiResponse.<MonthlyInvoiceResponse>builder().result(billing.completeUnilateralHandover(invoiceId, noticeId, requireUserId(), payload)).build();
     }
 
     @PostMapping("/{invoiceId}/termination/accept")

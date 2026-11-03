@@ -119,9 +119,11 @@ class ContractDataBuilderTest {
         assertEquals(snapshots.getFinancial().get("paymentDueDay"),
                 snapshots.getPolicies().get("paymentDueDay"));
         assertTrue(snapshots.getSpecialTerms().contains("Sau khi hết 05 ngày quá hạn"));
-        assertTrue(snapshots.getSpecialTerms().contains("tối đa 10 ngày"));
-        assertTrue(snapshots.getSpecialTerms().contains("bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận"));
-        assertEquals(true, snapshots.getPolicies().get("overdueLandlordTerminationAfterFiveDays"));
+        assertTrue(snapshots.getSpecialTerms().contains("tối đa 05 ngày"));
+        assertTrue(snapshots.getSpecialTerms().contains("không yêu cầu bên thuê xác nhận đồng ý"));
+        assertTrue(snapshots.getSpecialTerms().contains("Trong 24 giờ"));
+        assertEquals(false, snapshots.getPolicies().get("overdueLandlordTerminationAfterFiveDays"));
+        assertEquals(true, snapshots.getPolicies().get("overdueUnilateralTermination24h"));
         assertTrue(String.valueOf(snapshots.getFinancial().get("depositDescription"))
                 .contains("điều khoản vi phạm hoặc chấm dứt"));
 

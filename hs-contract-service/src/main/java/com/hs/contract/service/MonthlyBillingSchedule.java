@@ -11,7 +11,9 @@ public final class MonthlyBillingSchedule {
     // Four days after the closing date = five payment calendar days INCLUDING the closing date.
     public static final int PAYMENT_WINDOW_DAYS = 4;
     public static final int OVERDUE_ACTION_DAYS = 5;
+    public static final int MAXIMUM_PENALTY_DAYS = 5;
     public static final int AUTO_ROLLOVER_DAYS = 10;
+    public static final int TERMINATION_REVIEW_HOURS = 24;
     public static final int LATE_FEE_GRACE_DAYS = 0;
 
     private MonthlyBillingSchedule() {}
@@ -19,7 +21,8 @@ public final class MonthlyBillingSchedule {
     /** Read-only metadata for document labels. Never accepted as landlord configuration. */
     public static Map<String,Object> rules() {
         return Map.of("paymentWindowDays",PAYMENT_WINDOW_DAYS+1,"paymentDueOffsetDays",PAYMENT_WINDOW_DAYS,
-                "lateFeeGraceDays",LATE_FEE_GRACE_DAYS,"overdueActionDays",OVERDUE_ACTION_DAYS,"maximumPenaltyDays",AUTO_ROLLOVER_DAYS);
+                "lateFeeGraceDays",LATE_FEE_GRACE_DAYS,"overdueActionDays",OVERDUE_ACTION_DAYS,"maximumPenaltyDays",MAXIMUM_PENALTY_DAYS,
+                "autoRolloverDays",AUTO_ROLLOVER_DAYS,"terminationReviewHours",TERMINATION_REVIEW_HOURS);
     }
 
     public static String paymentDueDescription() {

@@ -42,7 +42,7 @@ class ContractRenderServiceTest {
                 "Ghi chú nhập tay",3,1,"HD-SYSTEM",java.time.LocalDate.of(2026,10,15),"HCM");
         String terms=String.valueOf(ContractRenderService.resolvePath(model,"contract.specialTerms"));
         assertTrue(terms.contains("ngày thứ 5"));assertTrue(terms.contains("từ ngày đầu tiên sau hạn thanh toán"));
-        assertTrue(terms.contains("tối đa 10 ngày"));assertTrue(terms.contains("tổng phí tối đa 1.000.000 VNĐ"));
+        assertTrue(terms.contains("tối đa 5 ngày"));assertTrue(terms.contains("tổng phí tối đa 500.000 VNĐ"));
         assertEquals(terms.indexOf("Phí chậm thanh toán:"),terms.lastIndexOf("Phí chậm thanh toán:"));
         byte[] template;
         try(var document=new org.apache.poi.xwpf.usermodel.XWPFDocument();var out=new java.io.ByteArrayOutputStream()) {
@@ -50,7 +50,7 @@ class ContractRenderServiceTest {
         }
         byte[] rendered=renderService.renderDocx(new java.io.ByteArrayInputStream(template),model);
         try(var document=new org.apache.poi.xwpf.usermodel.XWPFDocument(new java.io.ByteArrayInputStream(rendered));var extractor=new org.apache.poi.xwpf.extractor.XWPFWordExtractor(document)) {
-            assertTrue(extractor.getText().contains("1.000.000 VNĐ"));assertTrue(extractor.getText().contains("Ghi chú nhập tay"));assertFalse(extractor.getText().contains("{{"));
+            assertTrue(extractor.getText().contains("500.000 VNĐ"));assertTrue(extractor.getText().contains("Ghi chú nhập tay"));assertFalse(extractor.getText().contains("{{"));
         }
     }
     @Test void equipmentNotesSurviveFourColumnWordTableAndEmptyTablesDoNotInventTerms() throws Exception {

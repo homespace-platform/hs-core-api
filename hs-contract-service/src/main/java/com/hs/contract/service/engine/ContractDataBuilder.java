@@ -51,15 +51,18 @@ public class ContractDataBuilder {
 
     public static final String DEFAULT_OVERDUE_TERMS = "Sau khi hết 05 ngày quá hạn tính theo giờ Việt Nam sau hạn ghi trên hóa đơn, "
             + "bên cho thuê được chọn một phương án đang có hiệu lực: chuyển công nợ sang kỳ sau, gia hạn thanh toán "
-            + "từ 01 đến 30 ngày tính từ lúc đồng ý (hạn mới phải sau hạn hiện tại), hoặc thông báo chấm dứt hợp đồng "
-            + "do bên thuê vi phạm nghĩa vụ thanh toán. Hai bên có thể thỏa thuận chấm dứt sớm; "
-            + "nếu bên thuê không đồng ý, bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận "
-            + "sau khi thông báo và thực tế nhận lại phòng, chìa khóa, tài sản cho thuê. "
+            + "từ 01 đến 30 ngày cộng vào mốc muộn hơn giữa hạn hiện tại và thời điểm đồng ý, hoặc đơn phương chấm dứt hợp đồng "
+            + "do vi phạm nghĩa vụ thanh toán theo quy tắc HomeSpace. Quyết định đơn phương được thông báo trên hồ sơ, "
+            + "không yêu cầu bên thuê xác nhận đồng ý. Trong 24 giờ kể từ thời điểm thông báo, bên thuê có thể khiếu nại "
+            + "xin chuyển sang cộng nợ kỳ sau hoặc dời hạn thanh toán. Khi có khiếu nại đúng hạn, tạm dừng tự chấm dứt để chờ bên cho thuê quyết định. "
+            + "Nếu bên cho thuê đồng ý, quyết định đơn phương được rút và thay bằng đúng một phương án mới; nếu từ chối, hợp đồng chấm dứt ngay. "
+            + "Nếu không khiếu nại trong 24 giờ, hệ thống tự ghi nhận chấm dứt; đang đối soát thanh toán thì tạm dừng, đã xác nhận tiền thì rút quyết định. "
+            + "Kết thúc hợp đồng và bàn giao là hai bước riêng; chỉ mở lại tin đăng sau khi bên cho thuê xác nhận đã nhận lại phòng, chìa khóa, tài sản. "
             + "Khi hoàn tất bàn giao theo nhánh vi phạm này, toàn bộ tiền cọc đã nhận được ghi nhận "
             + "thuộc bên cho thuê; công nợ hóa đơn chưa thanh toán tiếp tục được theo dõi riêng. "
-            + "Phí chậm trả chỉ áp dụng khi được ghi rõ trong hợp đồng, tính tối đa 10 ngày trên mỗi hóa đơn. "
+            + "Phí chậm trả chỉ áp dụng khi được ghi rõ trong hợp đồng, tính tối đa 05 ngày trên mỗi hóa đơn, cộng dồn cả trước và sau các lần gia hạn. "
             + "Yêu cầu gia hạn đang chờ duyệt tạm dừng tăng phí; từ chối hoặc hết hạn phản hồi sẽ tính bù. "
-            + "Khi được đồng ý gia hạn, giữ phí đã chốt và không tăng thêm trên hóa đơn đó. "
+            + "Khi được đồng ý gia hạn, giữ phí đã chốt trong hạn mới; trễ hạn mới thì tính tiếp nhưng không đặt lại trần tổng 05 ngày. "
             + "Sau hết 10 ngày quá hạn chưa chọn phương án, hệ thống chốt cộng dồn nếu còn kỳ sau chưa phát hành "
             + "và không đang chờ duyệt gia hạn, đối soát hoặc xử lý chấm dứt. Kỳ cuối giữ nghĩa vụ thanh toán riêng; "
             + "QR cũ chỉ hủy khi hóa đơn kỳ sau thực sự nhận công nợ.";
@@ -1125,7 +1128,8 @@ public class ContractDataBuilder {
         map.put("latePaymentPolicy",
                 "Nếu quá hạn, hai bên xử lý theo điều khoản thỏa thuận riêng (nếu có); HomeSpace không tự áp dụng phí khi chưa có thỏa thuận.");
         map.put("latePaymentFeeMode", "NONE");
-        map.put("overdueLandlordTerminationAfterFiveDays", true);
+        map.put("overdueLandlordTerminationAfterFiveDays", false);
+        map.put("overdueUnilateralTermination24h", true);
         if (snapshot.getPolicies() != null && !snapshot.getPolicies().isEmpty()) {
             map.putAll(ContractListingPolicies.from(snapshot.getPolicies()));
             return com.hs.contract.service.LatePaymentPolicy.forNewAgreement(map, Map.of());

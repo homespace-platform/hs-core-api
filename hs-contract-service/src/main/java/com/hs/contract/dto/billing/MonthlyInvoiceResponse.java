@@ -32,4 +32,7 @@ public record MonthlyInvoiceResponse(String id, String contractId, int periodInd
                                      List<PaymentExtension> paymentExtensions, String activeResolution,
                                      boolean canRequestExtension, boolean canResolveOverdue,
                                      boolean finalCostSupplement, String sourceInvoiceId,
-                                     BillingPeriodView billingPeriod) {}
+                                     BillingPeriodView billingPeriod,
+                                     UnilateralTerminationNotice unilateralTermination,
+                                     boolean canRequestTerminationReview, boolean canDecideTerminationReview,
+                                     boolean canCompleteTerminationHandover) {}

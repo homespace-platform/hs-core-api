@@ -36,7 +36,7 @@ public class ContractDraftIntegrity {
     private static final TypeReference<List<Map<String,Object>>> ROWS = new TypeReference<>() {};
     private static final Set<String> FEE_KEYS = Set.of("latePaymentFeeMode", "latePaymentFeeAmount",
             "latePaymentFeeGraceDays", "latePaymentFeeCap", "billingRules", "paymentDueDay",
-            "overdueLandlordTerminationAfterFiveDays");
+            "overdueLandlordTerminationAfterFiveDays", "overdueUnilateralTermination24h");
     private static final Set<String> NUMBERS = Set.of("durationMonths", "occupantCount", "motorbikeCount", "carCount",
             "amountValue", "amountNumber", "depositAmountValue", "depositAmountNumber", "paymentDueOffsetDays",
             "maxOccupants", "maxVehicles", "maxMotorbikeCount", "maxCarCount", "areaM2", "quantity", "index",

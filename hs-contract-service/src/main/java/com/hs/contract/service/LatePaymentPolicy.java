@@ -24,7 +24,7 @@ public record LatePaymentPolicy(Mode mode, BigDecimal amount, int graceDays, Big
         try {
             Mode mode=Mode.valueOf(String.valueOf(result.getOrDefault("latePaymentFeeMode","NONE")));
             BigDecimal amount=mode==Mode.NONE?BigDecimal.ZERO:new BigDecimal(String.valueOf(result.get("latePaymentFeeAmount")));
-            BigDecimal cap=mode==Mode.FIXED_PER_DAY?amount.multiply(BigDecimal.valueOf(MonthlyBillingSchedule.AUTO_ROLLOVER_DAYS)):amount;
+            BigDecimal cap=mode==Mode.FIXED_PER_DAY?amount.multiply(BigDecimal.valueOf(MonthlyBillingSchedule.MAXIMUM_PENALTY_DAYS)):amount;
             for(String key:java.util.List.of("latePaymentFeeGraceDays","latePaymentFeeCap","billingRules")) {
                 Object expected=key.equals("latePaymentFeeGraceDays")?MonthlyBillingSchedule.LATE_FEE_GRACE_DAYS:key.equals("latePaymentFeeCap")?cap:MonthlyBillingSchedule.rules();
                 // A full snapshot may echo its previous values; it cannot choose new workflow controls.
@@ -80,7 +80,7 @@ public record LatePaymentPolicy(Mode mode, BigDecimal amount, int graceDays, Big
         LocalDate dueDate = dueAt.atZone(zone).toLocalDate();
         LocalDate currentDate = asOf.atZone(zone).toLocalDate();
         long chargeableDays = Math.max(0, ChronoUnit.DAYS.between(dueDate, currentDate) - graceDays);
-        return Math.min(chargeableDays, MonthlyBillingSchedule.AUTO_ROLLOVER_DAYS);
+        return Math.min(chargeableDays, MonthlyBillingSchedule.MAXIMUM_PENALTY_DAYS);
     }
 
     public String clause() {
@@ -89,7 +89,7 @@ public record LatePaymentPolicy(Mode mode, BigDecimal amount, int graceDays, Big
         String timing = graceDays == 0 ? "từ ngày đầu tiên sau hạn thanh toán"
                 : "sau " + graceDays + " ngày kể từ hạn thanh toán";
         String rule = mode == Mode.FIXED_ONCE ? "một lần " + price
-                : price + " cho mỗi ngày chậm trả, tối đa " + MonthlyBillingSchedule.AUTO_ROLLOVER_DAYS + " ngày tính phạt trên mỗi hóa đơn";
+                : price + " cho mỗi ngày chậm trả, tối đa " + MonthlyBillingSchedule.MAXIMUM_PENALTY_DAYS + " ngày tính phạt trên mỗi hóa đơn";
         return "Phí chậm thanh toán: Bên B trả thêm " + rule + " " + timing
                 + (cap == null ? "" : ", tổng phí tối đa " + ContractRenderService.formatVND(cap))
                 + ". Chỉ tính trên hóa đơn chưa thanh toán và thể hiện riêng trên hóa đơn. Hệ thống tạm ngừng cập nhật phí khi Bên B báo đã chuyển khoản để đối soát; nếu chứng từ bị từ chối, phí được tính lại theo số ngày chậm trả và các giới hạn nêu trên.";

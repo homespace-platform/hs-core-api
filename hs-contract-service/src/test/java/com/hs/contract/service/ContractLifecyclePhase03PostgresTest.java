@@ -51,7 +51,7 @@ import static org.mockito.ArgumentMatchers.*;
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.datasource.url=${HS_LIFECYCLE_TEST_PG_URL}","spring.datasource.username=postgres",
     "spring.datasource.password=hs_phase03_test","spring.jpa.hibernate.ddl-auto=create-drop","spring.profiles.active=test"})
-@Import({ContractLifecycleService.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class})
+@Import({ContractLifecycleService.class,MonthlyBillingService.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class})
 class ContractLifecyclePhase03PostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs")
     @EnableJpaRepositories(basePackageClasses={ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class})
@@ -74,6 +74,7 @@ class ContractLifecyclePhase03PostgresTest {
     @MockitoBean TransferReferenceGenerator references;
     @MockitoBean PaymentProofUploadSessionService uploadSessions;
     @Autowired ContractLifecycleService service;
+    @Autowired MonthlyBillingService billing;
     @Autowired PaymentRequestService payments;
     @Autowired PaymentDisputeService disputes;
     @Autowired DepositLedgerService ledger;
@@ -143,6 +144,151 @@ class ContractLifecyclePhase03PostgresTest {
         .originalName("proof.pdf").objectKey("test/"+file).bucketName("test-only").contentType("application/pdf").sizeBytes(100L)
         .purpose(StoragePurpose.PAYMENT_PROOF).visibility(StorageVisibility.PRIVATE).status(StorageStatus.READY)
         .referenceType("PAYMENT_REQUEST").referenceId(paymentId).build()));return file;}
+
+    @ParameterizedTest @CsvSource({"2026-12-04T10:00:00,2026-12-09T16:59:59Z","2026-12-10T10:00:00,2026-12-11T03:00:00Z"})
+    void approvingOneDaySynchronizesInvoiceAndPaymentUsingTheLaterDeadline(String approvedAt,String expectedDue) {
+        clock(approvedAt);var originalDue=Instant.parse("2026-12-08T16:59:59Z");var amount=new BigDecimal("3665000");
+        String[] ids=new String[2];
+        tx(()->{
+            var bill=invoices.findByContractIdAndPeriodIndex(id,0).orElseThrow();
+            bill.setPeriodStart(LocalDate.of(2026,11,4));bill.setPeriodEndExclusive(LocalDate.of(2026,12,4));
+            bill.setStatus(MonthlyInvoiceStatus.UNPAID);bill.setDueAt(originalDue);bill.setOriginalDueAt(originalDue);
+            bill.setBaseAmount(amount);bill.setTotalAmount(amount);bill.setLateFeeAmount(BigDecimal.ZERO);bill.setIssuedAt(Instant.parse("2026-12-04T03:00:00Z"));
+            bill.setLineItemsSnapshot("[{\"type\":\"RENT\",\"description\":\"Tiền thuê và phí kỳ đầu\",\"quantity\":1,\"unitPrice\":3665000,\"amount\":3665000}]");
+            var payment=paymentRepo.saveAndFlush(PaymentRequest.builder().rentalRequestId(rentalId).listingId(listingId).contractId(id).invoiceId(bill.getId())
+                .payerId("tenant").payeeId("owner").type(PaymentType.MONTHLY_RENT).direction(PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.AWAITING_TRANSFER)
+                .totalAmount(amount).dueAt(originalDue).currency("VND").qrImageUrl("existing-test-qr").transferReference("HS"+UUID.randomUUID().toString().substring(0,12)).build());
+            bill.setPaymentRequestId(payment.getId());invoices.saveAndFlush(bill);ids[0]=bill.getId();ids[1]=payment.getId();
+        });
+        var pending=billing.requestPaymentExtension(ids[0],"tenant",new PaymentExtensionPayload(1,"Xin gia hạn thanh toán thêm một ngày")).paymentExtensions().getFirst();
+        assertEquals(originalDue,pending.baseDueAt());
+        var approved=billing.decidePaymentExtension(ids[0],pending.id(),"owner",true);var due=Instant.parse(expectedDue);
+        assertEquals(due,approved.dueAt());assertEquals(originalDue,approved.originalDueAt());
+        assertEquals(PaymentExtension.Status.APPROVED,approved.paymentExtensions().getFirst().status());assertEquals(due,approved.paymentExtensions().getFirst().newDueAt());
+        assertEquals(due,invoices.findById(ids[0]).orElseThrow().getDueAt());
+        var stored=paymentRepo.findById(ids[1]).orElseThrow();assertEquals(due,stored.getDueAt());assertEquals(PaymentStatus.AWAITING_TRANSFER,stored.getStatus());
+        assertEquals(0,amount.compareTo(stored.getTotalAmount()));assertEquals("existing-test-qr",stored.getQrImageUrl());
+        assertThrows(AppException.class,()->billing.decidePaymentExtension(ids[0],pending.id(),"owner",true));
+        assertEquals(due,paymentRepo.findById(ids[1]).orElseThrow().getDueAt());
+    }
+
+    @ParameterizedTest @CsvSource({"false","true"})
+    void lateFeesResumeAfterFiveDayExtensionAndRemainConsistentWithTheRealPayment(boolean reportAndConfirm) {
+        clock("2026-12-11T10:00:00");var originalDue=Instant.parse("2026-12-08T16:59:59Z");var base=new BigDecimal("3665000");
+        String[] ids=new String[2];
+        when(qr.generateQrImageUrl(anyString(),anyString(),anyString(),any(),anyString()))
+            .thenAnswer(call->"test-qr-"+((BigDecimal)call.getArgument(3)).stripTrailingZeros().toPlainString());
+        tx(()->{
+            var contract=contracts.findById(id).orElseThrow();var revision=revisions.findById(contract.getCurrentRevisionId()).orElseThrow();
+            revision.setPoliciesSnapshot("{\"latePaymentFeeMode\":\"FIXED_PER_DAY\",\"latePaymentFeeAmount\":100000,\"latePaymentFeeGraceDays\":0}");revisions.saveAndFlush(revision);
+            var bill=invoices.findByContractIdAndPeriodIndex(id,0).orElseThrow();
+            bill.setPeriodStart(LocalDate.of(2026,11,4));bill.setPeriodEndExclusive(LocalDate.of(2026,12,4));
+            bill.setStatus(MonthlyInvoiceStatus.UNPAID);bill.setDueAt(originalDue);bill.setOriginalDueAt(originalDue);
+            bill.setBaseAmount(base);bill.setTotalAmount(base);bill.setLateFeeAmount(BigDecimal.ZERO);bill.setIssuedAt(Instant.parse("2026-12-04T03:00:00Z"));
+            bill.setLineItemsSnapshot("[{\"type\":\"RENT\",\"description\":\"Tiền thuê và phí kỳ đầu\",\"quantity\":1,\"unitPrice\":3665000,\"amount\":3665000}]");
+            var payment=payments.createMonthlyPayment(bill.getId(),id,rentalId,listingId,"tenant","owner",base,bill.getLineItemsSnapshot(),originalDue);
+            bill.setPaymentRequestId(payment.getId());invoices.saveAndFlush(bill);ids[0]=bill.getId();ids[1]=payment.getId();
+        });
+        var pending=billing.requestPaymentExtension(ids[0],"tenant",new PaymentExtensionPayload(5,"Xin gia hạn thêm năm ngày để thanh toán")).paymentExtensions().getFirst();
+        assertEquals(0,new BigDecimal("300000").compareTo(pending.frozenLateFee()));
+        clock("2026-12-12T10:00:00");var approved=billing.decidePaymentExtension(ids[0],pending.id(),"owner",true);
+        assertEquals(Instant.parse("2026-12-17T03:00:00Z"),approved.dueAt());assertFalse(approved.lateFeeExempt());
+        assertTrue(approved.paymentExtensions().getFirst().lateFeeResumesAfterDue());
+        assertTrue(invoices.findById(ids[0]).orElseThrow().getExtensionRequestsSnapshot().contains("\"lateFeeResumesAfterDue\":true"));
+        clock("2026-12-17T10:00:00");billing.syncContract(id);
+        assertEquals(0,new BigDecimal("300000").compareTo(invoices.findById(ids[0]).orElseThrow().getLateFeeAmount()));
+        clock("2026-12-18T00:01:00");billing.syncContract(id);billing.syncContract(id);
+        var bill=invoices.findById(ids[0]).orElseThrow();var payment=paymentRepo.findById(ids[1]).orElseThrow();
+        assertEquals(0,new BigDecimal("400000").compareTo(bill.getLateFeeAmount()));
+        assertEquals(0,new BigDecimal("4065000").compareTo(bill.getTotalAmount()));assertEquals(0,bill.getTotalAmount().compareTo(payment.getTotalAmount()));
+        assertEquals(bill.getLineItemsSnapshot(),payment.getBreakdownSnapshot());assertEquals(bill.getDueAt(),payment.getDueAt());
+        assertEquals("test-qr-4065000",payment.getQrImageUrl());
+        if(reportAndConfirm) {
+            String evidence=proof(payment.getId(),"tenant");payments.reportTransfer(payment.getId(),"tenant",ReportTransferRequest.builder()
+                .proofStorageId(evidence).expectedAmount(payment.getTotalAmount()).build());
+            clock("2026-12-20T10:00:00");billing.syncContract(id);
+            assertEquals(0,new BigDecimal("400000").compareTo(invoices.findById(ids[0]).orElseThrow().getLateFeeAmount()));
+            payments.confirmReceipt(payment.getId(),"owner");billing.syncContract(id);
+            assertEquals(MonthlyInvoiceStatus.PAID,invoices.findById(ids[0]).orElseThrow().getStatus());
+            assertEquals(0,new BigDecimal("4065000").compareTo(paymentRepo.findById(ids[1]).orElseThrow().getTotalAmount()));
+        }else {
+            clock("2026-12-24T10:00:00");billing.syncContract(id);billing.syncContract(id);
+            bill=invoices.findById(ids[0]).orElseThrow();payment=paymentRepo.findById(ids[1]).orElseThrow();
+            assertEquals(0,new BigDecimal("500000").compareTo(bill.getLateFeeAmount()));
+            assertEquals(0,new BigDecimal("4165000").compareTo(payment.getTotalAmount()));
+            assertEquals(bill.getLineItemsSnapshot(),payment.getBreakdownSnapshot());assertEquals("test-qr-4165000",payment.getQrImageUrl());
+        }
+    }
+
+    String[] overdueForUnilateral() {
+        clock("2026-11-22T10:00:00");String[] ids=new String[2];
+        tx(()->{
+            for(var future:invoices.findByContractIdOrderByPeriodIndexDesc(id))if(future.getPeriodIndex()>0)invoices.delete(future);
+            var contract=contracts.findById(id).orElseThrow();var revision=revisions.findById(contract.getCurrentRevisionId()).orElseThrow();
+            revision.setPoliciesSnapshot("{\"latePaymentFeeMode\":\"FIXED_PER_DAY\",\"latePaymentFeeAmount\":100000,\"latePaymentFeeGraceDays\":0}");revisions.saveAndFlush(revision);
+            var bill=invoices.findByContractIdAndPeriodIndex(id,0).orElseThrow();bill.setStatus(MonthlyInvoiceStatus.OVERDUE);
+            bill.setIssuedAt(Instant.parse("2026-11-12T03:00:00Z"));bill.setDueAt(Instant.parse("2026-11-16T16:59:59Z"));bill.setOriginalDueAt(bill.getDueAt());
+            bill.setBaseAmount(new BigDecimal("1000000"));bill.setTotalAmount(new BigDecimal("1000000"));bill.setLateFeeAmount(BigDecimal.ZERO);
+            bill.setLineItemsSnapshot("[{\"type\":\"RENT\",\"description\":\"Tiền thuê\",\"quantity\":1,\"unitPrice\":1000000,\"amount\":1000000}]");
+            var payment=payments.createMonthlyPayment(bill.getId(),id,rentalId,listingId,"tenant","owner",bill.getTotalAmount(),bill.getLineItemsSnapshot(),bill.getDueAt());
+            bill.setPaymentRequestId(payment.getId());invoices.saveAndFlush(bill);ids[0]=bill.getId();ids[1]=payment.getId();
+        });return ids;
+    }
+    UnilateralTerminationNotice storedNotice(String invoiceId) {
+        return billing.list(id,"owner").stream().filter(b->b.id().equals(invoiceId)).findFirst().orElseThrow().unilateralTermination();
+    }
+    @ParameterizedTest @CsvSource({"NO_REVIEW","REJECTED","ROLLOVER","PAYMENT_EXTENSION","CONFIRMED"})
+    void unilateralDecisionPersistsAcross24HoursAndOnlyTheSelectedOutcomeIsApplied(String outcome) {
+        var ids=overdueForUnilateral();var listingBefore=properties.findById(listingId).orElseThrow().getStatus();
+        var n=billing.issueUnilateralTermination(ids[0],"owner",new UnilateralTerminationPayloads.Issue("Quá hạn thanh toán, thông báo đơn phương chấm dứt")).unilateralTermination();
+        assertEquals(Instant.parse("2026-11-23T03:00:00Z"),n.respondBy());assertNull(contracts.findById(id).orElseThrow().getTerminationAcceptedAt());
+        assertEquals(0,new BigDecimal("500000").compareTo(invoices.findById(ids[0]).orElseThrow().getLateFeeAmount()));
+        assertTrue(contracts.findById(id).orElseThrow().getUnilateralTerminationSnapshot().contains(n.id()));
+        tx(()->invoices.saveAndFlush(MonthlyInvoice.builder().contractId(id).periodIndex(1)
+            .periodStart(LocalDate.of(2026,11,12)).periodEndExclusive(LocalDate.of(2026,12,12))
+            .status(MonthlyInvoiceStatus.DRAFT).totalAmount(BigDecimal.ZERO).build()));
+        if("CONFIRMED".equals(outcome)) {
+            String evidence=proof(ids[1],"tenant");payments.reportTransfer(ids[1],"tenant",ReportTransferRequest.builder().proofStorageId(evidence).expectedAmount(new BigDecimal("1500000")).build());
+            clock("2026-11-23T11:00:00");billing.syncContract(id);assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());
+            payments.confirmReceipt(ids[1],"owner");billing.syncContract(id);
+            assertEquals(UnilateralTerminationNotice.Status.CANCELLED_PAID,storedNotice(ids[0]).status());
+            assertEquals(MonthlyInvoiceStatus.PAID,invoices.findById(ids[0]).orElseThrow().getStatus());return;
+        }
+        if(!"NO_REVIEW".equals(outcome)) {
+            var option="ROLLOVER".equals(outcome)?UnilateralTerminationNotice.Option.ROLLOVER:UnilateralTerminationNotice.Option.PAYMENT_EXTENSION;
+            n=billing.requestTerminationReview(ids[0],n.id(),"tenant",new UnilateralTerminationPayloads.Review(n.version(),option,
+                option==UnilateralTerminationNotice.Option.PAYMENT_EXTENSION?5:null,"Xin chủ nhà chấp nhận phương án thanh toán mới")).unilateralTermination();
+            clock("2026-11-24T10:00:00");billing.syncContract(id);assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());
+            n=billing.decideTerminationReview(ids[0],n.id(),"owner",new UnilateralTerminationPayloads.Decision(n.version(),!"REJECTED".equals(outcome),"Chủ nhà đã xem xét và quyết định phương án")).unilateralTermination();
+        }else {clock("2026-11-23T10:00:00");billing.syncContract(id);n=storedNotice(ids[0]);}
+        if("ROLLOVER".equals(outcome)||"PAYMENT_EXTENSION".equals(outcome)) {
+            assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());assertEquals(UnilateralTerminationNotice.Status.REPLACED,n.status());
+            var bill=invoices.findById(ids[0]).orElseThrow();
+            if("ROLLOVER".equals(outcome)){assertNotNull(bill.getDeferredAt());assertEquals("ROLLOVER",bill.getResolutionMode());}
+            else {assertNull(bill.getDeferredAt());assertEquals(Instant.parse("2026-11-29T03:00:00Z"),bill.getDueAt());assertEquals(bill.getDueAt(),paymentRepo.findById(ids[1]).orElseThrow().getDueAt());}
+        }else {
+            assertEquals(UnilateralTerminationNotice.Status.ENDED,n.status());assertEquals(ContractStatus.TERMINATED,contracts.findById(id).orElseThrow().getStatus());
+            assertNull(contracts.findById(id).orElseThrow().getTerminationAcceptedAt());assertNull(n.handoverAt());
+            var cancelled=billing.list(id,"tenant").stream().filter(b->b.periodIndex()==1).findFirst().orElseThrow();
+            assertEquals(MonthlyInvoiceStatus.CANCELLED,cancelled.status());assertEquals("CANCELLED",cancelled.workflowState());assertNull(cancelled.paymentRequestId());
+            assertEquals(listingBefore,properties.findById(listingId).orElseThrow().getStatus());assertEquals(DepositStatus.HELD,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());
+            var endedAt=n.endedAt();clock("2026-11-25T10:00:00");
+            var done=billing.completeUnilateralHandover(ids[0],n.id(),"owner",new UnilateralTerminationPayloads.Handover(n.version(),true,true));
+            assertNotNull(done.unilateralTermination().handoverAt());assertEquals(endedAt,contracts.findById(id).orElseThrow().getTerminationCompletedAt());
+            assertEquals(0,principal.compareTo(deposits.findByRentalRequestId(rentalId).orElseThrow().getRetainedAmount()));
+            verify(listings,times(1)).releaseRentedAfterTermination(listingId,"owner");verify(parking,times(1)).releaseReservationsForContract(id);
+            var stale=n;assertThrows(AppException.class,()->billing.completeUnilateralHandover(ids[0],stale.id(),"owner",new UnilateralTerminationPayloads.Handover(stale.version(),true,true)));
+        }
+    }
+    @Test void opposingOwnerDecisionsCannotBothCommitAgainstTheSameReviewVersion() {
+        var ids=overdueForUnilateral();var notice=billing.issueUnilateralTermination(ids[0],"owner",new UnilateralTerminationPayloads.Issue("Thông báo đơn phương để kiểm thử đồng thời")).unilateralTermination();
+        var n=billing.requestTerminationReview(ids[0],notice.id(),"tenant",new UnilateralTerminationPayloads.Review(1,UnilateralTerminationNotice.Option.PAYMENT_EXTENSION,5,"Xin dời hạn để chờ tiền lương về")).unilateralTermination();
+        var turn=new java.util.concurrent.atomic.AtomicInteger();
+        assertEquals(List.of(0,1),race(()->billing.decideTerminationReview(ids[0],n.id(),"owner",new UnilateralTerminationPayloads.Decision(n.version(),turn.getAndIncrement()==0,"Một quyết định được phép ghi nhận duy nhất"))));
+        var contract=contracts.findById(id).orElseThrow();var stored=storedNotice(ids[0]);assertEquals(3,stored.version());assertNull(contract.getTerminationAcceptedAt());
+        if(stored.status()==UnilateralTerminationNotice.Status.ENDED){assertEquals(ContractStatus.TERMINATED,contract.getStatus());assertNull(invoices.findById(ids[0]).orElseThrow().getExtensionRequestsSnapshot());}
+        else {assertEquals(UnilateralTerminationNotice.Status.REPLACED,stored.status());assertEquals(ContractStatus.ACTIVE,contract.getStatus());assertEquals(invoices.findById(ids[0]).orElseThrow().getDueAt(),paymentRepo.findById(ids[1]).orElseThrow().getDueAt());}
+    }
 
     @ParameterizedTest @CsvSource({"0,0,20000000,0","100000,100000,19900000,0","20000000,20000000,0,0","21000000,20000000,0,1000000"})
     void settlementBalancesActualDepositAndKeepsExcessDebtSeparate(String deduction,String retained,String refund,String balance){

@@ -360,8 +360,7 @@ class MonthlyBillingServiceTest {
     @Test
     void scheduledSyncAutomaticallyIssuesPreparedInvoiceAtMidnight() {
         Contract contract = contracts.findById("contract").orElseThrow();
-        when(contracts.findByStatus(eq(ContractStatus.ACTIVE), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(contract)));
+        when(contracts.findLifecycleIdsAfter(anyCollection(),isNull(),any(PageRequest.class))).thenReturn(List.of("contract"));
         when(contracts.findByIdForUpdate("contract")).thenReturn(Optional.of(contract));
         when(rentals.findById("rental")).thenReturn(Optional.of(RentalRequest.builder()
                 .moveInDate(LocalDate.of(2026, 10, 1)).leaseMonths(12).build()));
@@ -824,14 +823,14 @@ class MonthlyBillingServiceTest {
         demoTime("2026-11-26T23:59:59");
         var tenthDay = service.list("contract", "landlord").get(0);
         assertNull(tenthDay.deferredAt());
-        assertEquals(new BigDecimal("1000000"), tenthDay.lateFeeAmount());
+        assertEquals(new BigDecimal("500000"), tenthDay.lateFeeAmount());
         demoTime("2026-11-27T00:00:00");
         var automatic = service.list("contract", "landlord").get(0);
         assertEquals("ROLLOVER", automatic.activeResolution());
         assertEquals("DEFERRED", automatic.workflowState());
-        assertEquals(new BigDecimal("2000000"), automatic.totalAmount());
+        assertEquals(new BigDecimal("1500000"), automatic.totalAmount());
         var feeLine = automatic.lines().stream().filter(line -> "LATE_FEE".equals(line.type())).findFirst().orElseThrow();
-        assertEquals(new BigDecimal("10"), feeLine.quantity());
+        assertEquals(new BigDecimal("5"), feeLine.quantity());
         assertEquals(new BigDecimal("100000"), feeLine.unitPrice());
         assertEquals("ngày", feeLine.quantityUnit());
         assertFalse(automatic.canRequestExtension());
@@ -842,8 +841,8 @@ class MonthlyBillingServiceTest {
         var repeated = service.list("contract", "tenant").get(0);
         assertEquals(automatic.deferredAt(), repeated.deferredAt());
         assertEquals(1, repeated.overdueActions().size());
-        assertEquals(new BigDecimal("1000000"), repeated.lateFeeAmount());
-        verify(payments, times(1)).increaseMonthlyPayment(eq("invoice"), eq(new BigDecimal("2000000")), anyString());
+        assertEquals(new BigDecimal("500000"), repeated.lateFeeAmount());
+        verify(payments, times(1)).increaseMonthlyPayment(eq("invoice"), eq(new BigDecimal("1500000")), anyString());
         verify(payments, never()).cancelMonthlyForRollover(anyString());
         assertThrows(AppException.class, () -> service.extendPaymentDirectly("invoice", "landlord", extension(7)));
         verifyNoInteractions(listingStatusService, parkingReservations);
@@ -853,12 +852,11 @@ class MonthlyBillingServiceTest {
     @Test void schedulerResumesLateAndCapsFeeBeforeAutomaticallyFreezingDebt() {
         octoberThreeMonthDemo(); demoTime("2026-12-01T10:00:00");
         var contract = contracts.findById("contract").orElseThrow();
-        when(contracts.findByStatus(eq(ContractStatus.ACTIVE), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(contract)));
+        when(contracts.findLifecycleIdsAfter(anyCollection(),isNull(),any(PageRequest.class))).thenReturn(List.of("contract"));
         when(tx.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         service.scheduledSync(); service.scheduledSync();
         assertNotNull(invoice.getDeferredAt());
-        assertEquals(new BigDecimal("1000000"), invoice.getLateFeeAmount());
+        assertEquals(new BigDecimal("500000"), invoice.getLateFeeAmount());
         assertEquals(1, service.list("contract", "tenant").get(0).overdueActions().size());
     }
 
@@ -873,7 +871,7 @@ class MonthlyBillingServiceTest {
         demoTime("2026-12-12T00:01:00");
         var payload = new IssueMonthlyInvoiceRequest(new BigDecimal("1560"), new BigDecimal("91"), List.of());
         var issued = service.issue("next", "landlord", payload);
-        assertEquals(new BigDecimal("7051000"), issued.totalAmount());
+        assertEquals(new BigDecimal("6551000"), issued.totalAmount());
         assertEquals(1, issued.lines().stream().filter(line -> "BALANCE_FORWARD".equals(line.type())).count());
         assertEquals(MonthlyInvoiceStatus.ROLLED_OVER, invoice.getStatus());
         assertEquals("next", invoice.getRolledToInvoiceId());
@@ -885,7 +883,7 @@ class MonthlyBillingServiceTest {
         octoberThreeMonthDemo(); demoTime("2026-12-01T10:00:00");
         invoice.setPeriodIndex(2);
         assertNull(service.list("contract", "landlord").get(0).deferredAt());
-        assertEquals(new BigDecimal("1000000"), invoice.getLateFeeAmount());
+        assertEquals(new BigDecimal("500000"), invoice.getLateFeeAmount());
         invoice.setPeriodIndex(0);
         when(invoices.findByContractIdAndPeriodIndex("contract", 1)).thenReturn(Optional.of(
                 MonthlyInvoice.builder().status(MonthlyInvoiceStatus.UNPAID).build()));
@@ -914,18 +912,18 @@ class MonthlyBillingServiceTest {
         verify(payments, never()).cancelMonthlyForRollover("invoice");
     }
 
-    @Test void autoRolloverWaitsForPendingExtensionThenExpiresAndBackfillsOnlyUpToTenDays() {
+    @Test void autoRolloverWaitsForPendingExtensionThenExpiresAndBackfillsOnlyUpToFivePenaltyDays() {
         octoberThreeMonthDemo(); demoTime("2026-11-25T10:00:00");
         service.requestPaymentExtension("invoice", "tenant", extension(7));
         demoTime("2026-11-27T00:01:00");
         var waiting = service.list("contract", "landlord").get(0);
         assertNull(waiting.deferredAt());
-        assertEquals(new BigDecimal("900000"), waiting.lateFeeAmount());
+        assertEquals(new BigDecimal("500000"), waiting.lateFeeAmount());
         demoTime("2026-11-27T10:00:00");
         var expired = service.list("contract", "tenant").get(0);
         assertEquals(PaymentExtension.Status.EXPIRED, expired.paymentExtensions().get(0).status());
         assertNotNull(expired.deferredAt());
-        assertEquals(new BigDecimal("1000000"), expired.lateFeeAmount());
+        assertEquals(new BigDecimal("500000"), expired.lateFeeAmount());
     }
 
     @Test void paymentReviewDisputeAndPaidBillsAreNotAutomaticallyDeferred() {
@@ -950,7 +948,7 @@ class MonthlyBillingServiceTest {
         assertTrue(service.list("contract", "landlord").get(0).overdueActions().isEmpty());
     }
 
-    @Test void approvedExtensionResetsRolloverWindowAndPreservesFrozenPenalty() {
+    @Test void approvedExtensionResetsRolloverWindowButKeepsTheInvoiceWideFeeCap() {
         octoberThreeMonthDemo(); demoTime("2026-11-19T10:00:00");
         var request = service.requestPaymentExtension("invoice", "tenant", extension(7)).paymentExtensions().get(0);
         demoTime("2026-11-20T10:00:00");
@@ -962,8 +960,8 @@ class MonthlyBillingServiceTest {
         demoTime("2026-12-08T00:00:00");
         var auto = service.list("contract", "landlord").get(0);
         assertNotNull(auto.deferredAt());
-        assertEquals(new BigDecimal("300000"), auto.lateFeeAmount());
-        assertTrue(auto.lateFeeExempt());
+        assertEquals(new BigDecimal("500000"), auto.lateFeeAmount());
+        assertFalse(auto.lateFeeExempt());
     }
 
     @Test void landlordCannotForgeSystemAutomaticRolloverHistory() {
@@ -985,7 +983,7 @@ class MonthlyBillingServiceTest {
         assertNull(proposal.deferredAt());
         assertEquals("TERMINATION", proposal.activeResolution());
         assertEquals(PaymentExtension.Status.REJECTED, proposal.paymentExtensions().get(0).status());
-        assertEquals(new BigDecimal("1000000"), proposal.lateFeeAmount());
+        assertEquals(new BigDecimal("500000"), proposal.lateFeeAmount());
         var synced = service.list("contract", "landlord").get(0);
         assertNull(synced.deferredAt());
         assertTrue(synced.overdueActions().isEmpty());
@@ -1017,9 +1015,9 @@ class MonthlyBillingServiceTest {
                 "{\"latePaymentFeeMode\":\"FIXED_PER_DAY\",\"latePaymentFeeAmount\":100000,\"latePaymentFeeGraceDays\":0,\"latePaymentFeeCap\":700000}");
         var line = service.list("contract", "landlord").get(0).lines().stream()
                 .filter(row -> "LATE_FEE".equals(row.type())).findFirst().orElseThrow();
-        assertEquals(new BigDecimal("10"), line.quantity());
+        assertEquals(new BigDecimal("5"), line.quantity());
         assertEquals(new BigDecimal("100000"), line.unitPrice());
-        assertEquals(new BigDecimal("700000"), line.amount());
+        assertEquals(new BigDecimal("500000"), line.amount());
         assertEquals("ngày", line.quantityUnit());
         invoice.setStatus(MonthlyInvoiceStatus.PAID);
         invoice.setLineItemsSnapshot("[{\"type\":\"LATE_FEE\",\"description\":\"Phí chậm thanh toán\",\"quantity\":1,\"unitPrice\":700000,\"amount\":700000}]");
@@ -1041,8 +1039,8 @@ class MonthlyBillingServiceTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"FIXED_PER_DAY,FIXED_ONCE,300000,100000,100000", "FIXED_ONCE,FIXED_PER_DAY,100000,300000,1000000",
-            "FIXED_PER_DAY,NONE,300000,0,0", "NONE,FIXED_PER_DAY,0,300000,1000000", "NONE,FIXED_ONCE,0,100000,100000"})
+    @CsvSource({"FIXED_PER_DAY,FIXED_ONCE,300000,100000,100000", "FIXED_ONCE,FIXED_PER_DAY,100000,300000,500000",
+            "FIXED_PER_DAY,NONE,300000,0,0", "NONE,FIXED_PER_DAY,0,300000,500000", "NONE,FIXED_ONCE,0,100000,100000"})
     void signedFeeModeAmendmentChangesFuturePeriodCalculationWithoutRepricingIssuedBill(
             String previousMode,String nextMode,String oldDayThree,String nextDayThree,String nextDayTen) throws Exception {
         var mapper=new ObjectMapper();
@@ -1118,32 +1116,130 @@ class MonthlyBillingServiceTest {
         assertEquals("revision",root.getCurrentRevisionId());assertEquals(signedPolicy,old.getPoliciesSnapshot());
     }
 
-    @Test void requestAfterThreeDaysFreezesFeeAt300kAndApprovalNeverAddsMoreEvenAfterNewDeadline() {
+    @Test void approvedExtensionFreezes300kDuringItsWindowThenAddsOnlyNewOverdueDays() {
         demoIssued(); demoTime("2027-01-19T10:00:00");
         var request = service.requestPaymentExtension("invoice", "tenant", extension(7)).paymentExtensions().get(0);
         assertEquals(new BigDecimal("300000"), request.frozenLateFee());
         demoTime("2027-01-20T10:00:00");
         var approved = service.decidePaymentExtension("invoice", request.id(), "landlord", true);
         assertEquals(Instant.parse("2027-01-27T03:00:00Z"), approved.dueAt());
-        assertEquals(new BigDecimal("300000"), approved.lateFeeAmount()); assertTrue(approved.lateFeeExempt());
+        assertEquals(new BigDecimal("300000"), approved.lateFeeAmount()); assertFalse(approved.lateFeeExempt());
+        assertEquals(Boolean.TRUE, approved.paymentExtensions().getFirst().lateFeeResumesAfterDue());
         verify(payments).extendMonthlyDueDate("invoice", approved.dueAt(), "landlord");
+        demoTime("2027-01-27T10:00:00");
+        assertEquals(new BigDecimal("300000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        demoTime("2027-01-28T00:01:00");
+        assertEquals(new BigDecimal("400000"),service.list("contract","tenant").getFirst().lateFeeAmount());
         demoTime("2027-02-02T00:01:00");
         var expired = service.list("contract", "tenant").get(0);
-        assertEquals(new BigDecimal("300000"), expired.lateFeeAmount()); assertTrue(expired.canResolveOverdue());
+        assertEquals(new BigDecimal("500000"), expired.lateFeeAmount()); assertTrue(expired.canResolveOverdue());
         assertEquals("NONE", expired.activeResolution());
         var frozenLine = expired.lines().stream().filter(line -> "LATE_FEE".equals(line.type())).findFirst().orElseThrow();
-        assertEquals(new BigDecimal("3"), frozenLine.quantity());
+        assertEquals(new BigDecimal("5"), frozenLine.quantity());
         assertEquals(new BigDecimal("100000"), frozenLine.unitPrice());
         assertEquals("ngày", frozenLine.quantityUnit());
+        demoTime("2027-02-03T00:01:00");
+        assertEquals(new BigDecimal("500000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        demoTime("2027-02-04T00:01:00");
+        assertEquals(new BigDecimal("500000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        verify(payments,times(1)).increaseMonthlyPayment(eq("invoice"),eq(new BigDecimal("1500000")),anyString());
     }
-    @Test void requestBeforeDeadlineAndApprovalLeavesZeroPenaltyForever() {
+    @Test void earlyApprovedExtensionChargesNothingUntilTheNewDeadlineThenStartsDailyFees() {
         demoIssued(); demoTime("2027-01-12T10:00:00");
         var request = service.requestPaymentExtension("invoice", "tenant", extension(7)).paymentExtensions().get(0);
         assertEquals(BigDecimal.ZERO, request.frozenLateFee());
         demoTime("2027-01-13T10:00:00"); service.decidePaymentExtension("invoice", request.id(), "landlord", true);
-        demoTime("2027-01-28T10:00:00");
-        assertEquals(BigDecimal.ZERO, service.list("contract", "tenant").get(0).lateFeeAmount());
+        demoTime("2027-01-23T23:59:59");
+        assertEquals(BigDecimal.ZERO, service.list("contract", "tenant").getFirst().lateFeeAmount());
         verify(payments, never()).increaseMonthlyPayment(anyString(), any(), anyString());
+        demoTime("2027-01-24T00:00:00");
+        assertEquals(new BigDecimal("100000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        demoTime("2027-01-28T10:00:00");
+        assertEquals(new BigDecimal("500000"), service.list("contract", "tenant").getFirst().lateFeeAmount());
+    }
+
+    private void approveSevenDaysAfterThreeOverdueDays() {
+        demoIssued();demoTime("2027-01-19T10:00:00");
+        var request=service.requestPaymentExtension("invoice","tenant",extension(7)).paymentExtensions().getFirst();
+        demoTime("2027-01-20T10:00:00");service.decidePaymentExtension("invoice",request.id(),"landlord",true);
+    }
+    @Test void multipleApprovedExtensionsKeepAccumulatedFeesWithoutChargingTheFreeIntervals() {
+        approveSevenDaysAfterThreeOverdueDays();demoTime("2027-01-28T10:00:00");
+        var second=service.requestPaymentExtension("invoice","tenant",extension(5)).paymentExtensions().getLast();
+        assertEquals(new BigDecimal("400000"),second.frozenLateFee());
+        demoTime("2027-01-29T10:00:00");
+        var approved=service.decidePaymentExtension("invoice",second.id(),"landlord",true);
+        assertEquals(Instant.parse("2027-02-03T03:00:00Z"),approved.dueAt());
+        demoTime("2027-02-03T10:00:00");assertEquals(new BigDecimal("400000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        demoTime("2027-02-04T00:01:00");assertEquals(new BigDecimal("500000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        demoTime("2027-02-10T00:01:00");
+        var capped=service.list("contract","tenant").getFirst();
+        assertEquals(new BigDecimal("500000"),capped.lateFeeAmount());assertEquals(new BigDecimal("1500000"),capped.totalAmount());
+        assertEquals(2,capped.paymentExtensions().size());
+        assertEquals(new BigDecimal("5"),capped.lines().stream().filter(l->"LATE_FEE".equals(l.type())).findFirst().orElseThrow().quantity());
+    }
+    @ParameterizedTest @CsvSource({"false,2027-01-29T10:00:00,500000","true,2027-01-30T10:00:00,500000"})
+    void secondRequestRejectionOrExpiryBackfillsOnlyFromTheLastApprovedDeadline(boolean expires,String at,String fee) {
+        approveSevenDaysAfterThreeOverdueDays();demoTime("2027-01-28T10:00:00");
+        var request=service.requestPaymentExtension("invoice","tenant",extension(5)).paymentExtensions().getLast();
+        demoTime(at);
+        var result=expires?service.list("contract","tenant").getFirst():service.decidePaymentExtension("invoice",request.id(),"landlord",false);
+        assertEquals(new BigDecimal(fee),result.lateFeeAmount());
+        assertEquals(expires?PaymentExtension.Status.EXPIRED:PaymentExtension.Status.REJECTED,result.paymentExtensions().getLast().status());
+        assertEquals(result.lateFeeAmount(),service.list("contract","tenant").getFirst().lateFeeAmount());
+    }
+    @ParameterizedTest @CsvSource({"2027-01-12T10:00:00,2027-01-13T10:00:00,0","2027-01-19T10:00:00,2027-01-20T10:00:00,100000"})
+    void oneTimeFeeCanStartAfterExtensionButCannotBeChargedTwice(String requestedAt,String approvedAt,String frozen) {
+        demoIssued();revisions.findById("revision").orElseThrow().setPoliciesSnapshot(
+            "{\"latePaymentFeeMode\":\"FIXED_ONCE\",\"latePaymentFeeAmount\":100000,\"latePaymentFeeGraceDays\":0}");
+        demoTime(requestedAt);var request=service.requestPaymentExtension("invoice","tenant",extension(7)).paymentExtensions().getFirst();
+        assertEquals(0,new BigDecimal(frozen).compareTo(request.frozenLateFee()));
+        demoTime(approvedAt);service.decidePaymentExtension("invoice",request.id(),"landlord",true);
+        demoTime("2027-01-28T10:00:00");assertEquals(new BigDecimal("100000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        demoTime("2027-02-02T10:00:00");assertEquals(new BigDecimal("100000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        verify(payments,times(1)).increaseMonthlyPayment(eq("invoice"),eq(new BigDecimal("1100000")),anyString());
+    }
+    @Test void approvedExtensionCannotCreateFeesWhenTheSignedContractHasNone() {
+        demoIssued();revisions.findById("revision").orElseThrow().setPoliciesSnapshot("{\"latePaymentFeeMode\":\"NONE\"}");
+        demoTime("2027-01-19T10:00:00");var request=service.requestPaymentExtension("invoice","tenant",extension(5)).paymentExtensions().getFirst();
+        service.decidePaymentExtension("invoice",request.id(),"landlord",true);
+        demoTime("2027-01-30T10:00:00");assertEquals(0,service.list("contract","tenant").getFirst().lateFeeAmount().signum());
+        verify(payments,never()).increaseMonthlyPayment(anyString(),any(),anyString());
+    }
+    @Test void resumingFeesKeepsAnOlderSignedLowerMoneyCap() {
+        demoIssued();revisions.findById("revision").orElseThrow().setPoliciesSnapshot(
+            "{\"latePaymentFeeMode\":\"FIXED_PER_DAY\",\"latePaymentFeeAmount\":100000,\"latePaymentFeeGraceDays\":0,\"latePaymentFeeCap\":450000}");
+        demoTime("2027-01-19T10:00:00");var request=service.requestPaymentExtension("invoice","tenant",extension(7)).paymentExtensions().getFirst();
+        demoTime("2027-01-20T10:00:00");service.decidePaymentExtension("invoice",request.id(),"landlord",true);
+        demoTime("2027-01-29T10:00:00");assertEquals(new BigDecimal("450000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        demoTime("2027-02-02T10:00:00");assertEquals(new BigDecimal("450000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        verify(payments,times(1)).increaseMonthlyPayment(eq("invoice"),eq(new BigDecimal("1450000")),anyString());
+    }
+    @ParameterizedTest @CsvSource({"TRANSFER_REPORTED","DISPUTED"})
+    void resumedFeesStillPauseWhilePaymentIsBeingReviewedAndCatchUpWhenRejected(PaymentStatus status) {
+        approveSevenDaysAfterThreeOverdueDays();
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(status).build()));
+        demoTime("2027-02-02T10:00:00");assertEquals(new BigDecimal("300000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        verify(payments,times(1)).increaseMonthlyPayment(anyString(),any(),anyString());
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.REJECTED).build()));
+        assertEquals(new BigDecimal("500000"),service.list("contract","tenant").getFirst().lateFeeAmount());
+        verify(payments,times(1)).increaseMonthlyPayment(eq("invoice"),eq(new BigDecimal("1500000")),anyString());
+    }
+    @Test void confirmedPaymentNeverAccruesAdditionalFeesAfterTheExtendedDeadline() {
+        approveSevenDaysAfterThreeOverdueDays();
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.CONFIRMED).confirmedAt(Instant.parse("2027-01-27T02:00:00Z")).build()));
+        demoTime("2027-02-02T10:00:00");var paid=service.list("contract","tenant").getFirst();
+        assertEquals(MonthlyInvoiceStatus.PAID,paid.status());assertEquals(new BigDecimal("300000"),paid.lateFeeAmount());
+        verify(payments,times(1)).increaseMonthlyPayment(anyString(),any(),anyString());
+    }
+    @Test void legacyApprovedWaiverWithoutNewMetadataIsReadWithoutRetroactiveFees() {
+        demoIssued();invoice.setLateFeeAmount(new BigDecimal("300000"));invoice.setTotalAmount(new BigDecimal("1300000"));
+        invoice.setDueAt(Instant.parse("2027-01-27T03:00:00Z"));invoice.setLateFeeExempt(true);
+        invoice.setExtensionRequestsSnapshot("[{\"id\":\"old\",\"days\":7,\"note\":\"Old approved decision\",\"status\":\"APPROVED\",\"requestedAt\":\"2027-01-19T03:00:00Z\",\"respondBy\":\"2027-01-21T03:00:00Z\",\"requestedBy\":\"tenant\",\"baseDueAt\":\"2027-01-16T16:59:59Z\",\"frozenLateFee\":300000,\"decidedAt\":\"2027-01-20T03:00:00Z\",\"decidedBy\":\"landlord\",\"newDueAt\":\"2027-01-27T03:00:00Z\"}]");
+        demoTime("2027-02-02T10:00:00");var old=service.list("contract","tenant").getFirst();
+        assertEquals(new BigDecimal("300000"),old.lateFeeAmount());assertTrue(old.lateFeeExempt());
+        assertNull(old.paymentExtensions().getFirst().lateFeeResumesAfterDue());
+        verify(payments,never()).increaseMonthlyPayment(anyString(),any(),anyString());
     }
     @Test void rejectRequestBackfillsFromOriginalDueWithoutDoubleAdding() {
         demoIssued(); demoTime("2027-01-19T10:00:00");
@@ -1185,13 +1281,17 @@ class MonthlyBillingServiceTest {
         assertThrows(AppException.class, () -> service.deferToNextPeriod("invoice","landlord"));
         assertThrows(AppException.class, () -> service.proposeMutualTermination("invoice","landlord"));
         assertThrows(AppException.class, () -> service.extendPaymentDirectly("invoice","landlord",extension(7)));
+        assertEquals(Boolean.TRUE,result.paymentExtensions().getLast().lateFeeResumesAfterDue());
+        assertFalse(result.lateFeeExempt());
+        demoTime("2027-01-30T00:01:00");
+        assertEquals(new BigDecimal("500000"),service.list("contract","tenant").getFirst().lateFeeAmount());
     }
     @Test void rolloverClosesPendingRequestAndBackfillsFeeBeforeFreezingDebt() {
         demoIssued(); demoTime("2027-01-21T10:00:00");
         service.requestPaymentExtension("invoice","tenant",extension(7));
         demoTime("2027-01-22T00:00:00");
         var result = service.deferToNextPeriod("invoice","landlord");
-        assertEquals("ROLLOVER", result.activeResolution()); assertEquals(new BigDecimal("600000"), result.lateFeeAmount());
+        assertEquals("ROLLOVER", result.activeResolution()); assertEquals(new BigDecimal("500000"), result.lateFeeAmount());
         assertEquals(PaymentExtension.Status.REJECTED, result.paymentExtensions().get(0).status());
         assertFalse(result.canRequestExtension());
         assertThrows(AppException.class, () -> service.extendPaymentDirectly("invoice","landlord",extension(7)));
@@ -1217,10 +1317,55 @@ class MonthlyBillingServiceTest {
         order.verify(payments).lockMonthlyPayment("invoice");
         verify(invoices,never()).findById("invoice");
     }
-    @Test void thirtyDaysIsAcceptedButNeverShortensExistingDeadline() {
+    @Test void oneDayRequestedBeforeTheDeadlineExtendsThatDeadlineWithoutShorteningIt() {
         demoIssued(); demoTime("2027-01-12T10:00:00");
+        var originalDue=invoice.getDueAt();
         var r = service.requestPaymentExtension("invoice","tenant",extension(1)).paymentExtensions().get(0);
-        assertThrows(AppException.class,() -> service.decidePaymentExtension("invoice",r.id(),"landlord",true));
+        var approved=service.decidePaymentExtension("invoice",r.id(),"landlord",true);
+        assertEquals(Instant.parse("2027-01-17T16:59:59Z"),approved.dueAt());
+        assertEquals(originalDue,approved.originalDueAt());assertEquals(originalDue,approved.paymentExtensions().get(0).baseDueAt());
+        assertEquals(PaymentExtension.Status.APPROVED,approved.paymentExtensions().get(0).status());
+        assertEquals(approved.dueAt(),approved.paymentExtensions().get(0).newDueAt());
+        verify(payments).extendMonthlyDueDate("invoice",approved.dueAt(),"landlord");
+        assertThrows(AppException.class,()->service.decidePaymentExtension("invoice",r.id(),"landlord",true));
+    }
+    @Test void simulatedDecemberFourthCanApproveOneDayBeyondDecemberEighthAsInTheReportedCase() {
+        demoIssued();demoTime("2026-12-04T10:00:00");
+        invoice.setIssuedAt(Instant.parse("2026-12-04T03:00:00Z"));
+        invoice.setPeriodStart(LocalDate.of(2026,11,4));invoice.setPeriodEndExclusive(LocalDate.of(2026,12,4));
+        invoice.setDueAt(Instant.parse("2026-12-08T16:59:59Z"));invoice.setOriginalDueAt(invoice.getDueAt());
+        invoice.setBaseAmount(new BigDecimal("3665000"));invoice.setTotalAmount(new BigDecimal("3665000"));
+        invoice.setLineItemsSnapshot("[{\"type\":\"RENT\",\"description\":\"Tiền thuê và phí kỳ đầu\",\"quantity\":1,\"unitPrice\":3665000,\"amount\":3665000}]");
+        var pending=service.requestPaymentExtension("invoice","tenant",extension(1)).paymentExtensions().get(0);
+        assertEquals(Instant.parse("2026-12-06T03:00:00Z"),pending.respondBy());
+        var result=service.decidePaymentExtension("invoice",pending.id(),"landlord",true);
+        assertEquals(Instant.parse("2026-12-09T16:59:59Z"),result.dueAt());
+        assertEquals(new BigDecimal("3665000"),result.totalAmount());assertEquals(BigDecimal.ZERO,result.lateFeeAmount());
+        assertEquals(Instant.parse("2026-12-04T03:00:00Z"),result.paymentExtensions().get(0).decidedAt());
+        verify(payments).extendMonthlyDueDate("invoice",result.dueAt(),"landlord");
+        verify(payments,never()).increaseMonthlyPayment(anyString(),any(),anyString());
+    }
+    @Test void movingTheSimulatedClockBeforeIssueCannotRequestOrApproveAFutureInvoice() {
+        demoIssued();invoice.setIssuedAt(Instant.parse("2027-01-12T03:00:00Z"));demoTime("2027-01-11T10:00:00");
+        assertFalse(service.list("contract","tenant").getFirst().canRequestExtension());
+        assertThrows(AppException.class,()->service.requestPaymentExtension("invoice","tenant",extension(1)));
+        demoTime("2027-01-12T10:00:00");
+        var pending=service.requestPaymentExtension("invoice","tenant",extension(1)).paymentExtensions().getFirst();
+        demoTime("2027-01-11T10:00:00");
+        var failure=assertThrows(AppException.class,()->service.decidePaymentExtension("invoice",pending.id(),"landlord",true));
+        assertTrue(failure.getMessage().contains("trước lúc phát hành"));
+        assertEquals(Instant.parse("2027-01-16T16:59:59Z"),invoice.getDueAt());
+        verify(payments,never()).extendMonthlyDueDate(anyString(),any(),anyString());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"2027-01-16T23:59:59,2027-01-17T16:59:59Z","2027-01-17T00:00:00,2027-01-17T17:00:00Z"})
+    void extensionAtOrAfterTheDeadlineUsesTheLaterBusinessTime(String approvedAt,String expectedDue) {
+        demoIssued();demoTime(approvedAt);
+        var pending=service.requestPaymentExtension("invoice","tenant",extension(1)).paymentExtensions().get(0);
+        assertEquals(Instant.parse(expectedDue),service.decidePaymentExtension("invoice",pending.id(),"landlord",true).dueAt());
+    }
+    @Test void thirtyDayDirectExtensionKeepsTheExistingOverdueApprovalRule() {
+        demoIssued();
         demoTime("2027-01-22T00:00:00");
         var result = service.extendPaymentDirectly("invoice","landlord",extension(30));
         assertEquals(Instant.parse("2027-02-20T17:00:00Z"),result.dueAt());
@@ -1229,8 +1374,7 @@ class MonthlyBillingServiceTest {
     private List<MonthlyInvoice> skippedMonthsDemo(String feeMode, ContractStatus contractStatus) {
         var contract = contracts.findById("contract").orElseThrow();
         contract.setStatus(contractStatus);
-        when(contracts.findByStatus(eq(contractStatus), any(PageRequest.class)))
-                .thenReturn(new PageImpl<>(List.of(contract)));
+        when(contracts.findLifecycleIdsAfter(anyCollection(),isNull(),any(PageRequest.class))).thenReturn(List.of("contract"));
         when(tx.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
         when(rentals.findById("rental")).thenReturn(Optional.of(RentalRequest.builder()
                 .moveInDate(LocalDate.of(2026,10,12)).leaseMonths(3).build()));
@@ -1268,7 +1412,7 @@ class MonthlyBillingServiceTest {
         return history;
     }
 
-    @Test void jumpingTwoMonthsWithoutAnyInteractionCarriesTenDayPenaltyIntoOnlyLatestBill() {
+    @Test void jumpingTwoMonthsWithoutAnyInteractionCarriesFiveDayPenaltyIntoOnlyLatestBill() {
         var history = skippedMonthsDemo("FIXED_PER_DAY",ContractStatus.ACTIVE);
         demoTime("2026-12-12T00:01:00"); service.scheduledSync(); service.scheduledSync();
         var first = history.get(0); var second = history.get(1);
@@ -1276,14 +1420,14 @@ class MonthlyBillingServiceTest {
         assertEquals(MonthlyInvoiceStatus.ROLLED_OVER,first.getStatus());
         assertEquals(second.getId(),first.getRolledToInvoiceId());
         assertEquals(Instant.parse("2026-11-16T16:59:59Z"),first.getOriginalDueAt());
-        assertEquals(new BigDecimal("1000000"),first.getLateFeeAmount());
-        assertEquals(new BigDecimal("6000000"),first.getTotalAmount());
-        assertEquals(new BigDecimal("11000000"),second.getTotalAmount());
+        assertEquals(new BigDecimal("500000"),first.getLateFeeAmount());
+        assertEquals(new BigDecimal("5500000"),first.getTotalAmount());
+        assertEquals(new BigDecimal("10500000"),second.getTotalAmount());
         assertEquals(Instant.parse("2026-12-16T16:59:59Z"),second.getDueAt());
         assertEquals(MonthlyInvoiceStatus.UNPAID,second.getStatus());
         var firstResponse = service.list("contract","tenant").stream().filter(i -> i.id().equals(first.getId())).findFirst().orElseThrow();
         var penalty = firstResponse.lines().stream().filter(l -> "LATE_FEE".equals(l.type())).findFirst().orElseThrow();
-        assertEquals(new BigDecimal("10"),penalty.quantity()); assertEquals(new BigDecimal("100000"),penalty.unitPrice());
+        assertEquals(new BigDecimal("5"),penalty.quantity()); assertEquals(new BigDecimal("100000"),penalty.unitPrice());
         assertEquals(1,firstResponse.overdueActions().size());
         assertEquals(1,service.list("contract","tenant").get(0).lines().stream().filter(l -> "BALANCE_FORWARD".equals(l.type())).count());
         verify(payments,times(1)).cancelMonthlyForRollover(first.getId());
@@ -1318,8 +1462,8 @@ class MonthlyBillingServiceTest {
         var last = service.list("contract","tenant").get(0);
         assertEquals(MonthlyInvoiceStatus.OVERDUE,last.status());
         assertNull(last.deferredAt());
-        assertEquals(new BigDecimal("13000000"),last.totalAmount());
-        assertEquals(new BigDecimal("1000000"),last.lateFeeAmount());
+        assertEquals(new BigDecimal("11500000"),last.totalAmount());
+        assertEquals(new BigDecimal("500000"),last.lateFeeAmount());
         assertTrue(last.lines().stream().noneMatch(l -> "RENT".equals(l.type())));
         assertEquals(1,last.lines().stream().filter(l -> "BALANCE_FORWARD".equals(l.type())).count());
         verify(payments,times(2)).cancelMonthlyForRollover(anyString());
@@ -1344,14 +1488,14 @@ class MonthlyBillingServiceTest {
         service.decidePaymentExtension(history.get(0).getId(),request.id(),"landlord",true);
         demoTime("2026-12-12T00:01:00"); service.scheduledSync();
         assertNull(history.get(0).getDeferredAt());
-        assertEquals(Instant.parse("2026-12-15T03:00:00Z"),history.get(0).getDueAt());
+        assertEquals(Instant.parse("2026-12-16T16:59:59Z"),history.get(0).getDueAt());
         assertEquals(new BigDecimal("5000000"),history.get(1).getTotalAmount());
         verify(payments,never()).cancelMonthlyForRollover(anyString());
     }
 
     @Test void midnightAutoFillsMissingReadingsOnlyAndNeverDuplicatesIssuedInvoice() {
         var contract = contracts.findById("contract").orElseThrow();
-        when(contracts.findByStatus(eq(ContractStatus.ACTIVE),any(PageRequest.class))).thenReturn(new PageImpl<>(List.of(contract)));
+        when(contracts.findLifecycleIdsAfter(anyCollection(),isNull(),any(PageRequest.class))).thenReturn(List.of("contract"));
         when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(invoice));
         when(invoices.findByContractIdAndPeriodIndex("contract",0)).thenReturn(Optional.of(invoice));
         when(tx.getTransaction(any())).thenReturn(new SimpleTransactionStatus());

@@ -72,7 +72,9 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     COMPLAINT_NOT_FOUND(6073, "Không tìm thấy hồ sơ khiếu nại", HttpStatus.NOT_FOUND),
     COMPLAINT_INVALID(6074, "Dữ liệu khiếu nại không hợp lệ", HttpStatus.BAD_REQUEST),
     COMPLAINT_STALE(6075, "Hồ sơ đã thay đổi. Tải lại trước khi phản hồi hoặc quyết định.", HttpStatus.CONFLICT),
-    COMPLAINT_NOT_ALLOWED(6076, "Thao tác chưa phù hợp trạng thái khiếu nại", HttpStatus.CONFLICT);
+    COMPLAINT_NOT_ALLOWED(6076, "Thao tác chưa phù hợp trạng thái khiếu nại", HttpStatus.CONFLICT),
+    TERMINATION_NOTICE_INVALID(6077, "Thông báo/khiếu nại chấm dứt cần lý do 10–1000 ký tự và phương án hợp lệ", HttpStatus.BAD_REQUEST),
+    TERMINATION_NOTICE_STALE(6078, "Quyết định chấm dứt đã thay đổi. Vui lòng tải lại hồ sơ.", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

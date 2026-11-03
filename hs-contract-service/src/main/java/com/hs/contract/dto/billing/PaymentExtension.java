@@ -7,10 +7,19 @@ import java.time.Instant;
 public record PaymentExtension(String id, int days, String note, Status status,
                                Instant requestedAt, Instant respondBy, String requestedBy,
                                Instant baseDueAt, BigDecimal frozenLateFee,
-                               Instant decidedAt, String decidedBy, Instant newDueAt) {
+                               Instant decidedAt, String decidedBy, Instant newDueAt,
+                               Boolean lateFeeResumesAfterDue) {
+    public PaymentExtension(String id,int days,String note,Status status,Instant requestedAt,Instant respondBy,String requestedBy,
+                            Instant baseDueAt,BigDecimal frozenLateFee,Instant decidedAt,String decidedBy,Instant newDueAt) {
+        this(id,days,note,status,requestedAt,respondBy,requestedBy,baseDueAt,frozenLateFee,decidedAt,decidedBy,newDueAt,null);
+    }
     public enum Status { PENDING, APPROVED, REJECTED, EXPIRED, CLOSED }
     public PaymentExtension decide(Status next, Instant at, String actor, Instant due) {
         return new PaymentExtension(id, days, note, next, requestedAt, respondBy, requestedBy,
-                baseDueAt, frozenLateFee, at, actor, due);
+                baseDueAt, frozenLateFee, at, actor, due, lateFeeResumesAfterDue);
+    }
+    public PaymentExtension approveWithResumedLateFee(Instant at,String actor,Instant due) {
+        return new PaymentExtension(id,days,note,Status.APPROVED,requestedAt,respondBy,requestedBy,
+                baseDueAt,frozenLateFee,at,actor,due,true);
     }
 }

@@ -110,6 +110,9 @@ public class Contract extends BaseEntity {
     private Instant terminationCompletedAt;
     @Column(name = "termination_forced_at")
     private Instant terminationForcedAt;
+    /** Versioned overdue notices; signed documents and older bilateral decisions remain immutable. */
+    @Column(name = "unilateral_termination_snapshot", columnDefinition = "TEXT")
+    private String unilateralTerminationSnapshot;
 
     @Builder.Default
     @OneToMany(mappedBy = "contract", cascade = CascadeType.ALL, orphanRemoval = true)

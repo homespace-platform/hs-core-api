@@ -20,15 +20,15 @@ class MonthlyBillingScheduleTest {
                 MonthlyBillingSchedule.autoRolloverAt(Instant.parse("2026-11-27T03:00:00Z")));
     }
 
-    @Test void twelveOctoberExampleHasFivePaymentDaysThenTenPenaltyDays() {
+    @Test void twelveOctoberExampleHasFivePaymentDaysFivePenaltyDaysAndTenDayRollover() {
         Instant due = MonthlyBillingSchedule.dueAt(LocalDate.of(2026, 10, 12));
         assertEquals(Instant.parse("2026-10-16T16:59:59Z"), due);
         LatePaymentPolicy policy = LatePaymentPolicy.from(Map.of("latePaymentFeeMode", "FIXED_PER_DAY",
                 "latePaymentFeeAmount", 100000, "latePaymentFeeGraceDays", 0));
         assertEquals(BigDecimal.ZERO, policy.accrued(due, due, BillingTime.ZONE));
         assertEquals(1, policy.chargedDays(due, Instant.parse("2026-10-16T17:00:00Z"), BillingTime.ZONE));
-        assertEquals(10, policy.chargedDays(due, Instant.parse("2026-10-26T16:59:59Z"), BillingTime.ZONE));
-        assertEquals(new BigDecimal("1000000"), policy.accrued(due,
+        assertEquals(5, policy.chargedDays(due, Instant.parse("2026-10-26T16:59:59Z"), BillingTime.ZONE));
+        assertEquals(new BigDecimal("500000"), policy.accrued(due,
                 Instant.parse("2026-10-27T03:00:00Z"), BillingTime.ZONE));
         assertEquals(Instant.parse("2026-10-26T17:00:00Z"), MonthlyBillingSchedule.autoRolloverAt(due));
         assertTrue(MonthlyBillingSchedule.paymentDueDescription().contains("ngày thứ 5"));

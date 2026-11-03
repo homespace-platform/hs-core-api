@@ -271,7 +271,7 @@ public class ContractRenderService {
         return buildDataModelFromSnapshots(
                 landlord, tenant, property, lease, financial, charges, equipments, meters,
                 initialPayment, amenities,
-                Map.of("latePaymentFeeMode", "NONE", "overdueLandlordTerminationAfterFiveDays", true),
+                Map.of("latePaymentFeeMode", "NONE", "overdueLandlordTerminationAfterFiveDays", false, "overdueUnilateralTermination24h", true),
                 ContractDataBuilder.DEFAULT_OVERDUE_TERMS, 3, 1,
                 "HD-20260905-DEMO", LocalDate.now(), "Thành phố Hồ Chí Minh"
         );

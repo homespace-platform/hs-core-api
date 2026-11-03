@@ -1,5 +1,8 @@
 # Kịch bản test độc lập — hợp đồng 3 tháng, hiệu lực 21/10/2026
 
+> **Hướng dẫn quá hạn hiện hành từ 04/11/2026:** dùng [bộ ca 5 ngày phạt/đơn phương 24 giờ](OVERDUE_5_DAY_UNILATERAL_24H_2026-11-04.md). Các UC bên dưới có mức trần 10 ngày hoặc yêu cầu khách đồng ý chấm dứt là tài liệu đối chiếu phiên bản trước, chỉ dùng cho hồ sơ cũ tương ứng; không dùng làm tiêu chí nghiệm thu luồng mới. Các mốc tạo/phát hành hóa đơn không đổi.
+
+
 ## Mốc giả lập ví dụ — 26/10/2026
 
 Mốc giả lập ví dụ là **26/10/2026 lúc 10:00:00, giờ Việt Nam (UTC+7)**: `homespace.time.simulated-at=2026-10-26T10:00:00`. Nếu muốn dùng đúng ngày/giờ thực hiện tại, để `homespace.time.simulated-at=` trống trong properties; ví dụ giả lập này không tự cập nhật theo thời gian thực.
@@ -68,7 +71,7 @@ Hợp đồng 3 tháng không gia hạn có **3 kỳ thanh toán tiền phòng +
 - Mặc định phạt **100.000đ/ngày**. Chủ nhà chỉ nhập cách tính và mức phí; hệ thống tự cấp graceDays **0**, tối đa **10 ngày**, tổng phí tối đa **1.000.000đ/hóa đơn**. Deadline 5 ngày tính cả ngày chốt, ân hạn và giới hạn tiền là **nhãn chỉ đọc**, không phải trường nhập của chủ nhà. UC chính sách khác chỉ đổi cách tính/mức phí; ngoại lệ legacy như UC37 dùng fixture bản ký cũ, không tạo bằng API mới.
 - Bill chốt ngày 21: **21–25 là 5 ngày thanh toán**; **26 là ngày phạt đầu**. Không thêm 5 ngày miễn phạt sau ngày 25. `paymentDueOffsetDays=4` là cộng 4 ngày sau ngày 21, tức 5 ngày khi tính cả ngày 21.
 - Với bill chốt 21/11: sau hết 5 ngày quá hạn (26–30/11), **01/12** mở ba phương án. Phạt tiếp tối đa 10 ngày (26/11–05/12), **06/12** tự chốt cộng dồn nếu đủ điều kiện. Mốc tự chốt được cộng theo ngày lịch, kể cả khi sang tháng sau. Phí hiển thị **100.000đ/ngày × số ngày đã chốt**, không `1 × tổng phí`.
-- Duyệt gia hạn: hạn mới = lúc duyệt + X ngày, X 1–30, phải sau hạn hiện tại. Phí đang chờ tạm dừng; từ chối/hết hạn tính bù, tối đa 10 ngày. Đồng ý giữ phí cố định cho bill đó kể cả trễ hạn mới.
+- Duyệt gia hạn: hạn mới = mốc muộn hơn giữa hạn hiện tại và lúc duyệt + X ngày, X 1–30. Duyệt trước hạn thì cộng vào hạn hiện tại; quá hạn thì tính từ lúc duyệt. Ví dụ ngày giả lập 04/12/2026 10:00, hạn 08/12 23:59:59, duyệt thêm 1 ngày → hạn mới 09/12 23:59:59. Phí đang chờ tạm dừng; từ chối/hết hạn tính bù theo hạn hiện tại. Đồng ý thì giữ phí đã chốt trong hạn mới; sau đó cộng tiếp ngày phạt mới, không thu bù các ngày được gia hạn và không đặt lại trần tổng 10 ngày/hóa đơn. Phạt một lần không thu lại; NONE không sinh phí. Các UC dưới đây dùng quyết định duyệt mới có `lateFeeResumesAfterDue=true`; quyết định miễn tăng phí cũ vẫn được giữ, không tự truy thu. Không gửi/duyệt khi lùi thời gian về trước lúc phát hành hóa đơn.
 - Tự chốt cộng dồn không tự hủy QR ngay: QR cũ chỉ hủy khi bill sau phát hành và nhận nợ. Đã trả/đang đối soát/gia hạn còn hiệu lực/chấm dứt còn hiệu lực không bị ghi đè. Kỳ cuối hoặc bill sau đã phát hành giữ nợ riêng.
 - Phạt 10 ngày là trên từng bill; bill mới có hạn và chính sách riêng. Không tự xóa tiền thuê/dịch vụ hoặc cọc.
 - **Nhảy thời gian/bỏ lỡ nhiều tháng mà không ai thao tác:** scheduler phát hành bù từ kỳ cũ đến kỳ mới, giữ hạn gốc của từng kỳ (không đẩy hạn bill cũ thành giờ hiện tại + 1 ngày). Bill cũ đủ 10 ngày quá hạn sẽ chốt phí theo bản hợp đồng rồi cộng vào bill sau; chỉ QR bill nhận nợ còn dùng được. `issuedAt`/lịch sử vẫn ghi thời điểm job thực sự chạy, không giả mạo thời điểm phát hành. Công tơ bị bỏ quên vẫn tự lấy số cuối kỳ trước, tiêu thụ tạm tính 0.
@@ -315,7 +318,7 @@ UC01–UC38 kiểm tra hóa đơn/thanh toán/quá hạn; UC39–UC51 kiểm tra
 | `2026-11-20T00:01:00` | Chủ nhà | Mở hóa đơn kỳ thanh toán 2 nháp, nhập CHỈ SỐ CUỐI điện 1550/nước 90; bấm Lưu bản nháp. | DRAFT; dùng 50 kWh/5 m³; người thuê chưa thấy bill. Không nhập lại số đầu 1500/85. |
 | `2026-11-21T00:01:00` | Hệ thống / hai bên | Chờ scheduler rồi mở hóa đơn kỳ thanh toán 2 của đúng HĐ này; chưa trả tiền. | UNPAID; chi phí tháng 1 + tiền phòng tháng 2; hạn 25/11 23:59:59. Không thu lại tiền phòng tháng 1 hoặc cọc. |
 | `2026-11-23T10:00:00` | Người thuê | Trên Hóa đơn kỳ thanh toán 2 xin 7 ngày; lý do ít nhất 10 ký tự. | PENDING; phí chốt 0; phản hồi trước 25/11 10:00. |
-| `2026-11-24T10:00:00` | Chủ nhà | Đồng ý thêm 7 ngày. | Hạn mới 01/12 10:00; giữ ID bill/PaymentRequest/mã chuyển khoản; phí 0. |
+| `2026-11-24T10:00:00` | Chủ nhà | Đồng ý thêm 7 ngày. | Hạn mới 02/12 23:59:59 (25/11 23:59:59 + 7 ngày); giữ ID bill/PaymentRequest/mã chuyển khoản; phí 0. |
 | `2026-11-29T10:00:00` | Hai bên | Mở hóa đơn kỳ thanh toán 2. | Nhắc theo hạn mới bằng log/trạng thái; không còn hạn 25/11 làm hạn hiện tại. |
 | `2026-11-30T10:00:00` | Người thuê → chủ nhà | Mở đúng hóa đơn kỳ thanh toán 2, kiểm tra tổng mới nhất/QR, chuyển tiền và gửi chứng từ; chủ nhà Xác nhận đã nhận tiền ngay tại mốc này. | hóa đơn kỳ thanh toán 2 PAID; không tăng phạt, không chuyển nợ sau đó. |
 | `2026-12-02T00:01:00` | Hai bên | Kiểm tra hóa đơn kỳ thanh toán 2. | PAID; không tăng phạt, không tự cộng dồn. |
@@ -333,11 +336,11 @@ UC01–UC38 kiểm tra hóa đơn/thanh toán/quá hạn; UC39–UC51 kiểm tra
 | `2026-11-20T00:01:00` | Chủ nhà | Mở hóa đơn kỳ thanh toán 2 nháp, nhập CHỈ SỐ CUỐI điện 1550/nước 90; bấm Lưu bản nháp. | DRAFT; dùng 50 kWh/5 m³; người thuê chưa thấy bill. Không nhập lại số đầu 1500/85. |
 | `2026-11-21T00:01:00` | Hệ thống / hai bên | Chờ scheduler rồi mở hóa đơn kỳ thanh toán 2 của đúng HĐ này; chưa trả tiền. | UNPAID; chi phí tháng 1 + tiền phòng tháng 2; hạn 25/11 23:59:59. Không thu lại tiền phòng tháng 1 hoặc cọc. |
 | `2026-11-23T10:00:00` | Người thuê | Xin 7 ngày trên hóa đơn kỳ thanh toán 2. | PENDING; phạt 0. |
-| `2026-11-24T10:00:00` | Chủ nhà | Duyệt 7 ngày. | Hạn mới 01/12 10:00; miễn tăng phí cho bill này. |
-| `2026-12-01T10:00:01` | Hai bên | Không trả. | Quá hạn mới nhưng phí vẫn 0. |
-| `2026-12-07T00:01:00` | Chủ nhà | Không chọn phương án. | Ba phương án mở lại; không tự chấm dứt. |
-| `2026-12-11T23:59:59` | Hai bên | Không thao tác. | Hết 10 ngày quá hạn mới 02/12–11/12; phí vẫn 0. |
-| `2026-12-12T00:01:00` | Hệ thống | Chờ đồng bộ. | Tự chốt cộng dồn theo hạn mới; không dùng mốc 06/12 của hạn cũ. |
+| `2026-11-24T10:00:00` | Chủ nhà | Duyệt 7 ngày. | Hạn mới 02/12 23:59:59; trong hạn mới không tăng phí. |
+| `2026-12-03T00:00:00` | Hai bên | Không trả. | Ngày phạt đầu sau hạn mới: 100.000đ. |
+| `2026-12-08T00:01:00` | Chủ nhà | Không chọn phương án. | Ba phương án mở lại; không tự chấm dứt. |
+| `2026-12-12T23:59:59` | Hai bên | Không thao tác. | Hết 10 ngày quá hạn mới 03/12–12/12; phí chạm trần 1.000.000đ. |
+| `2026-12-13T00:01:00` | Hệ thống | Chờ đồng bộ. | Tự chốt cộng dồn theo hạn mới; không dùng mốc 06/12 của hạn cũ. |
 | `2026-12-20T00:01:00` | Chủ nhà | Mở hóa đơn kỳ thanh toán 3 nháp; nhập điện 1610/nước 96, Lưu bản nháp. | Đầu kỳ lấy 1550/90; dùng 60 kWh/6 m³. |
 | `2026-12-21T00:01:00` | Hai bên | Xem hóa đơn kỳ thanh toán 3. | Một dòng nợ hóa đơn kỳ thanh toán 2, không có phạt tăng thêm; hóa đơn kỳ thanh toán 2 ROLLED_OVER, QR cũ hủy. |
 
@@ -356,7 +359,7 @@ UC01–UC38 kiểm tra hóa đơn/thanh toán/quá hạn; UC39–UC51 kiểm tra
 | `2026-11-25T23:59:59` | Hai bên | Không trả tiền, không chọn phương án. | Vẫn trong hạn; phạt 0đ. |
 | `2026-11-28T10:00:00` | Hai bên | Mở hóa đơn kỳ thanh toán 2, chưa thanh toán. | Phạt 100.000đ/ngày × 3 ngày = 300.000đ. |
 | `2026-11-28T10:01:00` | Người thuê | Xin 7 ngày. | Chốt 100.000đ/ngày × 3 ngày = 300.000đ; dừng tăng khi PENDING. |
-| `2026-11-29T10:00:00` | Chủ nhà | Duyệt. | Hạn mới 06/12 10:00; giữ phí 300.000đ, không tăng thêm cho bill này. |
+| `2026-11-29T10:00:00` | Chủ nhà | Duyệt. | Hạn mới 06/12 10:00; giữ phí 300.000đ trong hạn được duyệt, quá hạn mới cộng tiếp theo hợp đồng. |
 | `2026-12-04T10:00:00` | Người thuê → chủ nhà | Mở đúng hóa đơn kỳ thanh toán 2, kiểm tra tổng mới nhất/QR, chuyển tiền và gửi chứng từ; chủ nhà Xác nhận đã nhận tiền ngay tại mốc này. | PAID; dòng phạt vẫn 3 ngày × 100.000đ. |
 | `2026-12-07T00:01:00` | Hai bên | Xem lại bill. | Không tăng thành 10 ngày; không tự chuyển nợ. |
 
@@ -374,12 +377,13 @@ UC01–UC38 kiểm tra hóa đơn/thanh toán/quá hạn; UC39–UC51 kiểm tra
 | `2026-11-21T00:01:00` | Hệ thống / hai bên | Chờ scheduler rồi mở hóa đơn kỳ thanh toán 2 của đúng HĐ này; chưa trả tiền. | UNPAID; chi phí tháng 1 + tiền phòng tháng 2; hạn 25/11 23:59:59. Không thu lại tiền phòng tháng 1 hoặc cọc. |
 | `2026-11-28T10:00:00` | Người thuê | Xin 7 ngày. | Phạt chốt 300.000đ, 3 ngày. |
 | `2026-11-29T10:00:00` | Chủ nhà | Duyệt. | Hạn mới 06/12 10:00. |
-| `2026-12-06T10:00:01` | Hai bên | Không trả. | Quá hạn mới, phí vẫn 300.000đ. |
+| `2026-12-06T10:00:01` | Hai bên | Không trả. | Quá hạn mới nhưng chưa sang ngày lịch kế tiếp nên phí vẫn 300.000đ; 07/12 bắt đầu cộng ngày mới. |
+| `2026-12-07T00:01:00` | Hai bên | Mở bill và QR mới nhất. | Phạt 3 ngày cũ + 1 ngày mới = 400.000đ; không phạt thời gian được gia hạn. |
 | `2026-12-12T00:01:00` | Chủ nhà | Không chọn phương án. | Mở ba phương án theo hạn mới. |
-| `2026-12-16T23:59:59` | Hai bên | Không thao tác. | Hết 10 ngày quá hạn mới; phí vẫn 3 ngày = 300.000đ. |
-| `2026-12-17T00:01:00` | Hệ thống | Chờ đồng bộ. | Tự chốt cộng dồn, không tăng phí lên 1 triệu. |
+| `2026-12-16T23:59:59` | Hai bên | Không thao tác. | Hết 10 ngày quá hạn mới; tổng phí đã chạm trần 10 ngày = 1.000.000đ (3 cũ + tối đa 7 mới). |
+| `2026-12-17T00:01:00` | Hệ thống | Chờ đồng bộ. | Tự chốt cộng dồn, đóng băng tổng phí 1.000.000đ. |
 | `2026-12-20T00:01:00` | Chủ nhà | Mở hóa đơn kỳ thanh toán 3 nháp; nhập điện 1610/nước 96, Lưu bản nháp. | Đầu kỳ lấy 1550/90; dùng 60 kWh/6 m³. |
-| `2026-12-21T00:01:00` | Hai bên | Xem hóa đơn kỳ thanh toán 3. | Nợ hóa đơn kỳ thanh toán 2 gồm phí chốt 300.000đ, chuyển đúng một lần; QR hóa đơn kỳ thanh toán 2 hủy. |
+| `2026-12-21T00:01:00` | Hai bên | Xem hóa đơn kỳ thanh toán 3. | Nợ hóa đơn kỳ thanh toán 2 gồm phí chốt 1.000.000đ, chuyển đúng một lần; QR hóa đơn kỳ thanh toán 2 hủy. |
 
 
 ---
@@ -595,11 +599,11 @@ UC01–UC38 kiểm tra hóa đơn/thanh toán/quá hạn; UC39–UC51 kiểm tra
 | `2026-11-30T23:59:59` | Chủ nhà | Thử mở ba phương án. | Chưa được chọn vì chưa hết ngày trễ thứ 5. |
 | `2026-12-01T00:00:00` | Chủ nhà | Dời hạn 3 ngày, lý do ít nhất 10 ký tự. | Hạn mới 04/12 00:00; phí chốt 6 ngày = 600.000đ; không tạo bill mới. |
 | `2026-12-03T10:00:00` | Chủ nhà | Thử cộng dồn/chấm dứt/dời tiếp. | Bị chặn vì gia hạn còn hiệu lực. |
-| `2026-12-04T00:00:01` | Hai bên | Không trả. | Trễ hạn mới, phí vẫn 600.000đ. |
+| `2026-12-04T00:00:01` | Hai bên | Không trả. | Trễ hạn mới nhưng chưa sang ngày lịch kế tiếp nên phí vẫn 600.000đ; 05/12 cộng thành 700.000đ. |
 | `2026-12-10T00:01:00` | Chủ nhà | Không chọn gì. | Ba phương án mở lại. |
-| `2026-12-15T00:01:00` | Hệ thống | Chờ đồng bộ. | Tự chốt cộng dồn sau 10 ngày trễ hạn mới 05/12–14/12; phí vẫn 600.000đ. |
+| `2026-12-15T00:01:00` | Hệ thống | Chờ đồng bộ. | Tự chốt cộng dồn sau 10 ngày trễ hạn mới 05/12–14/12; tổng phí tối đa 1.000.000đ (6 ngày cũ + tối đa 4 ngày mới). |
 | `2026-12-20T00:01:00` | Chủ nhà | Mở hóa đơn kỳ thanh toán 3 nháp; nhập điện 1610/nước 96, Lưu bản nháp. | Đầu kỳ lấy 1550/90; dùng 60 kWh/6 m³. |
-| `2026-12-21T00:01:00` | Hai bên | Mở hóa đơn kỳ thanh toán 3. | Nợ hóa đơn kỳ thanh toán 2 gồm phí 600.000đ, không tăng lên 1 triệu. |
+| `2026-12-21T00:01:00` | Hai bên | Mở hóa đơn kỳ thanh toán 3. | Nợ hóa đơn kỳ thanh toán 2 gồm phí chốt 1.000.000đ, không cộng trùng sau khi chuyển nợ. |
 
 
 ---
@@ -614,7 +618,7 @@ UC01–UC38 kiểm tra hóa đơn/thanh toán/quá hạn; UC39–UC51 kiểm tra
 | `2026-11-20T00:01:00` | Chủ nhà | Mở hóa đơn kỳ thanh toán 2 nháp, nhập CHỈ SỐ CUỐI điện 1550/nước 90; bấm Lưu bản nháp. | DRAFT; dùng 50 kWh/5 m³; người thuê chưa thấy bill. Không nhập lại số đầu 1500/85. |
 | `2026-11-21T00:01:00` | Hệ thống / hai bên | Chờ scheduler rồi mở hóa đơn kỳ thanh toán 2 của đúng HĐ này; chưa trả tiền. | UNPAID; chi phí tháng 1 + tiền phòng tháng 2; hạn 25/11 23:59:59. Không thu lại tiền phòng tháng 1 hoặc cọc. |
 | `2026-12-01T00:00:00` | Chủ nhà | Dời hạn 3 ngày. | Hạn 04/12 00:00, phí 600.000đ. |
-| `2026-12-10T00:01:00` | Chủ nhà | Dời tiếp 3 ngày, lý do hợp lệ. | Hạn mới 13/12 00:01; lịch sử thêm lần gia hạn; phí vẫn 600.000đ. |
+| `2026-12-10T00:01:00` | Chủ nhà | Dời tiếp 3 ngày, lý do hợp lệ. | Hạn mới 13/12 00:01; lịch sử thêm lần gia hạn; phí đã chạm trần 1.000.000đ từ trước lượt duyệt thứ hai. Trần không đặt lại. |
 | `2026-12-11T10:00:00` | Người thuê → chủ nhà | Mở đúng hóa đơn kỳ thanh toán 2, kiểm tra tổng mới nhất/QR, chuyển tiền và gửi chứng từ; chủ nhà Xác nhận đã nhận tiền ngay tại mốc này. | hóa đơn kỳ thanh toán 2 PAID; không tăng phạt, không chuyển nợ sau đó. |
 | `2026-12-20T00:01:00` | Chủ nhà | Mở hóa đơn kỳ thanh toán 3 nháp; nhập điện 1610/nước 96, Lưu bản nháp. | Đầu kỳ lấy 1550/90; dùng 60 kWh/6 m³. |
 | `2026-12-21T00:01:00` | Hệ thống | Chờ phát hành hóa đơn kỳ thanh toán 3, mở đúng HĐ. | chi phí tháng 2 + tiền phòng tháng 3; hạn 25/12 23:59:59. Không có nợ kỳ 1 nếu hóa đơn kỳ thanh toán 2 đã PAID. |
@@ -650,7 +654,7 @@ UC01–UC38 kiểm tra hóa đơn/thanh toán/quá hạn; UC39–UC51 kiểm tra
 | `2026-11-23T10:00:00` | Người thuê / test API | Thử ngày 0/31/1000, lý do dưới 10 ký tự hoặc trên 1000. | UI/API từ chối; không có yêu cầu hoặc tiền mới. |
 | `2026-11-23T10:01:00` | Người thuê | Gửi 7 ngày, lý do hợp lệ; gửi lần hai. | Chỉ một PENDING; lần hai bị chặn. |
 | `2026-11-23T10:02:00` | Test API có xác thực | Chủ nhà thử gửi yêu cầu như người thuê; người thuê thử approve; tài khoản thứ ba thử đọc HĐ. | Bị chặn theo vai trò/quyền; không đổi dữ liệu. Dùng tài khoản test, không dùng token người thật. |
-| `2026-11-24T10:00:00` | Chủ nhà | Duyệt yêu cầu hợp lệ duy nhất. | Hạn mới 01/12 10:00. |
+| `2026-11-24T10:00:00` | Chủ nhà | Duyệt yêu cầu hợp lệ duy nhất. | Hạn mới 02/12 23:59:59. |
 | `2026-11-30T10:00:00` | Người thuê → chủ nhà | Mở đúng hóa đơn kỳ thanh toán 2, kiểm tra tổng mới nhất/QR, chuyển tiền và gửi chứng từ; chủ nhà Xác nhận đã nhận tiền ngay tại mốc này. | hóa đơn kỳ thanh toán 2 PAID; không tăng phạt, không chuyển nợ sau đó. |
 
 
@@ -827,8 +831,8 @@ UC01–UC38 kiểm tra hóa đơn/thanh toán/quá hạn; UC39–UC51 kiểm tra
 | `2026-12-20T00:01:00` | Chủ nhà | Mở hóa đơn kỳ thanh toán 3 nháp; nhập điện 1610/nước 96, Lưu bản nháp. | Đầu kỳ lấy 1550/90; dùng 60 kWh/6 m³. |
 | `2026-12-21T00:01:00` | Hệ thống | Chờ phát hành hóa đơn kỳ thanh toán 3, mở đúng HĐ. | chi phí tháng 2 + tiền phòng tháng 3; hạn 25/12 23:59:59. Không có nợ kỳ 1 nếu hóa đơn kỳ thanh toán 2 đã PAID. |
 | `2026-12-23T10:00:00` | Người thuê → chủ nhà | Mở đúng hóa đơn kỳ thanh toán 3, kiểm tra tổng mới nhất/QR, chuyển tiền và gửi chứng từ; chủ nhà Xác nhận đã nhận tiền ngay tại mốc này. | hóa đơn kỳ thanh toán 3 PAID; không tăng phạt, không chuyển nợ sau đó. |
-| `2026-12-31T00:00:01` | Hai bên | Không trả hóa đơn kỳ thanh toán 2. | Hóa đơn kỳ thanh toán 2 trễ hạn mới, phí vẫn 600.000đ. |
-| `2027-01-11T00:01:00` | Hệ thống | Chờ đồng bộ sau 10 ngày quá hạn mới. | Không nhét nợ vào hóa đơn kỳ thanh toán 3 đã phát hành; hóa đơn kỳ thanh toán 2 giữ riêng, phí không tăng. Không tự tạo bill ngoài hạn thuê. |
+| `2026-12-31T00:00:01` | Hai bên | Không trả hóa đơn kỳ thanh toán 2. | Trễ hạn mới nhưng chưa sang ngày lịch kế tiếp nên phí vẫn 600.000đ; 01/01 cộng tiếp thành 700.000đ. |
+| `2027-01-11T00:01:00` | Hệ thống | Chờ đồng bộ sau 10 ngày quá hạn mới. | Không nhét nợ vào hóa đơn kỳ thanh toán 3 đã phát hành; hóa đơn kỳ thanh toán 2 giữ riêng, phí đã chạm trần 1.000.000đ. Không tự tạo bill ngoài hạn thuê. |
 | `2027-01-12T10:00:00` | Người thuê → chủ nhà | Mở đúng hóa đơn kỳ thanh toán 2, kiểm tra tổng mới nhất/QR, chuyển tiền và gửi chứng từ; chủ nhà Xác nhận đã nhận tiền ngay tại mốc này. | hóa đơn kỳ thanh toán 2 PAID; không tăng phạt, không chuyển nợ sau đó. |
 
 **Lưu ý riêng:** Đây là ngoại lệ cần đối soát riêng, không phải lỗi cho phép sửa bill đã phát hành. Gia hạn thanh toán không gia hạn thời gian thuê.
@@ -943,7 +947,7 @@ Không sử dụng nhánh **chấm dứt quá hạn giữ cọc** để thay th�
 
 Mỗi UC ghi riêng: **mã/ID HĐ**, mốc đã chạy, bill/PaymentRequest ID, ảnh của hai bên, tổng bill, dòng phí ngày × đơn giá, trạng thái yêu cầu, quyết định đang hiệu lực, QR nào còn/hủy, PASS/FAIL và log nếu lỗi.
 
-Không ghi “gia hạn lỗi” nếu đang mở hóa đơn kỳ thanh toán 3 hạn 25/12 nhưng lùi đồng hồ về 23/11: duyệt 7 ngày sẽ ra 30/11, sớm hơn hạn hiện tại và phải bị chặn. Khi gặp trường hợp này, chuyển sang **HĐ mới đúng UC**, không sửa dữ liệu HĐ đã tiến lịch.
+Nếu đang mở hóa đơn kỳ thanh toán 3 phát hành 21/12, hạn 25/12 nhưng lùi đồng hồ về 23/11, backend chặn gửi/duyệt vì thời điểm hiện tại trước lúc phát hành. Khi gặp trường hợp này, chuyển sang **HĐ mới đúng UC**, không sửa dữ liệu HĐ đã tiến lịch. Với hóa đơn đã phát hành trước thời điểm giả lập hiện tại, gia hạn trước hạn là hợp lệ và cộng ngày vào hạn hiện tại; không yêu cầu đợi gần hết hạn mới duyệt.
 
 
 ---

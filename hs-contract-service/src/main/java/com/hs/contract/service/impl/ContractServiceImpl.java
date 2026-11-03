@@ -558,6 +558,8 @@ public class ContractServiceImpl implements ContractService {
         }
         if (policies != null) {
             policies.put("paymentDueDay", MonthlyBillingSchedule.paymentDueDescription());
+            policies.put("overdueUnilateralTermination24h", request.getSpecialTerms() != null
+                    && request.getSpecialTerms().contains("đơn phương chấm dứt") && request.getSpecialTerms().contains("24 giờ"));
             // A removed clause cannot remain enabled through an old structured draft flag.
             if (request.getSpecialTerms() == null || !request.getSpecialTerms()
                     .contains("bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận"))
