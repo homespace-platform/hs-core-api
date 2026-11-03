@@ -68,7 +68,11 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     CONTRACT_AI_QUERY_INVALID(6069, "Tham số tra cứu hợp đồng không hợp lệ", HttpStatus.BAD_REQUEST),
     CONTRACT_DRAFT_READ_ONLY(6070, "Điều khoản bản nháp không khớp hồ sơ thuê đã chấp thuận", HttpStatus.CONFLICT),
     CONTRACT_DRAFT_INVALID(6071, "Dữ liệu bản nháp hợp đồng không hợp lệ", HttpStatus.BAD_REQUEST),
-    CONTRACT_DRAFT_STALE(6072, "Bản nháp đã có phiên bản mới. Vui lòng tải lại trước khi lưu.", HttpStatus.CONFLICT);
+    CONTRACT_DRAFT_STALE(6072, "Bản nháp đã có phiên bản mới. Vui lòng tải lại trước khi lưu.", HttpStatus.CONFLICT),
+    COMPLAINT_NOT_FOUND(6073, "Không tìm thấy hồ sơ khiếu nại", HttpStatus.NOT_FOUND),
+    COMPLAINT_INVALID(6074, "Dữ liệu khiếu nại không hợp lệ", HttpStatus.BAD_REQUEST),
+    COMPLAINT_STALE(6075, "Hồ sơ đã thay đổi. Tải lại trước khi phản hồi hoặc quyết định.", HttpStatus.CONFLICT),
+    COMPLAINT_NOT_ALLOWED(6076, "Thao tác chưa phù hợp trạng thái khiếu nại", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

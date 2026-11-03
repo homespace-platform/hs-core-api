@@ -91,6 +91,7 @@ public class PaymentDisputeService {
     @Transactional
     public DisputeCaseView act(String caseId,String actor,String action,DisputeCaseAction request) {
         var before=cases.findById(caseId).orElseThrow(this::caseMissing);
+        if(!"PAYMENT".equals(before.getSubjectType()))throw caseMissing();
         var p=lockPayment(before.getSubjectId(),actor,false);
         var c=lockCase(caseId,p,request);
         party(p,actor);
@@ -133,13 +134,14 @@ public class PaymentDisputeService {
     public PageResponse<DisputeCaseView> adminList(String actor,DisputeCaseStatus status,int page,int size) {
         admin(actor);
         var pageable=PageRequest.of(Math.max(0,page-1),Math.min(50,Math.max(1,size)),Sort.by(Sort.Direction.ASC,"openedAt","id"));
-        var result=status==null?cases.findAll(pageable):cases.findByStatus(status,pageable);
+        var result=status==null?cases.findBySubjectType("PAYMENT",pageable):cases.findBySubjectTypeAndStatus("PAYMENT",status,pageable);
         return new PageResponse<>(result.map(c->view(c,payments.findById(c.getSubjectId()).orElseThrow(this::missing),actor,true,false)));
     }
 
     @Transactional(readOnly=true)
     public DisputeCaseView adminGet(String id,String actor) {
         admin(actor);var c=cases.findById(id).orElseThrow(this::caseMissing);
+        if(!"PAYMENT".equals(c.getSubjectType()))throw caseMissing();
         return view(c,payments.findById(c.getSubjectId()).orElseThrow(this::missing),actor,true,true);
     }
 
@@ -147,6 +149,7 @@ public class PaymentDisputeService {
     public DisputeCaseView adminAct(String id,String actor,String action,DisputeCaseAction request) {
         admin(actor);
         var before=cases.findById(id).orElseThrow(this::caseMissing);
+        if(!"PAYMENT".equals(before.getSubjectType()))throw caseMissing();
         var p=lockPayment(before.getSubjectId(),actor,true);
         if(actor.equals(p.getPayerId())||actor.equals(p.getPayeeId()))throw notAllowed("Quản trị viên không tự phân xử hồ sơ của chính mình.");
         var c=lockCase(id,p,request);var reason=text(request.reason(),10);

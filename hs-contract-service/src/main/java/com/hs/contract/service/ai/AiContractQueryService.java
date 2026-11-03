@@ -63,6 +63,8 @@ public class AiContractQueryService {
     private final PaymentRequestRepository payments;
     private final ObjectMapper mapper;
     private final BillingTime time;
+    @org.springframework.beans.factory.annotation.Autowired(required=false) private RentalWorkflowRecordRepository workflowRecords;
+    @org.springframework.beans.factory.annotation.Autowired(required=false) private WorkflowSigningDocumentRepository workflowDocuments;
 
     // ------------------------------------------------------------------ summary / search
 
@@ -301,7 +303,12 @@ public class AiContractQueryService {
         }).toList());
         out.put("termination", obj("state", terminationState(c), "proposedAt", c.getTerminationProposedAt(),
                 "acceptedAt", c.getTerminationAcceptedAt(), "declinedAt", c.getTerminationDeclinedAt(),
-                "cancelledAt", c.getTerminationCancelledAt(), "completedAt", c.getTerminationCompletedAt()));
+                "cancelledAt", c.getTerminationCancelledAt(), "completedAt", c.getTerminationCompletedAt(),"agreedEndExclusive",c.getAgreedEarlyEndExclusive()));
+        out.put("workflows",workflowRecords==null?List.of():workflowRecords.findByRentalRequestId(c.getRentalRequestId()).stream().limit(3).map(w->{
+            var proposal=map(w.getPayloadJson());if(proposal==null)proposal=new LinkedHashMap<>();else proposal=new LinkedHashMap<>(proposal);proposal.remove("evidenceIds");proposal.remove("expectedRevision");
+            return obj("kind",w.getKind(),"status",w.getStatus(),"revision",w.getRevision(),"proposal",proposal,"respondBy",w.getRespondBy(),"ownerConfirmedAt",w.getOwnerConfirmedAt(),"tenantConfirmedAt",w.getTenantConfirmedAt(),"complaintId",w.getComplaintId(),"calculation",map(w.getCalculationJson()),"documents",workflowDocuments==null?List.of():workflowDocuments.findByWorkflowIdOrderByPreparedAtDesc(w.getId()).stream().limit(5).map(d->obj("sourceRevision",d.getSourceRevision(),"signedAt",d.getSignedAt(),"preparedAt",d.getPreparedAt(),"current",d.getContentHash().equals(com.hs.contract.service.WorkflowDocumentService.hash(w)))).toList());
+        }).toList());
+        out.put("workflowGuidance","Chữ ký HĐ thuê không thay biên bản nhận nhà. Sau khiếu nại cần hai bên đồng ý tiếp tục. Văn bản riêng dùng lượt ký riêng; không tự xác nhận tiền. Quyết toán hoàn tất theo closure/receipt, không suy ra từ RETURNED.");
         ContractClosure close = closures.findById(c.getId()).orElse(null);
         out.put("closure", close == null ? null : closureView(close));
         return out;
@@ -412,7 +419,7 @@ public class AiContractQueryService {
             tenant = userId.equals(row.tenantId()) && row.status() != ContractStatus.DRAFT;
             primaryRole = landlord ? "LANDLORD" : "TENANT";
             lease = row.moveInDate() == null || (row.effectiveLeaseMonths() == null && row.requestedLeaseMonths() == null) ? null
-                    : new Lease(row.moveInDate(), ContractLeaseCalc.end(row.moveInDate(),
+                    : new Lease(row.moveInDate(), row.agreedEarlyEndExclusive()!=null?row.agreedEarlyEndExclusive():ContractLeaseCalc.end(row.moveInDate(),
                     ContractLeaseCalc.months(row.effectiveLeaseMonths(), row.requestedLeaseMonths())),
                     ContractLeaseCalc.months(row.effectiveLeaseMonths(), row.requestedLeaseMonths()));
             phase = AiContractQueryService.this.phase(row.status(), lease, today);
@@ -444,7 +451,7 @@ public class AiContractQueryService {
         if (rental == null || rental.getMoveInDate() == null) return null;
         if (c.getEffectiveLeaseMonths() == null && rental.getLeaseMonths() == null) return null;
         int months = ContractLeaseCalc.months(c, rental);
-        return new Lease(rental.getMoveInDate(), ContractLeaseCalc.end(rental.getMoveInDate(), months), months);
+        return new Lease(rental.getMoveInDate(),c.getAgreedEarlyEndExclusive()!=null?c.getAgreedEarlyEndExclusive():ContractLeaseCalc.end(rental.getMoveInDate(), months), months);
     }
 
     private Map<String, Object> leaseView(Lease l, LocalDate today) {
@@ -559,11 +566,13 @@ public class AiContractQueryService {
     }
 
     private static boolean terminationActive(Contract c) {
-        return c.getTerminationProposedAt() != null && c.getTerminationCancelledAt() == null
+        return c.getMutualTerminationWorkflowId()!=null || c.getTerminationProposedAt() != null && c.getTerminationCancelledAt() == null
                 && c.getTerminationDeclinedAt() == null && c.getTerminationCompletedAt() == null;
     }
 
     private static String terminationState(Contract c) {
+        if(c.getAgreedEarlyEndExclusive()!=null)return c.getStatus()==ContractStatus.CLOSED?"COMPLETED":"AGREED";
+        if(c.getMutualTerminationWorkflowId()!=null)return "PROPOSED";
         if (c.getTerminationCompletedAt() != null) return "COMPLETED";
         if (c.getTerminationForcedAt() != null) return "FORCED";
         if (c.getTerminationCancelledAt() != null) return "CANCELLED";

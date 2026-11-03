@@ -383,4 +383,12 @@ class AiContractQueryServiceTest {
         assertEquals("pl1", map(terms.get("applicableDocument")).get("amendmentId"));
         assertTrue(((List<?>) terms.get("warnings")).contains("PAST_VIEW_RECONSTRUCTED_FROM_SIGNED_SNAPSHOTS"));
     }
+
+    @Test void agreedEarlyEndIsTheAuthoritativeReadOnlyLeaseBoundary(){root.setAgreedEarlyEndExclusive(LocalDate.of(2026,12,20));var detail=service.detail(TENANT,ROOT);assertEquals("2026-12-20",map(detail.get("lease")).get("endExclusive"));assertEquals("AGREED",map(service.lifecycle(TENANT,ROOT).get("termination")).get("state"));verify(contracts,never()).save(any());}
+    @Test void workflowProjectionIsScopedAndOmitsPrivateEvidenceStorageIds(){
+        var workflows=mock(RentalWorkflowRecordRepository.class);var docs=mock(WorkflowSigningDocumentRepository.class);org.springframework.test.util.ReflectionTestUtils.setField(service,"workflowRecords",workflows);org.springframework.test.util.ReflectionTestUtils.setField(service,"workflowDocuments",docs);
+        var w=new RentalWorkflowRecord();w.setId("rental:MOVE_IN");w.setRentalRequestId("rental");w.setKind("MOVE_IN");w.setStatus("PROPOSED");w.setPayloadJson("{\"keys\":2,\"evidenceIds\":[\"private-file\"],\"expectedRevision\":3}");when(workflows.findByRentalRequestId("rental")).thenReturn(List.of(w));when(docs.findByWorkflowIdOrderByPreparedAtDesc(w.getId())).thenReturn(List.of());
+        var result=service.lifecycle(TENANT,ROOT);assertEquals(1,list(result.get("workflows")).size());assertFalse(result.toString().contains("private-file"));assertEquals(2,map(list(result.get("workflows")).getFirst().get("proposal")).get("keys"));verify(workflows,never()).save(any());
+        assertThrows(AppException.class,()->service.lifecycle(STRANGER,ROOT));verify(workflows,times(1)).findByRentalRequestId("rental");
+    }
 }

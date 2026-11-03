@@ -35,4 +35,6 @@ public class ContractClosure {
     private Instant closedAt;
     @Column(length=36) private String refundPaymentId;
     @Column(length=36) private String balancePaymentId;
+    @Column(length=36) private String complaintCaseId;
+    private Instant complaintOwnerApprovedAt;
 }

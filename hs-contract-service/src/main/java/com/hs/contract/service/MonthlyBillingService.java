@@ -771,6 +771,7 @@ public class MonthlyBillingService {
         LocalDate start = rental.getMoveInDate();
         for (int index = 0; index < leaseMonths(contract, rental); index++) {
             LocalDate end = start.plusMonths(index + 1);
+            if(contract.getAgreedEarlyEndExclusive()!=null&&end.isAfter(contract.getAgreedEarlyEndExclusive()))end=contract.getAgreedEarlyEndExclusive();
             if (end.minusDays(1).isAfter(time.today())) break;
             int period = index;
             if (invoices.findByContractIdAndPeriodIndex(contractId, period).isEmpty()) {
@@ -1121,7 +1122,7 @@ public class MonthlyBillingService {
             throw new AppException(ContractErrorCode.INVOICE_METER_INVALID);
     }
 
-    private Integer leaseMonths(Contract c, RentalRequest r) { return c.getEffectiveLeaseMonths()==null?r.getLeaseMonths():c.getEffectiveLeaseMonths(); }
+    private Integer leaseMonths(Contract c, RentalRequest r) { return c.getAgreedEarlyBillingMonths()!=null?c.getAgreedEarlyBillingMonths():c.getEffectiveLeaseMonths()==null?r.getLeaseMonths():c.getEffectiveLeaseMonths(); }
     private boolean billable(Contract c) { return c!=null && !com.hs.contract.deposit.DepositAgreementService.isDeposit(c) && c.getParentContractId()==null
             && (c.getStatus()==ContractStatus.ACTIVE || c.getStatus()==ContractStatus.EXPIRED); }
 
@@ -1225,7 +1226,7 @@ public class MonthlyBillingService {
     }
 
     private boolean activeTerminationProposal(Contract contract) {
-        return contract.getTerminationProposedAt() != null && contract.getTerminationDeclinedAt() == null
+        return contract.getMutualTerminationWorkflowId()!=null || contract.getTerminationProposedAt() != null && contract.getTerminationDeclinedAt() == null
                 && contract.getTerminationCancelledAt() == null && contract.getTerminationCompletedAt() == null;
     }
 

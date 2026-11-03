@@ -18,14 +18,14 @@ import java.util.List;
 public class DepositAgreementController {
     private final DepositAgreementService deposits;
     private final ContractServiceImpl contracts;
-    public record View(boolean required,boolean signingAllowed,String blockedReason,ContractResponse agreement,List<ContractDocumentResponse> documents) {}
+    public record View(boolean required,boolean signingAllowed,String blockedReason,ContractResponse agreement,List<ContractDocumentResponse> documents,String leaseContractId,String obligation) {}
     private String actor(){var c=UserContextHolder.get();if(c==null||c.userId()==null)throw new AppException(ErrorCode.UNAUTHENTICATED);return c.userId();}
     private View read(String rentalId,String actor) {
         var overview=deposits.overview(rentalId,actor);
         String contractId=overview.signingContractId();
         return new View(overview.required(),overview.signingAllowed(),overview.blockedReason(),
             contractId==null?null:contracts.getContract(contractId),
-            contractId==null?List.of():contracts.getDocumentsByContract(contractId));
+            contractId==null?List.of():contracts.getDocumentsByContract(contractId),overview.leaseContractId(),overview.obligation());
     }
     @GetMapping public ApiResponse<View> view(@PathVariable String rentalId) {
         return ApiResponse.<View>builder().result(read(rentalId,actor())).build();

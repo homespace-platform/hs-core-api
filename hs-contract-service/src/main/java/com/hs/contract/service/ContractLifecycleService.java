@@ -36,6 +36,10 @@ import org.springframework.beans.factory.annotation.Value;
 /** Root lock serializes renewal signatures, expiration, settlement and creation of transfer obligations. */
 @Service @RequiredArgsConstructor @Slf4j
 public class ContractLifecycleService {
+    @org.springframework.beans.factory.annotation.Autowired private DisputeCaseRepository complaintCases;
+    @org.springframework.beans.factory.annotation.Autowired private org.springframework.context.ApplicationEventPublisher complaintEvents;
+    @org.springframework.beans.factory.annotation.Autowired(required=false) private RentalWorkflowRecordRepository workflows;
+    @org.springframework.beans.factory.annotation.Autowired(required=false) private WorkflowDocumentService workflowDocuments;
     @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
     @org.springframework.beans.factory.annotation.Autowired private com.hs.payment.service.DepositLedgerService depositLedger;
     @org.springframework.beans.factory.annotation.Autowired
@@ -118,6 +122,7 @@ public class ContractLifecycleService {
 
     /** Called only by verified SmartCA embedding, not a public 'mark signed' endpoint. */
     @Transactional public void applyRenewalAfterSignatures(Contract agreement) {
+        if(WorkflowDocumentService.applies(agreement)){if(workflowDocuments==null)throw notAllowed();workflowDocuments.bothSigned(agreement);return;}
         if ("AMENDMENT".equals(agreement.getAgreementKind())) { amendments.signed(agreement); return; }
         Contract parent=contracts.findByIdForUpdate(agreement.getParentContractId()).orElseThrow(this::notAllowed);
         entityManager.refresh(parent,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
@@ -139,6 +144,7 @@ public class ContractLifecycleService {
     }
     public void validateAgreementSigning(Contract agreement) {
         if(agreement.getParentContractId()==null) return;
+        if(WorkflowDocumentService.applies(agreement)){if(workflowDocuments==null)throw notAllowed();workflowDocuments.validateSigning(agreement);return;}
         if ("AMENDMENT".equals(agreement.getAgreementKind())) { amendments.validateSigning(agreement); return; }
         ContractRenewal r=renewals.findByAgreementContractId(agreement.getId()).orElseThrow(this::notAllowed);
         Contract parent=contracts.findById(agreement.getParentContractId()).orElseThrow(this::notAllowed);
@@ -148,6 +154,13 @@ public class ContractLifecycleService {
 
     @Transactional public ContractLifecycleResponse proposeClosure(String id,String actor,ClosurePayload p) {
         Contract c=root(id,actor); owner(c,actor); syncLocked(c);
+        if(activeSettlementCase(c).isPresent())throw new AppException(ContractErrorCode.COMPLAINT_NOT_ALLOWED,"Hãy xử lý khiếu nại quyết toán trước khi gửi đề xuất khác.");
+        return proposeClosureLocked(c,actor,p,null);
+    }
+    private ContractLifecycleResponse proposeClosureLocked(Contract c,String actor,ClosurePayload p,String caseId) {
+        String id=c.getId();
+        if(c.getAgreedEarlyEndExclusive()!=null && (workflows==null||workflows.findById(c.getRentalRequestId()+":EARLY_EXIT").filter(w->"RETURNED".equals(w.getStatus())&&w.getOwnerConfirmedAt()!=null&&w.getTenantConfirmedAt()!=null).isEmpty()))
+            throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Hai bên cần xác nhận trả nhà theo thỏa thuận chấm dứt trước khi quyết toán cọc.");
         if(c.getStatus()!=ContractStatus.EXPIRED || p==null || !p.vacantPossessionConfirmed()
                 || p.note()==null || p.note().trim().length()<10 || p.note().length()>2000 || !moneyValid(p.otherDeduction())) throw notAllowed();
         ContractClosure close=closures.findById(id).orElse(ContractClosure.builder().contractId(id).status("WAITING_HANDOVER").build());
@@ -169,16 +182,49 @@ public class ContractLifecycleService {
         close.setRefundAmount(deposit.getHeldAmount().subtract(deducted).max(ZERO));
         close.setBalanceAmount(deducted.subtract(deposit.getHeldAmount()).max(ZERO));
         close.setNote(p.note().trim()); close.setProposedAt(time.now()); close.setProposalVersion(close.getProposalVersion()+1); close.setStatus("PROPOSED");
+        close.setComplaintCaseId(caseId);close.setComplaintOwnerApprovedAt(null);
         responseDeadline(close);
         appendClosureEvent(close,"PROPOSED",actor,close.getNote(),List.of());
         closures.save(close); deposit.setStatus(DepositStatus.SETTLEMENT_PENDING); deposits.save(deposit);
         return response(c,actor);
+    }
+    /** Admin creates only a revised proposal. Both parties must consent before any obligation is created. */
+    @Transactional public ContractLifecycleResponse proposeComplaintSettlement(String id,String caseId,String actor,ClosurePayload p) {
+        var auth=org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        var context=com.hs.common.context.UserContextHolder.get();
+        if(auth==null||!auth.isAuthenticated()||context==null||!actor.equals(context.userId())
+                ||auth.getAuthorities().stream().noneMatch(a->"ADMIN".equals(a.getAuthority())))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        var c=contracts.findByIdForUpdate(id).orElseThrow(this::notAllowed);entityManager.refresh(c);
+        var dispute=activeSettlementCase(c).filter(d->caseId.equals(d.getId())&&actor.equals(d.getAssignedTo())
+            &&d.getStatus()==com.hs.payment.model.constant.DisputeCaseStatus.ESCALATED&&"UNDER_REVIEW".equals(d.getComplaintStage())).orElseThrow(this::notAllowed);
+        var close=closures.findById(id).orElseThrow(this::notAllowed);
+        entityManager.refresh(close,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        if(actor.equals(c.getLandlordId())||actor.equals(c.getTenantId())||p==null||p.expectedProposalVersion()==null
+                ||dispute.getSourceVersion()==null||dispute.getSourceVersion()!=close.getProposalVersion()
+                ||p.expectedProposalVersion()!=close.getProposalVersion()||close.getAcceptedAt()!=null)throw new AppException(ContractErrorCode.COMPLAINT_STALE);
+        syncLocked(c);return proposeClosureLocked(c,actor,p,caseId);
+    }
+    @Transactional public void approveComplaintSettlement(String id,String caseId,int version,String actor) {
+        var c=root(id,actor);owner(c,actor);
+        var dispute=activeSettlementCase(c).filter(d->caseId.equals(d.getId())&&"FOLLOW_UP".equals(d.getComplaintStage())
+            &&"REVISE_SETTLEMENT".equals(d.getComplaintOutcome())).orElseThrow(this::notAllowed);
+        var close=closures.findById(id).orElseThrow(this::notAllowed);
+        if(!caseId.equals(close.getComplaintCaseId())||close.getProposalVersion()!=version||!"PROPOSED".equals(close.getStatus())
+            ||dispute.getSourceVersion()==null||dispute.getSourceVersion()!=version||close.getComplaintOwnerApprovedAt()!=null)throw notAllowed();
+        close.setComplaintOwnerApprovedAt(time.now());appendClosureEvent(close,"OWNER_APPROVED",actor,"Chủ nhà đồng ý phiên bản đề xuất từ hồ sơ khiếu nại.",List.of());closures.saveAndFlush(close);
     }
     @Transactional public ContractLifecycleResponse acceptClosure(String id,String actor,AcceptClosurePayload p) {
         Contract c=root(id,actor); tenant(c,actor); syncLocked(c);
         ContractClosure close=closures.findById(id).orElseThrow(this::notAllowed);
         if(p==null || !p.handoverConfirmed() || !p.deductionsAccepted() || p.proposalVersion()!=close.getProposalVersion()) throw invalid();
         if(!"PROPOSED".equals(close.getStatus()) || c.getStatus()!=ContractStatus.EXPIRED) throw notAllowed();
+        if(close.getComplaintCaseId()!=null&&close.getComplaintOwnerApprovedAt()==null)
+            throw new AppException(ContractErrorCode.COMPLAINT_NOT_ALLOWED,"Đề xuất admin chưa có đồng ý của chủ nhà. Đóng khiếu nại không thay thế sự đồng ý với số tiền.");
+        var complaint=activeSettlementCase(c);
+        if(complaint.isPresent()&&!("FOLLOW_UP".equals(complaint.get().getComplaintStage())
+                &&"REVISE_SETTLEMENT".equals(complaint.get().getComplaintOutcome())&&complaint.get().getId().equals(close.getComplaintCaseId())
+                &&close.getComplaintOwnerApprovedAt()!=null&&Objects.equals(complaint.get().getSourceVersion(),(long)close.getProposalVersion())))
+            throw new AppException(ContractErrorCode.COMPLAINT_NOT_ALLOWED,"Khiếu nại quyết toán chưa xong hoặc chủ nhà chưa đồng ý phiên bản admin đề xuất.");
         requirePaidBills(c);
         if(close.getUtilityAdjustment()!=null && close.getUtilityAdjustment().signum()!=0)
             throw new AppException(ContractErrorCode.LIFECYCLE_INVALID,"Đề xuất cũ có điện/nước trừ vào cọc; cần đối soát và lập lại sau khi thanh toán hóa đơn.");
@@ -228,9 +274,10 @@ public class ContractLifecycleService {
             || p.reason()==null || p.reason().trim().length()<10 || p.reason().length()>2000) throw invalid();
         List<String> evidence=validateEvidence(c,actor,p.evidenceIds());
         preserveLegacyProposal(close);
-        close.setStatus("DISPUTED"); responseDeadline(close);
+        close.setStatus("DISPUTED");close.setComplaintOwnerApprovedAt(null);responseDeadline(close);
         appendClosureEvent(close,"DISPUTED",actor,p.reason().trim(),evidence);
         closures.save(close); DepositRecord d=deposit(c); d.setStatus(DepositStatus.DISPUTED); deposits.save(d);
+        if(complaintEvents!=null)complaintEvents.publishEvent(new com.hs.contract.event.ClosureDisputed(id,actor,p.reason().trim()));
         return response(c,actor);
     }
 
@@ -369,9 +416,11 @@ public class ContractLifecycleService {
         return new ContractLifecycleResponse(time.now(),end(c),opens(c),signBy(c),actor.equals(c.getTenantId())&&canRequest(c),
                 history,close,deposit==null?null:deposit.getHeldAmount(),
                 actor.equals(c.getLandlordId())&&c.getStatus()==ContractStatus.EXPIRED
+                    && earlyReturnConfirmed(c)
+                    && activeSettlementCase(c).isEmpty()
                     && deposit!=null && Set.of(DepositStatus.HELD,DepositStatus.SETTLEMENT_PENDING,DepositStatus.DISPUTED).contains(deposit.getStatus())
                     && allBillsPaid(c) && (close==null || Set.of("WAITING_HANDOVER","PROPOSED","DISPUTED").contains(close.getStatus())),
-                close==null?null:paymentView(close.getRefundPaymentId(),actor),close==null?null:paymentView(close.getBalancePaymentId(),actor),billingView(c,actor,close),depositLedger.forRental(c.getRentalRequestId()));
+                close==null?null:paymentView(close.getRefundPaymentId(),actor),close==null?null:paymentView(close.getBalancePaymentId(),actor),billingView(c,actor,close),depositLedger.forRental(c.getRentalRequestId()),c.getRentalRequestId());
     }
     private com.hs.payment.dto.PaymentRequestResponse paymentView(String id,String actor) {
         return id==null?null:payments.toResponse(paymentRepository.findById(id).orElseThrow(this::notAllowed),actor);
@@ -389,10 +438,14 @@ public class ContractLifecycleService {
                 && b.getRolledToInvoiceId()!=null && list.stream().anyMatch(next->b.getRolledToInvoiceId().equals(next.getId()) && next.getPeriodIndex()>b.getPeriodIndex()));
     }
     private void requirePaidBills(Contract c) {
+        if(!earlyReturnConfirmed(c))throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Cần hai bên xác nhận trả nhà và xử lý khiếu nại chấm dứt trước khi chốt cọc.");
+        if(c.getAgreedEarlyEndExclusive()!=null&&paymentRepository.findAllByContractIdAndType(c.getId(),PaymentType.INITIAL_PAYMENT_REFUND).stream().anyMatch(p->p.getStatus()!=PaymentStatus.CONFIRMED))
+            throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Cần hoàn và xác nhận đủ tiền thuê trả trước theo thỏa thuận trước khi chốt cọc.");
         if(paymentRepository.findAllByContractIdAndType(c.getId(),PaymentType.DEPOSIT_ADJUSTMENT).stream().anyMatch(p->p.getStatus()!=PaymentStatus.CONFIRMED))
             throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Phải đối soát xong khoản chênh lệch cọc trước khi quyết toán/hoàn cọc.");
         if(!allBillsPaid(c)) throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Phải thanh toán và chủ nhà xác nhận tất cả hóa đơn kỳ cuối/bổ sung trước khi quyết toán cọc.");
     }
+    private boolean earlyReturnConfirmed(Contract c){return c.getAgreedEarlyEndExclusive()==null||workflows!=null&&workflows.findById(c.getRentalRequestId()+":EARLY_EXIT").filter(w->"RETURNED".equals(w.getStatus())&&w.getOwnerConfirmedAt()!=null&&w.getTenantConfirmedAt()!=null).isPresent()&&(complaintCases==null||complaintCases.findByActiveKey("RENTAL:"+c.getRentalRequestId()+":TERMINATION").isEmpty());}
     private MonthlyInvoice lastCostsBill(Contract c) {
         MonthlyInvoice original=invoices.findByContractIdAndPeriodIndex(c.getId(),months(c)-1).orElseThrow(this::notAllowed);
         return invoices.findByContractIdOrderByPeriodIndexDesc(c.getId()).stream()
@@ -418,22 +471,27 @@ public class ContractLifecycleService {
     private boolean canRequest(Contract c) {
         return c.getStatus()==ContractStatus.ACTIVE && !time.now().isBefore(opens(c)) && time.now().isBefore(signBy(c))
                 && (amendments == null || !amendments.hasPending(c))
+                && c.getMutualTerminationWorkflowId()==null
                 && (c.getTerminationProposedAt()==null || c.getTerminationCancelledAt()!=null || c.getTerminationDeclinedAt()!=null)
                 && renewals.findByContractIdOrderByRequestedAtDesc(c.getId()).stream().noneMatch(r->end(c).equals(r.getStartsOn())
                     && !Set.of("REJECTED","EXPIRED").contains(r.getStatus()));
     }
     @Transactional public void cancelPendingRenewalsForClosedParent(Contract c) { syncLocked(c); }
-    private boolean terminationActive(Contract c) { return c.getTerminationProposedAt()!=null && c.getTerminationCancelledAt()==null && c.getTerminationDeclinedAt()==null && c.getTerminationCompletedAt()==null; }
-    private LocalDate end(Contract c) { return ContractLeaseCalc.end(rental(c).getMoveInDate(), months(c)); }
+    private boolean terminationActive(Contract c) { return c.getMutualTerminationWorkflowId()!=null || c.getTerminationProposedAt()!=null && c.getTerminationCancelledAt()==null && c.getTerminationDeclinedAt()==null && c.getTerminationCompletedAt()==null; }
+    private LocalDate end(Contract c) { return c.getAgreedEarlyEndExclusive()!=null?c.getAgreedEarlyEndExclusive():ContractLeaseCalc.end(rental(c).getMoveInDate(), months(c)); }
     private Instant opens(Contract c) { return ContractLeaseCalc.renewalOpens(end(c)); }
     private Instant signBy(Contract c) { return ContractLeaseCalc.renewalSignBy(end(c)); }
-    private int months(Contract c) { return ContractLeaseCalc.months(c, rental(c)); }
+    private int months(Contract c) { return c.getAgreedEarlyBillingMonths()!=null?c.getAgreedEarlyBillingMonths():ContractLeaseCalc.months(c, rental(c)); }
     private RentalRequest rental(Contract c) { return rentals.findById(c.getRentalRequestId()).orElseThrow(this::notAllowed); }
     private ContractRevision revision(Contract c) { return terms == null ? revisions.findById(c.getCurrentRevisionId()).orElseThrow(this::notAllowed) : terms.at(c,time.today()); }
     private DepositRecord deposit(Contract c) {
         var d=deposits.findByRentalRequestIdForUpdate(c.getRentalRequestId()).orElseThrow(this::notAllowed);
         entityManager.refresh(d);return d;
     }
+    public static String settlementComplaintKey(String rentalId){return "RENTAL:"+rentalId+":DEPOSIT_SETTLEMENT";}
+    private Optional<DisputeCase> activeSettlementCase(Contract c){return complaintCases==null?Optional.empty():complaintCases.findByActiveKey(settlementComplaintKey(c.getRentalRequestId()));}
+    /** Internal caller already holds the root lock and has checked access to its complaint. */
+    void syncComplaintSource(Contract c){syncLocked(c);}
     private Contract root(String id,String actor) {
         Contract c=contracts.findByIdForUpdate(id).orElseThrow(this::notAllowed);
         entityManager.refresh(c,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);

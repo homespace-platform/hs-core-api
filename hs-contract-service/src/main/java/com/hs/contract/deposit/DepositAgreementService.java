@@ -40,6 +40,7 @@ public class DepositAgreementService {
     private final ContractFieldCatalog catalog;
     private final ObjectMapper mapper;
     private final BillingTime time;
+    @org.springframework.beans.factory.annotation.Autowired(required=false) private RentalWorkflowRecordRepository workflowRecords;
     @Value("${rental.deposit-signing-hours:48}") private long signingHours=48;
     @Value("${homespace.payment.contract-due-hours:48}") private long leaseSigningHours=48;
     private static final TypeReference<Map<String,Object>> MAP=new TypeReference<>(){};
@@ -59,21 +60,28 @@ public class DepositAgreementService {
         return agreements.findByRentalRequestId(rentalId).flatMap(d->contracts.findById(d.getSigningContractId()));
     }
     /** Resolve lazy associations in this transaction; only scalar values may leave the service. */
-    public record Overview(boolean required, boolean signingAllowed, String blockedReason, String signingContractId) {}
+    public record Overview(boolean required, boolean signingAllowed, String blockedReason, String signingContractId,String leaseContractId,String obligation) {
+        public Overview(boolean required,boolean allowed,String reason,String signingId){this(required,allowed,reason,signingId,null,null);}
+    }
 
     @Transactional(readOnly=true)
     public Overview overview(String rentalId, String actor) {
         var rental=participant(rentalId,actor);
         var found=find(rentalId);
         boolean eligible=rental.getStatus()==RentalRequestStatus.ACCEPTED
-            && rental.getCancellationRequestedAt()==null && rental.getListing()!=null
+            && rental.getResolutionWorkflowId()==null && rental.getCancellationRequestedAt()==null && rental.getListing()!=null
             && rental.getListing().getStatus()==ListingStatus.RESERVED;
         boolean expired=found.filter(c->c.getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING
             && c.getTenantSigningDueAt()!=null && !time.now().isBefore(c.getTenantSigningDueAt())).isPresent();
         String blocked=!eligible?"Hồ sơ đã chuyển bước hoặc đang chờ hủy/đối soát. Tài liệu đã ký vẫn được giữ để tra cứu."
             :expired?"Hết hạn ký cọc; chủ nhà cần mở lại hạn ký. Tiền đã xác nhận không bị đảo.":null;
+        var lease=contracts.findByRentalRequestId(rentalId).orElse(null);
+        var ledger=ledgers.findByRentalRequestId(rentalId).orElse(null);
+        String obligation=ledger!=null&&Set.of(DepositStatus.REFUND_DUE,DepositStatus.REFUNDED,DepositStatus.RETAINED_BY_LANDLORD,DepositStatus.DISPUTED).contains(ledger.getStatus())?ledger.getStatus().name()
+            :lease!=null&&lease.getSignedAt()!=null?(workflowRecords!=null&&workflowRecords.findById(rentalId+":MOVE_IN").filter(w->"COMPLETED".equals(w.getStatus())).isPresent()?"TRANSFERRED_TO_LEASE":"HANDOVER_PENDING")
+            :rental.getStatus()==RentalRequestStatus.ACCEPTED?"RESERVATION_PENDING":"ENDED";
         return new Overview(rental.getDepositAmount()!=null && rental.getDepositAmount().signum()>0,
-            eligible&&!expired,blocked,found.map(Contract::getId).orElse(null));
+            eligible&&!expired,blocked,found.map(Contract::getId).orElse(null),lease==null?null:lease.getId(),obligation);
     }
     /** Zero-deposit exemption; no synthetic receipt or deposit signing document. */
     @Transactional(readOnly=true)
@@ -168,7 +176,7 @@ public class DepositAgreementService {
     @Transactional
     public void validateSigning(Contract c) {
         var r=rentals.findByIdForUpdate(c.getRentalRequestId()).orElseThrow();
-        if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getCancellationRequestedAt()!=null || r.getListing().getStatus()!=ListingStatus.RESERVED)throw invalid("Hồ sơ không còn cho phép ký cọc.");
+        if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getResolutionWorkflowId()!=null || r.getCancellationRequestedAt()!=null || r.getListing().getStatus()!=ListingStatus.RESERVED)throw invalid("Hồ sơ không còn cho phép ký cọc.");
         var d=agreements.findBySigningContractId(c.getId()).orElseThrow();
         var p=payments.findById(d.getSourcePaymentId()).orElseThrow();
         var ledger=ledgers.findByRentalRequestId(r.getId()).orElseThrow();

@@ -1,6 +1,12 @@
 # Checklist hoàn thiện vòng đời hợp đồng HomeSpace
 
-Ngày lập: **03/11/2026**. Trạng thái: **giai đoạn 01–02 đã được duyệt tiếp; giai đoạn 03 đã triển khai và đạt regression, chờ chủ dự án nghiệm thu; giai đoạn 04–09 chưa bắt đầu**.
+Ngày lập: **03/11/2026**. Trạng thái: **giai đoạn 01–04 và 06–08 đã triển khai; R01–R03 đã khắc phục, bổ sung PDF/ký riêng, tính theo ngày và bộ kiểm thử. Thông báo bỏ qua; nghiệm thu SmartCA thật chờ sandbox theo người dùng. Kết quả và giới hạn xem báo cáo hoàn thiện.**
+
+Hậu kiểm và kết quả khắc phục: [R01–R03 và giới hạn kiểm thử](D:/Workspace/homespace/hs-core-api/docs/CONTRACT_LIFECYCLE_PHASE_06_08_REVIEW_GAPS.md).
+
+Bàn giao ba hạng mục mới: [Cọc chưa ký, nhận nhà và chấm dứt sớm](D:/Workspace/homespace/hs-core-api/docs/CONTRACT_LIFECYCLE_PHASE_06_08_REPORT.md).
+
+Bàn giao giai đoạn 04: [Khiếu nại hai bên và HomeSpace](D:/Workspace/homespace/hs-core-api/docs/CONTRACT_LIFECYCLE_PHASE_04_REPORT.md).
 
 Bàn giao giai đoạn 03: [Sổ cọc và gửi lại đề nghị gia hạn](D:/Workspace/homespace/hs-core-api/docs/CONTRACT_LIFECYCLE_PHASE_03_REPORT.md).
 
@@ -14,6 +20,8 @@ Căn cứ: [Review vòng đời hợp đồng ngày 02/11/2026](D:/Workspace/hom
 
 Mục tiêu: hoàn thiện cả luồng thuận lợi và luồng phát sinh từ yêu cầu thuê, ký HĐ cọc, ký HĐ thuê đến bàn giao, thanh toán, khiếu nại và kết thúc nghĩa vụ. Mỗi giai đoạn phải có API, giao diện cần thiết và kiểm thử; không đánh dấu hoàn thành chỉ vì đã thêm endpoint.
 
+Bàn giao lượt hoàn thiện: [Báo cáo](CONTRACT_LIFECYCLE_GAPS_COMPLETION_REPORT.md), [Hướng dẫn vận hành / kiểm thử lại](RENTAL_WORKFLOWS_OPERATIONS.md), [Ma trận T01–T40](CONTRACT_LIFECYCLE_ACCEPTANCE_MATRIX.md).
+
 ## Thứ tự thực hiện
 
 | Thứ tự | Hạng mục | Ưu tiên | Phụ thuộc chính | Kết quả phải bàn giao |
@@ -23,13 +31,13 @@ Mục tiêu: hoàn thiện cả luồng thuận lợi và luồng phát sinh t�
 | 02 | Mở đường giải quyết `DISPUTED` — F02; nền tảng khiếu nại | P1 | 00, 01 | Khoản tranh chấp có thể tiếp tục xử lý bằng API/UI đúng quyền |
 | 03 | Hoàn thiện sổ cọc và gửi lại gia hạn — F03, F04 | P2 | 00, 01; sổ cọc đối chiếu với 02 | Số tiền đầy đủ; gia hạn không bị khóa bởi đề nghị cũ |
 | 04 | Hoàn thiện khiếu nại người thuê → chủ nhà → admin — G01 | P1 | 02, 03 | Hồ sơ vụ việc, chứng cứ, chuyển cấp và quyết định có lịch sử |
-| 05 | Gửi thông báo thật, nhắc hạn và cảnh báo hồ sơ kẹt — G02 | P2 | Sự kiện của 02, 04 | Thông báo có gửi, retry và chống trùng |
-| 06 | Xử lý cọc đã nhận nhưng không hoàn tất ký/nhận nhà | P1 | 01–05 | Có lối kết thúc an toàn, không giữ phòng vô thời hạn |
+| 05 | Thông báo/nhắc hạn — **bỏ qua theo yêu cầu chủ dự án** | Hoãn | Không phải phụ thuộc của 06–08 | Không triển khai trong lượt này |
+| 06 | Xử lý cọc đã nhận nhưng không hoàn tất ký/nhận nhà | P1 | 01–04; bỏ phụ thuộc 05 theo yêu cầu | Có lối kết thúc an toàn, không giữ phòng vô thời hạn |
 | 07 | Biên bản nhận nhà và trạng thái nghĩa vụ HĐ cọc — G04 | P2 | 01, 03–06 | Bằng chứng bàn giao; phân biệt đã ký và đã nhận nhà |
 | 08 | Chấm dứt sớm theo thỏa thuận, không cần có nợ — G03 | P2 | 02–07 | Kết thúc thuê, bàn giao và quyết toán đúng thỏa thuận |
 | 09 | Nghiệm thu toàn luồng trên DB riêng và giao diện | Bắt buộc | 01–08 | Báo cáo test, các luồng không còn điểm kẹt đã biết |
 
-**Cách làm theo yêu cầu chủ dự án:** chỉ triển khai một giai đoạn trong mỗi lượt được duyệt. Hoàn thành phần đã được giao, chạy regression liên quan, báo cáo thay đổi/kết quả/giới hạn rồi **dừng lại chờ đồng ý** trước khi bắt đầu giai đoạn tiếp theo. Không tự triển khai hoặc chuẩn bị thay đổi code của các giai đoạn sau. Kiểm thử từng phần bắt đầu ngay từ bước 01; bước 09 là nghiệm thu liên module.
+**Phạm vi được duyệt:** các giai đoạn trước triển khai lần lượt. Sau 06–08, chủ dự án yêu cầu hoàn thành các điểm còn thiếu, tiếp tục bỏ qua thông báo và chuẩn bị code/bộ kiểm thử SmartCA để chạy sau khi có sandbox. Lượt hoàn thiện gồm R01–R03, PDF/ký riêng, tính thuê theo ngày, bộ kiểm thử riêng và tài liệu; không triển khai thông báo, không deploy hoặc thay đổi CSDL vận hành.
 
 ## 00 — Chốt quy tắc chung trước khi sửa
 
@@ -106,23 +114,25 @@ Mục tiêu: hoàn thiện cả luồng thuận lợi và luồng phát sinh t�
 
 **Phụ thuộc:** dùng lại nền tảng vụ việc và hành động giải quyết từ bước 02; không tạo thêm một bảng/cơ chế tranh chấp tiền tách biệt.
 
-Giai đoạn 02 đã có trang admin đối soát thanh toán tối thiểu. Các mục dưới vẫn chưa hoàn thành cho khiếu nại tổng quát, SLA và nghĩa vụ ngoài thanh toán.
+Giai đoạn 04 mở rộng trang admin thành hai tab khiếu nại hồ sơ thuê/đối soát chuyển tiền, dùng chung bảng hồ sơ và audit. SLA được chủ dự án chọn: 48 giờ, có cấu hình riêng; quá hạn không tự chấp thuận/xử lý tiền. Thông báo tự động vẫn ở giai đoạn 05.
 
-- [ ] Người thuê/chủ nhà mở được vụ việc gắn hồ sơ đúng quyền: thanh toán/cọc, bàn giao, hiện trạng, sửa chữa, điều khoản hoặc chấm dứt.
-- [ ] Định nghĩa trạng thái và chuyển tiếp rõ: mở → chờ phản hồi → trao đổi/đề xuất giải quyết → chuyển admin → đang xử lý → đã giải quyết/đóng. Rút vụ việc và mở lại phải có điều kiện.
-- [ ] Chủ nhà nhận và phản hồi vụ việc của người thuê; giữ nguyên ý kiến và chứng cứ của cả hai bên.
-- [ ] Có nút chuyển HomeSpace khi không thống nhất hoặc quá SLA. Quy định rõ vụ việc khẩn cấp nào có thể chuyển trực tiếp.
-- [ ] Admin có danh sách lọc theo trạng thái/loại/hạn, nhận phân công, đọc hồ sơ, yêu cầu bổ sung, ghi kết luận và theo dõi hành động phát sinh.
-- [ ] File chứng cứ private, đúng người gửi và hồ sơ; không lộ file giữa các hợp đồng hoặc qua URL công khai.
-- [ ] Quyết định và nghĩa vụ phát sinh được lưu nguyên nhân, người xử lý, phiên bản, thời điểm; không xóa phản hồi cũ.
-- [ ] Có cơ chế rút/đóng/mở lại khiếu nại và ngăn nhiều vụ việc đang mở trùng cùng vấn đề.
-- [ ] Đóng vụ việc không tự xóa nợ, xác nhận hoàn tiền hoặc trả listing nếu các điều kiện đó chưa đạt.
-- [ ] Thay trang trống `ComplaintsPage` bằng giao diện thực tế; bổ sung điểm mở/xem khiếu nại tại yêu cầu thuê, hợp đồng và thanh toán trên web.
-- [ ] Test bên thứ ba, admin không đủ quyền, hết hạn, hai quyết định đồng thời, quyết định cũ, chứng cứ sai hồ sơ và lỗi giữa transaction.
+- [x] Người thuê/chủ nhà mở được vụ việc đúng quyền. Tiền chuyển dùng luồng 02; khấu trừ/quyết toán cọc tự tạo hồ sơ từ phản đối; các nhóm bàn giao/hiện trạng/sửa chữa/điều khoản/chấm dứt có hồ sơ chung.
+- [x] Có tiến trình chờ phản hồi → trao đổi/đề xuất → chuyển admin → tiếp nhận/bổ sung → kết luận/theo dõi → đóng; rút trước chuyển cấp và mở lại có lý do, không hoàn tác tiền.
+- [x] Chủ nhà phản hồi, giữ lịch sử và chứng cứ hai bên; trao đổi cũ không thay thế lượt phản hồi khi mở lại.
+- [x] Chuyển HomeSpace sau khi chưa thống nhất/quá SLA; khai báo khẩn chỉ dành cho an toàn/bàn giao có lý do.
+- [x] Admin lọc trạng thái/nhóm/quá hạn, phân trang, tiếp nhận/chuyển người xử lý, đọc chứng cứ, yêu cầu đúng bên bổ sung, kết luận và theo dõi thực hiện.
+- [x] Chứng cứ PRIVATE/READY, đúng người và yêu cầu thuê, được gắn vào hồ sơ thật mới chia sẻ; giữ bảo vệ xóa kể cả sau đóng.
+- [x] Quyết định, đề xuất tài chính và nghĩa vụ phát sinh có căn cứ, người, phiên bản và thời điểm; giữ phản hồi cũ, nguồn và dấu đồng ý riêng.
+- [x] Có rút/đóng/mở lại và khóa một hồ sơ đang mở cho mỗi nhóm vấn đề trên yêu cầu thuê. Người mở cũ không được rút thay bên mở lại.
+- [x] Đóng vụ việc không tự xóa nợ/nhận tiền/trả listing. Đóng kết luận cũng không vượt sự đồng ý của chủ nhà với đề xuất tiền của admin.
+- [x] Admin có hai tab thực tế; web có điểm vào tại yêu cầu thuê, hợp đồng, hóa đơn/quyết toán và modal thanh toán.
+- [x] Test quyền, SLA, phiên bản cũ, hai quyết định đồng thời, chứng cứ và rollback. Lượt cuối: 670 backend đạt/1 SmartCA bỏ qua, gồm 92 PostgreSQL; 182 web và 18 admin đạt.
 
 **Nghiệm thu:** chạy được một vụ “tenant phản đối khấu trừ cọc → chủ nhà không đồng ý → gửi admin → kết luận → tạo nghĩa vụ hợp lệ → xác nhận thực nhận”. Cả ba bên nhìn thấy tiến trình phù hợp quyền của mình.
 
-## 05 — Thông báo và nhắc hạn thật
+## 05 — Thông báo và nhắc hạn thật — BỎ QUA
+
+Chủ dự án chưa muốn triển khai. Các ô dưới giữ nguyên để theo dõi backlog; không tính là việc phải làm của lượt 06–08. Không có outbox, worker, gửi thông báo hoặc giả định đã giao thông báo.
 
 - [ ] Liệt kê sự kiện cần gửi: duyệt/từ chối yêu cầu, xác nhận tiền, văn bản sẵn sàng, lượt ký, sắp/quá hạn, khiếu nại, quyết định, nghĩa vụ hoàn và bàn giao.
 - [ ] Ghi sự kiện/outbox cùng transaction thay đổi nghiệp vụ; tái sử dụng hạ tầng thông báo hiện có.
@@ -137,61 +147,69 @@ Giai đoạn 02 đã có trang admin đối soát thanh toán tối thiểu. Cá
 
 ## 06 — Cọc đã nhận nhưng khách không hoàn tất ký/nhận nhà
 
-- [ ] Phân biệt chưa ký HĐ cọc, HĐ cọc đã ký một bên, provider chưa rõ kết quả, đã ký cọc nhưng chưa trả tháng đầu, và đã trả đủ nhưng chưa ký HĐ thuê.
-- [ ] Dùng đồng hồ nghiệp vụ và hạn tương ứng của từng bước; không tính thời gian chủ nhà chưa chuẩn bị văn bản thành lỗi của khách.
-- [ ] Chủ nhà có thể gửi yêu cầu xử lý kèm lý do/chứng cứ dù khách không chủ động gửi đề nghị hủy.
-- [ ] Gửi thông báo, cho khách phản hồi và mở lại hạn khi phù hợp; tranh chấp/chữ ký chưa rõ phải được đối soát trước quyết định cuối.
-- [ ] Hết hạn xử lý mà không thống nhất có đường chuyển admin. Không vô hiệu hóa các chốt an toàn hiện có chỉ để giải phóng phòng.
-- [ ] Hoàn/khấu trừ dựa trên điều kiện đã thống nhất và kết quả xử lý; khoản thực nhận, tiền thuê đã nhận và tiền cọc được theo dõi riêng.
-- [ ] Kết thúc hồ sơ phải xử lý đúng nghĩa vụ chưa trả, ngày thuê đang đề nghị, xe và lượt giữ phòng hiện tại; nghĩa vụ hoàn còn tồn tại được theo dõi độc lập.
-- [ ] Hiển thị trạng thái nghĩa vụ giữ chỗ của HĐ cọc; giữ PDF/chữ ký và lịch sử kể cả khi không tiếp tục thuê.
-- [ ] Test khách mất liên lạc, chủ nhà không phản hồi, provider trả kết quả muộn, hoàn bị dispute, gửi lặp và listing đã có lượt giữ mới.
+- [x] R01: chuyển căn cứ/chứng cứ của đề nghị trước thuê vào case khiếu nại để admin xem đúng nguồn.
+- [x] R02: có hành động tiếp tục thuê/ký trực tiếp sau khi khiếu nại đã giải quyết, không phải tạo rồi rút đề nghị hủy khác.
+- [x] Phân biệt chưa ký HĐ cọc, HĐ cọc đã ký một bên, provider chưa rõ kết quả, đã ký cọc nhưng chưa trả tháng đầu, và đã trả đủ nhưng chưa ký HĐ thuê.
+- [x] Dùng đồng hồ nghiệp vụ và hạn tương ứng của từng bước; không tính thời gian chủ nhà chưa chuẩn bị văn bản thành lỗi của khách.
+- [x] Chủ nhà có thể gửi yêu cầu xử lý kèm lý do/chứng cứ dù khách không chủ động gửi đề nghị hủy.
+- [x] Ghi đề nghị/hạn phản hồi trên UI, cho khách phản hồi; luồng mở lại ký hiện có được giữ. Chữ ký/chứng từ chưa rõ phải đối soát trước quyết định cuối. Gửi thông báo tự động được bỏ qua ở 05; kết thúc một phía hoàn toàn bộ tiền yêu cầu chủ nhà xác nhận đã liên hệ khách ngoài hệ thống.
+- [x] Hết hạn xử lý mà không thống nhất có đường chuyển admin. Không vô hiệu hóa các chốt an toàn hiện có chỉ để giải phóng phòng.
+- [x] Nhánh mới hoàn toàn bộ cọc và tiền thuê thực nhận, theo dõi riêng từng khoản; không tự khấu trừ khi chưa ký. Nhánh giữ cọc do vi phạm chính sách đã ký hiện có được giữ nguyên, không mở rộng sang HĐ cọc chưa ký.
+- [x] Kết thúc hồ sơ phải xử lý đúng nghĩa vụ chưa trả, ngày thuê đang đề nghị, xe và lượt giữ phòng hiện tại; nghĩa vụ hoàn còn tồn tại được theo dõi độc lập.
+- [x] Hiển thị trạng thái nghĩa vụ giữ chỗ của HĐ cọc; giữ PDF/chữ ký và lịch sử kể cả khi không tiếp tục thuê.
+- [x] Test khách mất liên lạc, chủ nhà không phản hồi, provider trả kết quả muộn, hoàn bị dispute, gửi lặp và listing đã có lượt giữ mới.
 
 **Nghiệm thu:** mọi nhánh cọc đã nhận có người chịu trách nhiệm và đường xử lý tiếp; hệ thống không tự tịch thu tiền hoặc tự xác nhận đã hoàn.
 
 ## 07 — Bàn giao nhận nhà và kết thúc nghĩa vụ giữ chỗ
 
-- [ ] Có biên bản nhận nhà đầu kỳ liên kết HĐ thuê/revision: ngày thực tế, người giao/nhận, chìa khóa, tài sản, tình trạng, ảnh và chỉ số công tơ.
-- [ ] Hai bên được xem, phản hồi và xác nhận đúng bản biên bản; sửa sau khi đã xem/xác nhận phải có phiên bản và lý do.
-- [ ] Người thuê có thể báo không được giao nhà/phòng khác cam kết và mở vụ việc từ biên bản.
-- [ ] Chốt quan hệ giữa ngày hiệu lực đã ký và ngày nhận nhà thực tế; nhận muộn không tự sửa ngày thuê hoặc hóa đơn đã phát hành.
-- [ ] Chỉ số công tơ đã dùng để ký/phát hóa đơn không được ghi đè âm thầm; sai sót đi qua điều chỉnh có lịch sử.
-- [ ] Phân biệt đã ký HĐ thuê, đã nhận nhà và đã hoàn tất giữ chỗ trên UI. Quyền đưa listing trở lại thị trường phải theo bằng chứng bàn giao/quyết định hợp lệ.
-- [ ] HĐ cọc giữ nguyên văn bản, có liên kết HĐ thuê và tình trạng nghĩa vụ đã chuyển tiếp/hoàn tất/đang tranh chấp.
-- [ ] Test một bên xác nhận, sai phiên bản, ảnh sai hợp đồng, nhận thiếu tài sản, nhận nhà trễ, từ chối nhận và không bàn giao thực tế.
+- [x] R01: chuyển đúng phiên bản biên bản và chứng cứ đã gắn sang hồ sơ khiếu nại bàn giao.
+- [x] Có biên bản nhận nhà đầu kỳ liên kết HĐ thuê/revision: ngày thực tế, người giao/nhận, chìa khóa, tài sản, tình trạng, ảnh và chỉ số công tơ.
+- [x] Hai bên được xem, phản hồi và xác nhận đúng bản biên bản; sửa sau khi đã xem/xác nhận phải có phiên bản và lý do.
+- [x] Người thuê có thể báo không được giao nhà/phòng khác cam kết và mở vụ việc từ biên bản.
+- [x] Chốt quan hệ giữa ngày hiệu lực đã ký và ngày nhận nhà thực tế; nhận muộn không tự sửa ngày thuê hoặc hóa đơn đã phát hành.
+- [x] Chỉ số công tơ đã dùng để ký/phát hóa đơn không được ghi đè âm thầm; sai sót đi qua điều chỉnh có lịch sử.
+- [x] Phân biệt đã ký HĐ thuê, đã nhận nhà và đã hoàn tất giữ chỗ trên UI. Quyền đưa listing trở lại thị trường phải theo bằng chứng bàn giao/quyết định hợp lệ.
+- [x] HĐ cọc giữ nguyên văn bản, có liên kết HĐ thuê và tình trạng nghĩa vụ đã chuyển tiếp/hoàn tất/đang tranh chấp.
+- [x] Test một bên xác nhận, sai phiên bản, ảnh sai hợp đồng, nhận thiếu tài sản, nhận nhà trễ, từ chối nhận và không bàn giao thực tế.
 
 **Nghiệm thu:** có thể tra cứu ai xác nhận nhận nhà, vào lúc nào, trên hiện trạng/chỉ số nào; chữ ký HĐ thuê không bị dùng thay cho chứng cứ đã giao chìa khóa.
 
 ## 08 — Chấm dứt sớm theo thỏa thuận
 
-- [ ] Tạo luồng riêng cho hợp đồng đang hoạt động dù không có hóa đơn quá hạn; không tái sử dụng bằng cách ép điều kiện nợ vào dữ liệu.
-- [ ] Tenant hoặc landlord gửi đề nghị gồm lý do, ngày mong muốn, cách bàn giao và đề xuất xử lý các nghĩa vụ còn lại.
-- [ ] Bên kia có thể đồng ý, phản hồi/đề nghị lại hoặc từ chối; chưa đồng ý không tự kết thúc thuê.
-- [ ] Chốt cách tính kỳ cuối theo thỏa thuận có thể biểu diễn trên văn bản; không tự suy ra hoàn tiền theo ngày nếu điều khoản chưa quy định.
-- [ ] Liên kết phụ lục/gia hạn đang chờ, tiền trả trước, xe và các hóa đơn với quyết định; không bỏ quên nghĩa vụ hoặc thu lại tiền đã nhận.
-- [ ] Hai bên xác nhận trả nhà/tài sản và quyết toán; cọc không mặc định bị giữ toàn bộ chỉ vì chấm dứt sớm.
-- [ ] Nếu có tiền hoàn, trả thêm hoặc tranh chấp thì dùng lại bước 02–04 và sổ cọc đã sửa. Bàn giao và hoàn tất tài chính có thể ở hai thời điểm khác nhau.
-- [ ] Giữ chữ ký/văn bản gốc; biên bản hoặc văn bản chấm dứt có phiên bản và xác nhận phù hợp quy tắc sản phẩm đã chốt.
-- [ ] Bổ sung UI cho hai bên, thông báo và điểm chuyển admin nếu không giải quyết được.
-- [ ] Test không nợ, còn nợ, đã trả trước, cọc đã điều chỉnh, phụ lục tương lai, gia hạn đang ký, chưa trả phòng, hoàn chậm và quyết định đồng thời.
+- [x] R01: chuyển căn cứ thỏa thuận và chứng cứ vào case khiếu nại chấm dứt.
+- [x] R03: trạng thái mục chấm dứt đồng bộ khi quyết toán/hoàn tiền đã thực sự hoàn tất; bổ sung test GET sau đóng HĐ.
+- [x] Tạo luồng riêng cho hợp đồng đang hoạt động dù không có hóa đơn quá hạn; không tái sử dụng bằng cách ép điều kiện nợ vào dữ liệu.
+- [x] Tenant hoặc landlord gửi đề nghị gồm lý do, ngày mong muốn, cách bàn giao và đề xuất xử lý các nghĩa vụ còn lại.
+- [x] Bên kia có thể đồng ý, phản hồi/đề nghị lại hoặc từ chối; chưa đồng ý không tự kết thúc thuê.
+- [x] Thỏa thuận có phiên bản ghi rõ ngày kết thúc, bàn giao, chọn trọn kỳ hoặc tính tiền thuê theo số ngày thực tế, ghi khoản hoàn theo từng nguồn thuê thực nhận. Các phí khác không tự chia theo ngày; không sửa hóa đơn đã phát hành. Hai bên phải xác nhận đúng bản.
+- [x] Chặn đề nghị khi gia hạn/phụ lục (kể cả đã ký còn chờ áp dụng) chưa xử lý xong; không hủy văn bản/giữ xe âm thầm. Chốt số kỳ tính phí mới, hóa đơn cuối, nguồn hoàn tiền trả trước và giữ các khoản nợ thực tế.
+- [x] Hai bên xác nhận trả nhà/tài sản và quyết toán; cọc không mặc định bị giữ toàn bộ chỉ vì chấm dứt sớm.
+- [x] Nếu có tiền hoàn, trả thêm hoặc tranh chấp thì dùng lại bước 02–04 và sổ cọc đã sửa. Bàn giao và hoàn tất tài chính có thể ở hai thời điểm khác nhau.
+- [x] Giữ chữ ký/văn bản gốc; biên bản hoặc văn bản chấm dứt có phiên bản và xác nhận phù hợp quy tắc sản phẩm đã chốt.
+- [x] Bổ sung UI cho hai bên, lịch sử và điểm mở khiếu nại/chuyển admin qua giai đoạn 04. Thông báo tự động được bỏ qua theo yêu cầu.
+- [x] Test không nợ, còn nợ, đã trả trước, cọc đã điều chỉnh, phụ lục tương lai, gia hạn đang ký, chưa trả phòng, hoàn chậm và quyết định đồng thời.
 
 **Nghiệm thu:** khách trả đúng hạn vẫn đề nghị kết thúc được; chỉ trả listing/xe khi đủ điều kiện và không đánh dấu hết nghĩa vụ khi còn khoản tiền chưa xử lý.
 
-## 09 — Nghiệm thu toàn luồng
+Bàn giao 06–08: **709 backend đạt/1 chẩn đoán SmartCA bỏ qua**, gồm **127 PostgreSQL thực** (35 ca mới); **195 web đạt** (13 ca mới); TypeScript/ESLint/diff đạt. Chi tiết, giới hạn và log tại [báo cáo 06–08](D:/Workspace/homespace/hs-core-api/docs/CONTRACT_LIFECYCLE_PHASE_06_08_REPORT.md). Không triển khai gửi thông báo, không tác động DB vận hành và chưa chạy E2E provider thật.
 
-- [ ] Chuyển 40 ca T01–T40 trong tài liệu review thành bộ nghiệm thu có trạng thái thực hiện, dữ liệu đầu vào và bằng chứng kết quả; bổ sung ca mới của các bước trên.
-- [ ] Unit test các điều kiện nghiệp vụ; API test quyền, validation và mã lỗi; PostgreSQL integration test khóa, unique, retry và rollback liên module.
-- [ ] E2E bằng ít nhất hai tài khoản tenant, một landlord và một admin; kiểm tra cả quyền nhìn thấy hồ sơ và thao tác thực tế trên web/admin.
-- [ ] Chạy cả cọc trước/nhận nhà sau và cọc/thuê cùng ngày, từ gửi yêu cầu đến hai văn bản ký riêng, hóa đơn, bàn giao và đóng hồ sơ.
-- [ ] Chạy các nhánh không thuận lợi: tranh chấp tiền, khách/chủ nhà im lặng, không bàn giao, chấm dứt bình thường, hoàn cọc bị chậm và khiếu nại lên admin.
-- [ ] Kiểm tra phụ lục/gia hạn và quyết toán không làm thay đổi PDF đã ký hoặc tính trùng tiền, xe, kỳ thuê.
-- [ ] Chạy restart/nhiều instance: tạo hồ sơ, ký, xác nhận tiền, gửi thông báo và xử lý vụ việc; kiểm tra callback muộn và hai thao tác đồng thời.
-- [ ] Kiểm thử VNPT sandbox, lỗi chuyển Word/PDF/storage và lỗi kênh thông báo; ghi rõ phần chưa kiểm thử thật, không thay bằng kết quả mock.
-- [ ] Chuẩn bị dữ liệu mới theo entity/JPA và seed phù hợp cho môi trường dev tạo lại DB; không tạo SQL vá dữ liệu nếu không có nhu cầu. Kiểm thử DB dùng môi trường riêng, không drop DB đang sử dụng để chạy test.
-- [ ] Cập nhật Postman, hướng dẫn tenant/landlord/admin, seed kịch bản và tài liệu/RAG AI. AI chỉ hướng dẫn/gọi hành động được cấp quyền, không tự suy ra trạng thái thanh toán hoặc kết luận tranh chấp.
-- [ ] Báo cáo nghiệm thu ghi rõ test đã chạy, ca bỏ qua, giới hạn còn lại và cách xử lý hồ sơ lỗi qua API/admin.
+## 09 — Nghiệm thu và giới hạn đã ghi nhận
 
-**Điều kiện hoàn thành toàn kế hoạch:** bốn lỗi F01–F04 có regression đạt; không còn nhánh `DISPUTED`/cọc đã nhận không có lối xử lý đã biết; khiếu nại chuyển tới admin chạy được; mọi quyết định tiền có lịch sử và xác nhận đúng bên; đã chứng minh các luồng E2E trên môi trường riêng.
+- [x] Chuyển T01–T40 thành [ma trận nghiệm thu](CONTRACT_LIFECYCLE_ACCEPTANCE_MATRIX.md) có bằng chứng tự động và cột giới hạn; không đánh dấu ca cần provider thật là đã chạy thật.
+- [x] Hồi quy backend/API/validation/quyền và PostgreSQL: 754 đạt, 1 diagnostic SmartCA cần dịch vụ thật bỏ qua; trong tổng có 142 PostgreSQL/schema/restart. Thêm 1 HTTP system harness đạt, chạy cùng 5 kịch bản trình duyệt.
+- [x] Kiểm thử web/admin bằng hai danh tính tenant, landlord, admin riêng: người ngoài không đọc/thao tác hồ sơ; stale version, bàn giao, nguồn case/admin, tiếp tục ký và kết quả quyết toán.
+- [x] Hồi quy tạo hai văn bản cọc/thuê độc lập, tránh thu cọc/tháng đầu hai lần, cả nhận nhà tương lai và cùng ngày ở tầng service/PG. Các lượt ký VNPT thật vẫn chờ sandbox.
+- [x] Kiểm tra tranh chấp tiền, im lặng/quá hạn, không bàn giao, hoàn cọc/chậm/đối soát và chuyển admin qua bộ regression có quyền và audit; gửi thông báo ngoài phạm vi.
+- [x] Kiểm tra phụ lục/gia hạn, nguồn PDF, callback muộn ở biên giả lập provider, rollback và không tính tiền/xe hai lần.
+- [x] Kiểm tra nâng cấp schema và giữ dữ liệu cũ, đóng/mở application context, hai context dùng DB locks; không gọi đây là kiểm thử cluster với VNPT/ngân hàng thật.
+- [x] PDF qua Gotenberg thật và kiểm tra PNG trực quan; lỗi converter/storage/nguồn ký được mô phỏng để xác minh rollback.
+- [x] Postman, hướng dẫn tenant/landlord/admin, dữ liệu thử có thể tạo lại, source RAG và tool AI chỉ đọc được bổ sung.
+- [ ] Ký SmartCA thật/end-to-end với chứng thư, ngân hàng, storage, Keycloak của staging: **chưa nghiệm thu**. Người dùng chưa có sandbox và yêu cầu chuẩn bị code/bộ chạy sau. Có runbook, collection và script preflight/ký/đối soát riêng.
+- [ ] Publish/ingest nguồn RAG mới và deploy schema/code lên môi trường vận hành: thao tác triển khai riêng, chưa thực hiện trong lượt này.
+- [x] Báo cáo ghi rõ ca chạy, ca bỏ qua, giới hạn và cách xử lý hồ sơ qua API/admin. Không triển khai hệ thống thông báo.
+
+**Kết luận phạm vi:** các lỗi/gap đã được giao có bản sửa và hồi quy; chưa tuyên bố toàn bộ sản phẩm đã nghiệm thu production. T26 (thanh toán nhiều phần) vẫn là phạm vi sản phẩm riêng trong review ban đầu, không được ghi thành tính năng đã có.
 
 ## Nguyên tắc thực hiện xuyên suốt
 

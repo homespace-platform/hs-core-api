@@ -62,7 +62,7 @@ public interface ContractRepository extends JpaRepository<Contract, String>, Jpa
      */
     @Query("select new com.hs.contract.dto.ai.ContractLeaseRow(c.id, c.contractNumber, c.status, c.landlordId, "
             + "c.tenantId, c.createdAt, c.signedAt, c.effectiveLeaseMonths, r.moveInDate, r.leaseMonths, "
-            + "c.currentRevisionId) from Contract c, RentalRequest r where r.id = c.rentalRequestId "
+            + "c.currentRevisionId,c.agreedEarlyEndExclusive) from Contract c, RentalRequest r where r.id = c.rentalRequestId "
             + "and c.parentContractId is null and (c.agreementKind is null or c.agreementKind <> 'DEPOSIT') and c.active = true and (c.landlordId = :userId or "
             + "(c.tenantId = :userId and c.status <> com.hs.contract.model.constant.ContractStatus.DRAFT)) "
             + "order by c.createdAt desc")

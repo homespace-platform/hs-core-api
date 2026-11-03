@@ -794,7 +794,15 @@ public class PaymentRequestService {
         createRefundObligation(initialPayment,amount,true);
     }
 
+    /** Bilateral early-exit credit; does not imply a reservation-policy violation. */
+    @Transactional public void createAgreedRentRefundObligation(PaymentRequest source,BigDecimal amount){
+        createRefundObligation(source,amount,true,"Hoàn tiền thuê thực nhận theo thỏa thuận chấm dứt sớm; không thay đổi cọc hoặc chứng từ gốc");
+    }
+
     private void createRefundObligation(PaymentRequest initialPayment,BigDecimal amount,boolean rentOnly) {
+        createRefundObligation(initialPayment,amount,rentOnly,null);
+    }
+    private void createRefundObligation(PaymentRequest initialPayment,BigDecimal amount,boolean rentOnly,String agreedReason) {
         if(amount==null || amount.signum()<0 || amount.compareTo(initialPayment.getTotalAmount())>0)
             throw new IllegalArgumentException("Invalid refund amount");
         if(amount.signum()==0)return;
@@ -851,7 +859,7 @@ public class PaymentRequestService {
 
         recordEvent(savedRefund.getId(), PaymentEventType.REFUND_OBLIGATION_CREATED, null,
                 PaymentStatus.AWAITING_TRANSFER, "SYSTEM", "SYSTEM",
-                rentOnly?"Hoàn tiền thuê đã nhận; cọc được xử lý riêng theo thông báo vi phạm":"Hai bên đồng ý hủy hồ sơ trước khi ký; chủ nhà cần hoàn khoản thực nhận và người thuê xác nhận nhận đủ", null);
+                agreedReason!=null?agreedReason:rentOnly?"Hoàn tiền thuê đã nhận; cọc được xử lý riêng theo thông báo vi phạm":"Hai bên đồng ý hủy hồ sơ trước khi ký; chủ nhà cần hoàn khoản thực nhận và người thuê xác nhận nhận đủ", null);
     }
 
     @Transactional

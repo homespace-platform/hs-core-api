@@ -46,6 +46,7 @@ public class ContractStorageAccessChecker implements StorageAccessChecker {
                         || (userId.equals(contract.getTenantId())
                         && (contract.getStatus() != ContractStatus.DRAFT
                             || "AMENDMENT".equals(contract.getAgreementKind())
+                            || WorkflowDocumentService.applies(contract)
                             // Deposit-confirmed root draft of the matching ACCEPTED rental: read-only preview.
                             || ContractDraftVisibility.tenantMayReview(contract, rentalRequestRepository, paymentRequestRepository))))
                 .orElse(false);

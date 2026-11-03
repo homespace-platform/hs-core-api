@@ -191,7 +191,7 @@ public class ContractServiceImpl implements ContractService {
 
         // Payment callbacks can arrive after cancellation/completion. Never resurrect a closed file.
         if (currentUserId == null && (rentalRequest.getStatus() != RentalRequestStatus.ACCEPTED
-                || rentalRequest.getCancellationRequestedAt() != null)) return null;
+                || rentalRequest.getCancellationRequestedAt() != null || rentalRequest.getResolutionWorkflowId()!=null)) return null;
 
         // 1. Kiểm tra trạng thái RentalRequest: phải là ACCEPTED
         if (rentalRequest.getStatus() != RentalRequestStatus.ACCEPTED) {
@@ -202,7 +202,7 @@ public class ContractServiceImpl implements ContractService {
         if (currentUserId != null && !rentalRequest.getOwnerId().equals(currentUserId)) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
-        if (rentalRequest.getCancellationRequestedAt()!=null) {
+        if (rentalRequest.getCancellationRequestedAt()!=null || rentalRequest.getResolutionWorkflowId()!=null) {
             throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED,"Hồ sơ đang chờ quyết định hủy; chưa thể tạo hợp đồng.");
         }
 
@@ -803,7 +803,7 @@ public class ContractServiceImpl implements ContractService {
                 || !Objects.equals(contract.getLandlordId(), rental.getOwnerId())
                 || !Objects.equals(contract.getTenantId(), rental.getRenterId())
                 || contract.getStatus() != ContractStatus.DRAFT || rental.getStatus() != RentalRequestStatus.ACCEPTED
-                || rental.getCancellationRequestedAt() != null || rental.getListing() == null
+                || rental.getCancellationRequestedAt() != null || rental.getResolutionWorkflowId()!=null || rental.getListing() == null
                 || !Objects.equals(contract.getListingId(), rental.getListing().getId())
                 || rental.getListing().getStatus() != ListingStatus.RESERVED
                 || rental.getMoveInDate() == null || billingTime.today().isBefore(rental.getMoveInDate())) return null;
@@ -829,6 +829,7 @@ public class ContractServiceImpl implements ContractService {
     }
 
     private ContractDocumentResponse renderPreview(Contract contract, boolean requirePdf) {
+        if(com.hs.contract.service.WorkflowDocumentService.applies(contract))throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED,"Văn bản này được kết xuất từ biên bản/thỏa thuận nguồn; không dựng lại bằng mẫu HĐ thuê.");
         String contractId = contract.getId();
         ContractRevision revision = requireCurrentRevision(contract);
         if(!com.hs.contract.deposit.DepositAgreementService.isDeposit(contract) && contract.getParentContractId()==null && onboarding!=null) {
@@ -1353,7 +1354,7 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
         if (!landlord && tenant && contract.getStatus() == ContractStatus.DRAFT
-                && !"AMENDMENT".equals(contract.getAgreementKind()) && !canTenantReviewRootDraft(contract)) {
+                && !"AMENDMENT".equals(contract.getAgreementKind()) && !com.hs.contract.service.WorkflowDocumentService.applies(contract) && !canTenantReviewRootDraft(contract)) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
     }

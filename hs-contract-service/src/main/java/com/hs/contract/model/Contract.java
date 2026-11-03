@@ -91,6 +91,11 @@ public class Contract extends BaseEntity {
     @Column(name = "effective_lease_months")
     private Integer effectiveLeaseMonths;
 
+    /** Separately accepted early-exit agreement; original signed lease dates stay immutable. */
+    private java.time.LocalDate agreedEarlyEndExclusive;
+    private Integer agreedEarlyBillingMonths;
+    @Column(length=64) private String mutualTerminationWorkflowId;
+
     @Column(name = "termination_proposal_invoice_id", length = 36)
     private String terminationProposalInvoiceId;
     @Column(name = "termination_proposed_at")

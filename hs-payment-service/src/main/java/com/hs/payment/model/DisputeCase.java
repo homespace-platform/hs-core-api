@@ -8,7 +8,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Shared case foundation. Only the PAYMENT subject is enabled in this phase. */
+/** Shared case foundation for payment disputes and rental complaints. */
 @Entity @Table(name="dispute_cases",indexes={
     @Index(name="idx_dispute_subject",columnList="subject_type,subject_id"),
     @Index(name="idx_dispute_queue",columnList="status,opened_at")})
@@ -23,7 +23,7 @@ public class DisputeCase extends BaseEntity {
     @Column(nullable=false,length=36,updatable=false) private String payerId;
     @Column(nullable=false,length=36,updatable=false) private String payeeId;
     @Column(nullable=false,length=36,updatable=false) private String openedBy;
-    @Column(nullable=false,length=500,updatable=false) private String reason;
+    @Column(nullable=false,length=2000,updatable=false) private String reason;
     @Column(nullable=false,updatable=false) private Instant openedAt;
     @Enumerated(EnumType.STRING) @Column(nullable=false,length=24) private DisputeCaseStatus status;
     @Enumerated(EnumType.STRING) @Column(length=30,updatable=false) private PaymentStatus previousPaymentStatus;
@@ -40,6 +40,20 @@ public class DisputeCase extends BaseEntity {
     @Enumerated(EnumType.STRING) @Column(length=30) private DisputeResolution resolution;
     @Column(length=500) private String resolutionReason;
     private Instant resolvedAt;
+    // Nullable on existing PAYMENT cases; keep their state machine and enum CHECKs unchanged.
+    @Column(length=24) private String complaintCategory;
+    @Column(length=32) private String complaintStage;
+    private Instant respondBy;
+    @Column(length=36) private String responseDueFor;
+    private Instant escalatedAt;
+    private Long sourceVersion;
+    @Column(length=32) private String complaintOutcome;
+    @Column(columnDefinition="TEXT") private String complaintDecision;
+    @Column(columnDefinition="TEXT") private String complaintProposal;
+    private Instant tenantCompletedAt;
+    private Instant landlordCompletedAt;
+    @Column(length=36) private String complaintRoundOpenedBy;
+    private Long complaintRoundStartRevision;
     /** A business revision increments for every action, including notes at the same simulated instant. */
     @Column(nullable=false) private long revision;
     @Version private Long lockVersion;

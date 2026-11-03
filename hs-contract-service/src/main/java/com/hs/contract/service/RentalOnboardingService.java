@@ -104,7 +104,7 @@ public class RentalOnboardingService {
             }
         }
         if(r.getStatus()!=RentalRequestStatus.ACCEPTED)return;
-        if(r.getCancellationRequestedAt()!=null)return;
+        if(r.getCancellationRequestedAt()!=null||r.getResolutionWorkflowId()!=null)return;
         var deposit=payment(r.getId(),PaymentType.RESERVATION_DEPOSIT);
         var rent=payment(r.getId(),PaymentType.INITIAL);
         if(confirmed(deposit)&&rent==null&&!time.today().isBefore(r.getMoveInDate())) {
@@ -140,12 +140,13 @@ public class RentalOnboardingService {
         var depositDocument=depositAgreements==null?null:depositAgreements.find(r.getId()).orElse(null);
         if(!depositSigned)signDue=null;
         boolean paid=confirmed(rent)&&(deposit==null||confirmed(deposit));
-        boolean signingOpen=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null
+        boolean signingOpen=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&r.getResolutionWorkflowId()==null
             &&r.getListing().getStatus()==com.hs.listing.model.constant.ListingStatus.RESERVED
             &&paid&&depositSigned&&!time.now().isBefore(opens)&&signDue!=null&&time.now().isBefore(signDue);
         String stage,message;
         if(r.getStatus()==RentalRequestStatus.COMPLETED){stage="COMPLETED";message="Đã ký đủ và bắt đầu hợp đồng.";}
         else if(r.getStatus()!=RentalRequestStatus.ACCEPTED){stage=r.getStatus().name();message="Yêu cầu chưa được chấp nhận hoặc không còn hiệu lực.";}
+        else if(r.getResolutionWorkflowId()!=null){stage="RESOLUTION_PENDING";message="Đang xử lý hồ sơ trước thuê. Xem đề nghị, phản hồi hoặc khiếu nại tại mục Xử lý cọc và ký bên dưới.";}
         else if(r.getCancellationRequestedAt()!=null){stage="CANCELLATION_REQUESTED";message="Người thuê đề nghị hủy hồ sơ và hoàn tiền; chờ chủ nhà quyết định.";}
         else if(unresolved(deposit)||unresolved(rent)){stage="REQUIRES_REVIEW";message="Cần đối soát khoản chuyển; phòng tiếp tục được giữ, không tự xác nhận hay hoàn tiền.";}
         else if(!depositReady(r)&&(deposit!=null&&deposit.getStatus()==PaymentStatus.TRANSFER_REPORTED||rent!=null&&rent.getStatus()==PaymentStatus.TRANSFER_REPORTED)){stage="AWAITING_DEPOSIT_CONFIRMATION";message="Đã báo chuyển khoản giữ chỗ, chờ chủ nhà xác nhận nhận đủ tiền.";}
@@ -167,11 +168,11 @@ public class RentalOnboardingService {
         var rows=new ArrayList<PaymentRequestResponse>();
         for(var p:Arrays.asList(deposit,rent))if(p!=null)rows.add(paymentService.getPaymentRequest(p.getId(),actor));
         for(var refund:payments.findByRentalRequestIdAndTypeIn(r.getId(),List.of(PaymentType.INITIAL_PAYMENT_REFUND)))rows.add(paymentService.getPaymentRequest(refund.getId(),actor));
-        boolean earlier=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&depositReady(r)&&rent==null
+        boolean earlier=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getResolutionWorkflowId()==null&&r.getCancellationRequestedAt()==null&&depositReady(r)&&rent==null
             &&r.getMoveInDate().isAfter(time.today())&&(contract==null||contract.getStatus()==ContractStatus.DRAFT)
             &&changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()).stream().noneMatch(c->"REQUESTED".equals(c.getStatus()));
         return new View(time.now(),BillingTime.ZONE.toString(),stage,r.getMoveInDate(),r.getMoveInDate().plusMonths(r.getLeaseMonths()),
-            opens,rent!=null?rent.getDueAt():null,signDue,r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&paid&&(contract==null||contract.getStatus()==ContractStatus.DRAFT),signingOpen&&contract!=null,earlier,holdMinutes,
+            opens,rent!=null?rent.getDueAt():null,signDue,r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getResolutionWorkflowId()==null&&r.getCancellationRequestedAt()==null&&paid&&(contract==null||contract.getStatus()==ContractStatus.DRAFT),signingOpen&&contract!=null,earlier,holdMinutes,
             rows,changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()),message,actor.equals(r.getOwnerId())?"LANDLORD":"TENANT",r.getCancellationRequestedAt(),r.getCancellationReason(),events.findByRentalRequestIdOrderByOccurredAtDesc(r.getId()),
             defaultView(r),depositLedger.forRental(r.getId()),canCancel(r,contract),depositDocument==null?null:depositDocument.getId(),depositDocument==null?null:depositDocument.getStatus().name());
     }
@@ -191,6 +192,7 @@ public class RentalOnboardingService {
     @Transactional public View decideEarlier(String id,String changeId,String actor,Decision decision) {
         var r=rental(id,actor);sync(r);
         var change=changes.findById(changeId).filter(c->id.equals(c.getRentalRequestId())).orElseThrow(()->invalid("Không tìm thấy đề nghị."));
+        if(r.getResolutionWorkflowId()!=null)throw invalid("Đang xử lý hồ sơ trước thuê; chưa thể đổi ngày bắt đầu.");
         if(!actor.equals(r.getOwnerId())||!"REQUESTED".equals(change.getStatus())||r.getStatus()!=RentalRequestStatus.ACCEPTED)throw invalid("Đề nghị không còn chờ chủ nhà quyết định.");
         if(decision.approve()) {
             if(r.getCancellationRequestedAt()!=null)throw invalid("Đang chờ quyết định hủy hồ sơ; chưa thể đổi ngày bắt đầu thuê.");
@@ -280,6 +282,7 @@ public class RentalOnboardingService {
         if(!canCancel(r,contract))throw invalid("Đã ký đủ hoặc chữ ký chưa rõ kết quả; cần đối soát trước khi hủy hồ sơ nhận nhà.");
     }
     private boolean canCancel(RentalRequest r,com.hs.contract.model.Contract c) {
+        if(r.getResolutionWorkflowId()!=null)return false;
         if(depositAgreements!=null) {
             var dc=depositAgreements.find(r.getId()).orElse(null);
             if(dc!=null && dc.getStatus()!=ContractStatus.ACTIVE && signatureNeedsReconciliation(dc))return false;
@@ -358,6 +361,7 @@ public class RentalOnboardingService {
     }
 
     private String defaultKind(RentalRequest r) {
+        if(r.getResolutionWorkflowId()!=null)return null;
         if(depositAgreements!=null && !depositAgreements.signedOrExempt(r))return null;
         if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getCancellationRequestedAt()!=null || r.getDefaultDisputedAt()!=null
                 || !Set.of("RESERVATION_DEFAULT_V1","RESERVATION_DEFAULT_V2").contains(Objects.toString(r.getReservationPolicyVersion(),"")) || r.getReservationPolicyAcceptedAt()==null

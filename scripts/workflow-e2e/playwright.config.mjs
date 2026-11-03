@@ -1,0 +1,2 @@
+import {defineConfig} from "@playwright/test";
+export default defineConfig({testDir:".",testMatch:"workflow.spec.mjs",workers:1,fullyParallel:false,timeout:45000,use:{baseURL:"http://127.0.0.1:18198",browserName:"chromium",headless:true,trace:"retain-on-failure",screenshot:"only-on-failure"},reporter:[["list"],["html",{open:"never"}]],webServer:{command:"node serve.mjs",url:"http://127.0.0.1:18198",reuseExistingServer:false,timeout:30000}});

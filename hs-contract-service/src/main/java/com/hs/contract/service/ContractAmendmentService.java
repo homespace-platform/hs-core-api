@@ -481,7 +481,7 @@ public class ContractAmendmentService {
         if (dates(c).isEmpty()) return "Không còn đầu kỳ thuê tương lai chưa chốt hóa đơn để áp dụng phụ lục.";
         if(paymentRecords!=null && paymentRecords.findAllByContractIdAndType(c.getId(),com.hs.payment.model.constant.PaymentType.DEPOSIT_ADJUSTMENT).stream()
                 .anyMatch(p->p.getStatus()!=com.hs.payment.model.constant.PaymentStatus.CONFIRMED))return "Hãy hoàn tất khoản chênh lệch cọc trước khi lập phụ lục tiếp theo.";
-        if (c.getTerminationProposedAt() != null && c.getTerminationCancelledAt() == null && c.getTerminationDeclinedAt() == null)
+        if (c.getMutualTerminationWorkflowId()!=null || c.getTerminationProposedAt() != null && c.getTerminationCancelledAt() == null && c.getTerminationDeclinedAt() == null)
             return "Hợp đồng đang xử lý chấm dứt.";
         if (renewals.findByContractIdOrderByRequestedAtDesc(c.getId()).stream().anyMatch(r -> Set.of("REQUESTED", "APPROVED").contains(r.getStatus()) && time.now().isBefore(r.getSignBy())))
             return "Hãy hoàn tất yêu cầu gia hạn đang xử lý trước.";

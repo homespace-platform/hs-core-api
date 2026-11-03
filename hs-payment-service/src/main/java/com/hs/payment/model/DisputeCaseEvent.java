@@ -14,7 +14,7 @@ public class DisputeCaseEvent {
     @Column(nullable=false,length=30,updatable=false) private String action;
     @Column(nullable=false,length=36,updatable=false) private String actorId;
     @Column(nullable=false,length=20,updatable=false) private String actorRole;
-    @Column(nullable=false,length=500,updatable=false) private String reason;
+    @Column(nullable=false,length=2000,updatable=false) private String reason;
     @Column(length=36,updatable=false) private String evidenceStorageId;
     @Column(columnDefinition="TEXT",updatable=false) private String metadataJson;
     @Column(nullable=false,updatable=false) private Instant occurredAt;
