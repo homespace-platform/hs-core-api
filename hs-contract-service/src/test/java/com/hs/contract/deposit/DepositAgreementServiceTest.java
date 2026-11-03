@@ -108,6 +108,30 @@ class DepositAgreementServiceTest {
         rental.setDepositAmount(BigDecimal.ZERO);assertTrue(service.signedOrExempt(rental));assertNull(service.createAutomatically("rental"));
         verifyNoInteractions(ledgers,templates);verify(agreements,never()).save(any());
     }
+    @Test void exemptionDoesNotAdvertiseSigningOrAllowDepositSignatureAndReopen() {
+        rental.setDepositAmount(new BigDecimal("0.00"));
+        when(ledgers.findByRentalRequestId("rental")).thenReturn(Optional.empty());
+        var view=service.overview("rental","tenant");
+        assertFalse(view.required());assertFalse(view.signingAllowed());assertNull(view.signingContractId());
+        assertTrue(view.blockedReason().contains("bỏ qua hợp đồng cọc"));
+        var c=Contract.builder().rentalRequestId("rental").agreementKind("DEPOSIT").build();
+        assertThrows(AppException.class,()->service.validateSigning(c));
+        assertThrows(AppException.class,()->service.reopen("rental","owner"));
+        verify(contracts,never()).save(any());verify(agreements,never()).save(any());
+    }
+    @Test void missingAmountIsNotTreatedAsAZeroDepositExemption() {
+        rental.setDepositAmount(null);
+        assertFalse(service.signedOrExempt(rental));
+        var view=service.overview("rental","tenant");
+        assertTrue(view.required());assertFalse(view.signingAllowed());
+        assertTrue(view.blockedReason().contains("Chưa xác định"));assertNull(service.createAutomatically("rental"));
+        verify(agreements,never()).save(any());
+    }
+    @Test void changingTheLiveListingDoesNotWaiveTheAcceptedPositiveDeposit() {
+        rental.getListing().setDepositType(DepositType.NONE);rental.getListing().setDepositAmount(BigDecimal.ZERO);
+        assertFalse(service.signedOrExempt(rental));assertTrue(service.overview("rental","tenant").required());
+        assertEquals("DEPOSIT",service.createAutomatically("rental").getAgreementKind());
+    }
     @Test void strangerCannotReadAndPolicyTamperingCannotBeRendered() {
         assertThrows(AppException.class,()->service.participant("rental","stranger"));
         rental.setReservationPolicyText("Changed terms");assertThrows(AppException.class,()->service.createAutomatically("rental"));

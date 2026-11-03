@@ -244,19 +244,26 @@ public class ContractLifecycleService {
         deposit.setRetainedAmount(previousRetained.add(retained));
         if(retained.signum()>0){deposit.setRetainedAt(time.now());deposit.setRetainedReason(close.getNote());}
         preserveLegacyProposal(close);
-        Object configured=read(revision(c).getPoliciesSnapshot()).get("depositRefundDays");
-        int days=configured==null?15:Integer.parseInt(String.valueOf(configured));
-        if(days<1 || days>90) throw invalid();
-        close.setAcceptedAt(time.now()); close.setRefundDueAt(time.now().plus(Duration.ofDays(days)));
+        boolean paymentRequired=close.getRefundAmount().signum()>0||close.getBalanceAmount().signum()>0;
+        close.setRefundDueAt(null);
+        if(paymentRequired) {
+            Object configured=read(revision(c).getPoliciesSnapshot()).get("depositRefundDays");
+            int days=configured==null?15:Integer.parseInt(String.valueOf(configured));
+            if(days<1 || days>90) throw invalid();
+            close.setRefundDueAt(time.now().plus(Duration.ofDays(days)));
+        }
+        close.setAcceptedAt(time.now());
         close.setRespondBy(null); close.setResponseOverdueAt(null);
-        appendClosureEvent(close,"ACCEPTED",actor,"Người thuê đồng ý đề xuất; chưa xác nhận nhận tiền hoàn.",List.of());
+        appendClosureEvent(close,"ACCEPTED",actor,paymentRequired?"Người thuê đồng ý đề xuất; việc chuyển và nhận tiền quyết toán được xác nhận riêng.":"Hai bên đã xác nhận bàn giao và quyết toán; không phát sinh hoàn cọc hoặc khoản trả thêm.",List.of());
         if(close.getRefundAmount().signum()>0) {
             PaymentRequest refund=payments.createContractSettlement(id,c.getRentalRequestId(),c.getListingId(),c.getLandlordId(),c.getTenantId(),
                     close.getRefundAmount(),close.getRefundDueAt(),true,"Hoàn cọc sau quyết toán hợp đồng "+c.getContractNumber());
             close.setRefundPaymentId(refund.getId()); deposit.setRefundPaymentRequestId(refund.getId()); deposit.setStatus(DepositStatus.REFUND_DUE);
             deposit.setHeldAmount(close.getRefundAmount()); deposit.setRefundableAmount(close.getRefundAmount()); close.setStatus("REFUND_PENDING");
         } else {
-            deposit.setHeldAmount(ZERO); deposit.setRefundableAmount(ZERO); deposit.setStatus(DepositStatus.RETAINED_BY_LANDLORD);
+            deposit.setHeldAmount(ZERO); deposit.setRefundableAmount(ZERO);
+            // HELD with zero remains the existing waiver record; do not invent retention or a refund receipt.
+            deposit.setStatus(deposit.getRetainedAmount().signum()>0?DepositStatus.RETAINED_BY_LANDLORD:DepositStatus.HELD);
             if(close.getBalanceAmount().signum()>0) {
                 PaymentRequest balance=payments.createContractSettlement(id,c.getRentalRequestId(),c.getListingId(),c.getTenantId(),c.getLandlordId(),
                         close.getBalanceAmount(),close.getRefundDueAt(),false,"Khoản quyết toán còn thiếu của hợp đồng "+c.getContractNumber());

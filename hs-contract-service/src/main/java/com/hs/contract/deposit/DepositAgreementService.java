@@ -47,6 +47,8 @@ public class DepositAgreementService {
     private static final DateTimeFormatter DATE=DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter STAMP=DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss").withZone(BillingTime.ZONE);
     public static boolean isDeposit(Contract c){return c!=null && DepositFieldCatalog.KIND.equals(c.getAgreementKind());}
+    /** Use the accepted rental amount, never a later edit to the live listing or a missing amount. */
+    public static boolean isExempt(RentalRequest r){return r.getDepositAmount()!=null && r.getDepositAmount().signum()==0;}
     private AppException invalid(String text){return new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED,text);}
 
     @Transactional(readOnly=true)
@@ -68,31 +70,36 @@ public class DepositAgreementService {
     public Overview overview(String rentalId, String actor) {
         var rental=participant(rentalId,actor);
         var found=find(rentalId);
+        boolean exempt=isExempt(rental);
+        boolean amountKnown=rental.getDepositAmount()!=null && rental.getDepositAmount().signum()>=0;
         boolean eligible=rental.getStatus()==RentalRequestStatus.ACCEPTED
             && rental.getResolutionWorkflowId()==null && rental.getCancellationRequestedAt()==null && rental.getListing()!=null
             && rental.getListing().getStatus()==ListingStatus.RESERVED;
         boolean expired=found.filter(c->c.getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING
             && c.getTenantSigningDueAt()!=null && !time.now().isBefore(c.getTenantSigningDueAt())).isPresent();
-        String blocked=!eligible?"Hồ sơ đã chuyển bước hoặc đang chờ hủy/đối soát. Tài liệu đã ký vẫn được giữ để tra cứu."
+        String blocked=exempt?"Không yêu cầu đặt cọc: bỏ qua hợp đồng cọc, tiếp tục thanh toán tiền thuê và ký hợp đồng thuê."
+            :!amountKnown?"Chưa xác định được số tiền cọc đã thống nhất; cần đối soát hồ sơ trước khi ký."
+            :!eligible?"Hồ sơ đã chuyển bước hoặc đang chờ hủy/đối soát. Tài liệu đã ký vẫn được giữ để tra cứu."
             :expired?"Hết hạn ký cọc; chủ nhà cần mở lại hạn ký. Tiền đã xác nhận không bị đảo.":null;
         var lease=contracts.findByRentalRequestId(rentalId).orElse(null);
         var ledger=ledgers.findByRentalRequestId(rentalId).orElse(null);
         String obligation=ledger!=null&&Set.of(DepositStatus.REFUND_DUE,DepositStatus.REFUNDED,DepositStatus.RETAINED_BY_LANDLORD,DepositStatus.DISPUTED).contains(ledger.getStatus())?ledger.getStatus().name()
             :lease!=null&&lease.getSignedAt()!=null?(workflowRecords!=null&&workflowRecords.findById(rentalId+":MOVE_IN").filter(w->"COMPLETED".equals(w.getStatus())).isPresent()?"TRANSFERRED_TO_LEASE":"HANDOVER_PENDING")
             :rental.getStatus()==RentalRequestStatus.ACCEPTED?"RESERVATION_PENDING":"ENDED";
-        return new Overview(rental.getDepositAmount()!=null && rental.getDepositAmount().signum()>0,
-            eligible&&!expired,blocked,found.map(Contract::getId).orElse(null),lease==null?null:lease.getId(),obligation);
+        return new Overview(!exempt,
+            !exempt&&amountKnown&&eligible&&!expired,blocked,found.map(Contract::getId).orElse(null),lease==null?null:lease.getId(),obligation);
     }
     /** Zero-deposit exemption; no synthetic receipt or deposit signing document. */
     @Transactional(readOnly=true)
     public boolean signedOrExempt(RentalRequest r) {
-        if(r.getDepositAmount()!=null && r.getDepositAmount().signum()==0)return true;
+        if(isExempt(r))return true;
         return find(r.getId()).filter(c->c.getStatus()==ContractStatus.ACTIVE && c.getSignedAt()!=null).isPresent();
     }
 
     @Transactional
     public Contract createAutomatically(String rentalId) {
         var r=rentals.findByIdForUpdate(rentalId).orElseThrow();
+        if(isExempt(r))return null;
         var existing=find(rentalId); if(existing.isPresent())return existing.get();
         if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getCancellationRequestedAt()!=null
             || r.getListing()==null || r.getListing().getStatus()!=ListingStatus.RESERVED
@@ -176,6 +183,7 @@ public class DepositAgreementService {
     @Transactional
     public void validateSigning(Contract c) {
         var r=rentals.findByIdForUpdate(c.getRentalRequestId()).orElseThrow();
+        if(isExempt(r))throw invalid("Hồ sơ không yêu cầu đặt cọc; không phát sinh bước ký hợp đồng cọc.");
         if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getResolutionWorkflowId()!=null || r.getCancellationRequestedAt()!=null || r.getListing().getStatus()!=ListingStatus.RESERVED)throw invalid("Hồ sơ không còn cho phép ký cọc.");
         var d=agreements.findBySigningContractId(c.getId()).orElseThrow();
         var p=payments.findById(d.getSourcePaymentId()).orElseThrow();
@@ -200,6 +208,7 @@ public class DepositAgreementService {
     @Transactional public void reopen(String rentalId,String actor) {
         var r=participant(rentalId,actor);if(!actor.equals(r.getOwnerId()))throw invalid("Chỉ chủ nhà được mở lại hạn ký cọc.");
         r=rentals.findByIdForUpdate(rentalId).orElseThrow();
+        if(isExempt(r))throw invalid("Hồ sơ không yêu cầu đặt cọc; không có hạn ký cọc cần mở lại.");
         if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getCancellationRequestedAt()!=null || r.getListing()==null || r.getListing().getStatus()!=ListingStatus.RESERVED)
             throw invalid("Hồ sơ không còn cho phép mở lại hạn ký cọc.");
         var c=find(rentalId).orElseThrow();c=contracts.findByIdForUpdate(c.getId()).orElseThrow();

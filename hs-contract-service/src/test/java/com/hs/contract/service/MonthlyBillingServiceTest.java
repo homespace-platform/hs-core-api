@@ -633,6 +633,20 @@ class MonthlyBillingServiceTest {
         verify(listingStatusService).releaseRentedAfterTermination("listing", "landlord");
         verify(parkingReservations).releaseReservationsForContract("contract");
     }
+    @Test void terminationOfANoDepositLeaseDoesNotRecordZeroDepositForfeiture() {
+        Contract contract=contracts.findById("contract").orElseThrow();
+        invoice.setStatus(MonthlyInvoiceStatus.OVERDUE);invoice.setDueAt(Instant.parse("2026-11-05T16:59:59Z"));
+        when(time.now()).thenReturn(Instant.parse("2026-11-11T03:00:00Z"));when(time.today()).thenReturn(LocalDate.of(2026,11,10));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.OVERDUE).build()));
+        DepositRecord deposit=DepositRecord.builder().originalAmount(BigDecimal.ZERO).heldAmount(BigDecimal.ZERO).refundableAmount(BigDecimal.ZERO).status(DepositStatus.HELD).build();
+        when(deposits.findByRentalRequestIdForUpdate("rental")).thenReturn(Optional.of(deposit));when(deposits.findByRentalRequestId("rental")).thenReturn(Optional.of(deposit));
+        service.proposeMutualTermination("invoice","landlord");service.acceptMutualTermination("invoice","tenant",new AcceptTerminationRequest(true,true,true));
+        service.completeMutualTermination("invoice","landlord",new CompleteTerminationRequest(true,true));
+        assertEquals(ContractStatus.TERMINATED,contract.getStatus());assertEquals(DepositStatus.HELD,deposit.getStatus());
+        assertEquals(0,deposit.getRetainedAmount().signum());assertNull(deposit.getRetainedAt());assertNull(deposit.getRetainedReason());
+        assertEquals(MonthlyInvoiceStatus.OVERDUE,invoice.getStatus());
+        verify(listingStatusService).releaseRentedAfterTermination("listing","landlord");
+    }
 
     @Test
     void tenantMayDeclineTerminationAndContractStaysActive() {

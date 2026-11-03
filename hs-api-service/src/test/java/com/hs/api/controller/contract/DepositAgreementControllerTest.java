@@ -45,4 +45,11 @@ class DepositAgreementControllerTest {
         UserContextHolder.clear();assertThrows(AppException.class,()->controller.view("rental"));
         verifyNoInteractions(deposits,contracts);
     }
+    @Test void preparingAnExemptRentalDoesNotRenderOrSignADepositDocument() {
+        UserContextHolder.set(new UserContext("tenant",null));
+        when(deposits.overview("rental","tenant")).thenReturn(new DepositAgreementService.Overview(false,false,"Không yêu cầu đặt cọc",null));
+        var response=controller.prepare("rental").getResult();
+        assertFalse(response.required());assertFalse(response.signingAllowed());assertNull(response.agreement());assertTrue(response.documents().isEmpty());
+        verifyNoInteractions(contracts);
+    }
 }

@@ -507,12 +507,17 @@ public class MonthlyBillingService {
             throw new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY);
         listingStatusService.releaseRentedAfterTermination(contract.getListingId(), landlordId);
         parkingReservations.releaseReservationsForContract(contract.getId());
-        deposit.setRetainedAmount(deposit.getHeldAmount());
-        deposit.setStatus(DepositStatus.RETAINED_BY_LANDLORD);
+        if(deposit.getHeldAmount().signum()>0) {
+            deposit.setRetainedAmount(deposit.getHeldAmount());
+            deposit.setStatus(DepositStatus.RETAINED_BY_LANDLORD);
+            deposit.setRetainedAt(time.now());
+            deposit.setRetainedReason(reason);
+        }else {
+            if(deposit.getRetainedAmount()==null)deposit.setRetainedAmount(BigDecimal.ZERO);
+            deposit.setStatus(deposit.getRetainedAmount().signum()>0?DepositStatus.RETAINED_BY_LANDLORD:DepositStatus.HELD);
+        }
         deposit.setHeldAmount(BigDecimal.ZERO);
         deposit.setRefundableAmount(BigDecimal.ZERO);
-        deposit.setRetainedAt(time.now());
-        deposit.setRetainedReason(reason);
         deposits.save(deposit);
         contract.setStatus(ContractStatus.TERMINATED);
         contract.setTerminationCompletedAt(time.now());

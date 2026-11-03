@@ -325,6 +325,48 @@ class ContractLifecycleServiceTest {
         service.acceptClosure("root","tenant",acceptance());assertEquals(ContractStatus.CLOSED,root.getStatus());
         verify(payments,never()).createContractSettlement(anyString(),anyString(),anyString(),anyString(),anyString(),any(),any(),anyBoolean(),anyString());
     }
+    private void waiveDeposit() {
+        rental.setDepositAmount(ZERO);deposit.setOriginalAmount(ZERO);deposit.setHeldAmount(ZERO);deposit.setRefundableAmount(ZERO);
+    }
+    @Test void zeroDepositClosesAfterBilateralHandoverWithoutRefundDeadlineRetentionOrTransfer() {
+        waiveDeposit();finalBills();revision.setPoliciesSnapshot("{\"depositRefundDays\":0}");
+        service.proposeClosure("root","owner",proposal(ZERO));
+        assertEquals(ContractStatus.EXPIRED,root.getStatus());
+        var result=service.acceptClosure("root","tenant",acceptance());
+        assertEquals(ContractStatus.CLOSED,root.getStatus());assertEquals("CLOSED",result.closure().getStatus());
+        assertNull(result.closure().getRefundPaymentId());assertNull(result.closure().getBalancePaymentId());assertNull(result.closure().getRefundDueAt());
+        assertNull(result.refundPayment());assertNull(result.balancePayment());
+        assertEquals(DepositStatus.HELD,deposit.getStatus());assertEquals(0,deposit.getRetainedAmount().signum());assertNull(deposit.getRetainedAt());
+        verify(payments,never()).createContractSettlement(anyString(),anyString(),anyString(),anyString(),anyString(),any(),any(),anyBoolean(),anyString());
+        verify(listings).releaseRentedAfterTermination("listing","owner");verify(parking).releaseReservationsForContract("root");
+        assertThrows(AppException.class,()->service.acceptClosure("root","tenant",acceptance()));
+    }
+    @Test void zeroDepositStillRequiresFinalBillsAndExplicitReturnOfTheProperty() {
+        waiveDeposit();finalBills();bills.remove(2);
+        assertThrows(AppException.class,()->service.proposeClosure("root","owner",proposal(ZERO)));
+        assertFalse(service.get("root","owner").canProposeClosure());
+        bills.add(MonthlyInvoice.builder().id("bill2").contractId("root").periodIndex(2).status(MonthlyInvoiceStatus.PAID).totalAmount(ZERO).build());
+        assertThrows(AppException.class,()->service.proposeClosure("root","owner",new ClosurePayload(null,null,ZERO,"Chưa nhận lại nhà và chìa khóa",false)));
+        assertEquals(ContractStatus.EXPIRED,root.getStatus());assertNull(closureData.get("root").getClosedAt());
+        verifyNoInteractions(listings,parking);
+    }
+    @Test void zeroDepositWithAgreedDamagesCreatesOnlyTheTenantBalance() {
+        waiveDeposit();finalBills();service.proposeClosure("root","owner",proposal(new BigDecimal("100000")));
+        var result=service.acceptClosure("root","tenant",acceptance());
+        assertEquals("BALANCE_PENDING",result.closure().getStatus());assertNull(result.refundPayment());
+        assertEquals("settlement",result.closure().getBalancePaymentId());assertEquals(new BigDecimal("100000"),paymentData.get("settlement").getTotalAmount());assertEquals("tenant",paymentData.get("settlement").getPayerId());
+        assertEquals(0,deposit.getRetainedAmount().signum());assertEquals(DepositStatus.HELD,deposit.getStatus());
+        assertEquals(ContractStatus.EXPIRED,root.getStatus());
+        paymentData.get("settlement").setStatus(PaymentStatus.CONFIRMED);
+        assertEquals("CLOSED",service.get("root","owner").closure().getStatus());
+    }
+    @Test void initiallyWaivedDepositStillRefundsFundsActuallyHeldAfterAnAdjustment() {
+        waiveDeposit();deposit.setHeldAmount(new BigDecimal("3000000"));deposit.setRefundableAmount(new BigDecimal("3000000"));
+        finalBills();service.proposeClosure("root","owner",proposal(ZERO));
+        var result=service.acceptClosure("root","tenant",acceptance());
+        assertEquals("REFUND_PENDING",result.closure().getStatus());assertEquals(new BigDecimal("3000000"),result.closure().getRefundAmount());
+        assertEquals(DepositStatus.REFUND_DUE,deposit.getStatus());assertEquals(ContractStatus.EXPIRED,root.getStatus());
+    }
     @Test void ownershipAndRealMeterValidationCannotBeBypassed() {
         assertThrows(AppException.class,()->service.get("root","stranger"));finalBills();
         assertThrows(AppException.class,()->service.proposeClosure("root","tenant",proposal(ZERO)));

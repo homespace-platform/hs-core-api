@@ -2,6 +2,8 @@
 
 Ngày lập: **03/11/2026**. Trạng thái: **giai đoạn 01–04 và 06–08 đã triển khai; R01–R03 đã khắc phục, bổ sung PDF/ký riêng, tính theo ngày và bộ kiểm thử. Thông báo bỏ qua; nghiệm thu SmartCA thật chờ sandbox theo người dùng. Kết quả và giới hạn xem báo cáo hoàn thiện.**
 
+Đối chiếu lại ngày 03/11/2026: [Báo cáo theo đủ 10 giai đoạn, phần còn mở và kiểm thử chạy lại](CONTRACT_LIFECYCLE_REAUDIT_2026-11-03.md). Sau khi chủ dự án chốt và triển khai [miễn ký HĐ cọc khi không cọc/cọc 0 đồng](CONTRACT_ZERO_DEPOSIT_IMPLEMENTATION_REPORT.md), file có **103 ô**, gồm 6 ô bổ sung so với mốc 97 ban đầu; bỏ 8 ô thông báo còn **95 ô: 93 đã đánh dấu, 2 còn mở**. Đây là số ô trong checklist, không phải tỷ lệ nghiệm thu production; cập nhật prompt/Word và giới hạn T26 được theo dõi riêng trong báo cáo.
+
 Hậu kiểm và kết quả khắc phục: [R01–R03 và giới hạn kiểm thử](D:/Workspace/homespace/hs-core-api/docs/CONTRACT_LIFECYCLE_PHASE_06_08_REVIEW_GAPS.md).
 
 Bàn giao ba hạng mục mới: [Cọc chưa ký, nhận nhà và chấm dứt sớm](D:/Workspace/homespace/hs-core-api/docs/CONTRACT_LIFECYCLE_PHASE_06_08_REPORT.md).
@@ -45,10 +47,10 @@ Bàn giao lượt hoàn thiện: [Báo cáo](CONTRACT_LIFECYCLE_GAPS_COMPLETION_
 - [x] Phân biệt dữ liệu yêu cầu ban đầu, điều khoản đã được hai bên thống nhất, snapshot văn bản và sổ tiền thực nhận. Không xem một map client gửi lên là nguồn có quyền thay đổi tất cả dữ liệu.
 - [x] Chốt trường được chỉnh trực tiếp khi còn nháp và trường phải đi qua đề nghị thay đổi có thỏa thuận. Sau khi ký phải dùng văn bản điều chỉnh thích hợp, giữ nguyên bản đã ký. Phạm vi triển khai cụ thể ghi tại báo cáo 01; chủ dự án đã duyệt tiếp bằng yêu cầu “tiếp”.
 - [x] Giữ yêu cầu đã thống nhất: HĐ cọc và HĐ thuê là hai văn bản, hai lượt ký riêng; cọc và nhận nhà cùng ngày vẫn không gộp thành một lượt ký.
-- [ ] Chốt ngoại lệ cọc 0 đồng: hiện code miễn HĐ cọc. Quyết định có cần văn bản giữ chỗ 0 đồng ký riêng hay tiếp tục miễn; không tạo khoản chuyển/chứng từ nhận tiền giả để đủ luồng.
+- [x] Chủ dự án đã chốt: bài đăng không đặt cọc hoặc số cọc đã thống nhất bằng 0 thì bỏ qua ký HĐ cọc, không bổ sung văn bản giữ chỗ 0 đồng. Đã đồng bộ API/UI và hồi quy từ nhận tiền thuê tới tạo HĐ thuê; không dùng việc miễn cọc thay xác nhận thực nhận tiền thuê. Bản ghi miễn cọc 0 đồng không phải chứng từ chuyển tiền. Chi tiết tại báo cáo miễn cọc.
 - [x] Lập ma trận quyền tenant/landlord/admin/system cho mọi thao tác có thay đổi trạng thái hoặc tiền.
 - [x] Tách trạng thái chữ ký, quyền thuê/giữ chỗ, bàn giao và nghĩa vụ tài chính trong ma trận; không dùng một nhãn `ACTIVE`/`CLOSED` để suy ra mọi nghĩa vụ đã xong. Các model mới sẽ chỉ triển khai tại giai đoạn được duyệt tương ứng.
-- [ ] Chốt các chính sách còn thiếu: SLA phản hồi/chuyển admin, điều kiện hủy sau khi cọc, gửi lại gia hạn, xử lý cọc khi chấm dứt bình thường. Ghi rõ phần nào là đề xuất chưa được duyệt.
+- [x] Các chính sách này đã được cụ thể hóa qua các giai đoạn được duyệt: SLA khiếu nại 48 giờ có cấu hình, quá hạn không tự đồng ý; hủy trước thuê mới hoàn toàn bộ thực nhận theo điều kiện và giữ nhánh chính sách cũ đã ký; gia hạn được gửi lại sau từ chối/hết hạn trong cửa sổ; chấm dứt thỏa thuận không mặc định mất cọc, quyết toán dựa trên phiên bản đồng ý và thực nhận. Xem báo cáo 03, 04, 06–08 và báo cáo hoàn thiện. Ngoại lệ văn bản cọc 0 đồng đã được chốt ở ô riêng.
 
 **Nghiệm thu:** có bảng chuyển trạng thái ghi rõ ai được làm, điều kiện, tác động đến tiền/listing/xe/văn bản, cách retry và cách xử lý lỗi. Không có hành động “admin sửa tay trạng thái cho chạy tiếp”.
 
@@ -91,7 +93,7 @@ Bàn giao lượt hoàn thiện: [Báo cáo](CONTRACT_LIFECYCLE_GAPS_COMPLETION_
 
 - [x] `acceptClosure` ghi `retainedAmount`, lý do và thời điểm cho cả khấu trừ một phần/toàn bộ, phù hợp với hai bên đã chấp thuận. Mở rộng cột căn cứ lên 2.000 ký tự theo giới hạn quyết toán.
 - [x] Phân biệt tiền khấu trừ từ cọc với khoản phải trả thêm vượt cọc; không ghi khoản chưa thu thành cọc đã giữ lại. Đối chiếu lại số dư và phép tính trước chấp thuận phiên bản.
-- [x] Phân biệt tiền đang giữ, khoản sẽ hoàn và khoản đã hoàn; chỉ xác nhận tiền đã hoàn sau đúng bước thực nhận.
+- [x] Phân biệt tiền đang giữ, khoản sẽ hoàn và khoản đã hoàn; chỉ xác nhận tiền đã hoàn sau đúng bước thực nhận. Không cọc/cọc thực giữ bằng 0 thì không tạo giao dịch hoàn cọc, không đặt hạn hoàn nếu không còn khoản tiền phải chuyển, không ghi giữ lại cọc 0 đồng; vẫn cần hóa đơn cuối, trả nhà và quyết toán khoản phải trả nếu có. Cọc bổ sung đã thực nhận sau đó vẫn quyết toán theo số dư thật.
 - [x] Kiểm tra cân đối số tiền từ cọc thực nhận cộng/trừ các điều chỉnh đã xác nhận. Trạng thái `REFUNDED` không xóa dấu vết khoản đã khấu trừ trước đó.
 - [x] Thống nhất API và cách hiển thị sổ cọc giữa onboarding, hợp đồng, quyết toán và admin; không tự suy diễn null là đã hoàn/không khấu trừ. Hồ sơ cũ thiếu số giữ lại được ghi rõ chưa có dữ liệu, không tự backfill khi chưa đối chiếu.
 - [x] Test khấu trừ 0, một phần, toàn bộ, vượt cọc; hoàn bị từ chối/tranh chấp; xác nhận trùng; lỗi tạo nghĩa vụ hoàn phải rollback. Có test chấp thuận đồng thời và object đã đọc bị cũ.

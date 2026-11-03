@@ -202,6 +202,44 @@ class OnboardingPersistencePostgresTest {
         var v=service.refresh(id,"tenant");assertEquals("WAITING_START",v.stage());assertFalse(v.canPrepareContract());assertFalse(v.canSign());
         assertTrue(payments.findByRentalRequestIdAndType(id,PaymentType.INITIAL).isEmpty());
     }
+    @ParameterizedTest @ValueSource(booleans={false,true})
+    void zeroDepositWaitsForActualRentThenCreatesOnlyOneLeaseWithoutDepositSigning(boolean keepExemptionRow) {
+        var r=rentals.findById(id).orElseThrow();r.setDepositAmount(BigDecimal.ZERO);rentals.saveAndFlush(r);
+        var listing=r.getListing();listing.setDepositType(keepExemptionRow?DepositType.FIXED_AMOUNT:DepositType.NONE);
+        listing.setDepositAmount(keepExemptionRow?BigDecimal.ZERO:null);listings.saveAndFlush(listing);
+        var old=payments.findByRentalRequestIdAndType(id,PaymentType.RESERVATION_DEPOSIT).orElseThrow();
+        if(keepExemptionRow){old.setTotalAmount(BigDecimal.ZERO);payments.saveAndFlush(old);}else payments.delete(old);
+        em.flush();em.clear();
+        // An exemption must work without a deposit signature, including with a missing legacy exemption row.
+        when(depositAgreements.signedOrExempt(any())).thenReturn(false);
+        var waiting=service.refresh(id,"tenant");assertEquals("WAITING_START",waiting.stage());assertFalse(waiting.depositAgreementRequired());
+        assertFalse(waiting.canSign());assertTrue(payments.findByRentalRequestIdAndType(id,PaymentType.INITIAL).isEmpty());
+        ((MutableTime)clock).current=Instant.parse("2026-11-01T03:00:00Z");
+        when(paymentService.createFirstRent(any(),any(),any())).thenAnswer(call->{
+            var request=(RentalRequest)call.getArgument(0);
+            return payments.saveAndFlush(PaymentRequest.builder().rentalRequestId(id).listingId(request.getListing().getId())
+                .payerId("tenant").payeeId("owner").type(PaymentType.INITIAL).onboardingKey(id+":INITIAL")
+                .direction(PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.AWAITING_TRANSFER)
+                .totalAmount(new BigDecimal("5000000")).transferReference("HS"+UUID.randomUUID().toString().substring(0,12))
+                .opensAt(call.getArgument(1)).dueAt(call.getArgument(2)).build());
+        });
+        assertEquals("AWAITING_FIRST_RENT",service.refresh(id,"tenant").stage());
+        var firstRent=payments.findByRentalRequestIdAndType(id,PaymentType.INITIAL).orElseThrow();
+        assertEquals(Instant.parse("2026-10-31T17:00:00Z"),firstRent.getOpensAt());
+        assertEquals(Instant.parse("2026-11-01T17:00:00Z"),firstRent.getDueAt());
+        var creator=automaticCreator();TestTransaction.flagForCommit();TestTransaction.end();
+        assertNull(creator.createDraftAutomatically(id),"Zero deposit does not waive the first rent receipt");
+        TestTransaction.start();firstRent=payments.findByRentalRequestIdAndType(id,PaymentType.INITIAL).orElseThrow();
+        firstRent.setStatus(PaymentStatus.CONFIRMED);firstRent.setConfirmedAt(clock.now());payments.saveAndFlush(firstRent);
+        configureSourceBuilder();TestTransaction.flagForCommit();TestTransaction.end();
+        var draft=creator.createDraftAutomatically(id);assertNotNull(draft);
+        assertEquals(draft.getId(),creator.createDraftAutomatically(id).getId());
+        assertFalse(service.refresh(id,"owner").depositAgreementRequired());
+        assertEquals(0L,jdbc.queryForObject("select count(*) from contracts where rental_request_id=? and agreement_kind='DEPOSIT'",Long.class,id));
+        assertEquals(1L,jdbc.queryForObject("select count(*) from contracts where rental_request_id=? and parent_contract_id is null and agreement_kind is distinct from 'DEPOSIT'",Long.class,id));
+        verify(paymentService,times(1)).createFirstRent(any(),any(),any());
+        TestTransaction.start();
+    }
     @Test void latestStartChangesAreBatchedDeterministicallyWithoutMixingRentalRequests() {
         var requested=clock.now();
         changes.saveAndFlush(RentalStartChange.builder().id("00000000-0000-0000-0000-000000000001").rentalRequestId(id)
@@ -285,6 +323,9 @@ class OnboardingPersistencePostgresTest {
             .type(PaymentType.INITIAL).direction(PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.CONFIRMED)
             .totalAmount(new BigDecimal("5000000")).transferReference("HS"+UUID.randomUUID().toString().substring(0,12))
             .confirmedAt(clock.now()).build());
+        configureSourceBuilder();
+    }
+    private void configureSourceBuilder() {
         // Capture realistic source terms now that export verifies the operational calendar and amounts.
         var realBuilder=new ContractDataBuilder(mock(com.hs.user.repository.UserRepository.class),
             mock(com.hs.user.repository.AddressRepository.class),new ObjectMapper());

@@ -158,6 +158,52 @@ class ContractLifecyclePhase03PostgresTest {
         assertEquals(0,deposits.findByRentalRequestId(rentalId).orElseThrow().getRetainedAmount().compareTo(new BigDecimal(retained)));
         assertEquals(new BigDecimal(balance).signum()>0?"BALANCE_PENDING":new BigDecimal(refund).signum()>0?"REFUND_PENDING":"CLOSED",actual.getStatus());
     }
+    private void waiveDeposit() {
+        tx(()->{
+            var r=rentals.findById(rentalId).orElseThrow();r.setDepositAmount(BigDecimal.ZERO);rentals.saveAndFlush(r);
+            var d=deposits.findByRentalRequestId(rentalId).orElseThrow();d.setOriginalAmount(BigDecimal.ZERO);d.setHeldAmount(BigDecimal.ZERO);d.setRefundableAmount(BigDecimal.ZERO);deposits.saveAndFlush(d);
+            var p=paymentRepo.findById(d.getInitialPaymentRequestId()).orElseThrow();p.setTotalAmount(BigDecimal.ZERO);paymentRepo.saveAndFlush(p);
+        });
+    }
+    @ParameterizedTest @CsvSource({"0,CLOSED","100000,BALANCE_PENDING"})
+    void noDepositClosureSkipsRefundButStillCollectsAnAgreedBalance(String charge,String expectedStatus) {
+        waiveDeposit();var close=proposal(charge);accept(close.getProposalVersion());
+        var actual=closures.findById(id).orElseThrow();var d=deposits.findByRentalRequestId(rentalId).orElseThrow();
+        assertEquals(expectedStatus,actual.getStatus());assertNull(actual.getRefundPaymentId());
+        assertTrue(paymentRepo.findAllByContractIdAndType(id,PaymentType.DEPOSIT_REFUND).isEmpty());
+        assertEquals(DepositStatus.HELD,d.getStatus());assertEquals(0,d.getRetainedAmount().signum());assertNull(d.getRetainedAt());
+        if("0".equals(charge)) {
+            assertNull(actual.getRefundDueAt());assertNull(actual.getBalancePaymentId());assertEquals(ContractStatus.CLOSED,contracts.findById(id).orElseThrow().getStatus());
+        }else {
+            assertEquals(ContractStatus.EXPIRED,contracts.findById(id).orElseThrow().getStatus());
+            var payment=paymentRepo.findById(actual.getBalancePaymentId()).orElseThrow();assertEquals(0,new BigDecimal(charge).compareTo(payment.getTotalAmount()));
+            assertEquals("tenant",payment.getPayerId());assertEquals("owner",payment.getPayeeId());
+            String evidence=proof(payment.getId(),"tenant");payments.reportTransfer(payment.getId(),"tenant",ReportTransferRequest.builder().proofStorageId(evidence).expectedAmount(new BigDecimal(charge)).build());
+            assertEquals("BALANCE_PENDING",service.get(id,"owner").closure().getStatus());
+            payments.confirmReceipt(payment.getId(),"owner");assertEquals("CLOSED",service.get(id,"tenant").closure().getStatus());
+        }
+        assertThrows(AppException.class,()->accept(close.getProposalVersion()));
+    }
+    @Test void waivedDepositDoesNotReleaseThePropertyWithAnUnpaidFinalBillOrWithoutHandover() {
+        waiveDeposit();clock("2027-01-14T10:00:00");
+        tx(()->{var bill=invoices.findByContractIdAndPeriodIndex(id,2).orElseThrow();bill.setStatus(MonthlyInvoiceStatus.DRAFT);invoices.saveAndFlush(bill);});
+        assertFalse(service.get(id,"owner").canProposeClosure());assertThrows(AppException.class,()->proposal("0"));
+        tx(()->{var bill=invoices.findByContractIdAndPeriodIndex(id,2).orElseThrow();bill.setStatus(MonthlyInvoiceStatus.PAID);invoices.saveAndFlush(bill);});
+        assertThrows(AppException.class,()->service.proposeClosure(id,"owner",new ClosurePayload(null,null,BigDecimal.ZERO,"Chưa nhận lại nhà và chìa khóa",false)));
+        assertEquals(ContractStatus.EXPIRED,contracts.findById(id).orElseThrow().getStatus());
+        verify(listings,never()).releaseRentedAfterTermination(anyString(),anyString());verify(parking,never()).releaseReservationsForContract(anyString());
+    }
+    @Test void initiallyZeroDepositStillRefundsAnActuallyReceivedDepositAdjustment() {
+        waiveDeposit();tx(()->{
+            var d=deposits.findByRentalRequestId(rentalId).orElseThrow();d.setHeldAmount(new BigDecimal("3000000"));d.setRefundableAmount(new BigDecimal("3000000"));deposits.saveAndFlush(d);
+            paymentRepo.saveAndFlush(PaymentRequest.builder().rentalRequestId(rentalId).listingId(listingId).contractId(id).payerId("tenant").payeeId("owner")
+                .type(PaymentType.DEPOSIT_ADJUSTMENT).direction(PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("3000000"))
+                .confirmedAt(time.now()).transferReference("HS"+UUID.randomUUID().toString().substring(0,12)).build());
+        });
+        var close=proposal("0");accept(close.getProposalVersion());
+        var result=service.get(id,"tenant");assertEquals("REFUND_PENDING",result.closure().getStatus());assertEquals(0,new BigDecimal("3000000").compareTo(result.refundPayment().totalAmount()));
+        assertEquals(0,new BigDecimal("3000000").compareTo(ledger.forRental(rentalId).confirmedReceivedAmount()));
+    }
     @Test void refundRejectedAndDisputedThenConfirmedKeepsRetentionAndClosesOnlyAfterRealReceipt(){
         var close=proposal("100000");accept(close.getProposalVersion());String paymentId=closures.findById(id).orElseThrow().getRefundPaymentId();
         String proof=proof(paymentId,"owner");var amount=new BigDecimal("19900000");

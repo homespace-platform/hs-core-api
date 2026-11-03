@@ -74,7 +74,7 @@ public class RentalOnboardingService {
                        boolean canSign,boolean canRequestEarlierStart,long holdMinutes,
                        List<PaymentRequestResponse> payments,List<RentalStartChange> startChanges,String message,String askerRole,
                        Instant cancellationRequestedAt,String cancellationReason,List<RentalOnboardingEvent> history,
-                       DefaultView defaultCase,com.hs.payment.dto.DepositLedgerView deposit,boolean canRequestCancellation, String depositAgreementContractId, String depositAgreementStatus) {}
+                       DefaultView defaultCase,com.hs.payment.dto.DepositLedgerView deposit,boolean canRequestCancellation, String depositAgreementContractId, String depositAgreementStatus,boolean depositAgreementRequired) {}
     public record DefaultView(String eligibleKind,Instant notifiedAt,Instant respondBy,String reason,
                               Instant disputedAt,Instant completedAt,boolean canComplete,String policyVersion) {}
     @Value("${rental.hold-duration-minutes:60}") private long holdMinutes=60;
@@ -92,7 +92,9 @@ public class RentalOnboardingService {
             || p!=null&&p.getStatus()==PaymentStatus.TRANSFER_REPORTED&&p.getConfirmationDueAt()!=null&&!time.now().isBefore(p.getConfirmationDueAt());
     }
     private boolean depositReady(RentalRequest r) {
-        return confirmed(payment(r.getId(),PaymentType.RESERVATION_DEPOSIT))||confirmed(payment(r.getId(),PaymentType.INITIAL));
+        var deposit=payment(r.getId(),PaymentType.RESERVATION_DEPOSIT);
+        if(com.hs.contract.deposit.DepositAgreementService.isExempt(r))return deposit==null||confirmed(deposit);
+        return confirmed(deposit)||confirmed(payment(r.getId(),PaymentType.INITIAL));
     }
     @Transactional public View refresh(String id,String actor) {
         var r=rental(id,actor); sync(r); return view(r,actor);
@@ -107,7 +109,7 @@ public class RentalOnboardingService {
         if(r.getCancellationRequestedAt()!=null||r.getResolutionWorkflowId()!=null)return;
         var deposit=payment(r.getId(),PaymentType.RESERVATION_DEPOSIT);
         var rent=payment(r.getId(),PaymentType.INITIAL);
-        if(confirmed(deposit)&&rent==null&&!time.today().isBefore(r.getMoveInDate())) {
+        if(depositReady(r)&&(deposit==null||confirmed(deposit))&&rent==null&&!time.today().isBefore(r.getMoveInDate())) {
             var opens=r.getMoveInDate().atStartOfDay(BillingTime.ZONE).toInstant();
             // A delayed restart retains the original opening/deadline; it does not invent a new lease date.
             rent=paymentService.createFirstRent(r,opens,opens.plus(Duration.ofHours(rentWindowHours)));
@@ -136,7 +138,8 @@ public class RentalOnboardingService {
                 && "TENANT_SIGNING".equals(r.getDefaultNoticeKind()) && r.getDefaultDisputedAt()==null
                 && defaultFingerprint(r,"TENANT_SIGNING").equals(r.getDefaultNoticeFingerprint())
                 && (signDue==null||signDue.isBefore(r.getDefaultRespondBy())))signDue=r.getDefaultRespondBy();
-        boolean depositSigned=depositAgreements==null || depositAgreements.signedOrExempt(r);
+        boolean depositExempt=com.hs.contract.deposit.DepositAgreementService.isExempt(r);
+        boolean depositSigned=depositExempt || depositAgreements==null || depositAgreements.signedOrExempt(r);
         var depositDocument=depositAgreements==null?null:depositAgreements.find(r.getId()).orElse(null);
         if(!depositSigned)signDue=null;
         boolean paid=confirmed(rent)&&(deposit==null||confirmed(deposit));
@@ -148,20 +151,20 @@ public class RentalOnboardingService {
         else if(r.getStatus()!=RentalRequestStatus.ACCEPTED){stage=r.getStatus().name();message="Yêu cầu chưa được chấp nhận hoặc không còn hiệu lực.";}
         else if(r.getResolutionWorkflowId()!=null){stage="RESOLUTION_PENDING";message="Đang xử lý hồ sơ trước thuê. Xem đề nghị, phản hồi hoặc khiếu nại tại mục Xử lý cọc và ký bên dưới.";}
         else if(r.getCancellationRequestedAt()!=null){stage="CANCELLATION_REQUESTED";message="Người thuê đề nghị hủy hồ sơ và hoàn tiền; chờ chủ nhà quyết định.";}
-        else if(unresolved(deposit)||unresolved(rent)){stage="REQUIRES_REVIEW";message="Cần đối soát khoản chuyển; phòng tiếp tục được giữ, không tự xác nhận hay hoàn tiền.";}
+        else if(unresolved(deposit)||unresolved(rent)||depositExempt&&deposit!=null&&!confirmed(deposit)){stage="REQUIRES_REVIEW";message="Cần đối soát khoản chuyển; phòng tiếp tục được giữ, không tự xác nhận hay hoàn tiền.";}
         else if(!depositReady(r)&&(deposit!=null&&deposit.getStatus()==PaymentStatus.TRANSFER_REPORTED||rent!=null&&rent.getStatus()==PaymentStatus.TRANSFER_REPORTED)){stage="AWAITING_DEPOSIT_CONFIRMATION";message="Đã báo chuyển khoản giữ chỗ, chờ chủ nhà xác nhận nhận đủ tiền.";}
         else if(!depositReady(r)){stage="AWAITING_DEPOSIT";message="Chờ chuyển khoản giữ chỗ trước hạn ghi trên yêu cầu thanh toán.";}
         else if(!depositSigned){stage="AWAITING_DEPOSIT_SIGNATURE";message=depositDocument==null?"Đã xác nhận cọc. Đang chuẩn bị hợp đồng cọc; kiểm tra mẫu và dữ liệu nếu chưa có văn bản. Không chuyển tiền thêm.":"Đã xác nhận tiền. Hai bên cần ký số hợp đồng cọc trước khi ký hợp đồng thuê.";}
-        else if(rent==null){stage="WAITING_START";message="Đã xác nhận cọc. Tiền tháng đầu và ký hợp đồng mở vào ngày bắt đầu thuê.";}
+        else if(rent==null){stage="WAITING_START";message=depositExempt?"Không yêu cầu đặt cọc, bỏ qua hợp đồng cọc. Tiền thuê tháng đầu và ký hợp đồng thuê mở vào ngày bắt đầu thuê.":"Đã xác nhận cọc. Tiền tháng đầu và ký hợp đồng mở vào ngày bắt đầu thuê.";}
         else if(!paid){
             boolean reported=rent.getStatus()==PaymentStatus.TRANSFER_REPORTED;
             stage=reported?"AWAITING_RENT_CONFIRMATION":rent.getDueAt()!=null&&!time.now().isBefore(rent.getDueAt())?"REQUIRES_REVIEW":"AWAITING_FIRST_RENT";
-            message=reported?"Chờ chủ nhà xác nhận tiền tháng đầu.":"Chờ tiền thuê tháng đầu; không thu lại tiền cọc. Quá hạn cần hai bên đối soát, không tự đổi ngày thuê.";
+            message=reported?"Chờ chủ nhà xác nhận tiền tháng đầu.":depositExempt?"Chờ tiền thuê tháng đầu; hồ sơ không yêu cầu đặt cọc và không cần ký hợp đồng cọc. Quá hạn cần hai bên đối soát, không tự đổi ngày thuê.":"Chờ tiền thuê tháng đầu; không thu lại tiền cọc. Quá hạn cần hai bên đối soát, không tự đổi ngày thuê.";
         } else if(contract==null){
             var templateProblem=ContractDraftTemplates.problem(draftTemplates,r.getListing().getCategory());
             stage=templateProblem==null?"PREPARING_CONTRACT":"CONTRACT_TEMPLATE_REQUIRED";
             message=templateProblem==null
-                ?"Đã xác nhận đủ cọc và tiền tháng đầu. Bản nháp chưa được tạo; hệ thống sẽ tự thử lại. Nếu chờ lâu, vui lòng liên hệ hỗ trợ; không chuyển tiền lần nữa."
+                ?(depositExempt?"Đã xác nhận tiền thuê tháng đầu. Không yêu cầu hợp đồng cọc. Bản nháp hợp đồng thuê chưa được tạo; hệ thống sẽ tự thử lại. Nếu chờ lâu, vui lòng liên hệ hỗ trợ; không chuyển tiền lần nữa.":"Đã xác nhận đủ cọc và tiền tháng đầu. Bản nháp chưa được tạo; hệ thống sẽ tự thử lại. Nếu chờ lâu, vui lòng liên hệ hỗ trợ; không chuyển tiền lần nữa.")
                 :ContractDraftTemplates.message(templateProblem);
         }
         else {stage=signingOpen?"READY_TO_SIGN":"REQUIRES_REVIEW";message=signingOpen?"Đã xác nhận đủ tiền. Mở bản nháp để kiểm tra, hoàn thiện văn bản và ký trước hạn.":"Đã quá hạn hoàn tất ký; cần hai bên xử lý hồ sơ, không tự giải phóng phòng hoặc ghi lùi ngày ký.";}
@@ -174,7 +177,7 @@ public class RentalOnboardingService {
         return new View(time.now(),BillingTime.ZONE.toString(),stage,r.getMoveInDate(),r.getMoveInDate().plusMonths(r.getLeaseMonths()),
             opens,rent!=null?rent.getDueAt():null,signDue,r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getResolutionWorkflowId()==null&&r.getCancellationRequestedAt()==null&&paid&&(contract==null||contract.getStatus()==ContractStatus.DRAFT),signingOpen&&contract!=null,earlier,holdMinutes,
             rows,changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()),message,actor.equals(r.getOwnerId())?"LANDLORD":"TENANT",r.getCancellationRequestedAt(),r.getCancellationReason(),events.findByRentalRequestIdOrderByOccurredAtDesc(r.getId()),
-            defaultView(r),depositLedger.forRental(r.getId()),canCancel(r,contract),depositDocument==null?null:depositDocument.getId(),depositDocument==null?null:depositDocument.getStatus().name());
+            defaultView(r),depositLedger.forRental(r.getId()),canCancel(r,contract),depositDocument==null?null:depositDocument.getId(),depositDocument==null?null:depositDocument.getStatus().name(),!depositExempt);
     }
     @Transactional public View requestEarlier(String id,String actor,StartRequest request) {
         var r=rental(id,actor);sync(r);

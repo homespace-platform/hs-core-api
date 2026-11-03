@@ -65,6 +65,53 @@ class RentalOnboardingServiceTest {
             .totalAmount(new BigDecimal("5000000")).confirmedAt(status==PaymentStatus.CONFIRMED?now:null).build();
         when(payments.findByRentalRequestIdAndType("rental",PaymentType.INITIAL)).thenReturn(Optional.of(p));return p;
     }
+    private void exemptWithoutDepositPayment() {
+        rental.setDepositAmount(BigDecimal.ZERO);
+        rental.getListing().setDepositType(DepositType.NONE);
+        when(payments.findByRentalRequestIdAndType("rental",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.empty());
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",mock(com.hs.contract.deposit.DepositAgreementService.class));
+    }
+    @Test void exemptFutureRentalSkipsDepositWithoutNeedingAZeroValueReceipt() {
+        exemptWithoutDepositPayment();
+        var view=service.refresh("rental","tenant");
+        assertEquals("WAITING_START",view.stage());assertFalse(view.depositAgreementRequired());
+        assertTrue(view.message().contains("bỏ qua hợp đồng cọc"));assertTrue(view.canRequestEarlierStart());
+        assertFalse(view.canSign());assertFalse(view.canPrepareContract());assertTrue(view.payments().isEmpty());
+        assertNull(view.depositAgreementContractId());verify(paymentService,never()).createFirstRent(any(),any(),any());
+    }
+    @Test void exemptRentalOpensOnlyFirstRentOnTheOriginalStartDate() {
+        exemptWithoutDepositPayment();now=Instant.parse("2026-10-31T17:00:00Z");
+        when(paymentService.createFirstRent(eq(rental),any(),any())).thenAnswer(call->rent(PaymentStatus.AWAITING_TRANSFER));
+        var view=service.refresh("rental","tenant");
+        assertEquals("AWAITING_FIRST_RENT",view.stage());assertFalse(view.canSign());assertFalse(view.depositAgreementRequired());
+        verify(paymentService).createFirstRent(rental,Instant.parse("2026-10-31T17:00:00Z"),Instant.parse("2026-11-01T17:00:00Z"));
+        service.refresh("rental","tenant");verify(paymentService,times(1)).createFirstRent(any(),any(),any());
+    }
+    @Test void exemptSameDayRentalStillNeedsActualRentReceiptBeforeLeaseSigning() {
+        exemptWithoutDepositPayment();rental.setMoveInDate(time.today());
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(Contract.builder().id("lease").status(ContractStatus.TENANT_SIGNATURE_PENDING).build()));
+        var rent=rent(PaymentStatus.AWAITING_TRANSFER);
+        assertEquals("AWAITING_FIRST_RENT",service.refresh("rental","tenant").stage());
+        assertThrows(AppException.class,()->service.validateSigning("rental","tenant"));
+        rent.setStatus(PaymentStatus.TRANSFER_REPORTED);
+        assertEquals("AWAITING_RENT_CONFIRMATION",service.refresh("rental","tenant").stage());
+        assertThrows(AppException.class,()->service.validateSigning("rental","tenant"));
+        rent.setStatus(PaymentStatus.CONFIRMED);rent.setConfirmedAt(now);
+        var ready=service.refresh("rental","tenant");
+        assertEquals("READY_TO_SIGN",ready.stage());assertTrue(ready.canSign());assertFalse(ready.depositAgreementRequired());
+        assertDoesNotThrow(()->service.validateSigning("rental","tenant"));
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","DISPUTED","REJECTED"})
+    void exemptionDoesNotBypassAnUnresolvedRecordedDeposit(PaymentStatus status) {
+        rental.setDepositAmount(BigDecimal.ZERO);deposit.setStatus(status);
+        var waiting=service.refresh("rental","tenant");assertEquals("REQUIRES_REVIEW",waiting.stage());assertFalse(waiting.canRequestEarlierStart());
+        rental.setMoveInDate(time.today());
+        assertEquals("REQUIRES_REVIEW",service.refresh("rental","tenant").stage());
+        verify(paymentService,never()).createFirstRent(any(),any(),any());
+        rent(PaymentStatus.CONFIRMED);
+        var view=service.refresh("rental","tenant");assertEquals("REQUIRES_REVIEW",view.stage());assertFalse(view.canSign());
+    }
     @Test void paidWithoutPublishedTemplateExplainsTheBlockInsteadOfPretendingToGenerate() {
         rental.getListing().setCategory(ListingCategory.HOUSE);
         rent(PaymentStatus.CONFIRMED);

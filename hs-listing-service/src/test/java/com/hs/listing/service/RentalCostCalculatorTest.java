@@ -60,6 +60,16 @@ class RentalCostCalculatorTest {
                 .build();
     }
 
+    @Test void noDepositAndFixedZeroBothResolveToZeroRegardlessOfClientDeposit() {
+        for(DepositType type:List.of(DepositType.NONE,DepositType.FIXED_AMOUNT)) {
+            Listing listing=createBasicListing(ListingCategory.ROOM,PriceUnit.ROOM_MONTH,new BigDecimal("3500000"));
+            listing.setDepositType(type);listing.setDepositMonths(null);listing.setDepositAmount(type==DepositType.NONE?null:BigDecimal.ZERO);
+            var estimate=calculator.calculate(listing,LocalDate.of(2026,11,1),3,1,0,0,new BigDecimal("9999999"));
+            assertEquals(0,estimate.depositAmount().signum());
+            assertEquals(0,new BigDecimal("3500000").compareTo(estimate.estimatedInitialTotal()));
+        }
+    }
+
     @Test
     @DisplayName("1. MONTH & ROOM_MONTH giữ nguyên giá thuê")
     void testMonthAndRoomMonthKeepSamePrice() {

@@ -130,7 +130,7 @@ Các dòng “thiếu” là yêu cầu thiết kế tiếp, không phải quy�
 | Mã | Đề xuất | Hiện trạng / thời điểm cần quyết định |
 |---|---|---|
 | D01 | Duyệt chính sách trường được sửa tại mục 3: bảo vệ danh tính, lịch/tiền/xe và receipt; vẫn hoàn thiện điều khoản được phép khi chưa ký | Cần duyệt để thực hiện 01; F01 chưa sửa |
-| D02 | Giữ luồng hai HĐ ký riêng đối với cọc lớn hơn 0, kể cả cùng ngày; giai đoạn 00 không thay ngoại lệ miễn cọc | Quy tắc hiện có trong `ReservationPolicy.V2`: cọc 0 miễn HĐ nhận tiền cọc. Nếu muốn có thêm văn bản giữ chỗ 0 đồng, cần duyệt trước thay đổi đó; không là lý do tạo receipt giả |
+| D02 | Giữ luồng hai HĐ ký riêng đối với cọc lớn hơn 0, kể cả cùng ngày; cọc 0/không cọc bỏ qua HĐ cọc | Chủ dự án đã chốt ngày 03/11/2026: bỏ qua HĐ cọc khi không cọc hoặc cọc 0 đồng, không cần văn bản giữ chỗ 0 đồng ký riêng. Phù hợp `ReservationPolicy.V2` hiện có; không thay văn bản đồng ý/hash cũ hoặc tạo receipt chuyển tiền giả. Đã triển khai API/UI và kiểm thử tại báo cáo miễn cọc. |
 | D03 | Cho gửi đề nghị gia hạn mới sau từ chối/hết hạn phản hồi nếu còn cửa sổ và không có đề nghị hiệu lực trùng | Cần chốt trước 03B; không mở lại bản cũ |
 | D04 | Khiếu nại xử lý ở hai bên trước, được chuyển admin nếu không thống nhất/quá hạn; không coi im lặng là nhận tiền/đồng ý khấu trừ | Cần chốt SLA, quyền đóng/rút/mở lại và trường hợp khẩn cấp trước 04; chưa có cấu hình SLA khiếu nại tổng quát được duyệt |
 | D05 | Cọc đã nhận nhưng không ký/không nhận nhà phải có đường xử lý dựa trên nguyên nhân, chứng cứ và kết quả đối soát | Cần chốt điều kiện trước 06; không sửa điều khoản giữ cọc cũ hồi tố |
