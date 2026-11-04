@@ -84,7 +84,7 @@ public class PaymentRequestService {
     private void lockRentalForPayment(String id) {
         if(rentalRequests==null)return;
         var p=paymentRequestRepository.findById(id).orElseThrow(()->new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND));
-        if(isOnboarding(p)) {
+        if(isOnboarding(p) || (p.getType()==PaymentType.INITIAL_PAYMENT_REFUND && p.getRentalRequestId()!=null)) {
             var rental=rentalRequests.findById(p.getRentalRequestId()).orElseThrow();
             entityManager.refresh(rental,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
         }
@@ -595,6 +595,9 @@ public class PaymentRequestService {
 
         log.info("Payee [{}] CONFIRMED receipt for PaymentRequest [{}]", actorId, paymentRequestId);
         publishOnboardingReceipt(saved);
+        if (receiptEvents != null && saved.getType() == PaymentType.INITIAL_PAYMENT_REFUND && saved.getRentalRequestId() != null) {
+            receiptEvents.publishEvent(new com.hs.payment.event.InitialRefundConfirmed(saved.getRentalRequestId(), actorId));
+        }
         return toResponse(saved, actorId);
     }
 
@@ -851,7 +854,8 @@ public class PaymentRequestService {
         PaymentRequest savedRefund = paymentRequestRepository.save(refundPayment);
 
         // Update DepositRecord status to REFUND_DUE
-        if(!rentOnly) depositRecordRepository.findByInitialPaymentRequestId(initialPayment.getId()).ifPresent(record -> {
+        if(!rentOnly) depositRecordRepository.findByInitialPaymentRequestId(initialPayment.getId())
+                .filter(record -> record.getOriginalAmount() != null && record.getOriginalAmount().signum() > 0).ifPresent(record -> {
             record.setStatus(DepositStatus.REFUND_DUE);
             record.setRefundPaymentRequestId(savedRefund.getId());
             depositRecordRepository.save(record);

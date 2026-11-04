@@ -10,7 +10,7 @@ Phạm vi ngày 03/11/2026. Không bao gồm hệ thống thông báo. Thao tác
 2. Bên còn lại đọc đúng bản và chọn đồng ý/từ chối. Nếu không thống nhất, mở khiếu nại từ chính đề nghị; nguồn, lịch sử, chứng cứ đã gắn được chụp vào case.
 3. Hạn phản hồi mặc định 48 giờ, cấu hình `rental.resolution-response-hours`. Quá hạn không tự đồng ý. Chủ nhà chỉ dùng **Kết thúc và hoàn toàn bộ tiền** sau hạn, xác nhận đã liên hệ khách và phòng chưa bàn giao/đã nhận lại đầy đủ.
 4. Nếu đã có chữ ký đang xử lý hoặc chưa rõ kết quả, đối soát giao dịch cũ trước. Không hủy/gửi ký mới để bỏ qua trạng thái chưa rõ.
-5. Hoàn tiền là nghĩa vụ thanh toán riêng. Chủ nhà báo chuyển, người nhận xác nhận thực nhận; tạo khoản hoàn chưa có nghĩa đã trả.
+5. Sau khi đồng ý hủy, hồ sơ chờ hoàn tiền và phòng vẫn được giữ. Chủ nhà báo chuyển từng khoản hoàn. Khi người thuê xác nhận đã nhận đủ tất cả khoản hoàn, hệ thống mới hoàn tất hủy yêu cầu, hủy bản hợp đồng thuê chưa ký đủ và giải phóng lượt giữ phòng.
 6. Sau khi khiếu nại giải quyết mà hai bên vẫn muốn thuê: một bên chọn **Đề nghị tiếp tục thuê / ký**, bên kia chọn **Đồng ý tiếp tục thuê / ký**. Đóng case không tự đồng ý thuê. Không cần lập rồi rút đề nghị hủy để mở khóa. Hạn thanh toán đã quá hạn vẫn phải mở lại/đối soát qua luồng thanh toán hợp lệ; không ghi nhận tiền giả hay dời ngày thuê.
 
 ### Biên bản nhận nhà

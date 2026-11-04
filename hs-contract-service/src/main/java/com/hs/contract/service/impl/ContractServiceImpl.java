@@ -998,6 +998,10 @@ public class ContractServiceImpl implements ContractService {
         if (contract.getStatus() != ContractStatus.DRAFT) {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
         }
+        if (contract.getParentContractId() == null && rentalRequestRepository.findById(contract.getRentalRequestId())
+                .filter(rental -> rental.getCancellationRefundApprovedAt() != null).isPresent()) {
+            throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED, "Hồ sơ đang chờ người thuê xác nhận nhận tiền hoàn.");
+        }
 
         ContractRevision revision = requireCurrentRevision(contract);
         draftIntegrity.validateForDocument(contract, revision);

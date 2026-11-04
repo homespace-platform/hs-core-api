@@ -52,7 +52,7 @@ class RentalDefaultTest {
         revision=ContractRevision.builder().id("rev").initialPaymentSnapshot("{}").build();
         rent=PaymentRequest.builder().id("rent").rentalRequestId("r").type(PaymentType.INITIAL).status(PaymentStatus.AWAITING_TRANSFER)
             .totalAmount(new BigDecimal("5000000")).dueAt(now.minusSeconds(1)).build();
-        var dp=PaymentRequest.builder().id("dp").type(PaymentType.RESERVATION_DEPOSIT).status(PaymentStatus.CONFIRMED).build();
+        var dp=PaymentRequest.builder().id("dp").type(PaymentType.RESERVATION_DEPOSIT).status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("10000000")).build();
         deposit=DepositRecord.builder().initialPaymentRequestId("dp").heldAmount(new BigDecimal("10000000"))
             .originalAmount(new BigDecimal("10000000")).status(DepositStatus.HELD).build();
         when(rentals.findByIdForUpdate("r")).thenReturn(Optional.of(rental));
@@ -157,8 +157,10 @@ class RentalDefaultTest {
         tenantSigning();assertTrue(service.refresh("r","t").canRequestCancellation());
         service.requestCancellation("r","t",new RentalOnboardingService.Cancellation("Hai bên thỏa thuận hủy và hoàn tiền"));
         assertFalse(service.refresh("r","t").canSign());
-        service.decideCancellation("r","o",new RentalOnboardingService.Decision(true,"Thống nhất hoàn lại các khoản"));
-        verify(paymentService).createRefundObligation(rent);verify(paymentService,times(2)).createRefundObligation(any());assertEquals(ContractStatus.CANCELLED,contract.getStatus());
+        var pending=service.decideCancellation("r","o",new RentalOnboardingService.Decision(true,"Thống nhất hoàn lại các khoản"));
+        verify(paymentService).createRefundObligation(rent);verify(paymentService,times(2)).createRefundObligation(any());
+        assertEquals("CANCELLATION_REFUND_PENDING",pending.stage());
+        assertEquals(ContractStatus.TENANT_SIGNATURE_PENDING,contract.getStatus());
     }
     @Test void uncertainSignaturePreventsMutualCancellationToo() {
         tenantSigning();when(signatures.findByContractIdOrderByCreatedAtDesc("c")).thenReturn(List.of(SignatureRequest.builder().status(SignatureRequestStatus.EMBEDDING).signerRole(SignerRole.TENANT).build()));

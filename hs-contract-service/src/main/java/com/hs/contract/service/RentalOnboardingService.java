@@ -141,7 +141,7 @@ public class RentalOnboardingService {
         boolean depositExempt=com.hs.contract.deposit.DepositAgreementService.isExempt(r);
         boolean depositSigned=depositExempt || depositAgreements==null || depositAgreements.signedOrExempt(r);
         var depositDocument=depositAgreements==null?null:depositAgreements.find(r.getId()).orElse(null);
-        if(!depositSigned)signDue=null;
+        if(!depositSigned||r.getCancellationRefundApprovedAt()!=null)signDue=null;
         boolean paid=confirmed(rent)&&(deposit==null||confirmed(deposit));
         boolean signingOpen=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&r.getResolutionWorkflowId()==null
             &&r.getListing().getStatus()==com.hs.listing.model.constant.ListingStatus.RESERVED
@@ -149,6 +149,7 @@ public class RentalOnboardingService {
         String stage,message;
         if(r.getStatus()==RentalRequestStatus.COMPLETED){stage="COMPLETED";message="Đã ký đủ và bắt đầu hợp đồng.";}
         else if(r.getStatus()!=RentalRequestStatus.ACCEPTED){stage=r.getStatus().name();message="Yêu cầu chưa được chấp nhận hoặc không còn hiệu lực.";}
+        else if(r.getCancellationRefundApprovedAt()!=null){stage="CANCELLATION_REFUND_PENDING";message="Đã đồng ý hủy. Phòng vẫn được giữ cho đến khi người thuê xác nhận nhận đủ tiền hoàn.";}
         else if(r.getResolutionWorkflowId()!=null){stage="RESOLUTION_PENDING";message="Đang xử lý hồ sơ trước thuê. Xem đề nghị, phản hồi hoặc khiếu nại tại mục Xử lý cọc và ký bên dưới.";}
         else if(r.getCancellationRequestedAt()!=null){stage="CANCELLATION_REQUESTED";message="Người thuê đề nghị hủy hồ sơ và hoàn tiền; chờ chủ nhà quyết định.";}
         else if(unresolved(deposit)||unresolved(rent)||depositExempt&&deposit!=null&&!confirmed(deposit)){stage="REQUIRES_REVIEW";message="Cần đối soát khoản chuyển; phòng tiếp tục được giữ, không tự xác nhận hay hoàn tiền.";}
@@ -247,6 +248,8 @@ public class RentalOnboardingService {
         var r=rental(id,actor);
         boolean owner=actor.equals(r.getOwnerId());
         var target=owner?RentalRequestStatus.CANCELLED_BY_OWNER:RentalRequestStatus.CANCELLED_BY_RENTER;
+        if(r.getStatus()==RentalRequestStatus.ACCEPTED && r.getCancellationRefundApprovedAt()!=null)
+            throw invalid("Chờ người thuê xác nhận nhận đủ tiền hoàn trước khi hủy hồ sơ.");
         if(Set.of(RentalRequestStatus.CANCELLED_BY_RENTER,RentalRequestStatus.CANCELLED_BY_OWNER).contains(r.getStatus()))return view(r,actor);
         if(!Set.of(RentalRequestStatus.PENDING,RentalRequestStatus.ACCEPTED).contains(r.getStatus()))throw invalid("Yêu cầu không còn ở bước có thể hủy giữ chỗ.");
         var c=contracts.findByRentalRequestId(id).orElse(null);
@@ -285,7 +288,7 @@ public class RentalOnboardingService {
         if(!canCancel(r,contract))throw invalid("Đã ký đủ hoặc chữ ký chưa rõ kết quả; cần đối soát trước khi hủy hồ sơ nhận nhà.");
     }
     private boolean canCancel(RentalRequest r,com.hs.contract.model.Contract c) {
-        if(r.getResolutionWorkflowId()!=null)return false;
+        if(r.getResolutionWorkflowId()!=null||r.getCancellationRefundApprovedAt()!=null)return false;
         if(depositAgreements!=null) {
             var dc=depositAgreements.find(r.getId()).orElse(null);
             if(dc!=null && dc.getStatus()!=ContractStatus.ACTIVE && signatureNeedsReconciliation(dc))return false;
@@ -314,17 +317,25 @@ public class RentalOnboardingService {
         var r=rental(id,actor);requireUnsigned(r);
         if(!actor.equals(r.getOwnerId())||r.getCancellationRequestedAt()==null)throw invalid("Không có đề nghị hủy chờ chủ nhà quyết định.");
         if(p.approve()) {
+            boolean refundRequired=false;
             for(var type:List.of(PaymentType.RESERVATION_DEPOSIT,PaymentType.INITIAL)) {
                 var payment=payments.findByRentalRequestIdAndTypeForUpdate(id,type).orElse(null);
                 if(payment==null)continue;
                 if(Set.of(PaymentStatus.TRANSFER_REPORTED,PaymentStatus.DISPUTED,PaymentStatus.REJECTED).contains(payment.getStatus()))
                     throw invalid("Phải đối soát khoản chuyển trước khi quyết định hoàn tiền.");
-                if(confirmed(payment))paymentService.createRefundObligation(payment);
+                if(confirmed(payment)){
+                    if(payment.getTotalAmount().signum()>0){paymentService.createRefundObligation(payment);refundRequired=true;}
+                }
                 else {payment.setStatus(PaymentStatus.CANCELLED);payment.setCancelledAt(time.now());payment.setCancelledReason("Hai bên đồng ý hủy hồ sơ nhận nhà");payments.save(payment);}
             }
-            r.setStatus(RentalRequestStatus.CANCELLED_BY_RENTER);r.setHoldExpiresAt(null);rentals.save(r);
-            contracts.findByRentalRequestId(id).ifPresent(c->{c.setStatus(ContractStatus.CANCELLED);contracts.save(c);});
-            parking.releaseReservationsForRequest(id);listingStatus.releaseReserved(r.getListing(),actor,"Hai bên đồng ý hủy; nghĩa vụ hoàn tiền được theo dõi riêng");
+            r.setHoldExpiresAt(null);
+            if(refundRequired)r.setCancellationRefundApprovedAt(time.now());
+            else {
+                r.setStatus(RentalRequestStatus.CANCELLED_BY_RENTER);
+                contracts.findByRentalRequestId(id).ifPresent(c->{c.setStatus(ContractStatus.CANCELLED);contracts.save(c);});
+                parking.releaseReservationsForRequest(id);listingStatus.releaseReserved(r.getListing(),actor,"Hai bên đồng ý hủy hồ sơ chưa phát sinh khoản hoàn");
+            }
+            rentals.save(r);
         }else {r.setCancellationRequestedAt(null);r.setCancellationReason(null);rentals.save(r);}
         audit(r,actor,p.approve()?"CANCELLATION_APPROVED":"CANCELLATION_REJECTED",p.note());
         return view(r,actor);
@@ -332,7 +343,7 @@ public class RentalOnboardingService {
     public record ReviewDecision(boolean received,@NotBlank @Size(min=10,max=1000) String reason) {}
     @Transactional public View reopenSigning(String id,String actor,Cancellation note) {
         var r=rental(id,actor);var rent=payments.findByRentalRequestIdAndTypeForUpdate(id,PaymentType.INITIAL).orElseThrow(()->invalid("Chưa có khoản tiền tháng đầu."));
-        if(!actor.equals(r.getOwnerId())||r.getStatus()!=RentalRequestStatus.ACCEPTED||!confirmed(rent)||!depositReady(r)||r.getCancellationRequestedAt()!=null)
+        if(!actor.equals(r.getOwnerId())||r.getStatus()!=RentalRequestStatus.ACCEPTED||!confirmed(rent)||!depositReady(r)||r.getCancellationRequestedAt()!=null||r.getCancellationRefundApprovedAt()!=null)
             throw invalid("Chỉ chủ nhà được mở lại ký sau khi đã đối soát đủ tiền.");
         rent.setContractDueAt(time.now().plus(Duration.ofHours(signingHours)));payments.save(rent);
         contracts.findByRentalRequestId(id).ifPresent(c->{

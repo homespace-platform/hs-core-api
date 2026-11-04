@@ -670,6 +670,7 @@ public class RentalRequestService {
                 .listingSnapshot(r.getListingSnapshot())
                 .renterNote(r.getRenterNote())
                 .status(r.getStatus())
+                .cancellationRefundPending(r.getStatus()==RentalRequestStatus.ACCEPTED && r.getCancellationRefundApprovedAt()!=null)
                 .rejectReason(r.getRejectReason())
                 .acceptedAt(r.getAcceptedAt())
                 .holdExpiresAt(r.getHoldExpiresAt())

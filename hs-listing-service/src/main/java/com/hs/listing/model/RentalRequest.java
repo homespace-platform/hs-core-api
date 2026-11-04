@@ -126,6 +126,7 @@ public class RentalRequest extends BaseEntity {
     private Instant respondBy;
 
     private Instant cancellationRequestedAt;
+    private Instant cancellationRefundApprovedAt;
     /** A reviewed pre-tenancy resolution pauses new signing without rewriting the old cancellation workflow. */
     @Column(length=64) private String resolutionWorkflowId;
     @Column(length=1000) private String cancellationReason;

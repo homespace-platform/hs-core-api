@@ -233,7 +233,13 @@ class RentalOnboardingServiceTest {
     @Test void cancellationNeedsAgreementAndCreatesRefundRatherThanAutoTransfer() {
         service.requestCancellation("rental","tenant",new RentalOnboardingService.Cancellation("Hai bên thống nhất hủy thuê"));assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());
         when(payments.findByRentalRequestIdAndTypeForUpdate("rental",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.of(deposit));
-        service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(true,null));
-        verify(paymentService).createRefundObligation(deposit);assertEquals(RentalRequestStatus.CANCELLED_BY_RENTER,rental.getStatus());verify(parking).releaseReservationsForRequest("rental");
+        var pending=service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(true,null));
+        verify(paymentService).createRefundObligation(deposit);
+        assertEquals("CANCELLATION_REFUND_PENDING",pending.stage());
+        assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());
+        assertEquals(ListingStatus.RESERVED,rental.getListing().getStatus());
+        assertFalse(pending.canSign());assertFalse(pending.canPrepareContract());assertFalse(pending.canRequestCancellation());
+        assertThrows(AppException.class,()->service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(false,null)));
+        verifyNoInteractions(parking,listingStatus);
     }
 }

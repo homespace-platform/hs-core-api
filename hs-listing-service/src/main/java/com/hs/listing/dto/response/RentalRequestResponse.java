@@ -37,6 +37,7 @@ public record RentalRequestResponse(
         String listingSnapshot,
         String renterNote,
         RentalRequestStatus status,
+        boolean cancellationRefundPending,
         String rejectReason,
         Instant acceptedAt,
         Instant holdExpiresAt,
