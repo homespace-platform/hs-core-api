@@ -181,7 +181,16 @@ class ListingSeedPostgresTest {
             new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource),transactions,historicalSettings),historicalSettings);
         assertTrue(historicalQuery.summaries(new NearbyTypes.BatchRequest(List.of(historicalListing),2000,null,1)).getFirst().groups()
             .stream().allMatch(group->group.coverageStatus().equals("COMPLETE_PROVIDER_RESPONSE")),"The newer historical run must exercise the coverage precedence regression");
+        // A user-entered charge can carry its unit implicitly in the billing method.
+        execute("""
+            INSERT INTO listing_charges (id,listing_id,charge_type,billing_method,amount,currency,
+                included_in_rent,custom_name,sort_order,active,created_at,updated_at)
+            SELECT 'manual-seed-listing-fee',id,'OTHER','PER_MONTH',25000,'VND',false,
+                'Phí giặt',99,true,now(),now()
+            FROM listings WHERE status_reason LIKE 'DEMO%' ORDER BY id LIMIT 1
+            """);
         String before=counts(); execute(sql); assertEquals(before,counts());
+        assertEquals(1L,jdbc.queryForObject("select count(*) from listing_charges where id='manual-seed-listing-fee' and unit is null and amount=25000 and active",Long.class));
         assertEquals(1L,jdbc.queryForObject("select count(*) from listing_nearby_places where listing_id='unrelated-listing'",Long.class));
         var historicalRun=jdbc.queryForMap("select * from nearby_scan_runs where id=?",historicalRunId);
         assertEquals("TOMTOM",historicalRun.get("provider"));assertEquals("V2",historicalRun.get("api_version"));

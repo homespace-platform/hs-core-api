@@ -24,6 +24,8 @@ import java.util.*;
 @Service
 @RequiredArgsConstructor
 public class ContractRenderService {
+    private static final String NO_DEPOSIT = "Không đặt cọc theo điều khoản này.";
+    private static final String NO_DEPOSIT_PAYMENT = "Không phát sinh thanh toán tiền cọc";
 
     private final ObjectMapper objectMapper;
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd/MM/yyyy");
@@ -119,10 +121,20 @@ public class ContractRenderService {
         putTenantFields(model, tenant);
         putPropertyFields(model, property);
         putLeaseFields(model, lease);
-        putFinancialFields(model, financial);
+        boolean noDeposit = isZeroAmount(getStr(financial, "depositAmountValue", getStr(financial, "depositAmountNumber", "")));
+        putFinancialFields(model, financial, noDeposit);
         putMeterFields(model, meters);
         putInitialPaymentFields(model, initialPayment, financial);
-        model.put("policies", policies != null ? new LinkedHashMap<>(policies) : Map.of());
+        Map<String, Object> applicablePolicies = policies != null ? new LinkedHashMap<>(policies) : new LinkedHashMap<>();
+        if (noDeposit) {
+            applicablePolicies.remove("depositRefundDays");
+            applicablePolicies.remove("depositDeductionConditions");
+            if (applicablePolicies.get("listingPolicies") instanceof List<?> rows) {
+                applicablePolicies.put("listingPolicies", rows.stream().filter(row -> !(row instanceof Map<?, ?> fields)
+                        || !"depositRefundDays".equals(fields.get("code"))).toList());
+            }
+        }
+        model.put("policies", applicablePolicies);
 
         Map<String, Object> contract = new LinkedHashMap<>();
         contract.put("number", contractNumber != null ? contractNumber : "HD-" + System.currentTimeMillis());
@@ -135,11 +147,11 @@ public class ContractRenderService {
         if(!deadline.isBlank())terms+=(terms.isEmpty()?"":"\n")+"Hạn thanh toán theo quy trình hệ thống: "+deadline+".";
         String lateFeeClause=LatePaymentPolicy.from(policies).clause();
         if(!lateFeeClause.isBlank())terms+=(terms.isEmpty()?"":"\n")+lateFeeClause;
-        String policyClause = ContractPolicyTerms.clause(policies);
+        String policyClause = ContractPolicyTerms.clause(applicablePolicies);
         if (!policyClause.isBlank()) terms = terms.isEmpty() ? policyClause : terms + "\n" + policyClause;
         // Compatibility for old Word templates without #policiesTable. New templates should
         // place that dynamic table at the policy section; this text keeps every listing rule visible.
-        String listingRules = policies == null ? "" : ContractListingPolicies.text(policies);
+        String listingRules = ContractListingPolicies.text(applicablePolicies);
         if (!listingRules.isBlank()) terms += "\nCHÍNH SÁCH ÁP DỤNG CHO TÀI SẢN THUÊ:\n" + listingRules;
         contract.put("specialTerms", terms);
         model.put("contract", contract);
@@ -150,7 +162,7 @@ public class ContractRenderService {
         model.put("propertyFeaturesTable", buildPropertyFeaturesTable(property));
         model.put("amenitiesTable", buildAmenitiesTable(amenities));
         model.put("initialPaymentTable", buildInitialPaymentTable(initialPayment, financial));
-        model.put("policiesTable", buildPoliciesTable(policies));
+        model.put("policiesTable", buildPoliciesTable(applicablePolicies));
 
         return model;
     }
@@ -339,7 +351,7 @@ public class ContractRenderService {
         model.put("lease", lease);
     }
 
-    private void putFinancialFields(Map<String, Object> model, Map<String, Object> f) {
+    private void putFinancialFields(Map<String, Object> model, Map<String, Object> f, boolean noDeposit) {
         Map<String, Object> src = f != null ? f : Map.of();
         Map<String, Object> rent = new LinkedHashMap<>();
         rent.put("amountNumber", getStr(src, "amountNumber", ""));
@@ -352,7 +364,7 @@ public class ContractRenderService {
         Map<String, Object> deposit = new LinkedHashMap<>();
         deposit.put("amountNumber", getStr(src, "depositAmountNumber", ""));
         deposit.put("amountWords", getStr(src, "depositAmountWords", ""));
-        deposit.put("description", getStr(src, "depositDescription", ""));
+        deposit.put("description", noDeposit ? NO_DEPOSIT : getStr(src, "depositDescription", ""));
         model.put("deposit", deposit);
     }
 
@@ -485,6 +497,7 @@ public class ContractRenderService {
                     String item = String.valueOf(m.get("itemName"));
                     String amt = String.valueOf(m.get("amountText"));
                     String note = String.valueOf(m.get("note"));
+                    if ("Tiền đặt cọc".equals(item) && isZeroAmount(amt)) note = NO_DEPOSIT_PAYMENT;
                     rows.add(Rows.of(item, amt, note).create());
                 }
             }
@@ -497,7 +510,7 @@ public class ContractRenderService {
             String paidAt = getStr(initialPayment, "paidAt", "Trước thời điểm lập hợp đồng");
 
             rows.add(Rows.of("Tiền thuê kỳ đầu", rent, "Đã thanh toán").create());
-            rows.add(Rows.of("Tiền đặt cọc", deposit, "Đã thanh toán").create());
+            rows.add(Rows.of("Tiền đặt cọc", deposit, isZeroAmount(deposit) ? NO_DEPOSIT_PAYMENT : "Đã thanh toán").create());
             rows.add(Rows.of("Tổng cộng thanh toán", total, "Hoàn tất lúc: " + paidAt).create());
         }
 
@@ -580,6 +593,10 @@ public class ContractRenderService {
         if (map == null) return defaultVal;
         Object val = map.get(key);
         return val != null ? String.valueOf(val) : defaultVal;
+    }
+
+    private static boolean isZeroAmount(String amount) {
+        return amount.trim().matches("0(?:\\.0+)?(?: VN[ĐD])?");
     }
 
     public static String formatVND(BigDecimal amount) {

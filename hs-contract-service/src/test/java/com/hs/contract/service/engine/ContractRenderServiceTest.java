@@ -1,8 +1,13 @@
 package com.hs.contract.service.engine;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -10,6 +15,48 @@ import static org.junit.jupiter.api.Assertions.*;
 class ContractRenderServiceTest {
 
     private final ContractRenderService renderService = new ContractRenderService(new ObjectMapper());
+
+    @Test void wordAppliesDepositTermsOnlyWhenDepositIsDueAndPreservesHistoricalPaymentAmount() throws Exception {
+        byte[] template;
+        try (var document = new XWPFDocument(); var out = new ByteArrayOutputStream()) {
+            document.createParagraph().createRun().setText("{{deposit.description}}");
+            document.createParagraph().createRun().setText("{{#initialPaymentTable}}");
+            document.createParagraph().createRun().setText("{{#policiesTable}}");
+            document.createParagraph().createRun().setText("{{contract.specialTerms}}");
+            document.write(out);
+            template = out.toByteArray();
+        }
+
+        String oldTerms = "Hoàn cọc sau bàn giao theo điều khoản đã ký";
+        String oldNote = "Bên A hoàn cọc trực tiếp cho Bên B khi chấm dứt hợp đồng";
+        var policies = Map.<String, Object>of("depositRefundDays", 7, "depositDeductionConditions", "Đối chiếu thiệt hại",
+                "listingPolicies", List.of(Map.of("code", "depositRefundDays", "label", "Hạn hoàn cọc", "displayValue", "7 ngày"),
+                        Map.of("code", "petPolicy", "label", "Vật nuôi", "displayValue", "Được phép")));
+        for (String amount : List.of("0", "3400000")) {
+            boolean noDeposit = amount.equals("0");
+            String displayAmount = noDeposit ? "0 VNĐ" : "3.400.000 VNĐ";
+            var financial = Map.<String, Object>of("depositAmountValue", amount, "depositAmountNumber", displayAmount,
+                    "depositDescription", oldTerms);
+            for (boolean hasRows : List.of(true, false)) {
+                var initialPayment = Map.<String, Object>of("depositAmount", "0 VNĐ", "monthlyRent", "3.400.000 VNĐ",
+                        "rows", hasRows ? List.of(Map.of("itemName", "Tiền đặt cọc", "amountText", "0 VNĐ", "note", oldNote)) : List.of());
+                var model = renderService.buildDataModelFromSnapshots(null, null, null, null, financial, List.of(), List.of(),
+                        null, initialPayment, List.of(), policies, null, 3, 1, "HD-TEST", null, null);
+                byte[] rendered = renderService.renderDocx(new ByteArrayInputStream(template), model);
+                try (var document = new XWPFDocument(new ByteArrayInputStream(rendered)); var extractor = new XWPFWordExtractor(document)) {
+                    String text = extractor.getText();
+                    assertEquals(noDeposit, text.contains("Không đặt cọc theo điều khoản này."));
+                    assertEquals(!noDeposit, text.contains(oldTerms));
+                    assertEquals(!noDeposit, text.contains("Hạn hoàn cọc"));
+                    assertEquals(!noDeposit, text.contains("Đối chiếu thiệt hại"));
+                    assertTrue(text.contains("Không phát sinh thanh toán tiền cọc"));
+                    assertTrue(text.contains("Vật nuôi"));
+                    assertFalse(text.contains(oldNote));
+                }
+            }
+        }
+    }
+
     @Test void all64CatalogMarkersRenderForEachSupportedCategoryIncludingBothBankAccounts() throws Exception {
         var catalog=new ContractFieldCatalog();
         for(var category:ContractFieldCatalog.SUPPORTED_CATEGORIES) {
