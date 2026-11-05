@@ -67,7 +67,7 @@ public class ContractRenderService {
             }
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             template.write(out);
-            return out.toByteArray();
+            return WordLineBreakCompatibility.normalize(out.toByteArray());
         }
     }
 
