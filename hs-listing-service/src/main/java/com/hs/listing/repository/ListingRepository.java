@@ -28,6 +28,8 @@ public interface ListingRepository extends JpaRepository<Listing, String>, JpaSp
     @org.springframework.data.jpa.repository.Query("SELECT l.status, COUNT(l) FROM Listing l WHERE l.active = true GROUP BY l.status")
     List<Object[]> countAllGroupedByStatus();
 
+    long countByActiveTrueAndPendingEditIdIsNotNull();
+
     /** Published counts for the fixed home metros; optional category filter. */
     @org.springframework.data.jpa.repository.Query("""
             SELECT a.cityId, COUNT(l)

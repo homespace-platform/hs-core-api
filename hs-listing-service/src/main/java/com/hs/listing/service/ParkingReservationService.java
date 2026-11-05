@@ -28,6 +28,7 @@ public class ParkingReservationService {
     private final ParkingReservationRepository parkingReservationRepository;
     private final PropertyBranchRepository propertyBranchRepository;
     private final ListingRepository listingRepository;
+    @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
 
     private static final List<ParkingReservationStatus> ACTIVE_STATUSES = List.of(
             ParkingReservationStatus.HELD,
@@ -237,6 +238,21 @@ public class ParkingReservationService {
         }
     }
 
+    @Transactional
+    public void shortenHeldLease(String rentalRequestId, LocalDate previousEnd, LocalDate newEnd) {
+        var reservations = parkingReservationRepository.findByRentalRequestId(rentalRequestId);
+        for (var reservation : reservations) {
+            if (reservation.getStatus() == ParkingReservationStatus.ACTIVE)
+                throw new AppException(ListingErrorCode.RENTAL_ESTIMATE_INVALID, "Chỗ xe đã được kích hoạt.");
+            if (reservation.getStatus() != ParkingReservationStatus.HELD) continue;
+            if (!previousEnd.equals(reservation.getEndDateExclusive())
+                    || !newEnd.isAfter(reservation.getStartDate()) || !newEnd.isBefore(previousEnd))
+                throw new AppException(ListingErrorCode.RENTAL_ESTIMATE_INVALID, "Lịch giữ chỗ xe không khớp kỳ thuê.");
+            reservation.setEndDateExclusive(newEnd);
+            parkingReservationRepository.save(reservation);
+        }
+    }
+
     /**
      * Kích hoạt reservation sang ACTIVE khi hợp đồng có hiệu lực.
      */
@@ -307,7 +323,61 @@ public class ParkingReservationService {
         validateAmendmentCapacity(pool, rootId, agreementId, start, end, motorbikes, cars);
     }
 
+    @Transactional
+    public void validateAmendmentCapacityInBranch(String rootId,String agreementId,String listingId,String branchId,
+            LocalDate start,LocalDate end,int bikes,int cars) {
+        validateAmendmentCapacity(lockSelectedPool(listingId,branchId),rootId,agreementId,start,end,bikes,cars);
+    }
+
     private record AmendmentPool(Listing listing, PropertyBranch branch) {}
+
+    /** Replace only this unsigned rental's holds under the shared pool lock; never count its old hold twice. */
+    @Transactional
+    public void replaceDraftHold(RentalRequest request, int bikes, int cars) {
+        replaceDraftHoldInBranch(request,bikes,cars,request.getListing().getBranchId());
+    }
+
+    @Transactional
+    public void replaceDraftHoldInBranch(RentalRequest request,int bikes,int cars,String targetBranchId) {
+        var listing=listingRepository.findById(request.getListing().getId()).orElseThrow();
+        // The caller already holds the rental lock. Acceptance locks Listing before Rental;
+        // do not wait for that Listing here. The branch lock serializes inventory and an
+        // optimistic Listing check rolls back if approval changes its limits or branch.
+        var branch=targetBranchId==null?null:propertyBranchRepository.findByIdForUpdate(targetBranchId).orElseThrow();
+        if(branch!=null && !Objects.equals(listing.getOwnerId(),branch.getOwnerId()))
+            throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,"Chi nhánh không thuộc chủ nhà của hồ sơ thuê.");
+        entityManager.lock(listing,jakarta.persistence.LockModeType.OPTIMISTIC);
+        var start=request.getMoveInDate();var end=start.plusMonths(request.getLeaseMonths());
+        var own=parkingReservationRepository.findByRentalRequestId(request.getId());
+        if (own.stream().anyMatch(r->r.getStatus()==ParkingReservationStatus.ACTIVE))
+            throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,"Chỗ xe đã được kích hoạt; dùng phụ lục để thay đổi.");
+        if (bikes<0 || cars<0 || bikes>100 || cars>100
+                || listing.getRoomDetail()!=null && listing.getRoomDetail().getParkingPolicy()==com.hs.listing.model.constant.ListingEnums.ParkingPolicy.NONE && bikes+cars>0)
+            throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,"Số xe không phù hợp chính sách giữ xe.");
+        for(var type:VehicleType.values()) {
+            int desired=type==VehicleType.MOTORBIKE?bikes:cars;
+            Integer limit=type==VehicleType.MOTORBIKE?listing.getMaxMotorbikeCount():listing.getMaxCarCount();
+            Integer capacity=branch==null?limit:type==VehicleType.MOTORBIKE?branch.getMotorbikeParkingCapacity():branch.getCarParkingCapacity();
+            var others=branch==null?parkingReservationRepository.findOverlappingListingReservations(listing.getId(),type,ACTIVE_STATUSES,start,end)
+                    :parkingReservationRepository.findOverlappingBranchReservations(branch.getId(),type,ACTIVE_STATUSES,start,end);
+            var occupied=others.stream().filter(r->branch!=null || r.getBranchId()==null)
+                    .filter(r->!Objects.equals(request.getId(),r.getRentalRequestId())).toList();
+            int available=Math.max(0,Objects.requireNonNullElse(capacity,0)-calculatePeakUsage(occupied,start,end));
+            if(desired>available || limit!=null && desired>limit)
+                throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,"Không đủ chỗ "+(type==VehicleType.MOTORBIKE?"xe máy":"ô tô")+" trong thời hạn thuê.");
+        }
+        Instant deadline=own.stream().filter(r->r.getStatus()==ParkingReservationStatus.HELD).map(ParkingReservation::getHoldExpiresAt)
+                .filter(Objects::nonNull).min(Comparator.naturalOrder()).orElse(request.getHoldExpiresAt());
+        for(var r:own) if(r.getStatus()==ParkingReservationStatus.HELD) {
+            r.setStatus(ParkingReservationStatus.RELEASED);parkingReservationRepository.save(r);
+        }
+        for(var type:VehicleType.values()) {
+            int desired=type==VehicleType.MOTORBIKE?bikes:cars;if(desired==0)continue;
+            parkingReservationRepository.save(ParkingReservation.builder().listingId(listing.getId()).branchId(targetBranchId)
+                    .rentalRequestId(request.getId()).vehicleType(type).quantity(desired).startDate(start).endDateExclusive(end)
+                    .status(ParkingReservationStatus.HELD).holdExpiresAt(deadline).build());
+        }
+    }
 
     private AmendmentPool lockAmendmentPool(String listingId) {
         Listing candidate = listingRepository.findById(listingId).orElseThrow();
@@ -319,16 +389,29 @@ public class ParkingReservationService {
         return new AmendmentPool(listing, branch);
     }
 
+    private AmendmentPool lockSelectedPool(String listingId,String branchId) {
+        var listing=listingRepository.findById(listingId).orElseThrow();
+        var branch=branchId==null?null:propertyBranchRepository.findByIdForUpdate(branchId).orElseThrow();
+        if(branch!=null && !Objects.equals(listing.getOwnerId(),branch.getOwnerId()))
+            throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,"Chi nhánh không thuộc chủ nhà của hợp đồng.");
+        entityManager.lock(listing,jakarta.persistence.LockModeType.OPTIMISTIC);
+        return new AmendmentPool(listing,branch);
+    }
+
     private void validateAmendmentCapacity(AmendmentPool pool, String rootId, String agreementId,
             LocalDate start, LocalDate end, int motorbikes, int cars) {
         if (start == null || end == null || !end.isAfter(start) || motorbikes < 0 || cars < 0 || motorbikes > 100 || cars > 100)
             throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED, "Ngày hoặc số xe của phụ lục không hợp lệ.");
-        if (pool.branch() == null) return;
+        if(pool.branch()==null)return;
         for (VehicleType type : VehicleType.values()) {
             int desired = type == VehicleType.MOTORBIKE ? motorbikes : cars;
             if (desired == 0) continue;
-            Integer capacity = type == VehicleType.MOTORBIKE ? pool.branch().getMotorbikeParkingCapacity() : pool.branch().getCarParkingCapacity();
-            var others = parkingReservationRepository.findOverlappingBranchReservations(pool.branch().getId(), type, ACTIVE_STATUSES, start, end).stream()
+            Integer capacity = pool.branch()==null? (type==VehicleType.MOTORBIKE?pool.listing().getMaxMotorbikeCount():pool.listing().getMaxCarCount())
+                    :type == VehicleType.MOTORBIKE ? pool.branch().getMotorbikeParkingCapacity() : pool.branch().getCarParkingCapacity();
+            var bookings=pool.branch()==null?parkingReservationRepository.findOverlappingListingReservations(pool.listing().getId(),type,ACTIVE_STATUSES,start,end)
+                    :parkingReservationRepository.findOverlappingBranchReservations(pool.branch().getId(), type, ACTIVE_STATUSES, start, end);
+            var others = bookings.stream()
+                    .filter(r->pool.branch()!=null || r.getBranchId()==null)
                     // The root's future segment is replaced, not booked a second time.
                     .filter(r -> !(Objects.equals(rootId, r.getContractId()) && r.getStatus() == ParkingReservationStatus.ACTIVE))
                     .filter(r -> !(agreementId != null && Objects.equals(agreementId, r.getContractId()) && r.getStatus() == ParkingReservationStatus.HELD))
@@ -344,7 +427,17 @@ public class ParkingReservationService {
     @Transactional
     public void holdForAmendment(String rootId, String agreementId, String rentalId, String listingId,
             LocalDate start, LocalDate end, int motorbikes, int cars, Instant deadline) {
-        var pool = lockAmendmentPool(listingId);
+        holdInPool(lockAmendmentPool(listingId),rootId,agreementId,rentalId,listingId,start,end,motorbikes,cars,deadline);
+    }
+
+    @Transactional
+    public void holdForAmendmentInBranch(String rootId,String agreementId,String rentalId,String listingId,String branchId,
+            LocalDate start,LocalDate end,int bikes,int cars,Instant deadline) {
+        holdInPool(lockSelectedPool(listingId,branchId),rootId,agreementId,rentalId,listingId,start,end,bikes,cars,deadline);
+    }
+
+    private void holdInPool(AmendmentPool pool,String rootId,String agreementId,String rentalId,String listingId,
+            LocalDate start,LocalDate end,int motorbikes,int cars,Instant deadline) {
         validateAmendmentCapacity(pool, rootId, agreementId, start, end, motorbikes, cars);
         Listing listing = pool.listing();
         var existing = parkingReservationRepository.findByContractId(rootId).stream()
@@ -360,11 +453,12 @@ public class ParkingReservationService {
             var dates = new ArrayList<>(boundaries);
             for (int i = 0; i < dates.size() - 1; i++) {
                 LocalDate segmentStart = dates.get(i), segmentEnd = dates.get(i + 1);
-                int covered = existing.stream().filter(r -> r.getVehicleType() == type && !r.getStartDate().isAfter(segmentStart) && r.getEndDateExclusive().isAfter(segmentStart))
+                int covered = existing.stream().filter(r -> Objects.equals(r.getBranchId(),pool.branch()==null?null:pool.branch().getId()))
+                        .filter(r -> r.getVehicleType() == type && !r.getStartDate().isAfter(segmentStart) && r.getEndDateExclusive().isAfter(segmentStart))
                         .mapToInt(ParkingReservation::getQuantity).sum();
                 int increase = Math.max(0, desired - covered);
                 if (increase > 0) parkingReservationRepository.save(ParkingReservation.builder().contractId(agreementId)
-                        .branchId(listing.getBranchId()).listingId(listingId).rentalRequestId(rentalId).vehicleType(type)
+                        .branchId(pool.branch()==null?null:pool.branch().getId()).listingId(listingId).rentalRequestId(rentalId).vehicleType(type)
                         .quantity(increase).startDate(segmentStart).endDateExclusive(segmentEnd).status(ParkingReservationStatus.HELD).holdExpiresAt(deadline).build());
             }
         }
@@ -374,7 +468,17 @@ public class ParkingReservationService {
     @Transactional
     public void activateAmendmentHold(String rootId, String agreementId, String rentalId, String listingId,
             LocalDate start, LocalDate end, int motorbikes, int cars) {
-        var pool = lockAmendmentPool(listingId);
+        activateInPool(lockAmendmentPool(listingId),rootId,agreementId,rentalId,listingId,start,end,motorbikes,cars);
+    }
+
+    @Transactional
+    public void activateAmendmentHoldInBranch(String rootId,String agreementId,String rentalId,String listingId,String branchId,
+            LocalDate start,LocalDate end,int bikes,int cars) {
+        activateInPool(lockSelectedPool(listingId,branchId),rootId,agreementId,rentalId,listingId,start,end,bikes,cars);
+    }
+
+    private void activateInPool(AmendmentPool pool,String rootId,String agreementId,String rentalId,String listingId,
+            LocalDate start,LocalDate end,int motorbikes,int cars) {
         validateAmendmentCapacity(pool, rootId, agreementId, start, end, motorbikes, cars);
         Listing listing = pool.listing();
         var holds = parkingReservationRepository.findByContractId(agreementId);
@@ -392,7 +496,7 @@ public class ParkingReservationService {
         for (VehicleType type : VehicleType.values()) {
             int quantity = type == VehicleType.MOTORBIKE ? motorbikes : cars;
             if (quantity > 0) parkingReservationRepository.save(ParkingReservation.builder().contractId(rootId)
-                    .branchId(listing.getBranchId()).listingId(listingId).rentalRequestId(rentalId).vehicleType(type)
+                    .branchId(pool.branch()==null?null:pool.branch().getId()).listingId(listingId).rentalRequestId(rentalId).vehicleType(type)
                     .quantity(quantity).startDate(start).endDateExclusive(end).status(ParkingReservationStatus.ACTIVE).build());
         }
     }

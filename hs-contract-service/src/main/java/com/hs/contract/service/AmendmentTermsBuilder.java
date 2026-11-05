@@ -34,6 +34,7 @@ public class AmendmentTermsBuilder {
         t.put("systemTerms",systemTerms);
         t.put("landlord", map(r.getLandlordSnapshot())); t.put("lease", map(r.getLeaseSnapshot()));
         t.put("meters", map(r.getInitialMetersSnapshot())); t.put("initialPayment", map(r.getInitialPaymentSnapshot()));
+        t.put("listingBranchId", r.getContract()==null?null:r.getContract().getBranchId());
         t.put("billingRules",MonthlyBillingSchedule.rules());
         return t;
     }
@@ -140,6 +141,10 @@ public class AmendmentTermsBuilder {
         }
         if (diff.isEmpty() && !allowUnchanged) throw invalid("Chưa có thay đổi so với điều khoản đang áp dụng.");
         return new Result(after, diff);
+    }
+
+    List<Map<String,Object>> draftCharges(List<Map<String,Object>> original, Map<String,Object> tenant, Map<String,Object> property) {
+        return charges(original, original, tenant, property, true, true);
     }
 
     private List<Map<String,Object>> charges(List<Map<String,Object>> requested, List<Map<String,Object>> original,

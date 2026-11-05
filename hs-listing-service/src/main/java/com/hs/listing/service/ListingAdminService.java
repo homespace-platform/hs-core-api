@@ -63,8 +63,10 @@ public class ListingAdminService {
             int page, int size, ListingStatus status, String keyword, String ownerId,
             ListingCategory category, LocalDate fromDate, LocalDate toDate, String sort) {
         Specification<Listing> specification = (root, query, cb) -> cb.isTrue(root.get("active"));
-        if (status != null) specification = specification.and(
-                (root, query, cb) -> cb.equal(root.get("status"), status));
+        if (status != null) specification = specification.and((root, query, cb) ->
+                status == ListingStatus.PENDING_REVIEW
+                        ? cb.or(cb.equal(root.get("status"), status), cb.isNotNull(root.get("pendingEditId")))
+                        : cb.equal(root.get("status"), status));
         if (ownerId != null && !ownerId.isBlank()) specification = specification.and(
                 (root, query, cb) -> cb.equal(root.get("ownerId"), ownerId.trim()));
         if (category != null) specification = specification.and(
@@ -101,6 +103,7 @@ public class ListingAdminService {
             total += count;
         }
         counts.put("ALL", total);
+        counts.merge("PENDING_REVIEW", listingRepository.countByActiveTrueAndPendingEditIdIsNotNull(), Long::sum);
         return counts;
     }
 
@@ -120,12 +123,23 @@ public class ListingAdminService {
                 .map(item -> ListingStatusHistoryResponse.from(
                         item, actorsById.get(item.getChangedBy())))
                 .toList();
-        return new AdminListingDetailResponse(queryService.toDetail(listing), history);
+        return new AdminListingDetailResponse(queryService.toDetail(listing), history, listing.getPendingEditId(),
+                listingService.pendingEdit(listing), listingService.pendingEditAddress(listing));
     }
 
     @Transactional
     public ListingDetailResponse changeStatus(String adminId, String listingId, ListingStatus status, String reason) {
         return queryService.toDetail(statusService.changeByAdmin(adminId, listingId, status, reason));
+    }
+
+    @Transactional
+    public ListingDetailResponse decideEdit(String adminId, String id, String editId, boolean approve, String reason) {
+        Listing listing = listingService.decideEdit(adminId, id, editId, approve, reason);
+        historyRepository.save(com.hs.listing.model.ListingStatusHistory.builder()
+                .listingId(id).fromStatus(listing.getStatus()).toStatus(listing.getStatus())
+                .reason(approve ? "Đã duyệt bản sửa " + editId : "Từ chối bản sửa " + editId + ": " + reason.trim())
+                .changedBy(adminId).changedByType(ListingStatusActorType.ADMIN).build());
+        return queryService.toDetail(listing);
     }
 
     private AdminListingSummaryResponse toSummary(Listing listing) {
@@ -147,7 +161,7 @@ public class ListingAdminService {
                 listing.getPriceUnit(), cover == null ? null : publicUrl(cover.getStorageObject()), address, owner,
                 listing.getSubmittedAt(), listing.getPublishedAt(), listing.getExpiresAt(),
                 listing.getStatusChangedAt(), listing.getStatusChangedBy(),
-                listing.getCreatedAt(), listing.getUpdatedAt());
+                listing.getCreatedAt(), listing.getUpdatedAt(), listing.getPendingEditId());
     }
 
     private Sort adminSort(String value) {

@@ -54,6 +54,16 @@ public class Listing extends BaseEntity {
     private Instant publishedAt;
     @Column(name = "expires_at")
     private Instant expiresAt;
+    @Column(length = 36)
+    private String pendingEditId;
+    @Column(columnDefinition = "text")
+    private String pendingEditPayload;
+    @Column(length = 36)
+    private String approvedEditId;
+    @Column(columnDefinition = "text")
+    private String approvedContractSnapshot;
+    @Column(columnDefinition = "text")
+    private String editRejectionReason;
     @Version
     private long version;
     @Column(name = "available_from", nullable = false)

@@ -14,10 +14,18 @@ import java.util.Map;
 @AllArgsConstructor
 public class UpdateContractRevisionRequest {
 
+    public record LandlordContact(String phone, String email) {}
+    public record DraftContent(Map<String, Object> landlord, Map<String, Object> tenant, Map<String, Object> property,
+                               List<Map<String, Object>> equipments, List<Map<String, Object>> amenities) {}
+
     /** Optional for legacy clients; new editors send the revision they actually reviewed. */
     private String baseRevisionId;
+    private String listingSourceVersion;
 
     private Map<String, Object> landlord;
+
+    private LandlordContact landlordContact;
+    private DraftContent draftContent;
 
     private Map<String, Object> tenant;
 
@@ -40,6 +48,9 @@ public class UpdateContractRevisionRequest {
     private Map<String, Object> policies;
 
     private String specialTerms;
+
+    /** Editable text from the draft review form, separate from system terms. */
+    private String additionalTerms;
 
     private String revisionNote;
 }

@@ -34,6 +34,7 @@ class ContractAmendmentServiceTest {
     ContractDocumentRepository documents = mock(ContractDocumentRepository.class);
     StorageObjectRepository files = mock(StorageObjectRepository.class);
     ParkingReservationService parking = mock(ParkingReservationService.class);
+    ContractListingSync listingSync = mock(ContractListingSync.class);
     BillingTime time = mock(BillingTime.class);
     ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
     AmendmentTermsBuilder builder = new AmendmentTermsBuilder(mapper);
@@ -79,6 +80,7 @@ class ContractAmendmentServiceTest {
                 builder,resolver,mapper,time,mock(PlatformTransactionManager.class));
         ReflectionTestUtils.setField(service,"signatureMode","SMARTCA");
         ReflectionTestUtils.setField(service,"drafts",drafts);
+        ReflectionTestUtils.setField(service,"listingSync",listingSync);
         when(drafts.findById(anyString())).thenAnswer(i -> Optional.ofNullable(draftStore.get(i.getArgument(0))));
         when(drafts.save(any())).thenAnswer(i -> { ContractAmendmentDraft d = i.getArgument(0); draftStore.put(d.getContractId(),d); return d; });
     }
@@ -93,11 +95,10 @@ class ContractAmendmentServiceTest {
     }
     @Test void freeFormAmendmentUsesUpdatedSnapshotsAndRequiresBothSignaturesBeforeApplying() {
         var choices=mock(AmendmentOptionsService.class);ReflectionTestUtils.setField(service,"options",choices);
-        var changes=Map.<String,Object>of("freeForm",true,"fields",Map.of("property",Map.of("floor","Tầng mái"),"landlord",Map.of("phone","0901234567")),
-                "equipments",List.of(Map.of("name","Piano không có trên Listing","quantity",1,"condition","Mới","note","Hai bên thống nhất")));
+        var changes=Map.<String,Object>of("freeForm",true,"fields",Map.of("landlord",Map.of("phone","0901234567")));
         service.propose("root","owner",payload(changes));var offer=proposals.get(0);var child=approve(offer);
         verify(choices,never()).get(any(),any());verify(choices,never()).validate(any(),any(),any());
-        var revised=revisionStore.get(child.getCurrentRevisionId());assertEquals("Tầng mái",builder.map(revised.getPropertySnapshot()).get("floor"));
+        var revised=revisionStore.get(child.getCurrentRevisionId());assertEquals(builder.map(original.getPropertySnapshot()),builder.map(revised.getPropertySnapshot()));
         assertEquals("0901234567",builder.map(revised.getLandlordSnapshot()).get("phone"));
         assertEquals(original.getInitialPaymentSnapshot(),revised.getInitialPaymentSnapshot());assertEquals(original.getInitialMetersSnapshot(),revised.getInitialMetersSnapshot());
         assertEquals("original",root.getCurrentRevisionId());assertEquals("original",resolver.at(root,LocalDate.of(2026,11,14)).getId());
@@ -117,6 +118,48 @@ class ContractAmendmentServiceTest {
             assertEquals("original",root.getCurrentRevisionId()); assertEquals(ContractStatus.ACTIVE,root.getStatus()); assertNull(root.getEffectiveLeaseMonths());
         }
     }
+    @Test void listingAppendixUsesTheReviewedSnapshotEvenIfListingChangesBeforeConsent() {
+        root.setBranchId("old-branch");
+        var sourceTerms = new LinkedHashMap<String,Object>();
+        sourceTerms.put("property",Map.of("maxOccupants",4,"fullAddress","Địa chỉ đã duyệt"));
+        sourceTerms.put("equipments",List.of(Map.of("name","Giường","quantity",1,"condition","Mới")));
+        sourceTerms.put("amenities",List.of(Map.of("name","WiFi")));
+        sourceTerms.put("policies",Map.of("petsAllowed",true));
+        sourceTerms.put("listingBranchId","approved-branch");
+        var source = new ContractListingSync.Preview("approved-1","original",sourceTerms,null,null,
+                List.of(new AmendmentComparison("property.fullAddress","Địa chỉ","Nhà số 2","Địa chỉ đã duyệt")),List.of());
+        when(listingSync.preview(root,original,"approved-1")).thenReturn(source);
+        when(listingSync.mergeListingPolicies(anyMap(),anyMap())).thenAnswer(i -> {
+            var merged = new LinkedHashMap<String,Object>(i.getArgument(0));
+            merged.putAll(builder.object(((Map<?,?>)i.getArgument(1)).get("policies")));return merged;
+        });
+        service.propose("root","owner",payload(Map.of("freeForm",true,"listingSourceVersion","approved-1")));
+        var a=proposals.getFirst();assertNotNull(a.getListingSyncSnapshot());
+        // A later listing approval must never rewrite the proposal the tenant is reviewing.
+        when(listingSync.preview(any(),any(),any())).thenThrow(new IllegalStateException("New listing version"));
+        var child=approve(a);var revised=revisionStore.get(child.getCurrentRevisionId());
+        assertEquals("Địa chỉ đã duyệt",builder.map(revised.getPropertySnapshot()).get("fullAddress"));
+        assertEquals(original.getFinancialSnapshot(),revised.getFinancialSnapshot());
+        assertEquals(original.getChargesSnapshot(),revised.getChargesSnapshot());
+        assertEquals(original.getInitialPaymentSnapshot(),revised.getInitialPaymentSnapshot());
+        assertEquals("original",root.getCurrentRevisionId());
+        verify(listingSync,times(1)).preview(root,original,"approved-1");
+        assertEquals("approved-branch",child.getBranchId());assertEquals("old-branch",root.getBranchId());
+        verify(parking).holdForAmendmentInBranch(eq("root"),eq(child.getId()),eq("rental"),eq("listing"),eq("approved-branch"),any(),any(),eq(0),eq(0),any());
+        signaturesReady(child);service.signed(child);assertEquals("old-branch",root.getBranchId());
+        at("2026-11-14T03:00:00Z");service.get("root","owner");assertEquals("approved-branch",root.getBranchId());
+    }
+    @Test void manualListingEditsAndMixedFinancialSyncAreRejectedByTheApi() {
+        for(var changes:List.of(Map.<String,Object>of("freeForm",true,"fields",Map.of("property",Map.of("fullAddress","fake"))),
+                Map.<String,Object>of("freeForm",true,"equipments",List.of()),
+                Map.<String,Object>of("policies",Map.of("petsAllowed",true)),
+                Map.<String,Object>of("freeForm",true,"listingSourceVersion","approved-1","rentAmount","11000000"))) {
+            assertThrows(AppException.class,()->service.preview("root","owner",payload(changes)));
+            assertThrows(AppException.class,()->service.propose("root","owner",payload(changes)));
+            assertThrows(AppException.class,()->service.saveDraft("root","owner",payload(changes)));
+        }
+        assertTrue(proposals.isEmpty());assertTrue(draftStore.isEmpty());verifyNoInteractions(listingSync);
+    }
     @Test void signedLeaseChangeUpdatesFutureBillingLengthNotThePaidRentalOrRootRevision() {
         original.setLeaseSnapshot("{\"startDateText\":\"14/10/2026\",\"endDateText\":\"13/01/2027\",\"durationMonths\":3}");
         var change=Map.<String,Object>of("freeForm",true,"fields",Map.of("lease",Map.of("startDateText","14/11/2026","durationMonths",3)));
@@ -125,7 +168,7 @@ class ContractAmendmentServiceTest {
         assertEquals(4,root.getEffectiveLeaseMonths());assertEquals("original",root.getCurrentRevisionId());
         assertEquals(LocalDate.of(2026,10,14),rentals.findById("rental").orElseThrow().getMoveInDate());
         assertEquals("13/02/2027",builder.map(resolver.at(root,LocalDate.of(2026,11,14)).getLeaseSnapshot()).get("endDateText"));
-        verify(parking).activateAmendmentHold(eq("root"),eq(child.getId()),eq("rental"),eq("listing"),eq(LocalDate.of(2026,11,14)),eq(LocalDate.of(2027,2,14)),eq(0),eq(0));
+        verify(parking).activateAmendmentHoldInBranch(eq("root"),eq(child.getId()),eq("rental"),eq("listing"),isNull(),eq(LocalDate.of(2026,11,14)),eq(LocalDate.of(2027,2,14)),eq(0),eq(0));
     }
     @Test void startChangeCannotMovePaidHistoryAndPrepaidRentBlocksOverlappingEffectiveDates() {
         original.setLeaseSnapshot("{\"startDateText\":\"14/10/2026\",\"endDateText\":\"13/01/2027\",\"durationMonths\":3}");
@@ -236,7 +279,7 @@ class ContractAmendmentServiceTest {
         assertThrows(AppException.class,()->service.preview("root","owner",immediatePayload));
         assertThrows(AppException.class,()->service.propose("root","owner",immediatePayload));
         assertThrows(AppException.class,()->service.saveDraft("root","owner",immediatePayload));
-        var p=payload(Map.of("policies",Map.of("petsAllowed",true)));
+        var p=payload(Map.of("freeForm",true,"specialTerms","Hai bên thống nhất nội dung bổ sung"));
         service.propose("root","owner",p); var a = proposals.get(0); var child = approve(a);
         at("2026-10-15T03:00:00Z"); signaturesReady(child); service.signed(child);
         assertEquals("SCHEDULED",a.getStatus()); assertNull(a.getAppliedAt());
@@ -327,7 +370,7 @@ class ContractAmendmentServiceTest {
     @Test void revertingScheduledVehicleChangeRebuildsFutureParkingBackToBaseCounts() {
         service.propose("root","owner",payload(Map.of("motorbikeCount",1)));var old=proposals.getFirst();var oldChild=approve(old);signaturesReady(oldChild);service.signed(oldChild);
         service.propose("root","owner",replace(old,Map.of("freeForm",true)));var next=proposals.getFirst();var child=approve(next);signaturesReady(child);service.signed(child);
-        verify(parking).activateAmendmentHold(eq("root"),eq(child.getId()),eq("rental"),eq("listing"),eq(old.getEffectiveOn()),eq(LocalDate.of(2027,1,14)),eq(0),eq(0));
+        verify(parking).activateAmendmentHoldInBranch(eq("root"),eq(child.getId()),eq("rental"),eq("listing"),isNull(),eq(old.getEffectiveOn()),eq(LocalDate.of(2027,1,14)),eq(0),eq(0));
     }
     @Test void revertingScheduledLeaseChangeRestoresFutureLengthAndNeverTouchesSignedRoot() {
         original.setLeaseSnapshot("{\"startDateText\":\"14/10/2026\",\"endDateText\":\"13/01/2027\",\"durationMonths\":3}");
@@ -344,34 +387,34 @@ class ContractAmendmentServiceTest {
     }
     @Test void vehiclesHoldOnlyAfterApprovalAndActivateOnlyAfterVerifiedSigning() {
         var p = payload(Map.of("motorbikeCount",1)); service.propose("root","owner",p);
-        verify(parking).validateAmendmentCapacity("root",null,"listing",p.effectiveOn(),LocalDate.of(2027,1,14),1,0);
-        verify(parking,never()).holdForAmendment(any(),any(),any(),any(),any(),any(),anyInt(),anyInt(),any());
+        verify(parking).validateAmendmentCapacityInBranch("root",null,"listing",null,p.effectiveOn(),LocalDate.of(2027,1,14),1,0);
+        verify(parking,never()).holdForAmendmentInBranch(any(),any(),any(),any(),any(),any(),any(),anyInt(),anyInt(),any());
         var a = proposals.get(0); var child = approve(a);
-        verify(parking).holdForAmendment(eq("root"),eq(child.getId()),eq("rental"),eq("listing"),eq(p.effectiveOn()),eq(LocalDate.of(2027,1,14)),eq(1),eq(0),any());
-        verify(parking,never()).activateAmendmentHold(any(),any(),any(),any(),any(),any(),anyInt(),anyInt());
+        verify(parking).holdForAmendmentInBranch(eq("root"),eq(child.getId()),eq("rental"),eq("listing"),isNull(),eq(p.effectiveOn()),eq(LocalDate.of(2027,1,14)),eq(1),eq(0),any());
+        verify(parking,never()).activateAmendmentHoldInBranch(any(),any(),any(),any(),any(),any(),any(),anyInt(),anyInt());
         signaturesReady(child); service.signed(child); service.signed(child);
-        verify(parking,times(1)).activateAmendmentHold(eq("root"),eq(child.getId()),eq("rental"),eq("listing"),eq(p.effectiveOn()),eq(LocalDate.of(2027,1,14)),eq(1),eq(0));
-        verify(parking,atLeastOnce()).validateAmendmentCapacity("root",child.getId(),"listing",p.effectiveOn(),LocalDate.of(2027,1,14),1,0);
+        verify(parking,times(1)).activateAmendmentHoldInBranch(eq("root"),eq(child.getId()),eq("rental"),eq("listing"),isNull(),eq(p.effectiveOn()),eq(LocalDate.of(2027,1,14)),eq(1),eq(0));
+        verify(parking,atLeastOnce()).validateAmendmentCapacityInBranch("root",child.getId(),"listing",null,p.effectiveOn(),LocalDate.of(2027,1,14),1,0);
     }
     @Test void parkingCapacityIsCheckedBeforePreviewSubmissionApprovalAndSigning() {
         var p=payload(Map.of("freeForm",true,"motorbikeCount",3,"carCount",1));
         doThrow(new AppException(com.hs.listing.advice.ListingErrorCode.PARKING_CAPACITY_CHANGED,"Không đủ chỗ"))
-                .when(parking).validateAmendmentCapacity(any(),any(),any(),any(),any(),anyInt(),anyInt());
+                .when(parking).validateAmendmentCapacityInBranch(any(),any(),any(),any(),any(),any(),anyInt(),anyInt());
         assertThrows(AppException.class,()->service.preview("root","owner",p));
         assertThrows(AppException.class,()->service.propose("root","owner",p));
         assertTrue(proposals.isEmpty()); assertEquals(1,contractStore.size());
-        doNothing().when(parking).validateAmendmentCapacity(any(),any(),any(),any(),any(),anyInt(),anyInt());
+        doNothing().when(parking).validateAmendmentCapacityInBranch(any(),any(),any(),any(),any(),any(),anyInt(),anyInt());
         service.propose("root","owner",p);var a=proposals.getFirst();
         doThrow(new AppException(com.hs.listing.advice.ListingErrorCode.PARKING_CAPACITY_CHANGED,"Không đủ chỗ"))
-                .when(parking).validateAmendmentCapacity(any(),any(),any(),any(),any(),anyInt(),anyInt());
+                .when(parking).validateAmendmentCapacityInBranch(any(),any(),any(),any(),any(),any(),anyInt(),anyInt());
         assertThrows(AppException.class,()->approve(a));assertEquals("REQUESTED",a.getStatus());assertEquals(1,contractStore.size());
-        doNothing().when(parking).validateAmendmentCapacity(any(),any(),any(),any(),any(),anyInt(),anyInt());
+        doNothing().when(parking).validateAmendmentCapacityInBranch(any(),any(),any(),any(),any(),any(),anyInt(),anyInt());
         var child=approve(a); signaturesReady(child);
         doThrow(new AppException(com.hs.listing.advice.ListingErrorCode.PARKING_CAPACITY_CHANGED,"Không đủ chỗ"))
-                .when(parking).validateAmendmentCapacity(any(),eq(child.getId()),any(),any(),any(),anyInt(),anyInt());
+                .when(parking).validateAmendmentCapacityInBranch(any(),eq(child.getId()),any(),any(),any(),any(),anyInt(),anyInt());
         assertThrows(AppException.class,()->service.validateSigning(child));
         assertThrows(AppException.class,()->service.signed(child));assertEquals("APPROVED",a.getStatus());
-        verify(parking,never()).activateAmendmentHold(any(),any(),any(),any(),any(),any(),anyInt(),anyInt());
+        verify(parking,never()).activateAmendmentHoldInBranch(any(),any(),any(),any(),any(),any(),any(),anyInt(),anyInt());
     }
     @Test void standaloneListingAboveOriginalLimitsCanBeApprovedAndSignedWithRealParkingService() {
         var bookings=mock(com.hs.listing.repository.ParkingReservationRepository.class);
@@ -382,7 +425,9 @@ class ContractAmendmentServiceTest {
         List<com.hs.listing.model.ParkingReservation> store=new ArrayList<>();
         when(bookings.findByContractId(anyString())).thenAnswer(i->store.stream().filter(r->Objects.equals(r.getContractId(),i.getArgument(0))).toList());
         when(bookings.save(any())).thenAnswer(i->{com.hs.listing.model.ParkingReservation r=i.getArgument(0);if(!store.contains(r))store.add(r);return r;});
-        ReflectionTestUtils.setField(service,"parking",new ParkingReservationService(bookings,branches,listings));
+        var realParking=new ParkingReservationService(bookings,branches,listings);
+        ReflectionTestUtils.setField(realParking,"entityManager",mock(jakarta.persistence.EntityManager.class));
+        ReflectionTestUtils.setField(service,"parking",realParking);
         original.setPropertySnapshot("{\"maxVehicles\":0,\"maxMotorbikeCount\":0,\"maxCarCount\":0}");
         var p=payload(Map.of("freeForm",true,"motorbikeCount",5,"carCount",2));
         assertEquals(2,service.preview("root","owner",p).comparison().size());
@@ -398,6 +443,7 @@ class ContractAmendmentServiceTest {
         verify(bookings,never()).findOverlappingListingReservations(any(),any(),any(),any(),any());
     }
     @Test void branchLinkedAmendmentAboveListingLimitsChecksActualPoolThroughoutConsentAndSigning() {
+        root.setBranchId("branch");
         var bookings=mock(com.hs.listing.repository.ParkingReservationRepository.class);
         var listings=mock(com.hs.listing.repository.ListingRepository.class);
         var branches=mock(com.hs.listing.repository.PropertyBranchRepository.class);
@@ -418,7 +464,9 @@ class ContractAmendmentServiceTest {
                 .filter(r->r.getVehicleType()==i.getArgument(1) && (r.getStatus()==com.hs.listing.model.constant.ParkingReservationStatus.ACTIVE || r.getStatus()==com.hs.listing.model.constant.ParkingReservationStatus.HELD)
                         && r.getStartDate().isBefore(i.getArgument(4)) && r.getEndDateExclusive().isAfter(i.getArgument(3))).toList());
         when(bookings.save(any())).thenAnswer(i->{com.hs.listing.model.ParkingReservation r=i.getArgument(0);if(!store.contains(r))store.add(r);return r;});
-        ReflectionTestUtils.setField(service,"parking",new ParkingReservationService(bookings,branches,listings));
+        var realParking=new ParkingReservationService(bookings,branches,listings);
+        ReflectionTestUtils.setField(realParking,"entityManager",mock(jakarta.persistence.EntityManager.class));
+        ReflectionTestUtils.setField(service,"parking",realParking);
         original.setPropertySnapshot("{\"maxVehicles\":2,\"maxMotorbikeCount\":1,\"maxCarCount\":0}");
         var tenant=builder.map(original.getTenantSnapshot());tenant.put("motorbikeCount",2);original.setTenantSnapshot(builder.write(tenant));
         original.setChargesSnapshot("[{\"name\":\"Xe máy\",\"chargeType\":\"MOTORBIKE_PARKING\",\"billingMethod\":\"PER_VEHICLE_MONTH\",\"unitAmount\":\"50000\",\"estimatedMonthlyAmount\":\"100000\",\"includedInRent\":false}]");

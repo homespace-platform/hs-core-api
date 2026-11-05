@@ -31,6 +31,8 @@ public class ContractRevisionResponse {
     private Map<String, Object> policies;
     private Integer schemaVersion;
     private String specialTerms;
+    private String systemTerms;
+    private String additionalTerms;
     private String revisionNote;
     private Instant createdAt;
 }

@@ -260,7 +260,7 @@ final class FreeFormAmendmentTerms {
         if(m.matches())return integer(m.group(1),1,12);
         throw bad("Chu kỳ thanh toán: nhập Hàng tháng, Hàng quý, Hàng năm hoặc Mỗi N tháng (1–12).");
     }
-    private static void validateFeatureNumber(String name,String value) {
+    static void validateFeatureNumber(String name,String value) {
         boolean count=Set.of("Số mặt tiền","Tổng số tầng","Số người tối đa","Số người ở tối đa","Số xe tối đa","Số phương tiện tối đa","Số phòng ngủ","Số phòng tắm / WC","Phòng khách","Phòng bếp").contains(name);
         boolean dimension=Set.of("Diện tích đất","Diện tích sử dụng","Diện tích phòng","Mặt tiền","Chiều dài","Độ rộng đường vào","Độ rộng đường/hẻm").contains(name);
         if(!count&&!dimension)return;

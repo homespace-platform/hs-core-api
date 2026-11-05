@@ -84,6 +84,17 @@ public class ListingAdminController {
                 .build();
     }
 
+    public record EditDecision(@jakarta.validation.constraints.NotNull Boolean approve,
+                               @jakarta.validation.constraints.Size(max = 1000) String reason) {}
+
+    @PatchMapping("/{listingId}/edits/{editId}")
+    public ApiResponse<ListingDetailResponse> decideEdit(@PathVariable String listingId, @PathVariable String editId,
+                                                         @RequestBody @Valid EditDecision request) {
+        return ApiResponse.<ListingDetailResponse>builder()
+                .result(adminService.decideEdit(currentUserId(), listingId, editId, request.approve(), request.reason()))
+                .build();
+    }
+
     private String currentUserId() {
         UserContext context = UserContextHolder.get();
         return context == null ? null : context.userId();

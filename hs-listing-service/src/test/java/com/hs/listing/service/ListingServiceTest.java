@@ -1,12 +1,41 @@
 package com.hs.listing.service;
 import com.hs.common.advice.entity.AppException; import com.hs.listing.repository.*; import com.hs.storage.repository.StorageObjectRepository; import com.hs.listing.repository.ListingAddressRepository; import org.junit.jupiter.api.Test; import static org.junit.jupiter.api.Assertions.*; import static org.mockito.Mockito.*;
 class ListingServiceTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=com.hs.listing.model.constant.ListingStatus.class,
+            names={"DRAFT","PENDING_REVIEW","PUBLISHED","RESERVED","RENTED","REJECTED","HIDDEN","EXPIRED"})
+    void existingListingCategoryCannotChangeInAnyEditableState(com.hs.listing.model.constant.ListingStatus status) {
+        var repository=mock(ListingRepository.class);
+        var statuses=mock(ListingStatusService.class);
+        var listing=com.hs.listing.model.Listing.builder().id("listing").ownerId("owner")
+                .category(com.hs.listing.model.constant.ListingCategory.HOUSE).status(status).build();
+        when(repository.findByIdForUpdate("listing")).thenReturn(java.util.Optional.of(listing));
+        var service=new ListingService(repository,mock(ListingAddressRepository.class),mock(StorageObjectRepository.class),
+                mock(com.hs.storage.service.StorageService.class),mock(AmenityRepository.class),mock(FurnishingItemRepository.class),statuses,mock(PropertyBranchRepository.class));
+        var request=createDummyRequest(null,"listing","R202",com.hs.listing.model.constant.ListingSubmissionAction.SUBMIT_FOR_REVIEW);
+        var error=assertThrows(AppException.class,()->service.upsert("owner",request));
+        assertEquals(409,error.getStatusCode().value());
+        assertTrue(error.getMessage().contains("Không thể thay đổi loại hình"));
+        assertEquals(com.hs.listing.model.constant.ListingCategory.HOUSE,listing.getCategory());
+        assertNull(listing.getPendingEditId());verify(repository,never()).save(any());verify(repository,never()).flush();verifyNoInteractions(statuses);
+    }
+    @Test void adminCannotChangeAnExistingListingCategoryEither() {
+        var repository=mock(ListingRepository.class);
+        var listing=com.hs.listing.model.Listing.builder().id("listing").ownerId("owner")
+                .category(com.hs.listing.model.constant.ListingCategory.HOUSE).status(com.hs.listing.model.constant.ListingStatus.DRAFT).build();
+        when(repository.findByIdForUpdate("listing")).thenReturn(java.util.Optional.of(listing));
+        var service=new ListingService(repository,mock(ListingAddressRepository.class),mock(StorageObjectRepository.class),
+                mock(com.hs.storage.service.StorageService.class),mock(AmenityRepository.class),mock(FurnishingItemRepository.class),mock(ListingStatusService.class),mock(PropertyBranchRepository.class));
+        assertThrows(AppException.class,()->service.updateByAdmin("admin","listing",createDummyRequest(null,"listing")));
+        assertEquals(com.hs.listing.model.constant.ListingCategory.HOUSE,listing.getCategory());
+        verify(repository,never()).save(any());verify(repository,never()).flush();
+    }
     @org.junit.jupiter.api.Test
     void adminCannotRemoveRequiredPoliciesFromPublishedListingUsingDraftAction() {
         var repository = mock(ListingRepository.class);
         var listing = new com.hs.listing.model.Listing(); listing.setId("published"); listing.setOwnerId("owner");
         listing.setStatus(com.hs.listing.model.constant.ListingStatus.PUBLISHED);
-        when(repository.findByIdAndActiveTrue("published")).thenReturn(java.util.Optional.of(listing));
+        when(repository.findByIdForUpdate("published")).thenReturn(java.util.Optional.of(listing));
         var service = new ListingService(repository,mock(ListingAddressRepository.class),mock(StorageObjectRepository.class),
                 mock(com.hs.storage.service.StorageService.class),mock(AmenityRepository.class),mock(FurnishingItemRepository.class),mock(ListingStatusService.class),mock(PropertyBranchRepository.class));
         org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
@@ -559,7 +588,7 @@ class ListingServiceTest {
         rentedListing.setTitle("Phòng trọ cao cấp");
         rentedListing.setDescription("Mô tả phòng");
 
-        when(listingRepo.findByIdAndActiveTrue("listing-rented-1")).thenReturn(java.util.Optional.of(rentedListing));
+        when(listingRepo.findByIdForUpdate("listing-rented-1")).thenReturn(java.util.Optional.of(rentedListing));
 
         var req = createDummyRequest(null, "listing-rented-1");
         AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", req));
@@ -572,32 +601,60 @@ class ListingServiceTest {
         verify(statusService, never()).applySubmission(any(), any(), any(), any());
     }
 
-    @Test
-    void rejectsUpsertWhenListingIsRentedForSubmitForReview() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = com.hs.listing.model.constant.ListingStatus.class,
+            names = {"RESERVED", "RENTED", "HIDDEN", "EXPIRED", "PUBLISHED"})
+    void stagedContentChangesPreserveTheStatusAtDecision(com.hs.listing.model.constant.ListingStatus finalStatus) {
         var listingRepo = mock(ListingRepository.class);
         var statusService = mock(ListingStatusService.class);
+        var storage = mock(StorageObjectRepository.class);
         ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
-                mock(StorageObjectRepository.class), mock(com.hs.storage.service.StorageService.class),
+                storage, mock(com.hs.storage.service.StorageService.class),
                 mock(AmenityRepository.class), mock(FurnishingItemRepository.class),
-                statusService, mock(PropertyBranchRepository.class));
+                statusService, mock(PropertyBranchRepository.class), mock(ListingPolicyService.class));
         org.springframework.test.util.ReflectionTestUtils.setField(service, "vietmap", mock(com.hs.common.location.VietmapService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "mapper", new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules());
+        var snapshotService = mock(RentalRequestService.class);
+        when(snapshotService.buildListingSnapshotJson(any())).thenReturn("{\"listingId\":\"listing-rented-1\"}");
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "listingSnapshots", snapshotService);
 
-        com.hs.listing.model.Listing rentedListing = new com.hs.listing.model.Listing();
-        rentedListing.setId("listing-rented-1");
-        rentedListing.setOwnerId("owner-1");
-        rentedListing.setStatus(com.hs.listing.model.constant.ListingStatus.RENTED);
+        var listing = new com.hs.listing.model.Listing();
+        listing.setId("listing-rented-1");
+        listing.setOwnerId("owner-1");
+        listing.setCategory(com.hs.listing.model.constant.ListingCategory.ROOM);
+        listing.setStatus(com.hs.listing.model.constant.ListingStatus.RESERVED);
+        listing.setTitle("Bản đã duyệt");
+        listing.setMinimumLeaseMonths(6);
+        var originalRoom=new com.hs.listing.model.ListingRoomDetail();originalRoom.setRoomCode("R101");listing.setRoomDetail(originalRoom);
+        var media = new com.hs.storage.model.StorageObject();
+        media.setId("st-dummy");
+        media.setOwnerId("owner-1");
+        media.setStatus(com.hs.storage.model.constant.StorageStatus.READY);
+        media.setActive(true);
+        media.setPurpose(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE);
+        media.setContentType("image/jpeg");
+        when(storage.findById("st-dummy")).thenReturn(java.util.Optional.of(media));
 
-        when(listingRepo.findByIdAndActiveTrue("listing-rented-1")).thenReturn(java.util.Optional.of(rentedListing));
+        when(listingRepo.findByIdForUpdate("listing-rented-1")).thenReturn(java.util.Optional.of(listing));
+        when(listingRepo.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         var reviewReq = createDummyRequest(null, "listing-rented-1", "R202", com.hs.listing.model.constant.ListingSubmissionAction.SUBMIT_FOR_REVIEW);
-
-        AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", reviewReq));
-        assertEquals(com.hs.listing.advice.ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT.getCode(), ex.getCode());
-        assertEquals(409, ex.getStatusCode().value());
-
+        var submitted = service.upsert("owner-1", reviewReq);
+        assertNotNull(submitted.pendingEditId());
+        assertEquals("Bản đã duyệt", listing.getTitle());
+        assertEquals(6, listing.getMinimumLeaseMonths());
+        assertEquals("R101",listing.getRoomDetail().getRoomCode());
         verify(listingRepo, never()).flush();
-        verify(listingRepo, never()).save(any());
-        verify(statusService, never()).applySubmission(any(), any(), any(), any());
+        assertThrows(AppException.class, () -> service.decideEdit("admin", listing.getId(), "old-version", true, null));
+        listing.setStatus(finalStatus); // Signing, expiry or cancellation may advance the live state during moderation.
+        service.decideEdit("admin", listing.getId(), submitted.pendingEditId(), true, null);
+        assertEquals(finalStatus, listing.getStatus());
+        assertEquals(reviewReq.title(), listing.getTitle());
+        assertEquals("R202",listing.getRoomDetail().getRoomCode());
+        assertEquals(submitted.pendingEditId(), listing.getApprovedEditId());
+        assertEquals("{\"listingId\":\"listing-rented-1\"}", listing.getApprovedContractSnapshot());
+        assertNull(listing.getPendingEditId());
+        verifyNoInteractions(statusService);
     }
 
     @Test
@@ -615,7 +672,7 @@ class ListingServiceTest {
         rentedListing.setOwnerId("owner-1");
         rentedListing.setStatus(com.hs.listing.model.constant.ListingStatus.RENTED_EXTERNALLY);
 
-        when(listingRepo.findByIdAndActiveTrue("listing-rented-ext-1")).thenReturn(java.util.Optional.of(rentedListing));
+        when(listingRepo.findByIdForUpdate("listing-rented-ext-1")).thenReturn(java.util.Optional.of(rentedListing));
 
         var draftReq = createDummyRequest(null, "listing-rented-ext-1", "R202");
 
@@ -642,7 +699,7 @@ class ListingServiceTest {
         rentedListing.setOwnerId("owner-1");
         rentedListing.setStatus(com.hs.listing.model.constant.ListingStatus.RENTED);
 
-        when(listingRepo.findByIdAndActiveTrue("listing-rented-1")).thenReturn(java.util.Optional.of(rentedListing));
+        when(listingRepo.findByIdForUpdate("listing-rented-1")).thenReturn(java.util.Optional.of(rentedListing));
 
         var req = createDummyRequest(null, "listing-rented-1");
         AppException ex = assertThrows(AppException.class, () -> service.updateByAdmin("admin-1", "listing-rented-1", req));

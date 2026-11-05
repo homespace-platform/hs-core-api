@@ -196,6 +196,14 @@ class ContractPreviewTest {
         verify(storage, never()).uploadDirect(any(), anyString(), anyString(), any(), anyString(), anyString(), any(),anyString());
     }
 
+    @Test void revisionBoundPreviewRejectsStaleTabsBeforeRenderingAndRequiresPdf() {
+        assertEquals(6072, assertThrows(AppException.class, () -> service.triggerPreview("contract", "old-rev")).getCode());
+        verifyNoInteractions(converter);
+        when(converter.convertDocxToPdf(any(), anyString())).thenReturn(Optional.empty());
+        assertThrows(AppException.class, () -> service.triggerPreview("contract", "rev"));
+        assertTrue(saved.isEmpty());
+    }
+
     @Test void smartCaAddsSignaturePageOnlyOnceAcrossRetries() throws Exception {
         ReflectionTestUtils.setField(service, "signatureMode", "SMARTCA");
         PdfSignatureEngine engine = mock(PdfSignatureEngine.class);

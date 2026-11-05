@@ -60,6 +60,36 @@ class ContractDraftIntegrityTest {
         policy.validateForDocument(c,original);
         verifyNoInteractions(builder);
     }
+    @Test void acceptsDocumentIdentityBankAndResidentEditsAndRestoresThemForRendering() throws Exception {
+        var party=Map.<String,Object>of("idNumber","075204022672","bankName","Ngân hàng Quân Đội",
+                "bankAccountNumber","000123456","bankAccountHolder","NGUYEN VAN A");
+        var expected=policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().draftContent(
+                new UpdateContractRevisionRequest.DraftContent(party,Map.of("occupantCount","3","motorbikeCount","2","carCount","0"),null,null,null)).build());
+        assertEquals("000123456",expected.getLandlord().get("bankAccountNumber"));assertEquals("075204022672",expected.getLandlord().get("idNumber"));
+        assertEquals(3,expected.getTenant().get("occupantCount"));assertEquals(2,rental.getOccupantCount());
+        for (var bad:List.of(Map.<String,Object>of("idNumber","12abc"),Map.<String,Object>of("bankAccountNumber","1e6")))
+            assertThrows(AppException.class,()->policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().draftContent(
+                    new UpdateContractRevisionRequest.DraftContent(bad,null,null,null,null)).build()));
+    }
+    @Test void savedPeopleAndVehicleFeesAndWaterDescriptionPassDocumentRevalidation() throws Exception {
+        original.setChargesSnapshot("""
+            [{"name":"Nước","chargeType":"WATER","billingMethod":"PER_PERSON_MONTH","unitAmount":"10000","estimatedMonthlyAmount":"20000","includedInRent":false},
+             {"name":"Xe máy","chargeType":"MOTORBIKE_PARKING","billingMethod":"PER_VEHICLE_MONTH","unitAmount":"50000","estimatedMonthlyAmount":"50000","includedInRent":false}]
+            """);
+        var updated=policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().draftContent(
+                new UpdateContractRevisionRequest.DraftContent(Map.of("idNumber","075204022672","bankAccountNumber","000123456"),
+                        Map.of("occupantCount",3,"motorbikeCount",2),null,null,null)).build());
+        rental.setOccupantCount(3);rental.setMotorbikeCount(2);
+        updated.setCharges(new AmendmentTermsBuilder(mapper).draftCharges(updated.getCharges(),updated.getTenant(),updated.getProperty()));
+        var saved=copy();saved.setLandlordSnapshot(mapper.writeValueAsString(updated.getLandlord()));
+        saved.setTenantSnapshot(mapper.writeValueAsString(updated.getTenant()));saved.setChargesSnapshot(mapper.writeValueAsString(updated.getCharges()));
+        saved.setInitialMetersSnapshot(mapper.writeValueAsString(updated.getMeters()));
+        assertEquals("Không áp dụng - nước tính theo 3 người",updated.getMeters().get("waterInitial"));
+        policy.validateForDocument(c,saved);
+        var next=policy.prepareUpdate(c,saved,UpdateContractRevisionRequest.builder().meters(Map.of("electricityInitial","1250")).build());
+        assertEquals("000123456",next.getLandlord().get("bankAccountNumber"));
+        assertEquals(List.of("30000","100000"),next.getCharges().stream().map(row->row.get("estimatedMonthlyAmount")).toList());
+    }
     @ParameterizedTest @ValueSource(strings={"startDateText","endDateText","durationMonths","durationText","handoverDateText"})
     void rejectsEveryCalendarOverride(String field) {
         var input = UpdateContractRevisionRequest.builder().lease(Map.of(field,field.equals("durationMonths")?12:"01/01/2030")).build();
@@ -103,9 +133,100 @@ class ContractDraftIntegrityTest {
         assertEquals("Không nuôi",updated.getPolicies().get("petPolicy"));
         assertCode(6072,()->policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().baseRevisionId("r0").build()));
     }
+    @Test void combinedDraftReviewPreservesSystemTextAndProtectedLease() {
+        String system = ContractDataBuilder.DEFAULT_OVERDUE_TERMS;
+        original.setSpecialTerms(system + "\n\nGhi chú trước đó");
+        var input = UpdateContractRevisionRequest.builder().baseRevisionId("r1")
+                .meters(Map.of("electricityInitial", "0")).additionalTerms(" Ghi chú mới ")
+                .policies(Map.of("latePaymentFeeMode", "FIXED_ONCE", "latePaymentFeeAmount", 50000)).build();
+        var updated = policy.prepareUpdate(c, original, input);
+        assertEquals(system + "\n\nGhi chú mới", updated.getSpecialTerms());
+        assertEquals("0", updated.getMeters().get("electricityInitial"));
+        assertEquals(50000, updated.getPolicies().get("latePaymentFeeAmount"));
+        assertEquals(3, updated.getLease().get("durationMonths"));
+        input.setAdditionalTerms("");
+        assertEquals(system, policy.prepareUpdate(c, original, input).getSpecialTerms());
+    }
     @ParameterizedTest @ValueSource(strings={"-1","NaN","Infinity","1e309","1.0001","abc"})
     void invalidReadingsNeverReachRevisionStorage(String value) {
         assertCode(6071,()->policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().meters(Map.of("electricityInitial",value)).build()));
+    }
+    @Test void draftContactSurvivesLaterEditsAndDocumentValidation() throws Exception {
+        var contact = new UpdateContractRevisionRequest.LandlordContact(" 0901234567 ", "owner@example.com");
+        var updated = policy.prepareUpdate(c, original, UpdateContractRevisionRequest.builder().landlordContact(contact).build());
+        assertEquals("0901234567", updated.getLandlord().get("phone"));
+        assertEquals("owner@example.com", updated.getLandlord().get("email"));
+        assertEquals("001234", updated.getLandlord().get("idNumber"));
+        assertEquals("001000", updated.getLandlord().get("bankAccountNumber"));
+
+        var next = copy();
+        next.setLandlordSnapshot(mapper.writeValueAsString(updated.getLandlord()));
+        policy.validateForDocument(c, next);
+        var later = policy.prepareUpdate(c, next, UpdateContractRevisionRequest.builder().meters(Map.of("electricityInitial", "0")).build());
+        assertEquals(updated.getLandlord(), later.getLandlord());
+        assertCode(6070, () -> policy.prepareUpdate(c, next,
+                UpdateContractRevisionRequest.builder().landlord(Map.of("phone", "0911234567")).build()));
+        var cleared = policy.prepareUpdate(c, next,
+                UpdateContractRevisionRequest.builder().landlordContact(new UpdateContractRevisionRequest.LandlordContact(null, "")).build());
+        assertEquals("0901234567", cleared.getLandlord().get("phone"));
+        assertEquals("", cleared.getLandlord().get("email"));
+    }
+    @Test void invalidDraftContactCannotReachRevisionStorage() {
+        for (var contact : List.of(new UpdateContractRevisionRequest.LandlordContact("", null),
+                new UpdateContractRevisionRequest.LandlordContact("123", null),
+                new UpdateContractRevisionRequest.LandlordContact(null, "invalid@host"))) {
+            assertCode(6071, () -> policy.prepareUpdate(c, original,
+                    UpdateContractRevisionRequest.builder().landlordContact(contact).build()));
+        }
+    }
+    @Test void unsignedPartyTermsAndSyncedListingArePreservedForRendering() throws Exception {
+        original.setPropertySnapshot("""
+                {"fullAddress":"Địa chỉ ban đầu","listingCode":"HS001","areaText":"30 mét vuông","areaM2":"30",
+                 "features":[{"featureName":"Diện tích phòng","featureValue":"30 mét vuông"},
+                             {"featureName":"Cửa sổ","featureValue":"Có"}]}
+                """);
+        var draft = new UpdateContractRevisionRequest.DraftContent(
+                Map.of("fullName", "Tên Bên A đã rà soát"),
+                Map.of("permanentAddress", "Địa chỉ Bên B đã rà soát"),
+                Map.of("fullAddress", "Địa chỉ tài sản đã rà soát", "areaText", "31.125 mét vuông", "features",
+                        List.of(Map.of("featureName", "Diện tích phòng", "featureValue", "30 mét vuông"),
+                                Map.of("featureName", "Cửa sổ", "featureValue", "Cửa sổ phía sau"))),
+                List.of(Map.of("name", "Bàn", "quantity", "2", "condition", "Còn tốt")),
+                List.of(Map.of("name", "Sân phơi")));
+        assertCode(6070, () -> policy.prepareUpdate(c, original, UpdateContractRevisionRequest.builder().draftContent(draft).build()));
+        var partyOnly = new UpdateContractRevisionRequest.DraftContent(draft.landlord(), draft.tenant(), null, null, null);
+        var updated = policy.prepareUpdate(c, original, UpdateContractRevisionRequest.builder().draftContent(partyOnly).build());
+        // An approved source is attached by the service, never parsed from the user patch.
+        ContractDraftContent.apply(updated, new UpdateContractRevisionRequest.DraftContent(null, null, draft.property(),
+                draft.equipments(), draft.amenities()));
+        assertEquals("Tên Bên A đã rà soát", updated.getLandlord().get("fullName"));
+        assertEquals("001234", updated.getLandlord().get("idNumber"));
+        assertEquals("Địa chỉ Bên B đã rà soát", updated.getTenant().get("permanentAddress"));
+        assertEquals("31.125", updated.getProperty().get("areaM2"));
+        assertEquals(List.of(Map.of("featureName", "Diện tích phòng", "featureValue", "31.125 mét vuông"),
+                Map.of("featureName", "Cửa sổ", "featureValue", "Cửa sổ phía sau")), updated.getProperty().get("features"));
+        assertEquals(2, updated.getEquipments().getFirst().get("quantity"));
+        assertEquals("Sân phơi", updated.getAmenities().getFirst().get("name"));
+
+        var saved = copy();
+        saved.setListingSourceVersion("approved-edit");
+        saved.setLandlordSnapshot(mapper.writeValueAsString(updated.getLandlord()));
+        saved.setTenantSnapshot(mapper.writeValueAsString(updated.getTenant()));
+        saved.setPropertySnapshot(mapper.writeValueAsString(updated.getProperty()));
+        saved.setEquipmentSnapshot(mapper.writeValueAsString(updated.getEquipments()));
+        saved.setAmenitiesSnapshot(mapper.writeValueAsString(updated.getAmenities()));
+        policy.validateForDocument(c, saved);
+        var later = policy.prepareUpdate(c, saved, UpdateContractRevisionRequest.builder().meters(Map.of("electricityInitial", "0")).build());
+        assertEquals(updated.getProperty(), later.getProperty());
+        assertEquals(updated.getEquipments(), later.getEquipments());
+        assertEquals(original.getInitialPaymentSnapshot(), mapper.writeValueAsString(later.getInitialPayment()));
+    }
+    @Test void draftFormRejectsInvalidIdentifiersAndCannotEditListingArea() {
+        original.setChargesSnapshot("[{\"name\":\"Quản lý\",\"billingMethod\":\"PER_M2_MONTH\"}]");
+        var identity = new UpdateContractRevisionRequest.DraftContent(Map.of("idNumber", "000000"), null, null, null, null);
+        var area = new UpdateContractRevisionRequest.DraftContent(null, null, Map.of("areaText", "31"), null, null);
+        assertCode(6071, () -> policy.prepareUpdate(c, original, UpdateContractRevisionRequest.builder().draftContent(identity).build()));
+        assertCode(6070, () -> policy.prepareUpdate(c, original, UpdateContractRevisionRequest.builder().draftContent(area).build()));
     }
     @Test void freezesEquipmentChargesAmenitiesPoliciesAndMeterType() {
         assertCode(6070,()->policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().charges(List.of(Map.of("amount",0))).build()));

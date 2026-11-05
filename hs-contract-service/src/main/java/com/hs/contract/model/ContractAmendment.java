@@ -26,6 +26,7 @@ public class ContractAmendment extends BaseEntity {
     @Builder.Default @org.hibernate.annotations.ColumnDefault("false")
     @Column(name = "immediate_effect", nullable = false) private boolean immediateEffect = false;
     @Column(name = "changes_snapshot", nullable = false, columnDefinition = "TEXT") private String changesSnapshot;
+    @Column(columnDefinition = "TEXT") private String listingSyncSnapshot;
     @Column(name = "comparison_snapshot", nullable = false, columnDefinition = "TEXT") private String comparisonSnapshot;
     @Column(name = "evidence_snapshot", columnDefinition = "TEXT") private String evidenceSnapshot;
     @Column(nullable = false, length = 2000) private String reason;

@@ -177,6 +177,12 @@ public class ContractController {
                 .build();
     }
 
+    @GetMapping("/{contractId}/listing-sync")
+    public ApiResponse<com.hs.contract.service.ContractListingSync.Preview> previewListingSync(@PathVariable String contractId) {
+        return ApiResponse.<com.hs.contract.service.ContractListingSync.Preview>builder()
+                .result(contractService.previewListingSync(contractId)).build();
+    }
+
     @PatchMapping("/{contractId}/revision")
     public ApiResponse<ContractRevisionResponse> updateRevision(
             @PathVariable String contractId,
@@ -196,10 +202,11 @@ public class ContractController {
     }
 
     @PostMapping("/{contractId}/previews")
-    public ApiResponse<ContractDocumentResponse> triggerPreview(@PathVariable String contractId) {
+    public ApiResponse<ContractDocumentResponse> triggerPreview(@PathVariable String contractId,
+            @RequestParam(required = false) String expectedRevisionId) {
         return ApiResponse.<ContractDocumentResponse>builder()
                 .message("Đã yêu cầu kết xuất tài liệu hợp đồng")
-                .result(contractService.triggerPreview(contractId))
+                .result(contractService.triggerPreview(contractId, expectedRevisionId))
                 .build();
     }
 

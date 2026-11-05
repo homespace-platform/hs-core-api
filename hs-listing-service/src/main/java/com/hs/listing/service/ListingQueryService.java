@@ -95,7 +95,7 @@ public class ListingQueryService {
         boolean visibleListing = listing.getStatus() == ListingStatus.PUBLISHED || listing.getStatus() == ListingStatus.RESERVED;
         boolean hasRentalRequest = viewerId != null && rentalRequestRepository.existsByListingIdAndRenterId(listing.getId(), viewerId);
         if (!owner && !visibleListing && !hasRentalRequest) throw new AppException(ErrorCode.ROUTE_NOT_FOUND);
-        return toDetail(listing);
+        return toDetail(listing, owner);
     }
 
     private MyListingSummaryResponse toSummary(Listing listing,com.hs.listing.model.ListingAddress address) {
@@ -122,6 +122,10 @@ public class ListingQueryService {
     }
 
     public ListingDetailResponse toDetail(Listing listing) {
+        return toDetail(listing, false);
+    }
+
+    private ListingDetailResponse toDetail(Listing listing, boolean owner) {
         var amenities = listing.getAmenities().stream()
                 .filter(item -> !"PETS_ALLOWED".equals(item.getCode()))
                 .sorted(Comparator.comparing(Amenity::getSortOrder).thenComparing(Amenity::getCode))
@@ -149,7 +153,7 @@ public class ListingQueryService {
         var viewingSlots = listing.getViewingSlots() == null
                 ? List.<com.hs.listing.model.constant.ListingEnums.ViewingSlot>of()
                 : listing.getViewingSlots().stream().sorted().toList();
-        var owner = userRepository.findById(listing.getOwnerId())
+        var listingOwner = userRepository.findById(listing.getOwnerId())
                 .map(ListingOwnerResponse::from)
                 .orElse(null);
         String branchName = listing.getBranchId() != null
@@ -164,12 +168,13 @@ public class ListingQueryService {
                 toApartment(listing.getApartmentDetail()), toHouse(listing.getHouseDetail()),
                 toOffice(listing.getOfficeDetail()), toCommercial(listing.getCommercialDetail()),
                 toRoom(listing.getRoomDetail()), amenities, customAmenities, furnishings, charges,
-                address, owner, media, viewingDays, viewingSlots,
+                address, listingOwner, media, viewingDays, viewingSlots,
                 Boolean.TRUE.equals(listing.getActive()), listing.getStatusReason(), listing.getSubmittedAt(),
                 listing.getPublishedAt(), listing.getExpiresAt(), listing.getStatusChangedAt(),
                 listing.getStatusChangedBy(), listing.getVersion(),
                 listing.getCreatedAt(), listing.getUpdatedAt(), listing.getCreatedBy(), listing.getUpdatedBy(),
-                listing.getViewCount() != null ? listing.getViewCount() : 0L,ListingPolicyService.snapshot(listing));
+                listing.getViewCount() != null ? listing.getViewCount() : 0L,ListingPolicyService.snapshot(listing),
+                owner ? listing.getPendingEditId() : null, owner ? listing.getEditRejectionReason() : null);
     }
 
     /**

@@ -51,5 +51,7 @@ public record ListingDetailResponse(
                 String createdBy,
                 String updatedBy,
                 Long viewCount,
-                List<ListingPolicyResponse> policies) {
+                List<ListingPolicyResponse> policies,
+                String pendingEditId,
+                String editRejectionReason) {
 }

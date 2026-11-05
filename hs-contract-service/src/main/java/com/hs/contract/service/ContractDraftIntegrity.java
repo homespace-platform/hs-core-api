@@ -53,8 +53,15 @@ public class ContractDraftIntegrity {
             throw new AppException(ContractErrorCode.CONTRACT_DRAFT_STALE);
         assertNoSignature(c);
         var expected = canonical(c);
+        restoreListingSource(expected, current);
+        restoreDraftContent(expected, current);
         // Full-form echoes remain supported, but only the explicit draft fields below can change.
         protectedMap("landlord", input.getLandlord(), expected.getLandlord());
+        var contact = input.getLandlordContact();
+        if (contact != null) {
+            if (contact.phone() != null) ContractDraftContent.applyParty(expected.getLandlord(), Map.of("phone", contact.phone()));
+            if (contact.email() != null) ContractDraftContent.applyParty(expected.getLandlord(), Map.of("email", contact.email()));
+        }
         protectedMap("tenant", input.getTenant(), expected.getTenant());
         protectedMap("property", input.getProperty(), expected.getProperty());
         protectedMap("lease", input.getLease(), expected.getLease());
@@ -70,6 +77,18 @@ public class ContractDraftIntegrity {
         protectedRows("charges", input.getCharges(), expected.getCharges());
         protectedRows("equipments", input.getEquipments(), expected.getEquipments());
         protectedRows("amenities", input.getAmenities(), expected.getAmenities());
+        var content = input.getDraftContent();
+        if (content != null) {
+            if (content.property() != null || content.equipments() != null || content.amenities() != null)
+                throw readonly("bài đăng");
+            ContractDraftContent.applyParty(expected.getLandlord(), content.landlord());
+            var tenant = content.tenant() == null ? null : new LinkedHashMap<>(content.tenant());
+            if (tenant != null) {
+                for (String key : ContractDraftContent.RESIDENT_FIELDS) if (tenant.containsKey(key))
+                    expected.getTenant().put(key, AmendmentTermsBuilder.count(tenant.remove(key), "occupantCount".equals(key) ? 1 : 0, 100));
+            }
+            ContractDraftContent.applyParty(expected.getTenant(), tenant);
+        }
         if (input.getInitialPayment() != null
                 && !same(input.getInitialPayment(), map(current.getInitialPaymentSnapshot()), "initialPayment"))
             protectedMap("initialPayment", input.getInitialPayment(), expected.getInitialPayment());
@@ -86,10 +105,12 @@ public class ContractDraftIntegrity {
         FEE_KEYS.forEach(k -> { if (policies.containsKey(k)) savedPolicies.put(k, policies.get(k)); });
         expected.setPolicies(savedPolicies);
         var originalMeters = map(first(c).getInitialMetersSnapshot());
+        normalizeNonMeterWater(originalMeters, expected.getCharges(), expected.getTenant());
         var meters = new LinkedHashMap<>(originalMeters);
         var currentMeters = map(current.getInitialMetersSnapshot());
         for (String key : List.of("electricityInitial", "waterInitial"))
             if (currentMeters.containsKey(key)) meters.put(key, currentMeters.get(key));
+        normalizeNonMeterWater(meters, expected.getCharges(), expected.getTenant());
         if (input.getMeters() != null) {
             for (var e : input.getMeters().entrySet()) {
                 if (!Set.of("electricityInitial", "waterInitial").contains(e.getKey()))
@@ -99,11 +120,33 @@ public class ContractDraftIntegrity {
         }
         expected.setMeters(meters);
         validateMeters(meters, originalMeters);
-        expected.setSpecialTerms(input.getSpecialTerms() == null ? current.getSpecialTerms() : input.getSpecialTerms().trim());
+        if (input.getAdditionalTerms() != null) {
+            if (input.getSpecialTerms() != null) throw invalid("Chỉ gửi phần thỏa thuận bổ sung cần sửa.");
+            var terms = splitTerms(current.getSpecialTerms(), map(current.getPoliciesSnapshot()));
+            if (terms.additional() == null) throw invalid("Bản nháp cũ chưa tách điều khoản hệ thống khỏi nội dung bổ sung.");
+            String additional = input.getAdditionalTerms().replace(ContractDataBuilder.DEFAULT_OVERDUE_TERMS, "").trim();
+            expected.setSpecialTerms(java.util.stream.Stream.of(terms.system(), additional)
+                    .filter(part -> !part.isBlank()).collect(java.util.stream.Collectors.joining("\n\n")));
+        } else {
+            expected.setSpecialTerms(input.getSpecialTerms() == null ? current.getSpecialTerms() : input.getSpecialTerms().trim());
+        }
         expected.setRevisionNote(input.getRevisionNote());
         bounded(expected.getSpecialTerms(), 20000, "Thỏa thuận riêng");
         bounded(expected.getRevisionNote(), 500, "Ghi chú phiên bản");
         return expected;
+    }
+
+    public record DraftTerms(String system, String additional) {}
+
+    public static DraftTerms splitTerms(String text, Map<String, Object> policies) {
+        String raw = Objects.toString(text, "").trim();
+        String system = ContractDataBuilder.DEFAULT_OVERDUE_TERMS;
+        if (raw.contains(system)) return new DraftTerms(system, raw.replace(system, "").trim());
+        // Legacy policy text cannot be safely split when its exact wording differs.
+        if (policies != null && (Boolean.TRUE.equals(policies.get("overdueUnilateralTermination24h"))
+                || Boolean.TRUE.equals(policies.get("overdueLandlordTerminationAfterFiveDays"))))
+            return new DraftTerms(raw, null);
+        return new DraftTerms("", raw);
     }
 
     /** Recheck even for revisions created by older clients, before rendering or either signature. */
@@ -119,6 +162,8 @@ public class ContractDraftIntegrity {
         if (current == null || current.getContract() == null || !Objects.equals(current.getContract().getId(), c.getId()))
             throw invalid("Phiên bản không thuộc hợp đồng cần xử lý.");
         var expected = canonical(c);
+        restoreListingSource(expected, current);
+        restoreDraftContent(expected, current);
         protectedMapExact("landlord", map(current.getLandlordSnapshot()), expected.getLandlord());
         protectedMapExact("tenant", map(current.getTenantSnapshot()), expected.getTenant());
         protectedMapExact("property", map(current.getPropertySnapshot()), expected.getProperty());
@@ -140,9 +185,43 @@ public class ContractDraftIntegrity {
         var original = map(baseline.getInitialMetersSnapshot());
         original.remove("electricityInitial"); original.remove("waterInitial");
         protectedMapExact("meters", fixed, original);
-        validateMeters(meters, map(baseline.getInitialMetersSnapshot()));
+        var originalMeterValues=map(baseline.getInitialMetersSnapshot());
+        normalizeNonMeterWater(originalMeterValues, expected.getCharges(), expected.getTenant());
+        validateMeters(meters, originalMeterValues);
         LatePaymentPolicy.from(map(current.getPoliciesSnapshot()));
         bounded(current.getSpecialTerms(), 20000, "Thỏa thuận riêng");
+    }
+
+    private void restoreListingSource(UpdateContractRevisionRequest expected, ContractRevision current) {
+        if (current.getListingSourceVersion() == null) return;
+        expected.setProperty(map(current.getPropertySnapshot()));
+        expected.setEquipments(rows(current.getEquipmentSnapshot()));
+        expected.setAmenities(rows(current.getAmenitiesSnapshot()));
+        expected.setPolicies(map(current.getPoliciesSnapshot()));
+    }
+
+    private void normalizeNonMeterWater(Map<String,Object> meters,List<Map<String,Object>> charges,Map<String,Object> tenant) {
+        if (Objects.toString(meters.get("waterInitial"),"").startsWith("Không áp dụng")
+                && charges.stream().anyMatch(r->"WATER".equals(r.get("chargeType")) && "PER_PERSON_MONTH".equals(r.get("billingMethod"))))
+            meters.put("waterInitial","Không áp dụng - nước tính theo "+tenant.get("occupantCount")+" người");
+    }
+
+    private void restoreDraftContent(UpdateContractRevisionRequest expected, ContractRevision current) {
+        var equipments = rows(current.getEquipmentSnapshot());
+        var amenities = rows(current.getAmenitiesSnapshot());
+        ContractDraftContent.apply(expected, new UpdateContractRevisionRequest.DraftContent(
+                draftFields(map(current.getLandlordSnapshot()), expected.getLandlord(), ContractDraftContent.PARTY_FIELDS),
+                draftFields(map(current.getTenantSnapshot()), expected.getTenant(), ContractDraftContent.PARTY_FIELDS),
+                draftFields(map(current.getPropertySnapshot()), expected.getProperty(), ContractDraftContent.PROPERTY_FIELDS),
+                same(equipments, expected.getEquipments(), "equipments") ? null : equipments,
+                same(amenities, expected.getAmenities(), "amenities") ? null : amenities));
+    }
+
+    private Map<String, Object> draftFields(Map<String, Object> current, Map<String, Object> baseline, Set<String> keys) {
+        var changed = new LinkedHashMap<String, Object>();
+        for (String key : keys)
+            if (current.containsKey(key) && !same(current.get(key), baseline.get(key), key)) changed.put(key, current.get(key));
+        return changed;
     }
 
     private UpdateContractRevisionRequest canonical(Contract c) {
@@ -162,6 +241,9 @@ public class ContractDraftIntegrity {
         result.getTenant().put("occupantCount", r.getOccupantCount() == null || r.getOccupantCount() <= 0 ? 1 : r.getOccupantCount());
         result.getTenant().put("motorbikeCount", r.getMotorbikeCount() == null ? 0 : r.getMotorbikeCount());
         result.getTenant().put("carCount", r.getCarCount() == null ? 0 : r.getCarCount());
+        var originalTenant = map(first.getTenantSnapshot());
+        if (ContractDraftContent.RESIDENT_FIELDS.stream().anyMatch(k -> !same(result.getTenant().get(k), originalTenant.get(k), k)))
+            result.setCharges(new AmendmentTermsBuilder(mapper).draftCharges(result.getCharges(), result.getTenant(), result.getProperty()));
         result.setLease(ContractDataBuilder.leaseTerms(r));
         BigDecimal rent = r.getEffectiveMonthlyRent() != null ? r.getEffectiveMonthlyRent() : r.getMonthlyRentPrice();
         BigDecimal deposit = r.getDepositAmount();

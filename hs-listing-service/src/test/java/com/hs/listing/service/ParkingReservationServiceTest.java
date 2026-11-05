@@ -37,6 +37,7 @@ class ParkingReservationServiceTest {
         propertyBranchRepository = Mockito.mock(PropertyBranchRepository.class);
         listingRepository = Mockito.mock(ListingRepository.class);
         service = new ParkingReservationService(parkingReservationRepository, propertyBranchRepository, listingRepository);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
     }
 
     private final LocalDate amendmentStart = LocalDate.of(2026,11,15), amendmentEnd = LocalDate.of(2027,1,15);
@@ -72,6 +73,71 @@ class ParkingReservationServiceTest {
     }
     private void holdAmendment(int motorbikes, int cars) {
         service.holdForAmendment("root","appendix","rental","listing",amendmentStart,amendmentEnd,motorbikes,cars,Instant.now().plusSeconds(3600));
+    }
+    @Test void movingToAnotherBranchReservesTheWholeFutureAllocationAndUsesTheFrozenTarget() {
+        amendmentPool(10,1);
+        var live=listingRepository.findById("listing").orElseThrow();live.setBranchId("later-listing-branch");
+        var old=booked("root",VehicleType.MOTORBIKE,2,amendmentStart.minusMonths(1),amendmentEnd);old.setBranchId("old-branch");
+        service.holdForAmendmentInBranch("root","appendix","rental","listing","branch",amendmentStart,amendmentEnd,2,0,Instant.now().plusSeconds(3600));
+        var held=amendmentBookings.stream().filter(r->r.getStatus()==ParkingReservationStatus.HELD).toList();
+        assertEquals(1,held.size());assertEquals(2,held.getFirst().getQuantity());assertEquals("branch",held.getFirst().getBranchId());
+        assertEquals(amendmentEnd,old.getEndDateExclusive());
+        service.activateAmendmentHoldInBranch("root","appendix","rental","listing","branch",amendmentStart,amendmentEnd,2,0);
+        assertEquals(amendmentStart,old.getEndDateExclusive());assertEquals(ParkingReservationStatus.RELEASED,held.getFirst().getStatus());
+        var future=amendmentBookings.stream().filter(r->r.getStatus()==ParkingReservationStatus.ACTIVE&&r.getStartDate().equals(amendmentStart)).findFirst().orElseThrow();
+        assertEquals("branch",future.getBranchId());assertEquals("later-listing-branch",live.getBranchId());
+    }
+    @Test void draftReplacementExcludesItsOwnHoldButCountsOtherRentalsAndPreservesTheWindow() {
+        amendmentPool(4,1);
+        var request=RentalRequest.builder().id("own").listing(listingRepository.findById("listing").orElseThrow())
+                .moveInDate(amendmentStart).leaseMonths(2).holdExpiresAt(Instant.parse("2026-12-01T00:00:00Z")).build();
+        request.getListing().setMaxMotorbikeCount(4);request.getListing().setMaxCarCount(1);
+        var held=booked(null,VehicleType.MOTORBIKE,2,amendmentStart,amendmentEnd);
+        held.setStatus(ParkingReservationStatus.HELD);held.setRentalRequestId("own");
+        var other=booked("other",VehicleType.MOTORBIKE,1,amendmentStart,amendmentEnd);other.setRentalRequestId("other-rental");
+        when(parkingReservationRepository.findByRentalRequestId("own")).thenReturn(List.of(held));
+        service.replaceDraftHold(request,3,1);
+        assertEquals(ParkingReservationStatus.RELEASED,held.getStatus());
+        var replacements=amendmentBookings.stream().filter(r->r.getStatus()==ParkingReservationStatus.HELD).toList();
+        assertEquals(2,replacements.size());assertEquals(4,replacements.stream().mapToInt(ParkingReservation::getQuantity).sum());
+        assertTrue(replacements.stream().allMatch(r->r.getStartDate().equals(amendmentStart)&&r.getEndDateExclusive().equals(amendmentEnd)&&r.getHoldExpiresAt().equals(request.getHoldExpiresAt())));
+        assertEquals(ParkingReservationStatus.ACTIVE,other.getStatus());
+    }
+    @Test void fullDraftPoolAndActiveAllocationsRejectWithoutReleasingOldHolds() {
+        amendmentPool(2,0);
+        var listing=listingRepository.findById("listing").orElseThrow();listing.setMaxMotorbikeCount(2);
+        var request=RentalRequest.builder().id("own").listing(listing).moveInDate(amendmentStart).leaseMonths(2).build();
+        var held=booked(null,VehicleType.MOTORBIKE,1,amendmentStart,amendmentEnd);held.setStatus(ParkingReservationStatus.HELD);held.setRentalRequestId("own");
+        booked("other",VehicleType.MOTORBIKE,1,amendmentStart,amendmentEnd).setRentalRequestId("other-rental");
+        when(parkingReservationRepository.findByRentalRequestId("own")).thenReturn(List.of(held));
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->service.replaceDraftHold(request,2,0));
+        assertEquals(ParkingReservationStatus.HELD,held.getStatus());verify(parkingReservationRepository,never()).save(any());
+        held.setStatus(ParkingReservationStatus.ACTIVE);
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->service.replaceDraftHold(request,1,0));
+        verify(parkingReservationRepository,never()).save(any());
+    }
+    @Test void shorteningAnUnsignedLeaseOnlyShortensItsHeldParkingWindow() {
+        var start=LocalDate.of(2027,1,31);var oldEnd=start.plusMonths(6);var newEnd=start.plusMonths(3);
+        var deadline=Instant.parse("2027-01-31T15:00:00Z");
+        var held=ParkingReservation.builder().rentalRequestId("rental").status(ParkingReservationStatus.HELD)
+                .quantity(2).startDate(start).endDateExclusive(oldEnd).holdExpiresAt(deadline).build();
+        var released=ParkingReservation.builder().status(ParkingReservationStatus.RELEASED).endDateExclusive(oldEnd).build();
+        when(parkingReservationRepository.findByRentalRequestId("rental")).thenReturn(List.of(held,released));
+        service.shortenHeldLease("rental",oldEnd,newEnd);
+        assertEquals(LocalDate.of(2027,4,30),held.getEndDateExclusive());
+        assertEquals(deadline,held.getHoldExpiresAt());assertEquals(2,held.getQuantity());
+        assertEquals(ParkingReservationStatus.HELD,held.getStatus());assertEquals(oldEnd,released.getEndDateExclusive());
+        verify(parkingReservationRepository).save(held);verify(parkingReservationRepository,never()).save(released);
+    }
+    @Test void activeParkingAndMismatchedLeaseWindowsCannotBeShortened() {
+        var start=LocalDate.of(2027,1,31);var end=start.plusMonths(6);
+        var held=ParkingReservation.builder().status(ParkingReservationStatus.ACTIVE).startDate(start).endDateExclusive(end).build();
+        when(parkingReservationRepository.findByRentalRequestId("rental")).thenReturn(List.of(held));
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->service.shortenHeldLease("rental",end,start.plusMonths(3)));
+        held.setStatus(ParkingReservationStatus.HELD);
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->service.shortenHeldLease("rental",end.minusDays(1),start.plusMonths(3)));
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->service.shortenHeldLease("rental",end,start.minusDays(1)));
+        assertEquals(end,held.getEndDateExclusive());verify(parkingReservationRepository,never()).save(any());
     }
     @Test void branchAmendmentIgnoresListingLimitsButCountsOtherRentalsAndOwnReplacementCorrectly() {
         amendmentPool(10,2);

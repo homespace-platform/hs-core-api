@@ -238,7 +238,7 @@ class FreeFormAmendmentTermsTest {
                 "policies",Map.of("latePaymentFeeMode","Mỗi ngày","latePaymentFeeAmount","100000")));
         var result=builder.build(original,c).terms();var features=(List<Map<String,Object>>)((Map<?,?>)result.get("property")).get("features");
         assertEquals("6 người",features.getFirst().get("featureValue"));
-        var policy=(Map)result.get("policies");assertEquals(0,policy.get("latePaymentFeeGraceDays"));assertEquals("1000000",policy.get("latePaymentFeeCap"));
+        var policy=(Map)result.get("policies");assertEquals(0,policy.get("latePaymentFeeGraceDays"));assertEquals("500000",policy.get("latePaymentFeeCap"));
         var fee=LatePaymentPolicy.from((Map)result.get("policies"));assertEquals(LatePaymentPolicy.Mode.FIXED_PER_DAY,fee.mode());assertEquals(0,fee.amount().compareTo(new java.math.BigDecimal("100000")));
         assertThrows(AppException.class,()->builder.build(original,changes("featureRows",List.of(Map.of("featureName","Số người tối đa","featureValue","99 người")))));
     }

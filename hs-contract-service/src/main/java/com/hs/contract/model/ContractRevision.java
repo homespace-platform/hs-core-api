@@ -67,6 +67,11 @@ public class ContractRevision extends BaseEntity {
     @Column(name = "policies_snapshot", columnDefinition = "TEXT")
     private String policiesSnapshot;
 
+    @Column(length = 36)
+    private String listingSourceVersion;
+
+    private Integer listingTermMinimum;
+
     @Column(name = "schema_version")
     private Integer schemaVersion;
 

@@ -115,6 +115,17 @@ public class ContractDataBuilder {
         return build(request, listing, (PaymentRequest) null);
     }
 
+    public record ListingTerms(Map<String, Object> property, List<Map<String, Object>> equipments,
+                               List<Map<String, Object>> amenities, List<Map<String, Object>> charges,
+                               Map<String, Object> policies, Map<String, Object> meters) {}
+
+    public ListingTerms listingTerms(ListingSnapshotDto snapshot, RentalRequest request) {
+        int occupants = resolveOccupantCount(request);
+        return new ListingTerms(buildProperty(snapshot, null), buildEquipments(snapshot, null), buildAmenities(snapshot, null),
+                buildChargesFromSnapshot(request, snapshot, occupants), buildPolicies(snapshot, request),
+                buildMeters(snapshot, null, occupants));
+    }
+
     public ContractSnapshots build(RentalRequest request, Listing listing, PaymentRequest payment) {
         int occupants = resolveOccupantCount(request);
 
@@ -703,9 +714,13 @@ public class ContractDataBuilder {
 
     /** Shared document calendar: endDateText is the last occupied day (the operational end is exclusive). */
     public static Map<String, Object> leaseTerms(RentalRequest request) {
-        Map<String, Object> map = new LinkedHashMap<>();
         LocalDate start = request.getMoveInDate() != null ? request.getMoveInDate() : LocalDate.now();
         int months = request.getLeaseMonths() != null ? request.getLeaseMonths() : 12;
+        return leaseTerms(start, months);
+    }
+
+    public static Map<String, Object> leaseTerms(LocalDate start, int months) {
+        Map<String, Object> map = new LinkedHashMap<>();
         LocalDate end = start.plusMonths(months).minusDays(1);
 
         map.put("startDateText", start.format(DATE_FORMATTER));

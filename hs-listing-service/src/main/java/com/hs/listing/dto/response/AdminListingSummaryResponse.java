@@ -23,6 +23,7 @@ public record AdminListingSummaryResponse(
         Instant statusChangedAt,
         String statusChangedBy,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String pendingEditId
 ) {
 }

@@ -167,7 +167,7 @@ public class RentalCostCalculator {
         return unit != null && (unit.name().contains("M2") || unit.name().contains("PER_M2"));
     }
 
-    private BigDecimal calculateEffectiveMonthlyRent(Listing listing, int occupantCount) {
+    public BigDecimal calculateEffectiveMonthlyRent(Listing listing, int occupantCount) {
         if (listing.getPriceAmount() == null) {
             return BigDecimal.ZERO;
         }
@@ -502,7 +502,7 @@ public class RentalCostCalculator {
         };
     }
 
-    private BigDecimal calculateDeposit(Listing listing, BigDecimal effectiveMonthlyRent, BigDecimal negotiatedDepositAmount) {
+    public BigDecimal calculateDeposit(Listing listing, BigDecimal effectiveMonthlyRent, BigDecimal negotiatedDepositAmount) {
         DepositType type = listing.getDepositType();
         if (type == null || type == DepositType.NONE) {
             return BigDecimal.ZERO;

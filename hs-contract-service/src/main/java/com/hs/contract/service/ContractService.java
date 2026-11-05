@@ -35,10 +35,14 @@ public interface ContractService {
 
     ContractRevisionResponse updateRevision(String contractId, UpdateContractRevisionRequest request);
 
+    ContractListingSync.Preview previewListingSync(String contractId);
+
     /** Đối chiếu dữ liệu bản nháp với mã trường mà file mẫu Word thực sự dùng. */
     ContractCompletenessResponse getCompleteness(String contractId);
 
     ContractDocumentResponse triggerPreview(String contractId);
+
+    ContractDocumentResponse triggerPreview(String contractId, String expectedRevisionId);
 
     /** Only a committed result for the current renderer/revision, null otherwise. */
     ContractDocumentResponse getPreviewStatus(String contractId);

@@ -1,5 +1,6 @@
 package com.hs.listing.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.storage.model.constant.StoragePurpose;
 import com.hs.common.advice.entity.AppException;
 import com.hs.listing.dto.request.*;
@@ -28,6 +29,13 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 public class ListingService {
+    private static final Set<ListingStatus> CONTENT_REVIEW = Set.of(ListingStatus.PUBLISHED, ListingStatus.RESERVED,
+            ListingStatus.RENTED, ListingStatus.HIDDEN, ListingStatus.EXPIRED);
+    @org.springframework.beans.factory.annotation.Autowired
+    private ObjectMapper mapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private RentalRequestService listingSnapshots;
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.context.ApplicationEventPublisher nearbyEvents;
     private final ListingRepository listingRepository;
@@ -61,9 +69,8 @@ public class ListingService {
         }
         Listing l = upsertTarget(ownerId, r.id());
         if (updating) {
-            if (l.getStatus() == ListingStatus.RENTED) {
+            if (l.getStatus() == ListingStatus.RENTED && r.submissionAction() == ListingSubmissionAction.SAVE_DRAFT)
                 throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT);
-            }
             if (l.getStatus() == ListingStatus.RENTED_EXTERNALLY) {
                 throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_RENTED_EXTERNALLY);
             }
@@ -71,8 +78,17 @@ public class ListingService {
                 throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
             }
         }
+        if (updating && CONTENT_REVIEW.contains(l.getStatus())) {
+            if (r.submissionAction() != ListingSubmissionAction.SUBMIT_FOR_REVIEW)
+                throw error(409, "LISTING_EDIT_REVIEW_REQUIRED", "Gửi bản sửa để quản trị viên duyệt.");
+            validate(r, l);
+            applyContent(new Listing(), ownerId, r); // Check referenced catalogs and media without changing the live listing.
+            l.setPendingEditId(UUID.randomUUID().toString());
+            l.setPendingEditPayload(writeEdit(r));
+            l.setEditRejectionReason(null);
+            return response(listingRepository.save(l));
+        }
         validate(r, l.getId() != null ? l : null);
-
 
         if (updating) {
             clearOwnedData(l);
@@ -124,8 +140,10 @@ public class ListingService {
     @Transactional
     public CreateListingResponse updateByAdmin(String adminId, String listingId, CreateListingRequest request) {
         requireActor(adminId);
-        Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
+        Listing listing = listingRepository.findByIdForUpdate(listingId)
                 .orElseThrow(() -> error(404, "LISTING_NOT_FOUND", "Listing not found"));
+        if (listing.getPendingEditId() != null)
+            throw error(409, "LISTING_EDIT_PENDING", "Hãy xử lý bản sửa đang chờ duyệt trước.");
         if (listing.getStatus() == ListingStatus.RENTED) {
             throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT);
         }
@@ -144,9 +162,11 @@ public class ListingService {
         listingRepository.flush();
         applyContent(listing, listing.getOwnerId(), request);
         listing.setStatus(preservedStatus);
+        if (CONTENT_REVIEW.contains(preservedStatus)) listing.setApprovedEditId(UUID.randomUUID().toString());
         Listing saved = listingRepository.save(listing);
         linkStorageObjects(saved);
         upsertAddress(saved, saved.getOwnerId(), request.addressSource());
+        if (saved.getApprovedEditId() != null) captureApprovedSnapshot(saved);
         return response(saved);
     }
 
@@ -170,7 +190,69 @@ public class ListingService {
     private CreateListingResponse response(Listing listing) {
         return new CreateListingResponse(
                 listing.getId(), listing.getStatus(), listing.getTitle(),
-                listing.getSubmittedAt(), listing.getPublishedAt());
+                listing.getSubmittedAt(), listing.getPublishedAt(), listing.getPendingEditId());
+    }
+
+    public CreateListingRequest pendingEdit(Listing listing) {
+        if (listing.getPendingEditId() == null) return null;
+        try { return mapper.readValue(listing.getPendingEditPayload(), CreateListingRequest.class); }
+        catch (Exception e) { throw error(409, "LISTING_EDIT_INVALID", "Không đọc được bản sửa đang chờ duyệt."); }
+    }
+
+    public String pendingEditAddress(Listing listing) {
+        var edit = pendingEdit(listing);
+        if (edit == null) return null;
+        // Resolve for moderation without saving or changing the current listing address.
+        try {
+            var target = new ListingAddress();
+            var proposed = Listing.builder().branchId(edit.branchId()).build();
+            resolveAddress(proposed, listing.getOwnerId(), edit.addressSource(), target);
+            return target.getDisplay() == null ? null : target.getDisplay()
+                    + (target.getAddressNote() == null || target.getAddressNote().isBlank() ? "" : " · " + target.getAddressNote());
+        } catch (RuntimeException e) { return null; }
+    }
+
+    @Transactional
+    public Listing decideEdit(String adminId, String id, String editId, boolean approve, String reason) {
+        requireActor(adminId);
+        Listing listing = listingRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> error(404, "LISTING_NOT_FOUND", "Không tìm thấy bài đăng."));
+        if (editId == null || !editId.equals(listing.getPendingEditId()))
+            throw error(409, "LISTING_EDIT_STALE", "Bản sửa đã thay đổi hoặc đã được xử lý.");
+        if (approve) {
+            if (!CONTENT_REVIEW.contains(listing.getStatus()))
+                throw error(409, "LISTING_EDIT_BLOCKED", "Trạng thái hiện tại không cho phép duyệt bản sửa.");
+            CreateListingRequest edit = pendingEdit(listing);
+            validate(edit, listing);
+            clearOwnedData(listing);
+            listingRepository.flush();
+            applyContent(listing, listing.getOwnerId(), edit);
+            linkStorageObjects(listing);
+            listing.setApprovedEditId(editId);
+            listing.setEditRejectionReason(null);
+            upsertAddress(listing, listing.getOwnerId(), edit.addressSource());
+            captureApprovedSnapshot(listing);
+        } else {
+            if (reason == null || reason.isBlank())
+                throw error(400, "LISTING_EDIT_REASON_REQUIRED", "Nhập lý do từ chối bản sửa.");
+            listing.setEditRejectionReason(reason.trim());
+        }
+        listing.setPendingEditId(null);
+        listing.setPendingEditPayload(null);
+        return listingRepository.save(listing);
+    }
+
+    private void captureApprovedSnapshot(Listing listing) {
+        listingRepository.flush();
+        String snapshot = listingSnapshots.buildListingSnapshotJson(listing);
+        if (snapshot == null || snapshot.isBlank())
+            throw error(409, "LISTING_SNAPSHOT_FAILED", "Không thể lưu bản bài đăng đã duyệt. Vui lòng thử lại.");
+        listing.setApprovedContractSnapshot(snapshot);
+    }
+
+    private String writeEdit(CreateListingRequest edit) {
+        try { return mapper.writeValueAsString(edit); }
+        catch (Exception e) { throw error(400, "LISTING_EDIT_INVALID", "Không thể lưu bản sửa."); }
     }
 
     private void requireActor(String actorId) {
@@ -181,7 +263,7 @@ public class ListingService {
     private Listing upsertTarget(String ownerId, String listingId) {
         if (listingId == null || listingId.isBlank())
             return new Listing();
-        Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
+        Listing listing = listingRepository.findByIdForUpdate(listingId)
                 .orElseThrow(() -> error(404, "LISTING_NOT_FOUND", "Listing not found"));
         if (!ownerId.equals(listing.getOwnerId()))
             throw error(403, "LISTING_FORBIDDEN", "Listing belongs to another user");
@@ -252,6 +334,8 @@ public class ListingService {
     }
 
     private void validate(CreateListingRequest r, Listing existing) {
+        if (existing != null && existing.getCategory() != null && existing.getCategory() != r.category())
+            throw error(409, "LISTING_CATEGORY_READ_ONLY", "Không thể thay đổi loại hình sau khi tạo bài đăng.");
         Listing policyTarget = new Listing(); policyTarget.setCategory(r.category());
         policyService.attach(policyTarget,r.policies(),r.submissionAction() == ListingSubmissionAction.SUBMIT_FOR_REVIEW);
         if (r.duplicateSourceListingId() != null && !r.duplicateSourceListingId().isBlank()) {
@@ -609,6 +693,15 @@ public class ListingService {
     private void upsertAddress(Listing listing, String ownerId, ListingAddressSourceRequest source) {
         String listingId=listing.getId();
         ListingAddress target = addressRepository.findByListingId(listingId).orElseGet(ListingAddress::new);
+        resolveAddress(listing, ownerId, source, target);
+        target.setListingId(listingId);
+        target.setActive(true);
+        addressRepository.save(target);
+        if (nearbyEvents != null && listing.getStatus() == ListingStatus.PUBLISHED)
+            nearbyEvents.publishEvent(new com.hs.listing.nearby.NearbyTypes.ScanChanged(listing.getId()));
+    }
+
+    private void resolveAddress(Listing listing, String ownerId, ListingAddressSourceRequest source, ListingAddress target) {
         if (listing.getBranchId()!=null) {
             PropertyBranch branch=branchRepository.findByIdAndOwnerIdAndActiveTrue(listing.getBranchId(),ownerId)
                 .orElseThrow(() -> error(403,"BRANCH_FORBIDDEN","Chi nhánh không thuộc tài khoản của bạn."));
@@ -628,11 +721,6 @@ public class ListingService {
                 invalid("addressSource.address", "REQUIRED");
             vietmap.apply(target, source.address().refId(), source.address().addressNote());
         }
-        target.setListingId(listingId);
-        target.setActive(true);
-        addressRepository.save(target);
-        if (nearbyEvents != null && listing.getStatus() == ListingStatus.PUBLISHED)
-            nearbyEvents.publishEvent(new com.hs.listing.nearby.NearbyTypes.ScanChanged(listing.getId()));
     }
 
     private Set<String> normalized(List<String> values) {

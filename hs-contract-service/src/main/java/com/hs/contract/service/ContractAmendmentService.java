@@ -48,6 +48,7 @@ public class ContractAmendmentService {
     @org.springframework.beans.factory.annotation.Autowired private com.hs.payment.service.PaymentRequestService payments;
     @org.springframework.beans.factory.annotation.Autowired private com.hs.payment.repository.DepositRecordRepository deposits;
     @org.springframework.beans.factory.annotation.Autowired private com.hs.payment.repository.PaymentRequestRepository paymentRecords;
+    @org.springframework.beans.factory.annotation.Autowired private ContractListingSync listingSync;
     @Value("${homespace.amendment.response-hours:48}") private long responseHours = 48;
     @Value("${homespace.amendment.signing-hours:48}") private long signingHours = 48;
     @Value("${homespace.signature.mode:INTERNAL}") private String signatureMode = "INTERNAL";
@@ -66,7 +67,7 @@ public class ContractAmendmentService {
         ContractRevision base = terms.at(c, time.today());
         if (!base.getId().equals(p.baseRevisionId())) throw invalid("Điều khoản đã thay đổi. Tải lại để đối chiếu.");
         if (options != null && !Boolean.TRUE.equals(p.changes().get("freeForm"))) options.validate(c,builder.snapshot(base),p.changes());
-        var result=buildTerms(base,p.changes(),replacing);validateBusinessTerms(c,base,result.terms(),businessChanges(p.changes(),replacing),p.effectiveOn());return result;
+        var result=buildTerms(base,p.changes(),replacing,listingSource(c,base,p.changes()));validateBusinessTerms(c,base,result.terms(),businessChanges(p.changes(),replacing),p.effectiveOn());return result;
     }
 
     @Transactional public AmendmentResponse propose(String id, String actor, AmendmentPayload p) {
@@ -107,7 +108,8 @@ public class ContractAmendmentService {
         ContractRevision base = terms.at(c, time.today());
         if (!base.getId().equals(p.baseRevisionId())) throw invalid("Điều khoản đã thay đổi. Tải lại trước khi gửi đề nghị.");
         if (options != null && !Boolean.TRUE.equals(p.changes().get("freeForm"))) options.validate(c,builder.snapshot(base),p.changes());
-        var result = buildTerms(base, p.changes(),replacing);
+        var source = listingSource(c, base, p.changes());
+        var result = buildTerms(base, p.changes(),replacing,source);
         validateBusinessTerms(c,base,result.terms(),businessChanges(p.changes(),replacing),p.effectiveOn());
         String reason = text(p.reason(), 10, 2000);
         List<String> evidence = validateEvidence(c, actor, p.evidenceIds());
@@ -118,6 +120,7 @@ public class ContractAmendmentService {
                 .previousProposalId(p.previousProposalId()).tenantRequestId(p.tenantRequestId() != null ? p.tenantRequestId() : previous != null ? previous.getTenantRequestId() : null)
                 .proposerId(actor).recipientId(other(c, actor)).status("REQUESTED")
                 .effectiveOn(p.effectiveOn()).immediateEffect(false).reason(reason).changesSnapshot(builder.write(p.changes()))
+                .listingSyncSnapshot(source == null ? null : builder.write(source))
                 .comparisonSnapshot(builder.write(result.comparison())).evidenceSnapshot(builder.write(evidence))
                 .submittedAt(time.now()).respondBy(min(time.now().plus(Duration.ofHours(responseHours)), cutoff)).signBy(cutoff).build());
         if (drafts != null) drafts.deleteById(id);
@@ -176,10 +179,14 @@ public class ContractAmendmentService {
         if(immediate(p.changes()))throw invalid("Phụ lục chỉ áp dụng từ đầu kỳ thuê tương lai, không áp dụng ngay khi ký.");
         validateReplacement(c,replacement(c,p.previousProposalId()),p.effectiveOn());
         if (Boolean.TRUE.equals(p.changes().get("freeForm"))) {
-            if (!FreeFormAmendmentTerms.KEYS.containsAll(p.changes().keySet())) throw invalid("Bản nháp có trường không được phép sửa.");
+            var keys = new HashSet<>(p.changes().keySet());
+            keys.remove("listingSourceVersion");
+            if (!FreeFormAmendmentTerms.KEYS.containsAll(keys)) throw invalid("Bản nháp có trường không được phép sửa.");
         } else if (!Set.of("rentAmount", "occupantCount", "motorbikeCount", "carCount", "charges", "equipments", "amenities", "policies", "additionalTerms", "applyImmediately").containsAll(p.changes().keySet())) throw invalid("Bản nháp có trường không được phép sửa.");
         validateEvidence(c,actor,p.evidenceIds());
-        if (!terms.at(c,time.today()).getId().equals(p.baseRevisionId())) throw invalid("Điều khoản đã thay đổi. Tải lại hợp đồng trước khi sửa.");
+        var base = terms.at(c,time.today());
+        if (!base.getId().equals(p.baseRevisionId())) throw invalid("Điều khoản đã thay đổi. Tải lại hợp đồng trước khi sửa.");
+        listingSource(c, base, p.changes());
         // A draft is private and need not yet have a reason/date or an actual difference.
         drafts.save(ContractAmendmentDraft.builder().contractId(id).ownerId(actor).payload(builder.write(p)).build()); return p;
     }
@@ -220,11 +227,11 @@ public class ContractAmendmentService {
                 validateBaseAndDate(c, a);
                 ContractRevision base = terms.require(a.getBaseRevisionId());
                 var replacing=replacement(c,a.getPreviousProposalId());
-                var result = buildTerms(base, builder.map(a.getChangesSnapshot()),replacing);
+                var result = buildTerms(base, builder.map(a.getChangesSnapshot()),replacing,readListingSource(a));
                 validateBusinessTerms(c,base,result.terms(),businessChanges(builder.map(a.getChangesSnapshot()),replacing),a.getEffectiveOn());
                 Contract agreement = contracts.save(Contract.builder().contractNumber(c.getContractNumber() + "-PL-" + a.getId().substring(0, 8))
                         .parentContractId(c.getId()).agreementKind("AMENDMENT").rentalRequestId(c.getRentalRequestId())
-                        .listingId(c.getListingId()).branchId(c.getBranchId()).landlordId(c.getLandlordId()).tenantId(c.getTenantId())
+                        .listingId(c.getListingId()).branchId(targetBranch(c,result.terms())).landlordId(c.getLandlordId()).tenantId(c.getTenantId())
                         .templateId(c.getTemplateId()).templateVersionId(c.getTemplateVersionId())
                         .paymentStatus(c.getPaymentStatus()).rentalPaymentId(c.getRentalPaymentId()).paidAt(c.getPaidAt())
                         .status(ContractStatus.DRAFT).build());
@@ -242,9 +249,9 @@ public class ContractAmendmentService {
                 a.setAgreementContractId(agreement.getId()); a.setTermsRevisionId(revision.getId()); a.setStatus("APPROVED");
                 a.setSignBy(min(a.getSignBy(), time.now().plus(Duration.ofHours(signingHours))));
                 var changes = businessChanges(builder.map(a.getChangesSnapshot()),replacing);
-                if (vehiclesChanged(changes) || leaseChanged(changes)) {
+                if (parkingChanged(c,t,changes)) {
                     Map<String,Object> tenant = builder.object(t.get("tenant"));
-                    parking.holdForAmendment(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),
+                    parking.holdForAmendmentInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),targetBranch(c,t),
                             a.getEffectiveOn(), proposedEnd(c,t,changes), count(tenant.get("motorbikeCount"), 0, 100), count(tenant.get("carCount"), 0, 100), a.getSignBy());
                 }
             }
@@ -276,9 +283,9 @@ public class ContractAmendmentService {
         var changes = businessChanges(builder.map(a.getChangesSnapshot()),replacing);
         var newTerms=builder.snapshot(terms.require(a.getTermsRevisionId()));
         validateBusinessTerms(c,terms.require(a.getBaseRevisionId()),newTerms,changes,a.getEffectiveOn(),agreement.getId());
-        if (vehiclesChanged(changes) || leaseChanged(changes)) {
+        if (parkingChanged(c,newTerms,changes)) {
             var tenant = builder.map(terms.require(a.getTermsRevisionId()).getTenantSnapshot());
-            parking.activateAmendmentHold(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(), a.getEffectiveOn(), proposedEnd(c,newTerms,changes),
+            parking.activateAmendmentHoldInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),targetBranch(c,newTerms), a.getEffectiveOn(), proposedEnd(c,newTerms,changes),
                     count(tenant.get("motorbikeCount"), 0, 100), count(tenant.get("carCount"), 0, 100));
         }
         if(leaseChanged(changes)) {
@@ -299,6 +306,7 @@ public class ContractAmendmentService {
         syncLocked(c); return history(c).stream().anyMatch(a -> PENDING.contains(a.getStatus()));
     }
     public void syncLocked(Contract c) {
+        boolean appliedNow=false;
         for (var a : history(c)) {
             if (Set.of("TENANT_REQUESTED", "TENANT_ACCEPTED").contains(a.getStatus())
                     && (c.getStatus() != ContractStatus.ACTIVE || !time.now().isBefore(a.getRespondBy()) || !time.today().isBefore(end(c)))) {
@@ -312,9 +320,16 @@ public class ContractAmendmentService {
             }
             if ("SCHEDULED".equals(a.getStatus()) && !time.today().isBefore(a.getEffectiveOn())) {
                 createDepositDelta(c,a);
+                appliedNow=true;
                 a.setStatus("APPLIED"); Instant starts = a.getEffectiveOn().atStartOfDay(BillingTime.ZONE).toInstant();
                 a.setAppliedAt(starts.isBefore(a.getSignedAt()) ? a.getSignedAt() : starts); amendments.save(a);
                 log.info("CONTRACT_AMENDMENT_APPLIED contract={} amendment={} effective={}", c.getId(), a.getId(), a.getEffectiveOn());
+            }
+        }
+        if(appliedNow) {
+            var effective=terms.at(c,time.today());
+            if(effective.getContract()!=null && !Objects.equals(c.getBranchId(),effective.getContract().getBranchId())) {
+                c.setBranchId(effective.getContract().getBranchId());contracts.save(c);
             }
         }
     }
@@ -359,12 +374,59 @@ public class ContractAmendmentService {
         if(history(c).stream().anyMatch(p->PENDING.contains(p.getStatus())&&!p.getId().equals(a.getId())))return "Đang có đề xuất thay thế chờ xử lý.";
         return null;
     }
-    private AmendmentTermsBuilder.Result buildTerms(ContractRevision base,Map<String,Object> changes,ContractAmendment replacing) {
-        var result=builder.build(base,changes,replacing!=null);
+    private ContractListingSync.Preview listingSource(Contract c, ContractRevision base, Map<String, Object> changes) {
+        var fields = FreeFormAmendmentTerms.map(changes.get("fields"));
+        if (fields.containsKey("property") || changes.keySet().stream().anyMatch(
+                Set.of("featureRows", "equipments", "amenities", "policyRows", "policies")::contains))
+            throw invalid("Dữ liệu bài đăng phải lấy từ bản đã duyệt qua nút Cập nhật dữ liệu từ bài đăng.");
+        if (!changes.containsKey("listingSourceVersion")) return null;
+        if (changes.containsKey("rentAmount") || changes.containsKey("charges") || fields.containsKey("financial"))
+            throw invalid("Hãy lập đề xuất tài chính riêng cho thay đổi giá thuê, tiền cọc hoặc phí.");
+        if (!Boolean.TRUE.equals(changes.get("freeForm")) || !(changes.get("listingSourceVersion") instanceof String version) || version.isBlank())
+            throw invalid("Phiên bản bài đăng không hợp lệ.");
+        return listingSync.preview(c, base, version);
+    }
+
+    private ContractListingSync.Preview readListingSource(ContractAmendment amendment) {
+        if (amendment.getListingSyncSnapshot() == null) return null;
+        try { return mapper.readValue(amendment.getListingSyncSnapshot(), ContractListingSync.Preview.class); }
+        catch (Exception e) { throw invalid("Không đọc được bản bài đăng đã đính kèm phụ lục."); }
+    }
+
+    private AmendmentTermsBuilder.Result listingTerms(ContractRevision base, Map<String, Object> changes,
+                                                      ContractListingSync.Preview source, boolean allowUnchanged) {
+        var input = new LinkedHashMap<>(changes);
+        input.remove("listingSourceVersion");
+        var result = builder.build(base, input, source != null || allowUnchanged);
+        if (source == null) return result;
+        var updated = new LinkedHashMap<>(result.terms());
+        for (String group : List.of("property", "equipments", "amenities")) updated.put(group, source.terms().get(group));
+        if(source.terms().containsKey("listingBranchId"))updated.put("listingBranchId",source.terms().get("listingBranchId"));
+        updated.put("policies", listingSync.mergeListingPolicies(builder.object(updated.get("policies")), source.terms()));
+        var property = builder.object(updated.get("property"));
+        var tenant = builder.object(updated.get("tenant"));
+        var capacity = property.get("maxOccupants");
+        if (capacity != null && !capacity.toString().isBlank()
+                && count(tenant.getOrDefault("occupantCount", 1), 1, 100) > count(capacity, 0, 100))
+            throw invalid("Số người đề xuất vượt giới hạn của bản bài đăng đã duyệt.");
+        int bikes=count(tenant.getOrDefault("motorbikeCount",0),0,100),cars=count(tenant.getOrDefault("carCount",0),0,100);
+        for(String key:List.of("maxVehicles","maxMotorbikeCount","maxCarCount"))
+            if(property.get(key)!=null && !property.get(key).toString().isBlank()
+                    && (key.equals("maxVehicles")?bikes+cars:key.equals("maxMotorbikeCount")?bikes:cars)>count(property.get(key),0,100))
+                throw invalid("Số xe đề xuất vượt giới hạn của bản bài đăng đã duyệt.");
+        var comparison = new ArrayList<>(result.comparison());
+        comparison.addAll(source.differences());
+        if (comparison.isEmpty() && !allowUnchanged) throw invalid("Không có thay đổi so với điều khoản hiện tại.");
+        return new AmendmentTermsBuilder.Result(updated, comparison);
+    }
+
+    private AmendmentTermsBuilder.Result buildTerms(ContractRevision base,Map<String,Object> changes,ContractAmendment replacing,
+                                                    ContractListingSync.Preview source) {
+        var result=listingTerms(base,changes,source,replacing!=null);
         if(replacing==null)return result;
         // Stored comparisons may themselves describe a previous replacement, not the effective base.
         var old=new LinkedHashMap<String,AmendmentComparison>();
-        builder.build(base,builder.map(replacing.getChangesSnapshot()),true).comparison().forEach(r->old.put(r.field(),r));
+        listingTerms(base,builder.map(replacing.getChangesSnapshot()),readListingSource(replacing),true).comparison().forEach(r->old.put(r.field(),r));
         var next=new LinkedHashMap<String,AmendmentComparison>();result.comparison().forEach(r->next.put(r.field(),r));
         var keys=new LinkedHashSet<>(old.keySet());keys.addAll(next.keySet());var diff=new ArrayList<AmendmentComparison>();
         for(String key:keys){var a=old.get(key);var b=next.get(key);String before=a==null?b.before():a.after(),after=b==null?a.before():b.after();
@@ -376,6 +438,8 @@ public class ContractAmendmentService {
     private Map<String,Object> businessChanges(Map<String,Object> changes,ContractAmendment replacing) {
         if(replacing==null)return changes;
         var old=builder.map(replacing.getChangesSnapshot());var result=new LinkedHashMap<String,Object>(changes);
+        var previousSource=readListingSource(replacing);
+        if(previousSource!=null && previousSource.terms().containsKey("listingBranchId"))result.put("refreshParkingPool",true);
         for(String key:List.of("motorbikeCount","carCount"))if(old.containsKey(key))result.putIfAbsent(key,old.get(key));
         if(leaseChanged(old)&&!leaseChanged(changes)) {
             var fields=new LinkedHashMap<String,Object>(builder.object(changes.getOrDefault("fields",Map.of())));
@@ -422,10 +486,17 @@ public class ContractAmendmentService {
         }
     }
     private void validateParking(Contract c,Map<String,Object> next,Map<String,Object> changes,LocalDate effectiveOn,String agreementId) {
-        if (!vehiclesChanged(changes) && !leaseChanged(changes)) return;
+        if (!parkingChanged(c,next,changes)) return;
         var tenant=builder.object(next.get("tenant"));
-        parking.validateAmendmentCapacity(c.getId(),agreementId,c.getListingId(),effectiveOn,proposedEnd(c,next,changes),
+        parking.validateAmendmentCapacityInBranch(c.getId(),agreementId,c.getListingId(),targetBranch(c,next),effectiveOn,proposedEnd(c,next,changes),
                 count(tenant.get("motorbikeCount"),0,100),count(tenant.get("carCount"),0,100));
+    }
+    private String targetBranch(Contract c,Map<String,Object> next) {
+        return next.containsKey("listingBranchId")?(String)next.get("listingBranchId"):c.getBranchId();
+    }
+    private boolean parkingChanged(Contract c,Map<String,Object> next,Map<String,Object> changes) {
+        return vehiclesChanged(changes)||leaseChanged(changes)||Boolean.TRUE.equals(changes.get("refreshParkingPool"))
+                || !Objects.equals(c.getBranchId(),targetBranch(c,next));
     }
     private void createDepositDelta(Contract c,ContractAmendment a) {
         var changes=builder.map(a.getChangesSnapshot());

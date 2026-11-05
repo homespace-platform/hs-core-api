@@ -31,6 +31,7 @@ import com.hs.contract.repository.ContractRevisionRepository;
 import com.hs.contract.repository.ContractTemplateVersionRepository;
 import com.hs.contract.service.ContractService;
 import com.hs.contract.service.ContractDraftVisibility;
+import com.hs.contract.service.ContractDraftIntegrity;
 import com.hs.contract.service.LatePaymentPolicy;
 import com.hs.contract.service.ContractPolicyTerms;
 import com.hs.contract.service.ContractPreviewIdentity;
@@ -83,7 +84,9 @@ import org.springframework.beans.factory.annotation.Value;
 public class ContractServiceImpl implements ContractService {
     @Autowired private com.hs.payment.service.DepositLedgerService depositLedger;
     @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
-    @Autowired private com.hs.contract.service.ContractDraftIntegrity draftIntegrity;
+    @Autowired private ContractDraftIntegrity draftIntegrity;
+    @Autowired private com.hs.contract.service.ContractListingSync listingSync;
+    @Autowired private com.hs.contract.service.ContractDraftResidents draftResidents;
     @Autowired(required=false) private com.hs.contract.service.RentalOnboardingService onboarding;
     @Autowired private com.hs.contract.deposit.DepositAgreementService depositAgreements;
     private static final String SIGNING_CITY = "Thành phố Hồ Chí Minh";
@@ -514,6 +517,17 @@ public class ContractServiceImpl implements ContractService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public com.hs.contract.service.ContractListingSync.Preview previewListingSync(String contractId) {
+        Contract contract = findContractAndCheckAccess(contractId);
+        if (!contract.getLandlordId().equals(getCurrentUserId()) || !ContractDraftIntegrity.applies(contract))
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        var base = contract.getStatus() == ContractStatus.ACTIVE
+                ? termsResolver.at(contract, billingTime.today()) : requireCurrentRevision(contract);
+        return listingSync.preview(contract, base, null);
+    }
+
+    @Override
     @Transactional
     public ContractRevisionResponse updateRevision(String contractId, UpdateContractRevisionRequest request) {
         rejectDepositEdits(findContractAndCheckAccess(contractId));
@@ -531,7 +545,29 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
         }
 
-        request = draftIntegrity.prepareUpdate(contract, requireCurrentRevision(contract), request);
+        var current = requireCurrentRevision(contract);
+        var sourceVersion = request == null ? null : request.getListingSourceVersion();
+        boolean editResidents = request != null && request.getDraftContent() != null && request.getDraftContent().tenant() != null
+                && request.getDraftContent().tenant().keySet().stream().anyMatch(Set.of("occupantCount","motorbikeCount","carCount")::contains);
+        if (sourceVersion != null && !current.getId().equals(request.getBaseRevisionId()))
+            throw new AppException(ContractErrorCode.CONTRACT_DRAFT_STALE);
+        request = draftIntegrity.prepareUpdate(contract, current, request);
+        Integer listingTermMinimum = current.getListingTermMinimum();
+        if (sourceVersion != null) {
+            var sync = listingSync.preview(contract, current, sourceVersion);
+            request.setProperty(fromJson(toJson(sync.terms().get("property")), MAP_TYPE));
+            var rowsType = new TypeReference<List<Map<String, Object>>>() {};
+            request.setEquipments(fromJson(toJson(sync.terms().get("equipments")), rowsType));
+            request.setAmenities(fromJson(toJson(sync.terms().get("amenities")), rowsType));
+            request.setPolicies(listingSync.mergeListingPolicies(request.getPolicies(), sync.terms()));
+            listingSync.applyDraftTerm(contract, sync);
+            if (sync.proposedMonths() != null) {
+                var rental = rentalRequestRepository.findById(contract.getRentalRequestId()).orElseThrow();
+                request.setLease(ContractDataBuilder.leaseTerms(rental));
+                listingTermMinimum = sync.proposedMonths();
+            }
+        }
+        if (editResidents) draftResidents.apply(contract, current, request);
         Map<String,Object> previousPolicies=contract.getCurrentRevisionId()==null?Map.of():revisionRepository.findById(contract.getCurrentRevisionId())
                 .map(r->fromJson(r.getPoliciesSnapshot(),MAP_TYPE)).orElse(Map.of());
         Map<String,Object> policies=LatePaymentPolicy.forNewAgreement(request.getPolicies(),previousPolicies);
@@ -571,6 +607,8 @@ public class ContractServiceImpl implements ContractService {
                 .revisionNumber(nextRev)
                 .templateVersionId(contract.getTemplateVersionId())
                 .schemaVersion(requireCurrentRevision(contract).getSchemaVersion())
+                .listingSourceVersion(sourceVersion == null ? current.getListingSourceVersion() : sourceVersion)
+                .listingTermMinimum(listingTermMinimum)
                 .landlordSnapshot(toJson(request.getLandlord()))
                 .tenantSnapshot(toJson(request.getTenant()))
                 .propertySnapshot(toJson(request.getProperty()))
@@ -786,13 +824,22 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional
     public ContractDocumentResponse triggerPreview(String contractId) {
+        return triggerPreview(contractId, null);
+    }
+
+    @Override
+    @Transactional
+    public ContractDocumentResponse triggerPreview(String contractId, String expectedRevisionId) {
         // Database lock serializes duplicate clicks across Core instances and revision edits.
         Contract contract = findContractForUpdateAndCheckAccess(contractId);
         requireLandlord(contract);
         if (contract.getStatus() != ContractStatus.DRAFT) {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
         }
-        return renderPreview(contract, false);
+        if (expectedRevisionId != null && !expectedRevisionId.equals(contract.getCurrentRevisionId())) {
+            throw new AppException(ContractErrorCode.CONTRACT_DRAFT_STALE);
+        }
+        return renderPreview(contract, expectedRevisionId != null);
     }
 
     /** Internal only: no impersonated user and no public endpoint bypassing ownership checks. */
@@ -1437,6 +1484,8 @@ public class ContractServiceImpl implements ContractService {
     }
 
     private ContractRevisionResponse toRevisionResponse(ContractRevision r) {
+        Map<String, Object> policies = fromJson(r.getPoliciesSnapshot(), MAP_TYPE);
+        var terms = ContractDraftIntegrity.splitTerms(r.getSpecialTerms(), policies);
         return ContractRevisionResponse.builder()
                 .id(r.getId())
                 .contractId(r.getContract().getId())
@@ -1449,11 +1498,13 @@ public class ContractServiceImpl implements ContractService {
                 .financial(fromJson(r.getFinancialSnapshot(), new TypeReference<Map<String, Object>>() {}))
                 .initialPayment(fromJson(r.getInitialPaymentSnapshot(), new TypeReference<Map<String, Object>>() {}))
                 .amenities(fromJson(r.getAmenitiesSnapshot(), new TypeReference<List<Map<String, Object>>>() {}))
-                .policies(fromJson(r.getPoliciesSnapshot(), new TypeReference<Map<String, Object>>() {}))
+                .policies(policies)
                 .charges(fromJson(r.getChargesSnapshot(), new TypeReference<List<Map<String, Object>>>() {}))
                 .equipments(fromJson(r.getEquipmentSnapshot(), new TypeReference<List<Map<String, Object>>>() {}))
                 .meters(fromJson(r.getInitialMetersSnapshot(), new TypeReference<Map<String, Object>>() {}))
                 .specialTerms(r.getSpecialTerms())
+                .systemTerms(terms.system())
+                .additionalTerms(terms.additional())
                 .schemaVersion(r.getSchemaVersion() != null ? r.getSchemaVersion() : 2)
                 .revisionNote(r.getRevisionNote())
                 .createdAt(r.getCreatedAt())
