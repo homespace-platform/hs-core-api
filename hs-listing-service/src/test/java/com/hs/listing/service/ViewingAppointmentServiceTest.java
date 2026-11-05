@@ -252,9 +252,15 @@ class ViewingAppointmentServiceTest {
     @DisplayName("3. Approve Appointment Tests (No auto-rejection of other PENDING)")
     class ApproveAppointmentTests {
 
-        @Test
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
         @DisplayName("Approving an appointment does NOT reject other PENDING appointments in the same slot")
-        void testApprove_doesNotRejectOtherPendings() {
+        void testApprove_doesNotRejectOtherPendings(boolean reviewing) {
+            if (reviewing) {
+                testListing.setStatus(ListingStatus.PENDING_REVIEW);
+                testListing.setReviewOperationalStatus(ListingStatus.PUBLISHED);
+                testListing.setPendingEditId("edit");
+            }
             LocalDate futureDate = LocalDate.now(ViewingAppointmentService.VIETNAM_ZONE).plusDays(2);
             LocalTime start = LocalTime.of(9, 0);
             LocalTime end = LocalTime.of(10, 0);

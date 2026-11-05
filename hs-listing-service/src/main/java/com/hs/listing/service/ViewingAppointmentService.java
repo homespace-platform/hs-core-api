@@ -261,7 +261,7 @@ public class ViewingAppointmentService {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_STATUS);
         }
 
-        if (apt.getListing().getStatus() != ListingStatus.PUBLISHED) {
+        if (apt.getListing().getOperationalStatus() != ListingStatus.PUBLISHED) {
             throw new AppException(ListingErrorCode.LISTING_NOT_AVAILABLE_FOR_VIEWING);
         }
 

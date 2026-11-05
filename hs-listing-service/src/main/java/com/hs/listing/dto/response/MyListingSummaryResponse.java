@@ -29,6 +29,8 @@ public record MyListingSummaryResponse(
         Instant expiresAt,
         Instant createdAt,
         Instant updatedAt,
-        Long viewCount
+        Long viewCount,
+        String pendingEditId,
+        ListingStatus operationalStatus
 ) {
 }

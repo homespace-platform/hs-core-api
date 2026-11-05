@@ -606,7 +606,7 @@ class ListingServiceTest {
             names = {"RESERVED", "RENTED", "HIDDEN", "EXPIRED", "PUBLISHED"})
     void stagedContentChangesPreserveTheStatusAtDecision(com.hs.listing.model.constant.ListingStatus finalStatus) {
         var listingRepo = mock(ListingRepository.class);
-        var statusService = mock(ListingStatusService.class);
+        var statusService = new ListingStatusService(listingRepo,mock(ListingStatusHistoryRepository.class),mock(ViewingAppointmentService.class),30);
         var storage = mock(StorageObjectRepository.class);
         ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
                 storage, mock(com.hs.storage.service.StorageService.class),
@@ -622,7 +622,7 @@ class ListingServiceTest {
         listing.setId("listing-rented-1");
         listing.setOwnerId("owner-1");
         listing.setCategory(com.hs.listing.model.constant.ListingCategory.ROOM);
-        listing.setStatus(com.hs.listing.model.constant.ListingStatus.RESERVED);
+        listing.setStatus(finalStatus);
         listing.setTitle("Bản đã duyệt");
         listing.setMinimumLeaseMonths(6);
         var originalRoom=new com.hs.listing.model.ListingRoomDetail();originalRoom.setRoomCode("R101");listing.setRoomDetail(originalRoom);
@@ -641,20 +641,32 @@ class ListingServiceTest {
         var reviewReq = createDummyRequest(null, "listing-rented-1", "R202", com.hs.listing.model.constant.ListingSubmissionAction.SUBMIT_FOR_REVIEW);
         var submitted = service.upsert("owner-1", reviewReq);
         assertNotNull(submitted.pendingEditId());
+        assertEquals(com.hs.listing.model.constant.ListingStatus.PENDING_REVIEW,submitted.status());
+        assertEquals(finalStatus,submitted.operationalStatus());
         assertEquals("Bản đã duyệt", listing.getTitle());
         assertEquals(6, listing.getMinimumLeaseMonths());
         assertEquals("R101",listing.getRoomDetail().getRoomCode());
         verify(listingRepo, never()).flush();
+        var preview = service.reviewContent(listing, service.pendingEdit(listing));
+        assertNotSame(listing, preview.listing());
+        assertEquals(reviewReq.title(), preview.listing().getTitle());
+        assertEquals("R202", preview.listing().getRoomDetail().getRoomCode());
+        assertEquals(com.hs.listing.model.constant.ListingStatus.PENDING_REVIEW, preview.listing().getStatus());
+        assertEquals(finalStatus, preview.listing().getOperationalStatus());
+        assertEquals(reviewReq.pricing().minimumLeaseMonths(), preview.listing().getMinimumLeaseMonths());
+        assertEquals("Bản đã duyệt", listing.getTitle()); assertEquals("R101", listing.getRoomDetail().getRoomCode());
+        assertEquals(6, listing.getMinimumLeaseMonths());
+        verify(listingRepo, times(2)).save(listing); verify(listingRepo, never()).flush();
         assertThrows(AppException.class, () -> service.decideEdit("admin", listing.getId(), "old-version", true, null));
-        listing.setStatus(finalStatus); // Signing, expiry or cancellation may advance the live state during moderation.
         service.decideEdit("admin", listing.getId(), submitted.pendingEditId(), true, null);
-        assertEquals(finalStatus, listing.getStatus());
+        assertEquals(finalStatus == com.hs.listing.model.constant.ListingStatus.EXPIRED
+                ? com.hs.listing.model.constant.ListingStatus.PUBLISHED : finalStatus, listing.getStatus());
         assertEquals(reviewReq.title(), listing.getTitle());
         assertEquals("R202",listing.getRoomDetail().getRoomCode());
         assertEquals(submitted.pendingEditId(), listing.getApprovedEditId());
         assertEquals("{\"listingId\":\"listing-rented-1\"}", listing.getApprovedContractSnapshot());
         assertNull(listing.getPendingEditId());
-        verifyNoInteractions(statusService);
+        assertNull(listing.getReviewOperationalStatus()); assertNull(listing.getReviewOriginStatus());
     }
 
     @Test

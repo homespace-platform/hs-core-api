@@ -103,7 +103,6 @@ public class ListingAdminService {
             total += count;
         }
         counts.put("ALL", total);
-        counts.merge("PENDING_REVIEW", listingRepository.countByActiveTrueAndPendingEditIdIsNotNull(), Long::sum);
         return counts;
     }
 
@@ -123,22 +122,27 @@ public class ListingAdminService {
                 .map(item -> ListingStatusHistoryResponse.from(
                         item, actorsById.get(item.getChangedBy())))
                 .toList();
-        return new AdminListingDetailResponse(queryService.toDetail(listing), history, listing.getPendingEditId(),
-                listingService.pendingEdit(listing), listingService.pendingEditAddress(listing));
+        var edit = listingService.pendingEdit(listing);
+        ListingService.ReviewContent review = null;
+        String reviewError = null;
+        try { review = listingService.reviewContent(listing, edit); }
+        catch (AppException e) { reviewError = e.getMessage(); }
+        var detail = review == null ? queryService.toDetail(listing)
+                : queryService.toDetail(review.listing(), ListingAddressResponse.from(review.address()));
+        return new AdminListingDetailResponse(detail, history, listing.getPendingEditId(), edit,
+                review == null ? null : review.address().getDisplay(), reviewError, statusService.hasProtectedRental(listing));
     }
 
     @Transactional
     public ListingDetailResponse changeStatus(String adminId, String listingId, ListingStatus status, String reason) {
-        return queryService.toDetail(statusService.changeByAdmin(adminId, listingId, status, reason));
+        var changed = statusService.changeByAdmin(adminId, listingId, status, reason);
+        if (status == ListingStatus.PUBLISHED) listingService.capturePublicationApproval(changed);
+        return queryService.toDetail(changed);
     }
 
     @Transactional
     public ListingDetailResponse decideEdit(String adminId, String id, String editId, boolean approve, String reason) {
         Listing listing = listingService.decideEdit(adminId, id, editId, approve, reason);
-        historyRepository.save(com.hs.listing.model.ListingStatusHistory.builder()
-                .listingId(id).fromStatus(listing.getStatus()).toStatus(listing.getStatus())
-                .reason(approve ? "Đã duyệt bản sửa " + editId : "Từ chối bản sửa " + editId + ": " + reason.trim())
-                .changedBy(adminId).changedByType(ListingStatusActorType.ADMIN).build());
         return queryService.toDetail(listing);
     }
 
@@ -161,7 +165,7 @@ public class ListingAdminService {
                 listing.getPriceUnit(), cover == null ? null : publicUrl(cover.getStorageObject()), address, owner,
                 listing.getSubmittedAt(), listing.getPublishedAt(), listing.getExpiresAt(),
                 listing.getStatusChangedAt(), listing.getStatusChangedBy(),
-                listing.getCreatedAt(), listing.getUpdatedAt(), listing.getPendingEditId());
+                listing.getCreatedAt(), listing.getUpdatedAt(), listing.getPendingEditId(), listing.getOperationalStatus(), statusService.hasProtectedRental(listing));
     }
 
     private Sort adminSort(String value) {

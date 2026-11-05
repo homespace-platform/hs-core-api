@@ -42,6 +42,16 @@ public class Listing extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ListingStatus status;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "review_operational_status", length = 32)
+    private ListingStatus reviewOperationalStatus;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "review_origin_status", length = 32)
+    private ListingStatus reviewOriginStatus;
+
+    public ListingStatus getOperationalStatus() {
+        return status == ListingStatus.PENDING_REVIEW && reviewOperationalStatus != null ? reviewOperationalStatus : status;
+    }
     @Column(name = "status_reason", columnDefinition = "text")
     private String statusReason;
     @Column(name = "status_changed_at")

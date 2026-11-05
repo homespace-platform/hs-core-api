@@ -75,7 +75,7 @@ public class PreTenancyResolutionService {
     private void resume(RentalWorkflowSupport.Source s){s.rental().setResolutionWorkflowId(null);support.rentals.save(s.rental());}
     private boolean complaintResolved(RentalWorkflowSupport.Source s){return s.record().getComplaintId()!=null&&cases.findById(s.record().getComplaintId()).filter(c->s.rental().getId().equals(c.getRentalRequestId())&&c.getStatus()==DisputeCaseStatus.RESOLVED).isPresent()&&!activeComplaint(s);}
     private void resumeReady(RentalWorkflowSupport.Source s){
-        eligible(s);if(!complaintResolved(s)||s.rental().getResolutionWorkflowId()==null||s.rental().getCancellationRequestedAt()!=null||s.rental().getListing().getStatus()!=ListingStatus.RESERVED)throw support.invalid("Chỉ tiếp tục sau khi khiếu nại đã giải quyết và đúng lượt giữ phòng còn hiệu lực.");
+        eligible(s);if(!complaintResolved(s)||s.rental().getResolutionWorkflowId()==null||s.rental().getCancellationRequestedAt()!=null||s.rental().getListing().getOperationalStatus()!=ListingStatus.RESERVED)throw support.invalid("Chỉ tiếp tục sau khi khiếu nại đã giải quyết và đúng lượt giữ phòng còn hiệu lực.");
         signatureSafe(s.contract(),false);signatureSafe(depositAgreements.find(s.rental().getId()).orElse(null),true);
         for(var type:List.of(PaymentType.RESERVATION_DEPOSIT,PaymentType.INITIAL))support.payments.findByRentalRequestIdAndType(s.rental().getId(),type).ifPresent(cash->{if(Set.of(PaymentStatus.TRANSFER_REPORTED,PaymentStatus.DISPUTED,PaymentStatus.REJECTED).contains(cash.getStatus()))throw support.invalid("Cần đối soát khoản chuyển trước khi tiếp tục.");});
     }
@@ -132,7 +132,7 @@ public class PreTenancyResolutionService {
         if(dc!=null)dc=support.contracts.findByIdForUpdate(dc.getId()).orElseThrow(support::missing);signatureSafe(dc,true);
         var r=s.rental();var listing=listings.findByIdForUpdate(r.getListing().getId()).orElseThrow(support::missing);
         support.reload(listing);
-        if(listing.getStatus()!=ListingStatus.RESERVED||support.rentals.findByListingIdAndStatus(listing.getId(),RentalRequestStatus.ACCEPTED).stream().anyMatch(other->!other.getId().equals(r.getId())))
+        if(listing.getOperationalStatus()!=ListingStatus.RESERVED||support.rentals.findByListingIdAndStatus(listing.getId(),RentalRequestStatus.ACCEPTED).stream().anyMatch(other->!other.getId().equals(r.getId())))
             throw support.invalid("Lượt giữ phòng đã thay đổi; không giải phóng lượt của hồ sơ khác.");
         boolean anyConfirmed=false, refundRequired=false;
         for(var type:List.of(PaymentType.RESERVATION_DEPOSIT,PaymentType.INITIAL)) {
@@ -182,7 +182,7 @@ public class PreTenancyResolutionService {
         r.setHoldExpiresAt(null);support.rentals.save(r);
         for(var change:changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()))if("REQUESTED".equals(change.getStatus())){change.setStatus("WITHDRAWN");change.setDecidedAt(support.time.now());change.setDecidedBy(s.actor());changes.save(change);}
         parking.releaseReservationsForRequest(r.getId());
-        if(listing.getStatus()==ListingStatus.RESERVED && support.rentals.findByListingIdAndStatus(listing.getId(),RentalRequestStatus.ACCEPTED)
+        if(listing.getOperationalStatus()==ListingStatus.RESERVED && support.rentals.findByListingIdAndStatus(listing.getId(),RentalRequestStatus.ACCEPTED)
                 .stream().noneMatch(other->!other.getId().equals(r.getId())))
             listingStatus.releaseReserved(listing,s.actor(),"Hoàn tất hủy hồ sơ trước khi thuê");
         s.record().setStatus("COMPLETED");s.record().setRespondBy(null);

@@ -144,7 +144,7 @@ public class RentalOnboardingService {
         if(!depositSigned||r.getCancellationRefundApprovedAt()!=null)signDue=null;
         boolean paid=confirmed(rent)&&(deposit==null||confirmed(deposit));
         boolean signingOpen=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&r.getResolutionWorkflowId()==null
-            &&r.getListing().getStatus()==com.hs.listing.model.constant.ListingStatus.RESERVED
+            &&r.getListing().getOperationalStatus()==com.hs.listing.model.constant.ListingStatus.RESERVED
             &&paid&&depositSigned&&!time.now().isBefore(opens)&&signDue!=null&&time.now().isBefore(signDue);
         String stage,message;
         if(r.getStatus()==RentalRequestStatus.COMPLETED){stage="COMPLETED";message="Đã ký đủ và bắt đầu hợp đồng.";}
@@ -208,7 +208,7 @@ public class RentalOnboardingService {
                 if(contract.getStatus()!=ContractStatus.DRAFT)throw invalid("Đã bắt đầu ký, không thể sửa ngày thuê trực tiếp.");
             }
             var listing=r.getListing();
-            if(listing.getStatus()!=com.hs.listing.model.constant.ListingStatus.RESERVED)throw invalid("Tài sản không còn ở trạng thái giữ chỗ.");
+            if(listing.getOperationalStatus()!=com.hs.listing.model.constant.ListingStatus.RESERVED)throw invalid("Tài sản không còn ở trạng thái giữ chỗ.");
             if(listing.getBranchId()!=null)branches.findByIdForUpdate(listing.getBranchId()).orElseThrow();
             else listings.findByIdForUpdate(listing.getId()).orElseThrow();
             parking.releaseReservationsForRequest(id);
@@ -379,7 +379,7 @@ public class RentalOnboardingService {
         if(depositAgreements!=null && !depositAgreements.signedOrExempt(r))return null;
         if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getCancellationRequestedAt()!=null || r.getDefaultDisputedAt()!=null
                 || !Set.of("RESERVATION_DEFAULT_V1","RESERVATION_DEFAULT_V2").contains(Objects.toString(r.getReservationPolicyVersion(),"")) || r.getReservationPolicyAcceptedAt()==null
-                || r.getListing().getStatus()!=com.hs.listing.model.constant.ListingStatus.RESERVED)return null;
+                || r.getListing().getOperationalStatus()!=com.hs.listing.model.constant.ListingStatus.RESERVED)return null;
         var d=deposits.findByRentalRequestId(r.getId()).orElse(null);
         if(d==null || d.getStatus()!=DepositStatus.HELD || d.getHeldAmount()==null || d.getHeldAmount().signum()<=0)return null;
         var c=contracts.findByRentalRequestId(r.getId()).orElse(null);

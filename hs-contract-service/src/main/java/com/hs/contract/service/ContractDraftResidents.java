@@ -33,7 +33,7 @@ public class ContractDraftResidents {
         if (people==rental.getOccupantCount() && bikes==Objects.requireNonNullElse(rental.getMotorbikeCount(),0)
                 && cars==Objects.requireNonNullElse(rental.getCarCount(),0)) return;
         if (rental.getStatus()!=RentalRequestStatus.ACCEPTED || rental.getListing()==null
-                || rental.getListing().getStatus()!=ListingStatus.RESERVED || rental.getCancellationRequestedAt()!=null
+                || rental.getListing().getOperationalStatus()!=ListingStatus.RESERVED || rental.getCancellationRequestedAt()!=null
                 || rental.getResolutionWorkflowId()!=null || !invoices.findByContractIdOrderByPeriodIndexDesc(contract.getId()).isEmpty())
             throw invalid("Chỉ đổi số người/xe khi hồ sơ giữ chỗ đang ổn định và chưa phát hành hóa đơn.");
         limit(expected.getProperty().get("maxOccupants"),people,"Số người vượt giới hạn hợp đồng.");

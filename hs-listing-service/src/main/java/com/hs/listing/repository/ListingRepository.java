@@ -15,6 +15,7 @@ import java.util.Optional;
 public interface ListingRepository extends JpaRepository<Listing, String>, JpaSpecificationExecutor<Listing> {
     Page<Listing> findAllByOwnerIdAndActiveTrue(String ownerId, Pageable pageable);
     Optional<Listing> findByIdAndActiveTrue(String id);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     List<Listing> findAllByStatusAndActiveTrueAndExpiresAtLessThanEqual(ListingStatus status, Instant expiresAt);
     long countByOwnerIdAndStatusAndActiveTrue(String ownerId, ListingStatus status);
     @org.springframework.data.jpa.repository.Query("SELECT COUNT(l) FROM Listing l WHERE l.branchId = :branchId AND l.active = true")
@@ -29,6 +30,23 @@ public interface ListingRepository extends JpaRepository<Listing, String>, JpaSp
     List<Object[]> countAllGroupedByStatus();
 
     long countByActiveTrueAndPendingEditIdIsNotNull();
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("""
+            SELECT l FROM Listing l WHERE l.active = true AND l.status = com.hs.listing.model.constant.ListingStatus.PENDING_REVIEW
+            AND l.reviewOperationalStatus = com.hs.listing.model.constant.ListingStatus.PUBLISHED AND l.expiresAt <= :at
+            """)
+    List<Listing> findPendingReviewsPastPublicationExpiry(@org.springframework.data.repository.query.Param("at") Instant at);
+
+    /** Includes signed/expired leases until the parties confirm vacant possession, even if listing status was changed. */
+    @org.springframework.data.jpa.repository.Query(value = """
+            SELECT EXISTS (SELECT 1 FROM rental_requests r WHERE r.listing_id = :id AND r.active = true AND r.status = 'ACCEPTED')
+            OR EXISTS (SELECT 1 FROM contracts c LEFT JOIN contract_closures s ON s.contract_id = c.id
+              WHERE c.listing_id = :id AND c.active = true AND c.parent_contract_id IS NULL
+                AND (c.agreement_kind IS NULL OR c.agreement_kind <> 'DEPOSIT')
+                AND c.status NOT IN ('CANCELLED','CLOSED') AND s.accepted_at IS NULL)
+            """, nativeQuery = true)
+    boolean hasOccupiedRental(@org.springframework.data.repository.query.Param("id") String id);
 
     /** Published counts for the fixed home metros; optional category filter. */
     @org.springframework.data.jpa.repository.Query("""

@@ -100,6 +100,26 @@ class ContractListingSyncTest {
         verifyNoInteractions(parking);
     }
 
+    @Test void directSourceSkipsComparisonsButKeepsApprovedDataAndTermSafety() {
+        var source = sync.source(contract, revision, "approved");
+        assertTrue(source.differences().isEmpty()); assertTrue(source.financialDifferences().isEmpty());
+        assertEquals("Địa chỉ mới", ((Map<?, ?>)source.terms().get("property")).get("fullAddress"));
+        assertEquals(3, source.proposedMonths()); assertEquals(6, rental.getLeaseMonths());
+        verifyNoInteractions(costs, parking); verify(rentals, never()).save(any());
+        sync.applyDraftTerm(contract, source);
+        assertEquals(3, rental.getLeaseMonths()); assertEquals(new BigDecimal("3000000"), rental.getDepositAmount());
+        assertFalse(source.terms().containsKey("financial"));
+    }
+
+    @Test void directSourceStillRejectsStaleVersionsAndCapacityViolations() {
+        assertThrows(AppException.class, () -> sync.source(contract, revision, "old"));
+        revision.setTenantSnapshot("{\"occupantCount\":2}");
+        when(data.listingTerms(any(),any())).thenReturn(new ContractDataBuilder.ListingTerms(
+                Map.of("fullAddress","Địa chỉ mới","listingCode","HS001","maxOccupants",1),List.of(),List.of(),List.of(),Map.of(),Map.of()));
+        assertThrows(AppException.class, () -> sync.source(contract, revision, "approved"));
+        verifyNoInteractions(costs, parking); verify(rentals, never()).save(any());
+    }
+
     @Test void blocksStaleApprovalAndPastNewEnd() {
         assertThrows(AppException.class, () -> sync.preview(contract, revision, "superseded"));
         when(time.today()).thenReturn(LocalDate.of(2027, 4, 30));
@@ -119,6 +139,14 @@ class ContractListingSyncTest {
         verify(parking).replaceDraftHold(rental,0,0);assertEquals("new-branch",contract.getBranchId());
         assertEquals(12,rental.getLeaseMonths());assertEquals(new BigDecimal("3000000"),rental.getDepositAmount());
     }
+    @Test void pendingListingEditsMustBeApprovedBeforeContractRefresh() {
+        listing.setStatus(ListingStatus.PENDING_REVIEW); listing.setReviewOperationalStatus(ListingStatus.RESERVED);
+        listing.setPendingEditId("new-edit");
+        assertThrows(AppException.class,()->sync.preview(contract,revision,null));
+        assertThrows(AppException.class,()->sync.source(contract,revision,null));
+        verifyNoInteractions(data,parking); verify(rentals,never()).save(any());
+    }
+
     @Test void sourceIsFrozenAndDoesNotReadUnapprovedLiveListingChanges() {
         listing.setMinimumLeaseMonths(1);
         assertEquals(3,sync.preview(contract,revision,null).proposedMonths());

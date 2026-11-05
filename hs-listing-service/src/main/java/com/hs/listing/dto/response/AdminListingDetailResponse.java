@@ -8,6 +8,8 @@ public record AdminListingDetailResponse(
         List<ListingStatusHistoryResponse> statusHistory,
         String pendingEditId,
         CreateListingRequest pendingEdit,
-        String pendingAddress
+        String pendingAddress,
+        String reviewError,
+        boolean protectedRental
 ) {
 }

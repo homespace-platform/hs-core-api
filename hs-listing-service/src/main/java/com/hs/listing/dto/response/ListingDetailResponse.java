@@ -53,5 +53,6 @@ public record ListingDetailResponse(
                 Long viewCount,
                 List<ListingPolicyResponse> policies,
                 String pendingEditId,
-                String editRejectionReason) {
+                String editRejectionReason,
+                ListingStatus operationalStatus) {
 }

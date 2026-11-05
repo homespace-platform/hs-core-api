@@ -577,7 +577,7 @@ public class RentalRequestService {
             parkingReservationService.expireReservationsForRequest(req.getId());
 
             Listing listing = req.getListing();
-            if (listing != null && listing.getStatus() == ListingStatus.RESERVED) {
+            if (listing != null && listing.getOperationalStatus() == ListingStatus.RESERVED) {
                 String reason = wasConfirmed
                         ? "Hết hạn chuẩn bị hợp đồng sau khi khoản thanh toán ban đầu đã được xác nhận"
                         : "Hết hạn giữ chỗ mà không hoàn tất thủ tục thuê";

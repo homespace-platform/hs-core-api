@@ -24,6 +24,8 @@ public record AdminListingSummaryResponse(
         String statusChangedBy,
         Instant createdAt,
         Instant updatedAt,
-        String pendingEditId
+        String pendingEditId,
+        ListingStatus operationalStatus,
+        boolean protectedRental
 ) {
 }

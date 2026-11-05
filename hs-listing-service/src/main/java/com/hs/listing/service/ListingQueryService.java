@@ -92,7 +92,8 @@ public class ListingQueryService {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> new AppException(ErrorCode.ROUTE_NOT_FOUND));
         boolean owner = viewerId != null && viewerId.equals(listing.getOwnerId());
-        boolean visibleListing = listing.getStatus() == ListingStatus.PUBLISHED || listing.getStatus() == ListingStatus.RESERVED;
+        boolean visibleListing = listing.getPendingEditId() == null
+                && (listing.getStatus() == ListingStatus.PUBLISHED || listing.getStatus() == ListingStatus.RESERVED);
         boolean hasRentalRequest = viewerId != null && rentalRequestRepository.existsByListingIdAndRenterId(listing.getId(), viewerId);
         if (!owner && !visibleListing && !hasRentalRequest) throw new AppException(ErrorCode.ROUTE_NOT_FOUND);
         return toDetail(listing, owner);
@@ -118,7 +119,7 @@ public class ListingQueryService {
                 cover == null ? null : cover.getStorageObject().getId(), listing.getMedia().size(), fullAddress,
                 listing.getStatusReason(), listing.getSubmittedAt(), listing.getPublishedAt(), listing.getExpiresAt(),
                 listing.getCreatedAt(), listing.getUpdatedAt(),
-                listing.getViewCount() != null ? listing.getViewCount() : 0L);
+                listing.getViewCount() != null ? listing.getViewCount() : 0L, listing.getPendingEditId(), listing.getOperationalStatus());
     }
 
     public ListingDetailResponse toDetail(Listing listing) {
@@ -126,6 +127,16 @@ public class ListingQueryService {
     }
 
     private ListingDetailResponse toDetail(Listing listing, boolean owner) {
+        var address = addressRepository.findByListingIdAndActiveTrue(listing.getId())
+                .map(ListingAddressResponse::from).orElse(null);
+        return toDetail(listing, owner, address);
+    }
+
+    public ListingDetailResponse toDetail(Listing listing, ListingAddressResponse address) {
+        return toDetail(listing, false, address);
+    }
+
+    private ListingDetailResponse toDetail(Listing listing, boolean owner, ListingAddressResponse address) {
         var amenities = listing.getAmenities().stream()
                 .filter(item -> !"PETS_ALLOWED".equals(item.getCode()))
                 .sorted(Comparator.comparing(Amenity::getSortOrder).thenComparing(Amenity::getCode))
@@ -144,9 +155,6 @@ public class ListingQueryService {
                 .sorted(Comparator.comparing(ListingMedia::getSortOrder))
                 .map(this::toMedia)
                 .toList();
-        var address = addressRepository.findByListingIdAndActiveTrue(listing.getId())
-                .map(ListingAddressResponse::from)
-                .orElse(null);
         var viewingDays = listing.getViewingDays() == null
                 ? List.<java.time.DayOfWeek>of()
                 : listing.getViewingDays().stream().sorted().toList();
@@ -174,7 +182,7 @@ public class ListingQueryService {
                 listing.getStatusChangedBy(), listing.getVersion(),
                 listing.getCreatedAt(), listing.getUpdatedAt(), listing.getCreatedBy(), listing.getUpdatedBy(),
                 listing.getViewCount() != null ? listing.getViewCount() : 0L,ListingPolicyService.snapshot(listing),
-                owner ? listing.getPendingEditId() : null, owner ? listing.getEditRejectionReason() : null);
+                owner ? listing.getPendingEditId() : null, owner ? listing.getEditRejectionReason() : null, listing.getOperationalStatus());
     }
 
     /**
@@ -264,7 +272,7 @@ public class ListingQueryService {
     private ListingMediaResponse toMedia(ListingMedia media) {
         StorageObject object = media.getStorageObject();
         return new ListingMediaResponse(
-                media.getId(), object.getId(), media.getMediaType(), media.getSortOrder(), media.isCover(),
+                media.getId() == null ? object.getId() : media.getId(), object.getId(), media.getMediaType(), media.getSortOrder(), media.isCover(),
                 publicUrl(object), object.getContentType(), object.getSizeBytes());
     }
 

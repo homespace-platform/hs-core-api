@@ -202,7 +202,7 @@ public class PaymentDisputeService {
             throw notAllowed("Cần bổ sung chứng từ hợp lệ của khoản tiền trước khi mở bước xác nhận nhận tiền.");
         if(PaymentRequestService.isOnboarding(p)) {
             var r=rentals.findById(p.getRentalRequestId()).orElseThrow(this::missing);
-            if(r.getStatus()!=RentalRequestStatus.ACCEPTED||r.getListing()==null||r.getListing().getStatus()!=ListingStatus.RESERVED
+            if(r.getStatus()!=RentalRequestStatus.ACCEPTED||r.getListing()==null||r.getListing().getOperationalStatus()!=ListingStatus.RESERVED
                     ||r.getCancellationRequestedAt()!=null||!Objects.equals(p.getPayerId(),r.getRenterId())||!Objects.equals(p.getPayeeId(),r.getOwnerId()))
                 throw notAllowed("Hồ sơ không còn giữ chỗ hợp lệ hoặc đang chờ hủy. Không thể mở lại thanh toán/ký thuê từ đối soát này.");
         }

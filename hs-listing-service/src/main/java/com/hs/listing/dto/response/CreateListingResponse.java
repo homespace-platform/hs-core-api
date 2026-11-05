@@ -10,6 +10,7 @@ public record CreateListingResponse(
         String title,
         Instant submittedAt,
         Instant publishedAt,
-        String pendingEditId
+        String pendingEditId,
+        ListingStatus operationalStatus
 ) {
 }

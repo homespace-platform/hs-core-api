@@ -28,7 +28,7 @@ public class ListingStatusService {
             ListingStatus.PUBLISHED, Set.of(ListingStatus.HIDDEN, ListingStatus.RENTED_EXTERNALLY),
             ListingStatus.HIDDEN, Set.of(
                     ListingStatus.PUBLISHED, ListingStatus.RENTED_EXTERNALLY, ListingStatus.PENDING_REVIEW),
-            ListingStatus.RENTED_EXTERNALLY, Set.of(ListingStatus.PUBLISHED),
+            ListingStatus.RENTED_EXTERNALLY, Set.of(ListingStatus.PUBLISHED, ListingStatus.PENDING_REVIEW),
             ListingStatus.EXPIRED, Set.of(ListingStatus.PENDING_REVIEW),
             ListingStatus.REJECTED, Set.of(ListingStatus.PENDING_REVIEW));
 
@@ -71,6 +71,8 @@ public class ListingStatusService {
     @Transactional
     public Listing changeByOwner(String ownerId, String listingId, ListingStatus target, String note) {
         Listing listing = requireOwned(ownerId, listingId);
+        if (listing.getPendingEditId() != null) throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION,
+                "Tin đang chờ duyệt nội dung; hãy xử lý bản gửi hiện tại trước.");
         if (listing.getStatus() == ListingStatus.VIOLATION) {
             throw new AppException(ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
         }
@@ -86,6 +88,10 @@ public class ListingStatusService {
         if (target == ListingStatus.PUBLISHED && !hasRemainingPublicationWindow(listing)) {
             throw new AppException(ListingErrorCode.LISTING_PUBLICATION_WINDOW_ENDED);
         }
+        if (target == ListingStatus.PENDING_REVIEW && listing.getStatus() == ListingStatus.RENTED_EXTERNALLY
+                && hasRemainingPublicationWindow(listing)) throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
+        if (target == ListingStatus.PUBLISHED || target == ListingStatus.PENDING_REVIEW || target == ListingStatus.RENTED_EXTERNALLY)
+            requireUnoccupied(listing);
         if (target == ListingStatus.PENDING_REVIEW
                 && listing.getStatus() == ListingStatus.HIDDEN
                 && hasRemainingPublicationWindow(listing)) {
@@ -101,25 +107,31 @@ public class ListingStatusService {
 
     @Transactional
     public Listing changeByAdmin(String adminId, String listingId, ListingStatus target, String reason) {
-        Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
+        Listing listing = listingRepository.findByIdForUpdate(listingId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
-        if (listing.getStatus() == ListingStatus.RENTED && target == ListingStatus.RENTED_EXTERNALLY) {
+        if (listing.getPendingEditId() != null && target != ListingStatus.VIOLATION)
+            throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION,"Hãy duyệt đúng phiên bản nội dung đã gửi.");
+        if (target != ListingStatus.VIOLATION && hasProtectedRental(listing))
             throw new AppException(ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT);
-        }
         validateAdminTransition(listing.getStatus(), target);
         if (Set.of(ListingStatus.REJECTED, ListingStatus.HIDDEN, ListingStatus.VIOLATION).contains(target)
                 && (reason == null || reason.isBlank())) {
             throw new AppException(ListingErrorCode.MODERATION_REASON_REQUIRED);
         }
         change(listing, target, normalizeReason(reason), adminId, ListingStatusActorType.ADMIN, true);
+        if (target == ListingStatus.VIOLATION) {
+            listing.setPendingEditId(null); listing.setPendingEditPayload(null);
+            listing.setReviewOperationalStatus(null); listing.setReviewOriginStatus(null);
+        }
         return listing;
     }
 
     @Transactional
     public int expirePublishedListings(Instant now) {
-        var expired = listingRepository.findAllByStatusAndActiveTrueAndExpiresAtLessThanEqual(
-                ListingStatus.PUBLISHED, now);
-        expired.forEach(listing -> change(
+        var expired = new java.util.ArrayList<>(listingRepository.findAllByStatusAndActiveTrueAndExpiresAtLessThanEqual(
+                ListingStatus.PUBLISHED, now));
+        expired.addAll(listingRepository.findPendingReviewsPastPublicationExpiry(now));
+        expired.forEach(listing -> changeOperational(
                 listing, ListingStatus.EXPIRED, "Publication period expired", "SYSTEM",
                 ListingStatusActorType.SYSTEM, true));
         return expired.size();
@@ -129,7 +141,7 @@ public class ListingStatusService {
         if (ownerId == null || ownerId.isBlank()) {
             throw new AppException(ListingErrorCode.LISTING_AUTHENTICATION_REQUIRED);
         }
-        Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
+        Listing listing = listingRepository.findByIdForUpdate(listingId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
         if (!ownerId.equals(listing.getOwnerId())) {
             throw new AppException(ListingErrorCode.LISTING_FORBIDDEN);
@@ -140,17 +152,17 @@ public class ListingStatusService {
     private void validateAdminTransition(ListingStatus from, ListingStatus to) {
         if (from == to) throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
         boolean allowed = switch (to) {
-            case PUBLISHED -> from == ListingStatus.PENDING_REVIEW || from == ListingStatus.VIOLATION || from == ListingStatus.RESERVED;
+            case PUBLISHED -> from == ListingStatus.PENDING_REVIEW || from == ListingStatus.VIOLATION;
             case REJECTED -> from == ListingStatus.PENDING_REVIEW;
             case RENTED -> false; // RENTED is reserved strictly for contract execution flow
             case RENTED_EXTERNALLY -> from == ListingStatus.PUBLISHED;
             case EXPIRED -> from == ListingStatus.PUBLISHED;
             case VIOLATION -> from != ListingStatus.VIOLATION;
             case HIDDEN -> from != ListingStatus.HIDDEN;
-            case RESERVED -> from == ListingStatus.PUBLISHED;
+            case RESERVED -> false;
             case PENDING_REVIEW -> Set.of(
                     ListingStatus.DRAFT, ListingStatus.REJECTED, ListingStatus.EXPIRED,
-                    ListingStatus.HIDDEN, ListingStatus.RENTED, ListingStatus.RENTED_EXTERNALLY,
+                    ListingStatus.HIDDEN, ListingStatus.RENTED_EXTERNALLY,
                     ListingStatus.VIOLATION).contains(from);
             case DRAFT -> false;
         };
@@ -168,22 +180,22 @@ public class ListingStatusService {
 
     @Transactional
     public void releaseReserved(Listing listing, String actorId, String reason) {
-        if (listing.getStatus() != ListingStatus.RESERVED) {
+        if (listing.getOperationalStatus() != ListingStatus.RESERVED) {
             return;
         }
         ListingStatus restored = hasRemainingPublicationWindow(listing) ? ListingStatus.PUBLISHED : ListingStatus.EXPIRED;
-        change(listing, restored, reason != null ? reason : "Hết hạn giữ chỗ hoặc hủy giữ chỗ", actorId,
+        changeOperational(listing, restored, reason != null ? reason : "Hết hạn giữ chỗ hoặc hủy giữ chỗ", actorId,
                 ListingStatusActorType.SYSTEM, false);
     }
 
     @Transactional
     public void markRentedByContract(String listingId, String actorId) {
-        Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
+        Listing listing = listingRepository.findByIdForUpdate(listingId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
-        if (listing.getStatus() != ListingStatus.RESERVED) {
+        if (listing.getOperationalStatus() != ListingStatus.RESERVED) {
             throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
         }
-        change(listing, ListingStatus.RENTED, "Hợp đồng thuê đã được thanh toán và ký", actorId,
+        changeOperational(listing, ListingStatus.RENTED, "Hợp đồng thuê đã được thanh toán và ký", actorId,
                 ListingStatusActorType.USER, true);
     }
 
@@ -191,9 +203,9 @@ public class ListingStatusService {
     @Transactional
     public void releaseRentedAfterTermination(String listingId, String ownerId) {
         Listing listing = requireOwned(ownerId, listingId);
-        if (listing.getStatus() != ListingStatus.RENTED)
+        if (listing.getOperationalStatus() != ListingStatus.RENTED)
             throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
-        change(listing, ListingStatus.PUBLISHED, "Đã chấm dứt hợp đồng và xác nhận bàn giao phòng",
+        changeOperational(listing, ListingStatus.PUBLISHED, "Đã chấm dứt hợp đồng và xác nhận bàn giao phòng",
                 ownerId, ListingStatusActorType.SYSTEM, true);
         Instant now = Instant.now();
         listing.setPublishedAt(now);
@@ -204,6 +216,11 @@ public class ListingStatusService {
 
     private void change(Listing listing, ListingStatus target, String reason, String actorId,
                         ListingStatusActorType actorType, boolean validateExisting) {
+        change(listing,target,reason,actorId,actorType,validateExisting,null);
+    }
+
+    private void change(Listing listing, ListingStatus target, String reason, String actorId,
+                        ListingStatusActorType actorType, boolean validateExisting, Boolean renewPublication) {
         ListingStatus previous = listing.getStatus();
         if (previous == target) {
             if (target == ListingStatus.PENDING_REVIEW) {
@@ -225,9 +242,9 @@ public class ListingStatusService {
         listing.setStatusChangedBy(actorId);
         if (target == ListingStatus.PENDING_REVIEW) listing.setSubmittedAt(now);
         boolean startsNewPublicationWindow = target == ListingStatus.PUBLISHED
-                && (previous == ListingStatus.PENDING_REVIEW
+                && (renewPublication != null ? renewPublication : (previous == ListingStatus.PENDING_REVIEW
                 || previous == ListingStatus.VIOLATION
-                || listing.getPublishedAt() == null);
+                || listing.getPublishedAt() == null));
         if (startsNewPublicationWindow) {
             listing.setPublishedAt(now);
             listing.setExpiresAt(now.plus(publicationDurationDays, ChronoUnit.DAYS));
@@ -237,16 +254,7 @@ public class ListingStatusService {
         if (nearbyEvents != null && target == ListingStatus.PUBLISHED)
             nearbyEvents.publishEvent(new com.hs.listing.nearby.NearbyTypes.ScanChanged(listing.getId()));
 
-        // Nếu tin đăng rời khỏi trạng thái PUBLISHED (bị ẩn, hết hạn, đã thuê, vi phạm...)
-        // -> Tự động hủy toàn bộ lịch hẹn xem nhà đang active (PENDING hoặc CONFIRMED)
-        if (target != ListingStatus.PUBLISHED && target != ListingStatus.RESERVED
-                && (previous == ListingStatus.PUBLISHED || previous == ListingStatus.RESERVED)) {
-            try {
-                appointmentService.cancelActiveAppointmentsForListing(listing.getId(), target);
-            } catch (Exception e) {
-                // Đảm bảo không block luồng chuyển trạng thái tin đăng
-            }
-        }
+        cancelAppointmentsIfUnavailable(listing,previous,target);
 
         historyRepository.save(ListingStatusHistory.builder()
                 .listingId(listing.getId())
@@ -260,5 +268,72 @@ public class ListingStatusService {
 
     private String normalizeReason(String reason) {
         return reason == null || reason.isBlank() ? null : reason.trim();
+    }
+
+    public boolean hasProtectedRental(Listing listing) {
+        return listing.getOperationalStatus() == ListingStatus.RESERVED || listing.getOperationalStatus() == ListingStatus.RENTED
+                || listingRepository.hasOccupiedRental(listing.getId());
+    }
+
+    private void requireUnoccupied(Listing listing) {
+        if (hasProtectedRental(listing)) throw new AppException(ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT,
+                "Tin còn hồ sơ giữ chỗ hoặc hợp đồng chưa bàn giao; không thể chuyển sang đăng lại/công khai bằng thao tác quản trị.");
+    }
+
+    @Transactional
+    public void beginContentReview(Listing listing, String actorId) {
+        ListingStatus previous = listing.getStatus();
+        if (listing.getReviewOperationalStatus() == null) {
+            listing.setReviewOperationalStatus(previous); listing.setReviewOriginStatus(previous);
+        }
+        listing.setStatus(ListingStatus.PENDING_REVIEW);
+        listing.setStatusReason(null);
+        listing.setSubmittedAt(Instant.now()); listing.setStatusChangedAt(listing.getSubmittedAt()); listing.setStatusChangedBy(actorId);
+        listingRepository.save(listing);
+        historyRepository.save(ListingStatusHistory.builder().listingId(listing.getId()).fromStatus(previous)
+                .toStatus(ListingStatus.PENDING_REVIEW).reason("Gửi chỉnh sửa nội dung để duyệt")
+                .changedBy(actorId).changedByType(ListingStatusActorType.USER).build());
+        // Moderation does not cancel existing viewings, holds, payments or contracts.
+    }
+
+    @Transactional
+    public void finishContentReview(Listing listing, String actorId, boolean approve, String reason) {
+        ListingStatus operational = listing.getOperationalStatus();
+        ListingStatus origin = listing.getReviewOriginStatus() == null ? operational : listing.getReviewOriginStatus();
+        ListingStatus target = operational;
+        boolean publicationReview = origin == ListingStatus.PUBLISHED || origin == ListingStatus.EXPIRED;
+        if (target == ListingStatus.PUBLISHED && listing.getExpiresAt() != null && !hasRemainingPublicationWindow(listing))
+            target = ListingStatus.EXPIRED;
+        if (publicationReview && (operational == ListingStatus.PUBLISHED || operational == ListingStatus.EXPIRED))
+            target = approve ? ListingStatus.PUBLISHED : ListingStatus.REJECTED;
+        if (target == ListingStatus.PUBLISHED) requireUnoccupied(listing);
+        listing.setReviewOperationalStatus(null); listing.setReviewOriginStatus(null);
+        change(listing, target, (approve ? "Đã duyệt nội dung " : "Từ chối nội dung ") + listing.getPendingEditId()
+                + (reason == null || reason.isBlank() ? "" : ": " + reason.trim()), actorId, ListingStatusActorType.ADMIN, false,
+                approve && publicationReview && target == ListingStatus.PUBLISHED);
+        cancelAppointmentsIfUnavailable(listing,operational,target);
+    }
+
+    private void changeOperational(Listing listing, ListingStatus target, String reason, String actorId,
+                                   ListingStatusActorType actorType, boolean validateExisting) {
+        if (listing.getStatus() != ListingStatus.PENDING_REVIEW || listing.getReviewOperationalStatus() == null) {
+            change(listing,target,reason,actorId,actorType,validateExisting); return;
+        }
+        ListingStatus previous = listing.getReviewOperationalStatus();
+        listing.setReviewOperationalStatus(target); listingRepository.save(listing);
+        historyRepository.save(ListingStatusHistory.builder().listingId(listing.getId()).fromStatus(previous).toStatus(target)
+                .reason("Trong thời gian chờ duyệt: " + reason).changedBy(actorId).changedByType(actorType).build());
+        cancelAppointmentsIfUnavailable(listing,previous,target);
+    }
+
+    private void cancelAppointmentsIfUnavailable(Listing listing, ListingStatus previous, ListingStatus target) {
+        if (target != ListingStatus.PUBLISHED && target != ListingStatus.RESERVED
+                && (previous == ListingStatus.PUBLISHED || previous == ListingStatus.RESERVED)) {
+            try {
+                appointmentService.cancelActiveAppointmentsForListing(listing.getId(),target);
+            } catch (Exception ignored) {
+                // Keep the same behavior as ordinary lifecycle transitions.
+            }
+        }
     }
 }

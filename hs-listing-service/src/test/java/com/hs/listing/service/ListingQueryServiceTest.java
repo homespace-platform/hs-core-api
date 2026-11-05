@@ -23,6 +23,22 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ListingQueryServiceTest {
+    @Test void pendingContentIsPrivateButExistingRentalPartiesKeepAccessToApprovedData() {
+        var listings=mock(ListingRepository.class); var rentals=mock(com.hs.listing.repository.RentalRequestRepository.class);
+        var listing=listing(); listing.setStatus(ListingStatus.PENDING_REVIEW);
+        listing.setPendingEditId("edit"); listing.setReviewOperationalStatus(ListingStatus.RESERVED);
+        when(listings.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+        when(rentals.existsByListingIdAndRenterId("listing-1","tenant")).thenReturn(true);
+        var service=accessService(listings,rentals);
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->service.getById(null,"listing-1"));
+        assertThrows(com.hs.common.advice.entity.AppException.class,()->service.getById("unrelated","listing-1"));
+        for(var viewer:List.of("owner-1","tenant")) {
+            var response=service.getById(viewer,"listing-1");
+            assertEquals(ListingStatus.PENDING_REVIEW,response.status()); assertEquals(ListingStatus.RESERVED,response.operationalStatus());
+            assertEquals("Listing",response.title());
+        }
+    }
+
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(ListingStatus.class)
     void onlyPublicStatusesAreReadableByGuestsAndUnrelatedViewers(ListingStatus status) {
@@ -69,6 +85,22 @@ class ListingQueryServiceTest {
     private ListingQueryService accessService(ListingRepository listings,com.hs.listing.repository.RentalRequestRepository rentals) {
         return new ListingQueryService(listings,mock(ListingAddressRepository.class),mock(UserRepository.class),properties(),rentals,
             mock(com.hs.listing.repository.PropertyBranchRepository.class));
+    }
+    @Test void reviewDetailUsesTheSubmittedAddressAndAStableKeyForUnpersistedMedia() {
+        var addresses = mock(ListingAddressRepository.class);
+        var service = new ListingQueryService(mock(ListingRepository.class), addresses, mock(UserRepository.class),
+                properties(), mock(com.hs.listing.repository.RentalRequestRepository.class), mock(com.hs.listing.repository.PropertyBranchRepository.class));
+        var proposed = listing();
+        var object = com.hs.storage.model.StorageObject.builder().id("new-photo").bucketName("bucket").objectKey("new.jpg")
+                .visibility(com.hs.storage.model.constant.StorageVisibility.PUBLIC).contentType("image/jpeg").sizeBytes(100L).build();
+        var media = new com.hs.listing.model.ListingMedia(); media.setStorageObject(object);
+        media.setMediaType(com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE); media.setCover(true); media.setSortOrder(0);
+        proposed.getMedia().add(media);
+        var address = new com.hs.listing.model.ListingAddress(); address.setDisplay("Địa chỉ đã gửi");
+        var response = service.toDetail(proposed, com.hs.listing.dto.response.ListingAddressResponse.from(address));
+        assertEquals("Địa chỉ đã gửi",response.address().display());
+        assertEquals("new-photo",response.media().getFirst().id()); assertTrue(response.media().getFirst().url().endsWith("/new.jpg"));
+        verifyNoInteractions(addresses); assertNull(proposed.getMedia().getFirst().getId());
     }
     @Test
     void returnsTenOwnedListingsPerPage() {

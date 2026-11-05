@@ -226,7 +226,7 @@ public class ContractServiceImpl implements ContractService {
 
         if (!com.hs.contract.service.ContractDraftFunding.ready(rentalRequest, payment, deposit)
                 || rentalRequest.getMoveInDate() != null && billingTime.today().isBefore(rentalRequest.getMoveInDate())
-                || rentalRequest.getListing() == null || rentalRequest.getListing().getStatus() != ListingStatus.RESERVED) {
+                || rentalRequest.getListing() == null || rentalRequest.getListing().getOperationalStatus() != ListingStatus.RESERVED) {
             if (currentUserId == null) return null;
             throw new AppException(ContractErrorCode.RENTAL_PAYMENT_REQUIRED_BEFORE_CONTRACT);
         }
@@ -524,7 +524,8 @@ public class ContractServiceImpl implements ContractService {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         var base = contract.getStatus() == ContractStatus.ACTIVE
                 ? termsResolver.at(contract, billingTime.today()) : requireCurrentRevision(contract);
-        return listingSync.preview(contract, base, null);
+        return contract.getStatus() == ContractStatus.DRAFT ? listingSync.source(contract, base, null)
+                : listingSync.preview(contract, base, null);
     }
 
     @Override
@@ -554,7 +555,7 @@ public class ContractServiceImpl implements ContractService {
         request = draftIntegrity.prepareUpdate(contract, current, request);
         Integer listingTermMinimum = current.getListingTermMinimum();
         if (sourceVersion != null) {
-            var sync = listingSync.preview(contract, current, sourceVersion);
+            var sync = listingSync.source(contract, current, sourceVersion);
             request.setProperty(fromJson(toJson(sync.terms().get("property")), MAP_TYPE));
             var rowsType = new TypeReference<List<Map<String, Object>>>() {};
             request.setEquipments(fromJson(toJson(sync.terms().get("equipments")), rowsType));
@@ -854,7 +855,7 @@ public class ContractServiceImpl implements ContractService {
                 || contract.getStatus() != ContractStatus.DRAFT || rental.getStatus() != RentalRequestStatus.ACCEPTED
                 || rental.getCancellationRequestedAt() != null || rental.getResolutionWorkflowId()!=null || rental.getListing() == null
                 || !Objects.equals(contract.getListingId(), rental.getListing().getId())
-                || rental.getListing().getStatus() != ListingStatus.RESERVED
+                || rental.getListing().getOperationalStatus() != ListingStatus.RESERVED
                 || rental.getMoveInDate() == null || billingTime.today().isBefore(rental.getMoveInDate())) return null;
         var rent = paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.INITIAL).orElse(null);
         var deposit = paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId, PaymentType.RESERVATION_DEPOSIT).orElse(null);

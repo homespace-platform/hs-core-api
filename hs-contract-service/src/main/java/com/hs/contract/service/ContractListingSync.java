@@ -54,10 +54,19 @@ public class ContractListingSync {
                           List<AmendmentComparison> financialDifferences) {}
 
     public Preview preview(Contract contract, ContractRevision base, String expectedVersion) {
+        return resolve(contract, base, expectedVersion, true);
+    }
+
+    public Preview source(Contract contract, ContractRevision base, String expectedVersion) {
+        return resolve(contract, base, expectedVersion, false);
+    }
+
+    private Preview resolve(Contract contract, ContractRevision base, String expectedVersion, boolean compare) {
         boolean draft = contract.getStatus() == ContractStatus.DRAFT;
         Listing listing = listings.findByIdAndActiveTrue(contract.getListingId()).orElseThrow(() -> invalid("Không tìm thấy bài đăng gốc."));
-        if (draft && listing.getStatus() != ListingStatus.RESERVED
-                || !draft && (contract.getStatus() != ContractStatus.ACTIVE || listing.getStatus() != ListingStatus.RENTED))
+        if (listing.getPendingEditId() != null) throw invalid("Bài đăng đang chờ quản trị viên duyệt. Hãy cập nhật dữ liệu sau khi được duyệt.");
+        if (draft && listing.getOperationalStatus() != ListingStatus.RESERVED
+                || !draft && (contract.getStatus() != ContractStatus.ACTIVE || listing.getOperationalStatus() != ListingStatus.RENTED))
             throw invalid("Bài đăng hoặc hợp đồng không còn ở trạng thái cho phép đồng bộ.");
         if (listing.getApprovedEditId() == null) throw invalid("Bài đăng chưa có bản sửa được quản trị viên duyệt.");
         if (expectedVersion != null) {
@@ -96,22 +105,24 @@ public class ContractListingSync {
         var oldCharges = terms.rows(base.getChargesSnapshot());
         var financial = terms.object(before.get("financial"));
         var money = new ArrayList<AmendmentComparison>();
-        var quotedListing = Listing.builder().category(approved.getCategory()).priceAmount(approved.getPriceAmount())
-                .priceUnit(com.hs.listing.model.constant.PriceUnit.valueOf(approved.getPriceUnit()))
-                .depositType(com.hs.listing.model.constant.DepositType.valueOf(approved.getDepositType()))
-                .depositAmount(approved.getDepositAmount()).depositMonths(approved.getDepositMonths()).build();
-        BigDecimal rent = cost.calculateEffectiveMonthlyRent(quotedListing, occupants);
-        BigDecimal deposit = cost.calculateDeposit(quotedListing, rent, rental.getDepositAmount());
-        compareMoney(money, "amountValue", "Tiền thuê mỗi tháng", financial.get("amountValue"), rent);
-        compareMoney(money, "depositAmountValue", "Tiền đặt cọc", financial.get("depositAmountValue"), deposit);
-        terms.compareCharges(money, oldCharges, source.charges());
-        if (source.policies().get("paymentCycle") != null)
-            add(money, "financial.paymentCycle", "Chu kỳ thanh toán", financial.get("paymentCycle"), source.policies().get("paymentCycle"));
+        if (compare) {
+            var quotedListing = Listing.builder().category(approved.getCategory()).priceAmount(approved.getPriceAmount())
+                    .priceUnit(com.hs.listing.model.constant.PriceUnit.valueOf(approved.getPriceUnit()))
+                    .depositType(com.hs.listing.model.constant.DepositType.valueOf(approved.getDepositType()))
+                    .depositAmount(approved.getDepositAmount()).depositMonths(approved.getDepositMonths()).build();
+            BigDecimal rent = cost.calculateEffectiveMonthlyRent(quotedListing, occupants);
+            BigDecimal deposit = cost.calculateDeposit(quotedListing, rent, rental.getDepositAmount());
+            compareMoney(money, "amountValue", "Tiền thuê mỗi tháng", financial.get("amountValue"), rent);
+            compareMoney(money, "depositAmountValue", "Tiền đặt cọc", financial.get("depositAmountValue"), deposit);
+            terms.compareCharges(money, oldCharges, source.charges());
+            if (source.policies().get("paymentCycle") != null)
+                add(money, "financial.paymentCycle", "Chu kỳ thanh toán", financial.get("paymentCycle"), source.policies().get("paymentCycle"));
+        }
 
         var protectedFeatures = new HashSet<>(OPERATIONAL_FEATURES);
         if (oldCharges.stream().anyMatch(row -> "PER_M2_MONTH".equals(row.get("billingMethod")))) {
             for (String key : List.of("areaM2", "areaText")) {
-                if (!Objects.equals(property.get(key), originalProperty.get(key)) && "areaText".equals(key))
+                if (compare && !Objects.equals(property.get(key), originalProperty.get(key)) && "areaText".equals(key))
                     add(money, "property.areaText", "Diện tích dùng để tính phí", originalProperty.get(key), property.get(key));
                 if (originalProperty.containsKey(key)) property.put(key, originalProperty.get(key));
                 else property.remove(key);
@@ -119,7 +130,7 @@ public class ContractListingSync {
             protectedFeatures.addAll(AREA_FEATURES);
         }
         preserveFeatures(originalProperty, property, protectedFeatures);
-        for (String key : List.of("electricMeterType", "waterMeterType"))
+        if (compare) for (String key : List.of("electricMeterType", "waterMeterType"))
             add(money, "meters." + key, "Cách tính theo công tơ", terms.object(before.get("meters")).get(key), source.meters().get(key));
 
         var policies = mergeListingPolicies(terms.object(before.get("policies")), Map.of("policies", source.policies()));
@@ -131,17 +142,19 @@ public class ContractListingSync {
         // Association metadata is kept outside the legal Listing snapshot, which intentionally excludes branch IDs.
         updated.put("listingBranchId", listing.getBranchId());
         var changes = new ArrayList<AmendmentComparison>();
-        for (var key : List.of("fullAddress", "unitNumber", "areaText", "floor", "rentalScope", "maxOccupants", "maxVehicles", "features"))
-            add(changes, "property." + key, switch (key) {
-                case "fullAddress" -> "Địa chỉ tài sản"; case "unitNumber" -> "Mã/tên phòng hoặc căn"; case "areaText" -> "Diện tích"; case "floor" -> "Tầng";
-                case "rentalScope" -> "Phạm vi cho thuê"; case "maxOccupants" -> "Số người tối đa";
-                case "maxVehicles" -> "Số xe tối đa"; default -> "Đặc điểm tài sản";
-            }, originalProperty.get(key), property.get(key));
-        if (!Objects.equals(contract.getBranchId(), listing.getBranchId()))
-            changes.add(new AmendmentComparison("listingBranchId", "Liên kết chi nhánh và chỗ xe", "Theo hồ sơ hợp đồng hiện tại", "Theo bài đăng đã duyệt; kiểm tra lại sức chứa khi áp dụng"));
-        add(changes, "equipments", "Nội thất bàn giao", before.get("equipments"), updated.get("equipments"));
-        add(changes, "amenities", "Tiện ích", before.get("amenities"), updated.get("amenities"));
-        add(changes, "policies", "Chính sách bài đăng", before.get("policies"), updated.get("policies"));
+        if (compare) {
+            for (var key : List.of("fullAddress", "unitNumber", "areaText", "floor", "rentalScope", "maxOccupants", "maxVehicles", "features"))
+                add(changes, "property." + key, switch (key) {
+                    case "fullAddress" -> "Địa chỉ tài sản"; case "unitNumber" -> "Mã/tên phòng hoặc căn"; case "areaText" -> "Diện tích"; case "floor" -> "Tầng";
+                    case "rentalScope" -> "Phạm vi cho thuê"; case "maxOccupants" -> "Số người tối đa";
+                    case "maxVehicles" -> "Số xe tối đa"; default -> "Đặc điểm tài sản";
+                }, originalProperty.get(key), property.get(key));
+            if (!Objects.equals(contract.getBranchId(), listing.getBranchId()))
+                changes.add(new AmendmentComparison("listingBranchId", "Liên kết chi nhánh và chỗ xe", "Theo hồ sơ hợp đồng hiện tại", "Theo bài đăng đã duyệt; kiểm tra lại sức chứa khi áp dụng"));
+            add(changes, "equipments", "Nội thất bàn giao", before.get("equipments"), updated.get("equipments"));
+            add(changes, "amenities", "Tiện ích", before.get("amenities"), updated.get("amenities"));
+            add(changes, "policies", "Chính sách bài đăng", before.get("policies"), updated.get("policies"));
+        }
 
         int minimum = number(approved.getMinimumLeaseMonths(), 0);
         int selected = number(rental.getLeaseMonths(), 0);
@@ -159,7 +172,7 @@ public class ContractListingSync {
             proposed = minimum;
             var end = rental.getMoveInDate().plusMonths(minimum);
             updated.put("lease", ContractDataBuilder.leaseTerms(rental.getMoveInDate(), minimum));
-            changes.add(new AmendmentComparison("lease.durationMonths", "Thời hạn thuê",
+            if (compare) changes.add(new AmendmentComparison("lease.durationMonths", "Thời hạn thuê",
                     selected + " tháng", minimum + " tháng · ngày thuê cuối " + end.minusDays(1)));
         }
         return new Preview(listing.getApprovedEditId(), base.getId(), updated, proposed, leaseMessage, changes, money);

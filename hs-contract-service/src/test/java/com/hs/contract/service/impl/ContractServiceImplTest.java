@@ -472,8 +472,9 @@ class ContractServiceImplTest {
         assertEquals(ContractPaymentStatus.PAID_MOCK, contract.getPaymentStatus());
     }
 
-    @Test
-    void paidTenantCanSignAndCompleteRentalLifecycle() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void paidTenantCanSignAndCompleteRentalLifecycle(boolean reviewing) {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
         when(rentalRequestRepository.findByIdForUpdate(anyString())).thenAnswer(i -> rentalRequestRepository.findById(i.getArgument(0)));
@@ -487,6 +488,11 @@ class ContractServiceImplTest {
                 listingStatusService
         );
         Listing listing = Listing.builder().id("listing-1").status(ListingStatus.RESERVED).build();
+        if (reviewing) {
+            listing.setStatus(ListingStatus.PENDING_REVIEW);
+            listing.setReviewOperationalStatus(ListingStatus.RESERVED);
+            listing.setPendingEditId("edit");
+        }
         RentalRequest rentalRequest = RentalRequest.builder()
                 .id("request-1")
                 .listing(listing)

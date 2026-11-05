@@ -78,7 +78,7 @@ public class ListingService {
                 throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_LOCKED_BY_VIOLATION);
             }
         }
-        if (updating && CONTENT_REVIEW.contains(l.getStatus())) {
+        if (updating && CONTENT_REVIEW.contains(l.getOperationalStatus())) {
             if (r.submissionAction() != ListingSubmissionAction.SUBMIT_FOR_REVIEW)
                 throw error(409, "LISTING_EDIT_REVIEW_REQUIRED", "Gửi bản sửa để quản trị viên duyệt.");
             validate(r, l);
@@ -86,6 +86,7 @@ public class ListingService {
             l.setPendingEditId(UUID.randomUUID().toString());
             l.setPendingEditPayload(writeEdit(r));
             l.setEditRejectionReason(null);
+            listingStatusService.beginContentReview(l,ownerId);
             return response(listingRepository.save(l));
         }
         validate(r, l.getId() != null ? l : null);
@@ -190,7 +191,7 @@ public class ListingService {
     private CreateListingResponse response(Listing listing) {
         return new CreateListingResponse(
                 listing.getId(), listing.getStatus(), listing.getTitle(),
-                listing.getSubmittedAt(), listing.getPublishedAt(), listing.getPendingEditId());
+                listing.getSubmittedAt(), listing.getPublishedAt(), listing.getPendingEditId(), listing.getOperationalStatus());
     }
 
     public CreateListingRequest pendingEdit(Listing listing) {
@@ -212,6 +213,26 @@ public class ListingService {
         } catch (RuntimeException e) { return null; }
     }
 
+    public record ReviewContent(Listing listing, ListingAddress address) {}
+
+    /** Resolve the submitted content for the normal admin detail view, without changing live data. */
+    public ReviewContent reviewContent(Listing current, CreateListingRequest edit) {
+        if (edit == null) return null;
+        var proposed = Listing.builder().id(current.getId()).ownerId(current.getOwnerId())
+                .status(current.getStatus()).statusReason(current.getStatusReason())
+                .reviewOperationalStatus(current.getReviewOperationalStatus()).reviewOriginStatus(current.getReviewOriginStatus())
+                .statusChangedAt(current.getStatusChangedAt()).statusChangedBy(current.getStatusChangedBy())
+                .submittedAt(current.getSubmittedAt()).publishedAt(current.getPublishedAt()).expiresAt(current.getExpiresAt())
+                .version(current.getVersion()).viewCount(current.getViewCount()).build();
+        proposed.setActive(current.getActive());
+        proposed.setCreatedAt(current.getCreatedAt()); proposed.setCreatedBy(current.getCreatedBy());
+        proposed.setUpdatedAt(current.getUpdatedAt()); proposed.setUpdatedBy(current.getUpdatedBy());
+        applyContent(proposed, current.getOwnerId(), edit);
+        var address = new ListingAddress(); address.setListingId(current.getId());
+        resolveAddress(proposed, current.getOwnerId(), edit.addressSource(), address);
+        return new ReviewContent(proposed, address);
+    }
+
     @Transactional
     public Listing decideEdit(String adminId, String id, String editId, boolean approve, String reason) {
         requireActor(adminId);
@@ -220,7 +241,7 @@ public class ListingService {
         if (editId == null || !editId.equals(listing.getPendingEditId()))
             throw error(409, "LISTING_EDIT_STALE", "Bản sửa đã thay đổi hoặc đã được xử lý.");
         if (approve) {
-            if (!CONTENT_REVIEW.contains(listing.getStatus()))
+            if (!CONTENT_REVIEW.contains(listing.getOperationalStatus()))
                 throw error(409, "LISTING_EDIT_BLOCKED", "Trạng thái hiện tại không cho phép duyệt bản sửa.");
             CreateListingRequest edit = pendingEdit(listing);
             validate(edit, listing);
@@ -237,6 +258,7 @@ public class ListingService {
                 throw error(400, "LISTING_EDIT_REASON_REQUIRED", "Nhập lý do từ chối bản sửa.");
             listing.setEditRejectionReason(reason.trim());
         }
+        listingStatusService.finishContentReview(listing,adminId,approve,reason);
         listing.setPendingEditId(null);
         listing.setPendingEditPayload(null);
         return listingRepository.save(listing);
@@ -248,6 +270,11 @@ public class ListingService {
         if (snapshot == null || snapshot.isBlank())
             throw error(409, "LISTING_SNAPSHOT_FAILED", "Không thể lưu bản bài đăng đã duyệt. Vui lòng thử lại.");
         listing.setApprovedContractSnapshot(snapshot);
+    }
+
+    public void capturePublicationApproval(Listing listing) {
+        listing.setApprovedEditId(UUID.randomUUID().toString());
+        captureApprovedSnapshot(listing);
     }
 
     private String writeEdit(CreateListingRequest edit) {
