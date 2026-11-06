@@ -239,6 +239,11 @@ class RentalWorkflowPostgresTest {
             assertEquals(0,new BigDecimal("1000000").compareTo(deposits.findByRentalRequestId(rentalId).orElseThrow().getRetainedAmount()));
             assertTrue(onboardingEvents.findByRentalRequestIdOrderByOccurredAtDesc(rentalId).stream().anyMatch(e->"DEPOSIT_TERMINATED_TENANT_DEFAULT".equals(e.getAction())&&e.getNote().contains("Lỗi Bên B")));
             var refunds=paymentRepo.findByRentalRequestIdAndTypeIn(rentalId,List.of(PaymentType.INITIAL_PAYMENT_REFUND));assertEquals(unpaidRent?0:1,refunds.size());
+            var summary=onboarding.refresh(rentalId,"tenant").message();
+            assertTrue(summary.contains("Chủ nhà giữ tiền cọc đã nhận."));
+            assertEquals(unpaidRent,summary.contains("Không có tiền thuê cần hoàn."));
+            assertEquals(!unpaidRent,summary.contains("khoản hoàn riêng"));
+            assertFalse(summary.contains("sẽ tự chấm dứt"));
             if(!unpaidRent)assertEquals(0,new BigDecimal("2000000").compareTo(refunds.getFirst().getTotalAmount()));
             assertEquals(unpaidRent?PaymentStatus.CANCELLED:PaymentStatus.CONFIRMED,paymentRepo.findByRentalRequestIdAndType(rentalId,PaymentType.INITIAL).orElseThrow().getStatus());
             verify(parking,times(1)).releaseReservationsForRequest(rentalId);verify(listings,times(1)).releaseReserved(any(),eq("SYSTEM"),anyString());

@@ -131,6 +131,7 @@ public class RentalOnboardingService {
     private View view(RentalRequest r,String actor) {
         var deposit=payment(r.getId(),PaymentType.RESERVATION_DEPOSIT);
         var rent=payment(r.getId(),PaymentType.INITIAL);
+        var refunds=payments.findByRentalRequestIdAndTypeIn(r.getId(),List.of(PaymentType.INITIAL_PAYMENT_REFUND));
         var opens=r.getMoveInDate().atStartOfDay(BillingTime.ZONE).toInstant();
         var signDue=rent!=null&&rent.getConfirmedAt()!=null?(rent.getContractDueAt()!=null?rent.getContractDueAt():rent.getConfirmedAt().plus(Duration.ofHours(signingHours))):null;
         var contract=contracts.findByRentalRequestId(r.getId()).orElse(null);
@@ -149,7 +150,14 @@ public class RentalOnboardingService {
             &&paid&&depositSigned&&!time.now().isBefore(opens)&&signDue!=null&&time.now().isBefore(signDue);
         String stage,message;
         if(r.getStatus()==RentalRequestStatus.COMPLETED){stage="COMPLETED";message="Đã ký đủ và bắt đầu hợp đồng.";}
-        else if(r.getDefaultCompletedAt()!=null){stage=r.getStatus().name();message="Hợp đồng cọc đã chấm dứt do lỗi Bên B (người thuê): quá hạn "+("FIRST_RENT".equals(r.getDefaultNoticeKind())?"thanh toán tháng đầu":"ký hợp đồng thuê")+" sau hạn cuối. Cọc thực nhận được giữ lại; tiền thuê đã nhận được hoàn riêng.";}
+        else if(r.getDefaultCompletedAt()!=null){
+            stage=r.getStatus().name();
+            boolean hasRentRefund=refunds.stream().anyMatch(p->p.getStatus()!=PaymentStatus.CANCELLED
+                && p.getDirection()==PaymentDirection.LANDLORD_TO_TENANT && p.getTotalAmount()!=null && p.getTotalAmount().signum()>0);
+            message="Người thuê không "+("FIRST_RENT".equals(r.getDefaultNoticeKind())?"thanh toán tháng đầu":"ký hợp đồng thuê")
+                +" đúng hạn nên hồ sơ giữ phòng đã bị hủy. Chủ nhà giữ tiền cọc đã nhận. "
+                +(hasRentRefund?"Tiền thuê đã nhận được theo dõi trong khoản hoàn riêng.":"Không có tiền thuê cần hoàn.");
+        }
         else if(r.getStatus()!=RentalRequestStatus.ACCEPTED){stage=r.getStatus().name();message="Yêu cầu chưa được chấp nhận hoặc không còn hiệu lực.";}
         else if(r.getCancellationRefundApprovedAt()!=null){stage="CANCELLATION_REFUND_PENDING";message="Đã đồng ý hủy. Phòng vẫn được giữ cho đến khi người thuê xác nhận nhận đủ tiền hoàn.";}
         else if(r.getResolutionWorkflowId()!=null){stage="RESOLUTION_PENDING";message="Đang xử lý hồ sơ trước thuê. Xem đề nghị, phản hồi hoặc khiếu nại tại mục Xử lý cọc và ký bên dưới.";}
@@ -173,7 +181,7 @@ public class RentalOnboardingService {
         else {stage=signingOpen?"READY_TO_SIGN":"REQUIRES_REVIEW";message=signingOpen?"Đã xác nhận đủ tiền. Mở bản nháp để kiểm tra, hoàn thiện văn bản và ký trước hạn.":"Đã quá hạn hoàn tất ký; cần hai bên xử lý hồ sơ, không tự giải phóng phòng hoặc ghi lùi ngày ký.";}
         var rows=new ArrayList<PaymentRequestResponse>();
         for(var p:Arrays.asList(deposit,rent))if(p!=null)rows.add(paymentService.getPaymentRequest(p.getId(),actor));
-        for(var refund:payments.findByRentalRequestIdAndTypeIn(r.getId(),List.of(PaymentType.INITIAL_PAYMENT_REFUND)))rows.add(paymentService.getPaymentRequest(refund.getId(),actor));
+        for(var refund:refunds)rows.add(paymentService.getPaymentRequest(refund.getId(),actor));
         boolean earlier=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getResolutionWorkflowId()==null&&r.getCancellationRequestedAt()==null&&depositReady(r)&&rent==null
             &&r.getMoveInDate().isAfter(time.today())&&(contract==null||contract.getStatus()==ContractStatus.DRAFT)
             &&changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()).stream().noneMatch(c->"REQUESTED".equals(c.getStatus()));
@@ -511,7 +519,7 @@ public class RentalOnboardingService {
         for(var change:changes.findByRentalRequestIdOrderByRequestedAtDesc(id))if("REQUESTED".equals(change.getStatus())) {
             change.setStatus("EXPIRED");change.setDecidedAt(time.now());change.setDecidedBy(actor);changes.save(change);
         }
-        parking.releaseReservationsForRequest(id);listingStatus.releaseReserved(listing,actor,"Hủy trước khi thuê do vi phạm đã thông báo; giữ cọc, hoàn tiền thuê riêng");
+        parking.releaseReservationsForRequest(id);listingStatus.releaseReserved(listing,actor,"Đã hủy giữ phòng do người thuê quá hạn; chủ nhà giữ tiền cọc đã nhận");
         if(depositAgreements!=null && !com.hs.contract.deposit.DepositAgreementService.isExempt(r) && depositAgreements.signedOrExempt(r))
             depositAgreements.terminateForTenantDefault(id,"Lỗi Bên B (người thuê): "+r.getDefaultNoticeKind()+"; "+note.reason());
         audit(r,actor,"DEFAULT_COMPLETED","Lỗi Bên B (người thuê): "+r.getDefaultNoticeKind()+"; giữ cọc "+deposit.getRetainedAmount()+"; "+note.reason());
@@ -532,7 +540,7 @@ public class RentalOnboardingService {
         var kind=defaultKind(r);if(kind==null)return;
         if(defaultView(r).canComplete()) {
             finalizeDefault(r,"SYSTEM",new DefaultCompletion("Người thuê không hoàn tất "+("FIRST_RENT".equals(kind)?"thanh toán tháng đầu":"ký hợp đồng thuê")+" sau hạn cuối; hệ thống tự động chấm dứt HĐ cọc do lỗi bên thuê.",true,true));
-        } else issueDefaultNotice(r,"SYSTEM","Người thuê quá hạn "+("FIRST_RENT".equals(kind)?"thanh toán tháng đầu":"ký hợp đồng thuê")+". Hạn cuối bổ sung ít nhất 24 giờ; quá hạn không có vấn đề cần đối soát sẽ tự chấm dứt HĐ cọc và giữ cọc do lỗi bên thuê.");
+        } else issueDefaultNotice(r,"SYSTEM","Người thuê chưa "+("FIRST_RENT".equals(kind)?"thanh toán tháng đầu":"ký hợp đồng thuê")+" đúng hạn. Cần hoàn tất trước hạn cuối ghi bên dưới. Nếu vẫn chưa hoàn tất khi hết hạn, hệ thống sẽ hủy giữ phòng và chủ nhà giữ tiền cọc. Nếu có khiếu nại hoặc khoản tiền, chữ ký cần kiểm tra, hệ thống sẽ tạm dừng xử lý.");
     }
     private void audit(RentalRequest r,String actor,String action,String note) {
         events.save(RentalOnboardingEvent.builder().rentalRequestId(r.getId()).actorId(actor).action(action).note(note).occurredAt(time.now()).build());
