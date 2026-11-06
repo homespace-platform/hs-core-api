@@ -238,7 +238,7 @@ class RentalOnboardingServiceTest {
         deposit.setTotalAmount(new BigDecimal("1000000"));
         deposit.setConfirmedAt(LocalDateTime.parse("2026-11-06T10:00:00").atZone(BillingTime.ZONE).toInstant());
         var agreements=mock(com.hs.contract.deposit.DepositAgreementService.class);
-        var signedDeposit=Contract.builder().id("signed-deposit").agreementKind("DEPOSIT").status(ContractStatus.ACTIVE).signedAt(deposit.getConfirmedAt()).build();
+        var signedDeposit=Contract.builder().id("signed-deposit").agreementKind("DEPOSIT").status(ContractStatus.TENANT_SIGNATURE_PENDING).build();
         when(agreements.find("rental")).thenReturn(Optional.of(signedDeposit));when(agreements.signedOrExempt(rental)).thenReturn(true);
         org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",agreements);
         PaymentRequest first=rentOpened?rent(PaymentStatus.AWAITING_TRANSFER):null;
@@ -249,7 +249,7 @@ class RentalOnboardingServiceTest {
         verify(paymentService).createCancellationRefund(List.of(deposit));
         verify(paymentService,never()).createRefundObligation(any());
         assertEquals("CANCELLATION_REFUND_PENDING",view.stage());assertFalse(view.canSign());
-        assertEquals(PaymentStatus.CONFIRMED,deposit.getStatus());assertEquals(ContractStatus.ACTIVE,signedDeposit.getStatus());
+        assertEquals(PaymentStatus.CONFIRMED,deposit.getStatus());assertEquals(ContractStatus.TENANT_SIGNATURE_PENDING,signedDeposit.getStatus());
         if(first!=null)assertEquals(PaymentStatus.CANCELLED,first.getStatus());
         verifyNoInteractions(parking);verify(listingStatus,never()).releaseReserved(any(),any(),any());
     }

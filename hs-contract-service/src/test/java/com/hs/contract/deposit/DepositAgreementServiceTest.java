@@ -31,6 +31,7 @@ import static org.mockito.Mockito.*;
 class DepositAgreementServiceTest {
     @Mock DepositAgreementRepository agreements;
     @Mock ContractRepository contracts;
+    @Mock SignatureRequestRepository signatures;
     @Mock ContractRevisionRepository revisions;
     @Mock ContractTemplateVersionRepository templates;
     @Mock RentalRequestRepository rentals;
@@ -46,6 +47,37 @@ class DepositAgreementServiceTest {
     final Instant now = Instant.parse("2026-10-24T03:00:00Z");
     RentalRequest rental;
     PaymentRequest payment;
+
+    private Contract depositDocument(ContractStatus status) {
+        var c=Contract.builder().id("dc").rentalRequestId("rental").agreementKind("DEPOSIT").status(status).build();
+        var d=new DepositAgreement();d.setRentalRequestId("rental");d.setSigningContractId("dc");
+        when(agreements.findByRentalRequestId("rental")).thenReturn(Optional.of(d));
+        when(contracts.findById("dc")).thenReturn(Optional.of(c));when(contracts.findByIdForUpdate("dc")).thenReturn(Optional.of(c));return c;
+    }
+    @Test void verifiedTenantSignatureBlocksRefundBeforeFinalDocumentStatus() {
+        var c=depositDocument(ContractStatus.TENANT_SIGNATURE_PENDING);
+        assertFalse(service.tenantHasSigned("rental"));
+        when(signatures.findByContractIdOrderByCreatedAtDesc(c.getId())).thenReturn(List.of(SignatureRequest.builder()
+                .signerRole(SignerRole.LANDLORD).status(SignatureRequestStatus.SIGNED).build()));
+        assertFalse(service.tenantHasSigned("rental"));
+        when(signatures.findByContractIdOrderByCreatedAtDesc(c.getId())).thenReturn(List.of(SignatureRequest.builder()
+                .signerRole(SignerRole.TENANT).status(SignatureRequestStatus.SIGNED).build()));
+        assertTrue(service.tenantHasSigned("rental"));
+    }
+    @Test void tenantDefaultEndsTheDepositButPreservesSignatureAndFrozenSnapshot() {
+        var c=depositDocument(ContractStatus.ACTIVE);c.setSignedAt(now.minusSeconds(100));var signedAt=c.getSignedAt();
+        service.terminateForTenantDefault("rental","Lỗi Bên B: không thanh toán tháng đầu đúng hạn");
+        service.terminateForTenantDefault("rental","Lỗi Bên B: không thanh toán tháng đầu đúng hạn");
+        assertEquals(ContractStatus.TERMINATED,c.getStatus());assertEquals(now,c.getTerminationCompletedAt());assertEquals(signedAt,c.getSignedAt());
+        verify(contracts,times(1)).save(c);verify(agreements,never()).save(any());
+        verify(events).save(argThat(e->"DEPOSIT_TERMINATED_TENANT_DEFAULT".equals(e.getAction())&&e.getNote().contains("Lỗi Bên B")&&"SYSTEM".equals(e.getActorId())));
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=ContractStatus.class,names={"DRAFT","LANDLORD_SIGNATURE_PENDING","TENANT_SIGNATURE_PENDING","CANCELLED"})
+    void unsignedDepositCannotBeTerminatedAsATenantDefault(ContractStatus status) {
+        depositDocument(status);assertThrows(AppException.class,()->service.terminateForTenantDefault("rental","Quá hạn"));
+        verify(contracts,never()).save(any());
+    }
 
     @BeforeEach void setup() throws Exception {
         when(time.now()).thenReturn(now);

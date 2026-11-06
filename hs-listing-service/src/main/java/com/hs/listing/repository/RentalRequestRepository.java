@@ -38,6 +38,10 @@ public interface RentalRequestRepository extends JpaRepository<RentalRequest, St
 
     org.springframework.data.domain.Page<RentalRequest> findByStatus(RentalRequestStatus status, org.springframework.data.domain.Pageable pageable);
 
+    @org.springframework.data.jpa.repository.Query("SELECT r FROM RentalRequest r WHERE r.status = :status AND r.active = true AND r.id > :after ORDER BY r.id")
+    List<RentalRequest> findNextOnboardingBatch(@org.springframework.data.repository.query.Param("status") RentalRequestStatus status,
+            @org.springframework.data.repository.query.Param("after") String after,org.springframework.data.domain.Pageable pageable);
+
     List<RentalRequest> findByStatusAndRespondByLessThanEqual(RentalRequestStatus status, Instant now);
 
     List<RentalRequest> findByListingIdAndStatusIn(String listingId, Collection<RentalRequestStatus> statuses);

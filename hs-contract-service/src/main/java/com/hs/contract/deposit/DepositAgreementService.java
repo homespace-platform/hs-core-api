@@ -29,6 +29,7 @@ import java.util.*;
 public class DepositAgreementService {
     private final DepositAgreementRepository agreements;
     private final ContractRepository contracts;
+    private final SignatureRequestRepository signatures;
     private final ContractRevisionRepository revisions;
     private final ContractTemplateVersionRepository templates;
     private final RentalRequestRepository rentals;
@@ -61,6 +62,25 @@ public class DepositAgreementService {
     public Optional<Contract> find(String rentalId) {
         return agreements.findByRentalRequestId(rentalId).flatMap(d->contracts.findById(d.getSigningContractId()));
     }
+
+    /** A verified tenant signature is binding even before the final PDF/status has been committed. */
+    @Transactional(readOnly=true)
+    public boolean tenantHasSigned(String rentalId) {
+        return find(rentalId).filter(c -> c.getSignedAt()!=null || c.getStatus()==ContractStatus.ACTIVE
+            || signatures.findByContractIdOrderByCreatedAtDesc(c.getId()).stream().anyMatch(s ->
+                s.getSignerRole()==SignerRole.TENANT && s.getStatus()==SignatureRequestStatus.SIGNED)).isPresent();
+    }
+
+    /** End the obligation; preserve both signatures, the frozen terms and the signed PDF. */
+    @Transactional
+    public void terminateForTenantDefault(String rentalId,String reason) {
+        var found=find(rentalId).orElseThrow(()->invalid("Thiếu hợp đồng cọc đã ký."));
+        var c=contracts.findByIdForUpdate(found.getId()).orElseThrow();
+        if(c.getStatus()==ContractStatus.TERMINATED)return;
+        if(c.getStatus()!=ContractStatus.ACTIVE || c.getSignedAt()==null)throw invalid("Hợp đồng cọc chưa ký đủ; không tự xử lý mất cọc.");
+        c.setStatus(ContractStatus.TERMINATED);c.setTerminationCompletedAt(time.now());contracts.save(c);
+        audit(rentalId,"SYSTEM","DEPOSIT_TERMINATED_TENANT_DEFAULT",reason);
+    }
     /** Resolve lazy associations in this transaction; only scalar values may leave the service. */
     public record Overview(boolean required, boolean signingAllowed, String blockedReason, String signingContractId,String leaseContractId,String obligation) {
         public Overview(boolean required,boolean allowed,String reason,String signingId){this(required,allowed,reason,signingId,null,null);}
@@ -79,6 +99,7 @@ public class DepositAgreementService {
             && c.getTenantSigningDueAt()!=null && !time.now().isBefore(c.getTenantSigningDueAt())).isPresent();
         String blocked=exempt?"Không yêu cầu đặt cọc: bỏ qua hợp đồng cọc, tiếp tục thanh toán tiền thuê và ký hợp đồng thuê."
             :!amountKnown?"Chưa xác định được số tiền cọc đã thống nhất; cần đối soát hồ sơ trước khi ký."
+            :rental.getDefaultCompletedAt()!=null?"Hợp đồng cọc đã chấm dứt do lỗi bên thuê: không hoàn tất nghĩa vụ đúng hạn. Bản đã ký được giữ để tra cứu."
             :!eligible?"Hồ sơ đã chuyển bước hoặc đang chờ hủy/đối soát. Tài liệu đã ký vẫn được giữ để tra cứu."
             :expired?"Hết hạn ký cọc; chủ nhà cần mở lại hạn ký. Tiền đã xác nhận không bị đảo.":null;
         var lease=contracts.findByRentalRequestId(rentalId).orElse(null);

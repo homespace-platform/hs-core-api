@@ -56,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -239,6 +240,21 @@ class ContractServiceImplTest {
         verify(root,atLeastOnce()).get("landlordId"); // Receipt must match both parties, not just the rental id.
         verify(statusPath).in(ContractStatus.ACTIVE, ContractStatus.EXPIRED, ContractStatus.CLOSED, ContractStatus.TERMINATED);
         verify(root,atLeastOnce()).get("parentContractId");
+    }
+
+    @Test @SuppressWarnings({"rawtypes","unchecked"})
+    void dedicatedDepositTabFiltersBeforePaginationAndCannotEnterTheBillingList() {
+        var contracts=mock(ContractRepository.class);
+        var service=createService(contracts,mock(ContractRevisionRepository.class),mock(ContractDocumentRepository.class),mock(ContractTemplateVersionRepository.class));
+        when(contracts.findAll(any(Specification.class),any(Pageable.class))).thenReturn(Page.empty());
+        service.getContractsForCurrentUser("tenant",null,ContractPartyRole.TENANT,false,1,12,false,com.hs.contract.model.constant.ContractAgreementKind.DEPOSIT);
+        var captured=ArgumentCaptor.forClass(Specification.class);verify(contracts).findAll(captured.capture(),any(Pageable.class));
+        var root=mock(Root.class);var kind=mock(Path.class);when(root.get("agreementKind")).thenReturn(kind);when(root.get("status")).thenReturn(mock(Path.class));
+        var cb=mock(CriteriaBuilder.class);var query=mock(jakarta.persistence.criteria.CriteriaQuery.class,org.mockito.Answers.RETURNS_DEEP_STUBS);
+        captured.getValue().toPredicate(root,query,cb);verify(cb).equal(kind,"DEPOSIT");verify(root,atLeastOnce()).get("tenantId");
+        reset(contracts);when(contracts.findAll(any(Specification.class),any(Pageable.class))).thenReturn(Page.empty());
+        service.getContractsForCurrentUser("tenant",null,ContractPartyRole.TENANT,true,1,12,false,com.hs.contract.model.constant.ContractAgreementKind.DEPOSIT);
+        verify(contracts).findAll(captured.capture(),any(Pageable.class));reset(cb);captured.getValue().toPredicate(root,query,cb);verify(cb).disjunction();
     }
 
     @Test

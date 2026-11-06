@@ -107,6 +107,9 @@ public class PreTenancyResolutionService {
     private void eligible(RentalWorkflowSupport.Source s){
         if(s.rental().getStatus()!=RentalRequestStatus.ACCEPTED||s.rental().getDefaultCompletedAt()!=null)throw support.invalid("Hồ sơ không còn ở bước trước thuê.");
         if(s.rental().getCancellationRefundApprovedAt()!=null)throw support.invalid("Đã đồng ý hủy. Chờ người thuê xác nhận nhận đủ tiền hoàn.");
+        var deposit=depositAgreements.find(s.rental().getId()).orElse(null);
+        if(depositAgreements.tenantHasSigned(s.rental().getId()) || deposit!=null && (deposit.getSignedAt()!=null || deposit.getStatus()==ContractStatus.ACTIVE))
+            throw support.invalid("Người thuê đã ký hợp đồng cọc; không thể hủy tự nguyện và yêu cầu hoàn cọc. Nếu có lỗi hoặc tranh chấp, hãy gửi khiếu nại.");
         var c=s.contract();
         if(c!=null&&(c.getSignedAt()!=null||!Set.of(ContractStatus.DRAFT,ContractStatus.PENDING_REVIEW,ContractStatus.TENANT_SIGNATURE_PENDING).contains(c.getStatus())))
             throw support.invalid("HĐ thuê đã ký hoặc chuyển bước; cần dùng chấm dứt hợp đồng.");

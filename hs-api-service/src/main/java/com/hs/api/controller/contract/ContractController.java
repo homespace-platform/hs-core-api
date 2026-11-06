@@ -155,9 +155,11 @@ public class ContractController {
             @RequestParam(required = false) ContractPartyRole role,
             @RequestParam(defaultValue = "false") boolean billableOnly,
             @RequestParam(defaultValue = "false") boolean includeDepositFallback,
+            @RequestParam(required = false) com.hs.contract.model.constant.ContractAgreementKind agreementKind,
             @RequestParam(defaultValue = "1") @Min(1) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size
     ) {
+        if(agreementKind!=null)return contractService.getContractsForCurrentUser(requireUserId(),status,role,billableOnly,page,size,includeDepositFallback,agreementKind);
         return includeDepositFallback
             ? contractService.getContractsForCurrentUser(requireUserId(), status, role, billableOnly, page, size, true)
             : contractService.getContractsForCurrentUser(requireUserId(), status, role, billableOnly, page, size);

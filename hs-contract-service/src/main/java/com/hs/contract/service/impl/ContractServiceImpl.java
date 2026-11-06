@@ -355,6 +355,12 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional(readOnly = true)
     public PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size, boolean includeDepositFallback) {
+        return getContractsForCurrentUser(userId,status,role,billableOnly,page,size,includeDepositFallback,null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size, boolean includeDepositFallback, com.hs.contract.model.constant.ContractAgreementKind agreementKind) {
         String currentUserId = (userId != null && !userId.isBlank()) ? userId : getCurrentUserId();
         if (currentUserId == null || currentUserId.isBlank() || "system".equals(currentUserId)) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
@@ -378,7 +384,9 @@ public class ContractServiceImpl implements ContractService {
             }
             predicates.add(cb.isTrue(root.get("active")));
             predicates.add(cb.isNull(root.get("parentContractId")));
-            predicates.add(includeDepositFallback && !billableOnly
+            predicates.add(agreementKind==com.hs.contract.model.constant.ContractAgreementKind.DEPOSIT
+                ? billableOnly?cb.disjunction():cb.equal(root.get("agreementKind"),"DEPOSIT")
+                : agreementKind==null && includeDepositFallback && !billableOnly
                 ? com.hs.contract.service.ContractAgreementSelection.primary(root, query, cb, currentUserId, role)
                 : com.hs.contract.service.ContractAgreementSelection.lease(root, cb));
             if (status != null) {
@@ -400,7 +408,7 @@ public class ContractServiceImpl implements ContractService {
         var pageable = PageRequest.of(Math.max(page - 1, 0), Math.min(Math.max(size, 1), 100), sort);
         Page<Contract> pageResult = contractRepository.findAll(spec, pageable);
         var responses = pageResult.map(this::toContractResponse);
-        if (includeDepositFallback && !billableOnly) withDepositLinks(responses.getContent());
+        if (!billableOnly && (includeDepositFallback || agreementKind!=null)) withDepositLinks(responses.getContent());
         return new PageResponse<>(responses);
     }
 

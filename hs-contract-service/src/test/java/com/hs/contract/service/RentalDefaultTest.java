@@ -39,9 +39,13 @@ class RentalDefaultTest {
     @Mock ContractDocumentRepository documents; @Mock ParkingReservationService parking; @Mock ListingStatusService listingStatus;
     @Mock RentalCostCalculator calculator; @Mock ListingRepository listings; @Mock PropertyBranchRepository branches;
     @Mock BillingTime time; @Spy ObjectMapper mapper=new ObjectMapper(); @Mock ContractDataBuilder builder;
+    @Mock com.hs.contract.deposit.DepositAgreementService depositAgreements;
+    @Mock DisputeCaseRepository complaintCases;
     @Mock PlatformTransactionManager transactions; @InjectMocks RentalOnboardingService service;
     Instant now;RentalRequest rental;Contract contract;PaymentRequest rent;DepositRecord deposit;ContractRevision revision;
     @BeforeEach void setup() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",depositAgreements);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"complaintCases",complaintCases);
         org.springframework.test.util.ReflectionTestUtils.setField(service,"depositLedger",new com.hs.payment.service.DepositLedgerService(deposits,payments,mapper));
         now=Instant.parse("2026-11-02T03:00:00Z");
         when(time.now()).thenAnswer(i->now);when(time.today()).thenAnswer(i->now.atZone(BillingTime.ZONE).toLocalDate());
@@ -64,6 +68,8 @@ class RentalDefaultTest {
         when(payments.findByRentalRequestIdAndTypeForUpdate("r",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.of(dp));
         when(deposits.findByRentalRequestId("r")).thenReturn(Optional.of(deposit));when(deposits.findByRentalRequestIdForUpdate("r")).thenReturn(Optional.of(deposit));
         readyDocument();
+        when(listings.findByIdForUpdate("l")).thenReturn(Optional.of(rental.getListing()));
+        when(depositAgreements.signedOrExempt(rental)).thenReturn(true);
     }
     private void readyDocument() {when(documents.findByContractIdAndRevisionId("c","rev")).thenReturn(List.of(ContractDocument.builder()
         .documentType(ContractDocumentType.PDF).purpose(DocumentPurpose.PREVIEW).storageObjectId("file").status(DocumentGenerationStatus.READY)
@@ -71,6 +77,62 @@ class RentalDefaultTest {
     private void notice() {service.notifyDefault("r","o",new RentalOnboardingService.Cancellation("Thông báo nghĩa vụ đã quá hạn"));}
     private void elapsed() {now=rental.getDefaultRespondBy();}
     private RentalOnboardingService.DefaultCompletion decision(){return new RentalOnboardingService.DefaultCompletion("Khách không phản hồi đúng hạn",true,true);}
+
+    private Contract signedDeposit() {
+        var dc=Contract.builder().id("dc").agreementKind("DEPOSIT").status(ContractStatus.ACTIVE).signedAt(now.minusSeconds(200000)).build();
+        when(depositAgreements.find("r")).thenReturn(Optional.of(dc));when(depositAgreements.tenantHasSigned("r")).thenReturn(true);
+        when(contracts.findByIdForUpdate("dc")).thenReturn(Optional.of(dc));return dc;
+    }
+    @Test void schedulerUsesAStableCursorWhileEarlierRequestsLeaveTheAcceptedQueue() {
+        var job=spy(service);doNothing().when(job).processDue(anyString());
+        when(transactions.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
+        var first=java.util.stream.IntStream.range(0,100).mapToObj(i->RentalRequest.builder().id("a"+String.format("%03d",i)).build()).toList();
+        var second=java.util.stream.IntStream.range(100,200).mapToObj(i->RentalRequest.builder().id("a"+String.format("%03d",i)).build()).toList();
+        when(rentals.findNextOnboardingBatch(eq(RentalRequestStatus.ACCEPTED),eq(""),any())).thenReturn(first);
+        when(rentals.findNextOnboardingBatch(eq(RentalRequestStatus.ACCEPTED),eq("a099"),any())).thenReturn(second);
+        when(rentals.findNextOnboardingBatch(eq(RentalRequestStatus.ACCEPTED),eq("a199"),any())).thenReturn(List.of(RentalRequest.builder().id("a200").build()));
+        job.tick();verify(job,times(201)).processDue(anyString());verify(job).processDue("a200");
+    }
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void signedDepositAutomaticallyGetsAFinalWindowThenEndsForTenantFault(boolean signing) {
+        if(signing)tenantSigning();else when(contracts.findByRentalRequestId("r")).thenReturn(Optional.empty());
+        signedDeposit();service.processDue("r");
+        assertNotNull(rental.getDefaultNoticeAt());assertEquals(now.plusSeconds(86400),rental.getDefaultRespondBy());
+        assertEquals(DepositStatus.HELD,deposit.getStatus());
+        now=rental.getDefaultRespondBy().minusSeconds(1);service.processDue("r");assertNull(rental.getDefaultCompletedAt());
+        elapsed();service.processDue("r");service.processDue("r");
+        assertEquals(RentalRequestStatus.CANCELLED_BY_SYSTEM,rental.getStatus());assertNotNull(rental.getDefaultCompletedAt());
+        assertEquals(DepositStatus.RETAINED_BY_LANDLORD,deposit.getStatus());assertEquals(new BigDecimal("10000000"),deposit.getRetainedAmount());
+        verify(depositAgreements,times(1)).terminateForTenantDefault(eq("r"),contains("Lỗi Bên B"));
+        verify(parking,times(1)).releaseReservationsForRequest("r");
+        if(signing)verify(paymentService).createRentRefundObligation(rent,new BigDecimal("5000000"));
+        else verify(paymentService,never()).createRentRefundObligation(any(),any());
+    }
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"reported","disputed","rejected","provider","complaint","active-case","other-rental","paid","owner-not-signed","no-deposit-signature","zero-deposit"})
+    void automaticDefaultPausesForUncertainMoneyOrSignaturesAndNeverBlamesTheOwner(String scenario) {
+        signedDeposit();
+        if("owner-not-signed".equals(scenario))rent.setStatus(PaymentStatus.CONFIRMED);
+        else {service.processDue("r");elapsed();}
+        switch(scenario) {
+            case "reported" -> rent.setStatus(PaymentStatus.TRANSFER_REPORTED);
+            case "disputed" -> rent.setStatus(PaymentStatus.DISPUTED);
+            case "rejected" -> rent.setStatus(PaymentStatus.REJECTED);
+            case "provider" -> when(signatures.findByContractIdOrderByCreatedAtDesc("c")).thenReturn(List.of(SignatureRequest.builder().status(SignatureRequestStatus.EMBEDDING).signerRole(SignerRole.TENANT).build()));
+            case "complaint" -> rental.setDefaultDisputedAt(now);
+            case "active-case" -> when(complaintCases.existsByRentalRequestIdAndActiveKeyIsNotNull("r")).thenReturn(true);
+            case "other-rental" -> when(rentals.findByListingIdAndStatus("l",RentalRequestStatus.ACCEPTED)).thenReturn(List.of(RentalRequest.builder().id("other").build()));
+            case "paid" -> rent.setStatus(PaymentStatus.CONFIRMED);
+            case "no-deposit-signature" -> when(depositAgreements.signedOrExempt(rental)).thenReturn(false);
+            case "zero-deposit" -> rental.setDepositAmount(BigDecimal.ZERO);
+        }
+        service.processDue("r");assertNull(rental.getDefaultCompletedAt());assertEquals(DepositStatus.HELD,deposit.getStatus());
+        verify(parking,never()).releaseReservationsForRequest(any());verify(depositAgreements,never()).terminateForTenantDefault(any(),any());
+    }
+    @Test void tenantDepositSignatureLocksVoluntaryCancellationEvenWhenLeaseHasNoSignature() {
+        signedDeposit();assertFalse(service.refresh("r","t").canRequestCancellation());
+        assertThrows(AppException.class,()->service.requestCancellation("r","t",new RentalOnboardingService.Cancellation("Muốn hủy sau khi ký hợp đồng cọc")));
+        verify(paymentService,never()).createCancellationRefund(any());verify(paymentService,never()).createRefundObligation(any());
+    }
     @Test void firstRentDefaultWorksWithoutAnyContractAndStillNeedsNoticeAndGrace() {
         when(contracts.findByRentalRequestId("r")).thenReturn(Optional.empty());
         assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));

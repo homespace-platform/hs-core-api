@@ -10,6 +10,7 @@ import com.hs.contract.dto.response.ContractResponse;
 import com.hs.contract.dto.response.ContractRevisionResponse;
 import com.hs.contract.model.constant.ContractStatus;
 import com.hs.contract.model.constant.ContractPartyRole;
+import com.hs.contract.model.constant.ContractAgreementKind;
 
 import java.util.List;
 
@@ -28,6 +29,8 @@ public interface ContractService {
     PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size);
 
     PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size, boolean includeDepositFallback);
+
+    PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size, boolean includeDepositFallback, ContractAgreementKind agreementKind);
 
     List<ContractResponse> getContractsForCurrentUser(ContractStatus status);
 

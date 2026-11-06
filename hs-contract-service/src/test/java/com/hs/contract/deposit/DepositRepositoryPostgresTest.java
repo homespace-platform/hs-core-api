@@ -37,7 +37,7 @@ class DepositRepositoryPostgresTest {
                 com.hs.listing.repository.RentalRequestRepository rentals) {
             var time=org.mockito.Mockito.mock(com.hs.common.time.BillingTime.class);
             org.mockito.Mockito.when(time.now()).thenReturn(java.time.Instant.parse("2026-10-25T16:00:00Z"));
-            return new DepositAgreementService(agreements,contracts,
+            return new DepositAgreementService(agreements,contracts,org.mockito.Mockito.mock(SignatureRequestRepository.class),
                 org.mockito.Mockito.mock(ContractRevisionRepository.class),org.mockito.Mockito.mock(ContractTemplateVersionRepository.class),rentals,
                 org.mockito.Mockito.mock(com.hs.listing.repository.RentalOnboardingEventRepository.class),
                 org.mockito.Mockito.mock(com.hs.payment.repository.DepositRecordRepository.class),
