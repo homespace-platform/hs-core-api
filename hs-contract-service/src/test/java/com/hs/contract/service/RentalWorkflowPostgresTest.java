@@ -195,6 +195,46 @@ class RentalWorkflowPostgresTest {
     private void markRefundReported(String id){
         tx(()->{var payment=paymentRepo.findById(id).orElseThrow();payment.setStatus(PaymentStatus.TRANSFER_REPORTED);paymentRepo.save(payment);});
     }
+    @ParameterizedTest @CsvSource({"2026-11-06T10:00:00,false","2026-11-06T10:00:00,true","2026-11-10T10:00:00,false","2026-11-10T10:00:00,true"})
+    void novemberDepositOnlyRefundDoesNotRequireALeaseOrAnInitialRentReceipt(String current,boolean depositSigned) {
+        beforeLease();clock(current);String[] depositContract={null};
+        tx(()->{
+            contracts.deleteById(id);contracts.flush();
+            var rental=rentals.findById(rentalId).orElseThrow();rental.setMoveInDate(LocalDate.of(2026,11,10));rental.setDepositAmount(new BigDecimal("1000000"));
+            var paid=paymentRepo.findByRentalRequestIdAndType(rentalId,PaymentType.RESERVATION_DEPOSIT).orElseThrow();
+            paid.setContractId(null);paid.setTotalAmount(new BigDecimal("1000000"));
+            paid.setConfirmedAt(LocalDateTime.parse("2026-11-06T09:00:00").atZone(BillingTime.ZONE).toInstant());
+            lines.saveAndFlush(PaymentLineItem.builder().paymentRequestId(paid.getId()).type("DEPOSIT").displayName("Tiền cọc giữ chỗ")
+                    .amount(new BigDecimal("1000000")).quantity(1).unitPrice(new BigDecimal("1000000")).build());
+            var record=deposits.findByRentalRequestId(rentalId).orElseThrow();record.setContractId(null);
+            record.setOriginalAmount(new BigDecimal("1000000"));record.setHeldAmount(new BigDecimal("1000000"));record.setRefundableAmount(new BigDecimal("1000000"));
+            var dc=contracts.saveAndFlush(Contract.builder().contractNumber("DC-NOV-"+UUID.randomUUID()).rentalRequestId(rentalId).listingId(listingId)
+                    .landlordId("owner").tenantId("tenant").templateId("template").templateVersionId("version").agreementKind("DEPOSIT")
+                    .status(depositSigned?ContractStatus.ACTIVE:ContractStatus.DRAFT).signedAt(depositSigned?paid.getConfirmedAt():null).build());
+            depositContract[0]=dc.getId();when(depositAgreements.find(rentalId)).thenReturn(Optional.of(dc));
+            if(!time.today().isBefore(rental.getMoveInDate()))paymentRepo.saveAndFlush(PaymentRequest.builder().rentalRequestId(rentalId).listingId(listingId)
+                    .payerId("tenant").payeeId("owner").type(PaymentType.INITIAL).direction(PaymentDirection.TENANT_TO_LANDLORD)
+                    .status(PaymentStatus.AWAITING_TRANSFER).totalAmount(new BigDecimal("2000000")).transferReference("HS"+UUID.randomUUID().toString().substring(0,12)).build());
+        });
+        assertTrue(contracts.findByRentalRequestId(rentalId).isEmpty());
+        var proposed=cancellation.propose(rentalId,"tenant",new RentalWorkflowPayloads.Cancellation(0L,"Chưa đóng tháng đầu, hai bên thống nhất hoàn cọc",List.of()));
+        var pending=cancellation.act(rentalId,"owner","ACCEPT",action(proposed.revision()));
+        assertEquals(1,pending.refundPayments().size());var refund=pending.refundPayments().getFirst();
+        assertEquals(0,new BigDecimal("1000000").compareTo(refund.totalAmount()));
+        assertEquals(1,refund.lineItems().size());assertEquals("DEPOSIT_REFUND",refund.lineItems().getFirst().type());
+        assertEquals(ListingStatus.RESERVED,properties.findById(listingId).orElseThrow().getStatus());
+        verify(listings,never()).releaseReserved(any(),any(),any());
+        paymentRepo.findByRentalRequestIdAndType(rentalId,PaymentType.INITIAL).ifPresent(rent->assertEquals(PaymentStatus.CANCELLED,rent.getStatus()));
+        markRefundReported(refund.id());assertThrows(AppException.class,()->payments.confirmReceipt(refund.id(),"owner"));
+        payments.confirmReceipt(refund.id(),"tenant");
+        assertEquals(RentalRequestStatus.CANCELLED_BY_RENTER,rentals.findById(rentalId).orElseThrow().getStatus());
+        assertEquals(DepositStatus.REFUNDED,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());
+        assertEquals(0,new BigDecimal("1000000").compareTo(ledger.forRental(rentalId).confirmedRefundedAmount()));
+        assertEquals(depositSigned?ContractStatus.ACTIVE:ContractStatus.CANCELLED,contracts.findById(depositContract[0]).orElseThrow().getStatus());
+        assertTrue(contracts.findByRentalRequestId(rentalId).isEmpty());
+        verify(listings).releaseReserved(any(),eq("tenant"),anyString());
+    }
+
     @Test void oneMillionRentWithoutDepositHasAnExactRefundBreakdownAndRequiresTenantReceipt() {
         beforeLease();
         tx(()->{
@@ -221,6 +261,47 @@ class RentalWorkflowPostgresTest {
         assertEquals(0,ledger.forRental(rentalId).confirmedReceivedAmount().signum());
         assertEquals(0,ledger.forRental(rentalId).confirmedRefundedAmount().signum());
         verify(listings).releaseReserved(any(),eq("tenant"),anyString());
+    }
+
+    @ParameterizedTest @CsvSource({"false,false","false,true","true,false","true,true"})
+    void oneRefundCoversThreeMillionWhetherPaidTogetherOrSeparately(boolean workflow,boolean combined) {
+        beforeLease();clock("2026-11-10T10:00:00");
+        var originalAmounts=new HashMap<String,BigDecimal>();
+        tx(()->{
+            var rental=rentals.findById(rentalId).orElseThrow();rental.setDepositAmount(new BigDecimal("1000000"));rental.setMoveInDate(LocalDate.of(2026,11,10));
+            var paid=paymentRepo.findByRentalRequestIdAndType(rentalId,PaymentType.RESERVATION_DEPOSIT).orElseThrow();
+            paid.setType(combined?PaymentType.INITIAL:PaymentType.RESERVATION_DEPOSIT);paid.setTotalAmount(new BigDecimal(combined?"3000000":"1000000"));
+            paid.setConfirmedAt(LocalDateTime.parse("2026-11-06T10:00:00").atZone(BillingTime.ZONE).toInstant());
+            var deposit=deposits.findByRentalRequestId(rentalId).orElseThrow();deposit.setOriginalAmount(new BigDecimal("1000000"));deposit.setHeldAmount(new BigDecimal("1000000"));deposit.setRefundableAmount(new BigDecimal("1000000"));
+            lines.saveAndFlush(PaymentLineItem.builder().paymentRequestId(paid.getId()).type("DEPOSIT").displayName("Tiền đặt cọc").amount(new BigDecimal("1000000")).build());
+            var rent=combined?paid:paymentRepo.saveAndFlush(PaymentRequest.builder().rentalRequestId(rentalId).listingId(listingId).contractId(id)
+                    .payerId("tenant").payeeId("owner").type(PaymentType.INITIAL).direction(PaymentDirection.TENANT_TO_LANDLORD)
+                    .status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("2000000")).confirmedAt(time.now())
+                    .transferReference("HS"+UUID.randomUUID().toString().substring(0,12)).build());
+            lines.saveAndFlush(PaymentLineItem.builder().paymentRequestId(rent.getId()).type("RENT").displayName("Tiền thuê kỳ đầu").amount(new BigDecimal("2000000")).build());
+            originalAmounts.put(paid.getId(),paid.getTotalAmount());originalAmounts.put(rent.getId(),rent.getTotalAmount());
+        });
+        List<PaymentRequestResponse> refunds;
+        if(workflow) {
+            var proposed=cancellation.propose(rentalId,"tenant",new RentalWorkflowPayloads.Cancellation(0L,"Hai bên thống nhất hủy và hoàn toàn bộ",List.of()));
+            refunds=cancellation.act(rentalId,"owner","ACCEPT",action(proposed.revision())).refundPayments();
+        } else {
+            onboarding.requestCancellation(rentalId,"tenant",new RentalOnboardingService.Cancellation("Hai bên thống nhất hủy và hoàn toàn bộ"));
+            refunds=onboarding.decideCancellation(rentalId,"owner",new RentalOnboardingService.Decision(true,null)).payments().stream().filter(p->p.type()==PaymentType.INITIAL_PAYMENT_REFUND).toList();
+        }
+        assertEquals(1,refunds.size());var refund=refunds.getFirst();
+        assertEquals(0,new BigDecimal("3000000").compareTo(refund.totalAmount()));assertEquals(2,refund.lineItems().size());
+        assertEquals(0,new BigDecimal("1000000").compareTo(refund.lineItems().stream().filter(l->l.type().equals("DEPOSIT_REFUND")).findFirst().orElseThrow().amount()));
+        assertEquals(0,new BigDecimal("2000000").compareTo(refund.lineItems().stream().filter(l->l.type().equals("RENT_REFUND")).findFirst().orElseThrow().amount()));
+        assertEquals(refund.id(),deposits.findByRentalRequestId(rentalId).orElseThrow().getRefundPaymentRequestId());
+        assertAwaitingRefund();assertThrows(AppException.class,()->payments.confirmReceipt(refund.id(),"tenant"));
+        markRefundReported(refund.id());assertAwaitingRefund();assertThrows(AppException.class,()->payments.confirmReceipt(refund.id(),"owner"));
+        payments.confirmReceipt(refund.id(),"tenant");payments.confirmReceipt(refund.id(),"tenant");
+        assertEquals(RentalRequestStatus.CANCELLED_BY_RENTER,rentals.findById(rentalId).orElseThrow().getStatus());
+        assertEquals(0,new BigDecimal("1000000").compareTo(ledger.forRental(rentalId).confirmedRefundedAmount()));
+        originalAmounts.forEach((payment,amount)->{var source=paymentRepo.findById(payment).orElseThrow();assertEquals(PaymentStatus.CONFIRMED,source.getStatus());assertEquals(0,amount.compareTo(source.getTotalAmount()));});
+        assertEquals(1,paymentRepo.findByRentalRequestIdAndTypeIn(rentalId,List.of(PaymentType.INITIAL_PAYMENT_REFUND)).size());
+        verify(parking,times(1)).releaseReservationsForRequest(rentalId);verify(listings,times(1)).releaseReserved(any(),eq("tenant"),anyString());
     }
 
     @Test void combinedInitialRefundAllocatesRentAndDepositButDepositLedgerCountsOnlyDeposit() {
@@ -289,14 +370,13 @@ class RentalWorkflowPostgresTest {
         assertThrows(AppException.class,()->cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision())));
         assertTrue(paymentRepo.findByRentalRequestIdAndTypeIn(rentalId,List.of(PaymentType.INITIAL_PAYMENT_REFUND)).isEmpty());
     }
-    @Test void signedDepositIsPreservedAndSeparateRentAndDepositRefundsAreCreated(){
+    @Test void signedDepositIsPreservedAndSeparateRentAndDepositReceiptsHaveOneRefund(){
         var p=proposeCancel();tx(()->{var dc=contracts.saveAndFlush(Contract.builder().contractNumber("DC-"+UUID.randomUUID()).rentalRequestId(rentalId).listingId(listingId).landlordId("owner").tenantId("tenant").templateId("template").templateVersionId("version").agreementKind("DEPOSIT").status(ContractStatus.ACTIVE).signedAt(time.now()).build());when(depositAgreements.find(rentalId)).thenReturn(Optional.of(dc));
             paymentRepo.saveAndFlush(PaymentRequest.builder().contractId(id).rentalRequestId(rentalId).listingId(listingId).payerId("tenant").payeeId("owner").type(PaymentType.INITIAL).direction(PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("5000000")).transferReference("HS"+UUID.randomUUID().toString().substring(0,12)).confirmedAt(time.now()).build());});
-        var done=cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision()));assertEquals(2,done.refundPayments().size());assertEquals(ContractStatus.ACTIVE,contracts.findById(depositAgreements.find(rentalId).orElseThrow().getId()).orElseThrow().getStatus());
-        for(int i=0;i<2;i++){
-            String refund=done.refundPayments().get(i).id();markRefundReported(refund);payments.confirmReceipt(refund,"tenant");
-            if(i==0)assertAwaitingRefund();
-        }
+        var done=cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision()));assertEquals(1,done.refundPayments().size());assertEquals(ContractStatus.ACTIVE,contracts.findById(depositAgreements.find(rentalId).orElseThrow().getId()).orElseThrow().getStatus());
+        assertEquals(0,new BigDecimal("25000000").compareTo(done.refundPayments().getFirst().totalAmount()));
+        String refund=done.refundPayments().getFirst().id();markRefundReported(refund);assertAwaitingRefund();payments.confirmReceipt(refund,"tenant");
+        assertEquals(0,principal.compareTo(ledger.forRental(rentalId).confirmedRefundedAmount()));
         assertEquals(ContractStatus.CANCELLED,contracts.findById(id).orElseThrow().getStatus());
         assertEquals(ContractStatus.ACTIVE,contracts.findById(depositAgreements.find(rentalId).orElseThrow().getId()).orElseThrow().getStatus());
         verify(parking,times(1)).releaseReservationsForRequest(rentalId);

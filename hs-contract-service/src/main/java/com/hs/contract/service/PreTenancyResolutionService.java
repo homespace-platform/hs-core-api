@@ -135,17 +135,19 @@ public class PreTenancyResolutionService {
         if(listing.getOperationalStatus()!=ListingStatus.RESERVED||support.rentals.findByListingIdAndStatus(listing.getId(),RentalRequestStatus.ACCEPTED).stream().anyMatch(other->!other.getId().equals(r.getId())))
             throw support.invalid("Lượt giữ phòng đã thay đổi; không giải phóng lượt của hồ sơ khác.");
         boolean anyConfirmed=false, refundRequired=false;
+        var receipts=new ArrayList<com.hs.payment.model.PaymentRequest>();
         for(var type:List.of(PaymentType.RESERVATION_DEPOSIT,PaymentType.INITIAL)) {
             var cash=support.payments.findByRentalRequestIdAndTypeForUpdate(r.getId(),type).orElse(null);if(cash==null)continue;
             support.reload(cash);
             if(Set.of(PaymentStatus.TRANSFER_REPORTED,PaymentStatus.DISPUTED,PaymentStatus.REJECTED).contains(cash.getStatus()))throw support.invalid("Phải đối soát chứng từ trước khi kết thúc và hoàn tiền.");
             if(cash.getStatus()==PaymentStatus.CONFIRMED){
                 anyConfirmed=true;
-                if(cash.getTotalAmount().signum()>0){paymentService.createRefundObligation(cash);refundRequired=true;}
+                if(cash.getTotalAmount().signum()>0){receipts.add(cash);refundRequired=true;}
             }
             else {cash.setStatus(PaymentStatus.CANCELLED);cash.setCancelledAt(support.time.now());cash.setCancelledReason("Kết thúc trước thuê; hoàn toàn bộ khoản đã xác nhận");support.payments.save(cash);}
         }
         if(!anyConfirmed)throw support.invalid("Chưa có khoản thực nhận; dùng hủy giữ chỗ chưa thanh toán.");
+        paymentService.createCancellationRefund(receipts);
         if(refundRequired){
             r.setCancellationRefundApprovedAt(support.time.now());
             r.setHoldExpiresAt(null);

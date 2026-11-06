@@ -53,7 +53,7 @@ class ContractLifecycleServiceTest {
         service=new ContractLifecycleService(contracts,revisions,renewals,closures,rentals,invoices,deposits,paymentRepo,payments,
                 signatures,documents,listings,parking,new ObjectMapper().findAndRegisterModules(),time,mock(PlatformTransactionManager.class),storageObjects);
         org.springframework.test.util.ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
-        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositLedger",new com.hs.payment.service.DepositLedgerService(deposits,paymentRepo));
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositLedger",new com.hs.payment.service.DepositLedgerService(deposits,paymentRepo,new ObjectMapper()));
         root=Contract.builder().id("root").contractNumber("HD-DEMO").rentalRequestId("rental").listingId("listing")
                 .landlordId("owner").tenantId("tenant").status(ContractStatus.ACTIVE).currentRevisionId("original")
                 .templateId("template").templateVersionId("template-v1").signedAt(Instant.parse("2026-10-12T03:00:00Z"))

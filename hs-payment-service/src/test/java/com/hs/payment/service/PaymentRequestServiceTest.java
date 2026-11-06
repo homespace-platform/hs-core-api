@@ -72,6 +72,7 @@ class PaymentRequestServiceTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"INITIAL,1000000,0","INITIAL,1000000,2000000","RESERVATION_DEPOSIT,0,2000000"})
     void refundAllocationComesFromThePaidReceiptAndMatchesTheQrTotal(PaymentType type, String rentText, String depositText) throws Exception {
+        when(paymentRequestRepository.findByOnboardingKey("CANCEL_REFUND:rental")).thenReturn(Optional.empty());
         BigDecimal rent=new BigDecimal(rentText), deposit=new BigDecimal(depositText), total=rent.add(deposit);
         var source=PaymentRequest.builder().id("paid").rentalRequestId("rental").listingId("listing").payerId("tenant").payeeId("owner")
                 .type(type).status(PaymentStatus.CONFIRMED).totalAmount(total)
@@ -122,7 +123,77 @@ class PaymentRequestServiceTest {
         verify(paymentRequestRepository,never()).save(any());
     }
 
+    private PaymentRequest cancellationSource(String id, PaymentType type, String amount) {
+        var payment=PaymentRequest.builder().id(id).rentalRequestId("rental").listingId("listing").contractId("lease")
+                .payerId("tenant").payeeId("owner").type(type).direction(com.hs.payment.model.constant.PaymentDirection.TENANT_TO_LANDLORD)
+                .status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal(amount))
+                .payerBankAccountSnapshot("{\"bankBin\":\"970436\",\"accountNumber\":\"222222\",\"accountHolderName\":\"TENANT\"}").build();
+        when(paymentRequestRepository.findByIdForUpdate(id)).thenReturn(Optional.of(payment));
+        return payment;
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"split","combined","deposit-only","rent-only"})
+    void cancellationCreatesOneTransferForAllActualReceipts(String scenario) {
+        var deposit=new BigDecimal("1000000");var rent=new BigDecimal("2000000");
+        var sources=new java.util.ArrayList<PaymentRequest>();
+        if(!"combined".equals(scenario)&&!"rent-only".equals(scenario))sources.add(cancellationSource("deposit",PaymentType.RESERVATION_DEPOSIT,deposit.toPlainString()));
+        if(!"deposit-only".equals(scenario))sources.add(cancellationSource("rent",PaymentType.INITIAL,"combined".equals(scenario)?"3000000":rent.toPlainString()));
+        for(var source:sources)when(paymentLineItemRepository.findByPaymentRequestIdOrderBySortOrderAsc(source.getId())).thenReturn(
+                "combined".equals(scenario)?List.of(
+                    com.hs.payment.model.PaymentLineItem.builder().type("RENT").amount(rent).build(),
+                    com.hs.payment.model.PaymentLineItem.builder().type("DEPOSIT").amount(deposit).build()):List.of(
+                    com.hs.payment.model.PaymentLineItem.builder().type(source.getType()==PaymentType.INITIAL?"RENT":"DEPOSIT").amount(source.getTotalAmount()).build()));
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-06T08:00:00Z"));
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSREFUND");
+        when(paymentRequestRepository.save(any())).thenAnswer(inv->{PaymentRequest payment=inv.getArgument(0);payment.setId("refund");return payment;});
+        paymentRequestService.createCancellationRefund(sources);
+        var paymentCapture=org.mockito.ArgumentCaptor.forClass(PaymentRequest.class);verify(paymentRequestRepository).save(paymentCapture.capture());
+        var refund=paymentCapture.getValue();var total=sources.stream().map(PaymentRequest::getTotalAmount).reduce(BigDecimal.ZERO,BigDecimal::add);
+        assertEquals(0,total.compareTo(refund.getTotalAmount()));assertEquals("owner",refund.getPayerId());assertEquals("tenant",refund.getPayeeId());
+        assertEquals("CANCEL_REFUND:rental",refund.getOnboardingKey());assertTrue(sources.stream().allMatch(s->InitialRefundSources.covers(refund,s,objectMapper)));
+        var lineCapture=org.mockito.ArgumentCaptor.forClass(com.hs.payment.model.PaymentLineItem.class);
+        int count="split".equals(scenario)||"combined".equals(scenario)?2:1;
+        verify(paymentLineItemRepository,times(count)).save(lineCapture.capture());var rows=lineCapture.getAllValues();
+        assertEquals(0,total.compareTo(rows.stream().map(com.hs.payment.model.PaymentLineItem::getAmount).reduce(BigDecimal.ZERO,BigDecimal::add)));
+        assertEquals(count,rows.stream().map(com.hs.payment.model.PaymentLineItem::getSortOrder).distinct().count());
+        verify(vietQrProvider).generateQrImageUrl("970436","222222","TENANT",total,"HSREFUND");
+        assertTrue(sources.stream().allMatch(s->s.getStatus()==PaymentStatus.CONFIRMED));
+        when(paymentRequestRepository.findByOnboardingKey("CANCEL_REFUND:rental")).thenReturn(Optional.of(refund));
+        paymentRequestService.createCancellationRefund(sources);verify(paymentRequestRepository,times(1)).save(any());
+        assertThrows(IllegalStateException.class,()->paymentRequestService.createRefundObligation(sources.getFirst()));
+        sources.getFirst().setTotalAmount(total.add(BigDecimal.ONE));
+        assertThrows(IllegalStateException.class,()->paymentRequestService.createCancellationRefund(sources));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"reported","disputed","rejected","wrong-rental","wrong-payer","wrong-payee","wrong-listing","wrong-direction","wrong-type","negative","zero","wrong-currency","duplicate","existing-refund"})
+    void cancellationNeverGroupsUnreceivedOrUnrelatedMoney(String scenario) {
+        var deposit=cancellationSource("deposit",PaymentType.RESERVATION_DEPOSIT,"1000000");
+        var rent=cancellationSource("rent",PaymentType.INITIAL,"2000000");
+        var sources=new java.util.ArrayList<>(List.of(deposit,rent));
+        switch(scenario) {
+            case "reported" -> rent.setStatus(PaymentStatus.TRANSFER_REPORTED);
+            case "disputed" -> rent.setStatus(PaymentStatus.DISPUTED);
+            case "rejected" -> rent.setStatus(PaymentStatus.REJECTED);
+            case "wrong-rental" -> rent.setRentalRequestId("other");
+            case "wrong-payer" -> rent.setPayerId("other");
+            case "wrong-payee" -> rent.setPayeeId("other");
+            case "wrong-listing" -> rent.setListingId("other");
+            case "wrong-direction" -> rent.setDirection(com.hs.payment.model.constant.PaymentDirection.LANDLORD_TO_TENANT);
+            case "wrong-type" -> rent.setType(PaymentType.MONTHLY_RENT);
+            case "negative" -> rent.setTotalAmount(BigDecimal.ONE.negate());
+            case "zero" -> rent.setTotalAmount(BigDecimal.ZERO);
+            case "wrong-currency" -> rent.setCurrency("USD");
+            case "duplicate" -> sources.add(deposit);
+            case "existing-refund" -> when(paymentRequestRepository.findByRentalRequestIdAndTypeIn(eq("rental"),any())).thenReturn(List.of(PaymentRequest.builder().id("old").build()));
+        }
+        assertThrows(IllegalStateException.class,()->paymentRequestService.createCancellationRefund(sources));
+        verify(paymentRequestRepository,never()).save(any());verifyNoInteractions(paymentLineItemRepository,vietQrProvider);
+    }
+
     @Test void rentOnlyRefundDoesNotRefundOrResetRetainedDeposit() {
+        when(paymentRequestRepository.findByOnboardingKey("CANCEL_REFUND:rental")).thenReturn(Optional.empty());
         var source=PaymentRequest.builder().id("source").contractId("root").rentalRequestId("rental").listingId("listing")
             .payerId("tenant").payeeId("owner").status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("15000000")).build();
         when(billingTime.now()).thenReturn(Instant.parse("2026-11-02T03:00:00Z"));

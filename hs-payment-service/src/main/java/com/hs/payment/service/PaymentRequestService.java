@@ -791,6 +791,49 @@ public class PaymentRequestService {
         createRefundObligation(initialPayment,initialPayment.getTotalAmount(),false);
     }
 
+    /** The caller holds the rental lock. Freeze all confirmed receipts into one transfer obligation. */
+    @Transactional
+    public void createCancellationRefund(List<PaymentRequest> receipts) {
+        if (receipts.isEmpty()) return;
+        var sources = receipts.stream().sorted(java.util.Comparator.comparing(PaymentRequest::getId)).map(p -> {
+            var locked = paymentRequestRepository.findByIdForUpdate(p.getId()).orElseThrow();
+            if (entityManager != null) entityManager.refresh(locked);
+            return locked;
+        }).toList();
+        var first = sources.getFirst();
+        if (first.getRentalRequestId() == null || sources.stream().map(PaymentRequest::getId).distinct().count() != sources.size()
+                || sources.stream().anyMatch(p -> !isOnboarding(p) || p.getStatus() != PaymentStatus.CONFIRMED
+                    || p.getTotalAmount() == null || p.getTotalAmount().signum() <= 0 || !"VND".equals(p.getCurrency())
+                    || p.getDirection() != PaymentDirection.TENANT_TO_LANDLORD
+                    || !java.util.Objects.equals(first.getRentalRequestId(), p.getRentalRequestId())
+                    || !java.util.Objects.equals(first.getListingId(), p.getListingId())
+                    || !java.util.Objects.equals(first.getPayerId(), p.getPayerId())
+                    || !java.util.Objects.equals(first.getPayeeId(), p.getPayeeId())))
+            throw new IllegalStateException("Cancellation refund requires matching confirmed receipts");
+        BigDecimal total = sources.stream().map(PaymentRequest::getTotalAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        String key = InitialRefundSources.key(first.getRentalRequestId());
+        var existing = paymentRequestRepository.findByOnboardingKey(key);
+        if (existing.isPresent()) {
+            var refund = existing.get();
+            if (refund.getType() != PaymentType.INITIAL_PAYMENT_REFUND || refund.getTotalAmount().compareTo(total) != 0
+                    || sources.stream().anyMatch(p -> !InitialRefundSources.covers(refund, p, objectMapper)))
+                throw new IllegalStateException("Cancellation refund sources differ; reconciliation required");
+            return;
+        }
+        if (!paymentRequestRepository.findByRentalRequestIdAndTypeIn(first.getRentalRequestId(), List.of(PaymentType.INITIAL_PAYMENT_REFUND)).isEmpty())
+            throw new IllegalStateException("A refund already exists; reconciliation required");
+        // Prefer the later first-rent receipt's account snapshot when payments were split.
+        var accountSource = sources.stream().filter(p -> p.getType() == PaymentType.INITIAL).findFirst().orElse(first);
+        var refund = newInitialRefund(accountSource, total, key, InitialRefundSources.freeze(sources, objectMapper));
+        int order = 0;
+        for (var source : sources.stream().sorted(java.util.Comparator.comparing(p -> p.getType() == PaymentType.INITIAL ? 0 : 1)).toList()) {
+            order = saveRefundLineItems(source, refund, false, order);
+            linkDepositRefund(source, refund);
+        }
+        recordEvent(refund.getId(), PaymentEventType.REFUND_OBLIGATION_CREATED, null, PaymentStatus.AWAITING_TRANSFER,
+                "SYSTEM", "SYSTEM", "Hai bên đồng ý hủy trước thuê; hoàn gộp toàn bộ khoản thực nhận đã xác nhận, người thuê xác nhận một lần", null);
+    }
+
     /** Refund only confirmed rent when a separately agreed deposit is retained. Never alter the receipt. */
     @Transactional
     public void createRentRefundObligation(PaymentRequest initialPayment,BigDecimal amount) {
@@ -810,6 +853,8 @@ public class PaymentRequestService {
             throw new IllegalArgumentException("Invalid refund amount");
         if(amount.signum()==0)return;
         if(initialPayment.getStatus()!=PaymentStatus.CONFIRMED || initialPayment.getTotalAmount().signum()==0)return;
+        if(initialPayment.getRentalRequestId()!=null && paymentRequestRepository.findByOnboardingKey(InitialRefundSources.key(initialPayment.getRentalRequestId())).isPresent())
+            throw new IllegalStateException("Source receipt is covered by a cancellation refund");
         // Idempotency: check if refund request already created
         Optional<PaymentRequest> existingRefund = paymentRequestRepository.findByOnboardingKey("REFUND:"+initialPayment.getId());
         if (existingRefund.isPresent()) {
@@ -817,6 +862,16 @@ public class PaymentRequestService {
             return;
         }
 
+        PaymentRequest savedRefund = newInitialRefund(initialPayment, amount, "REFUND:"+initialPayment.getId(), null);
+        saveRefundLineItems(initialPayment, savedRefund, rentOnly, 0);
+        if(!rentOnly) linkDepositRefund(initialPayment, savedRefund);
+
+        recordEvent(savedRefund.getId(), PaymentEventType.REFUND_OBLIGATION_CREATED, null,
+                PaymentStatus.AWAITING_TRANSFER, "SYSTEM", "SYSTEM",
+                agreedReason!=null?agreedReason:rentOnly?"Hoàn tiền thuê đã nhận; cọc được xử lý riêng theo thông báo vi phạm":"Hai bên đồng ý hủy hồ sơ trước khi ký; chủ nhà cần hoàn khoản thực nhận và người thuê xác nhận nhận đủ", null);
+    }
+
+    private PaymentRequest newInitialRefund(PaymentRequest initialPayment, BigDecimal amount, String key, String sourcesSnapshot) {
         String ref = transferReferenceGenerator.generateUniqueReference();
         BankAccountSnapshotDto tenantAccount = parseSnapshot(initialPayment.getPayerBankAccountSnapshot());
 
@@ -838,7 +893,8 @@ public class PaymentRequestService {
                 .payerId(initialPayment.getPayeeId()) // Landlord must refund
                 .payeeId(initialPayment.getPayerId()) // Tenant receives refund
                 .type(PaymentType.INITIAL_PAYMENT_REFUND)
-                .onboardingKey("REFUND:"+initialPayment.getId())
+                .onboardingKey(key)
+                .refundSourcesSnapshot(sourcesSnapshot)
                 .direction(PaymentDirection.LANDLORD_TO_TENANT)
                 .status(PaymentStatus.AWAITING_TRANSFER)
                 .currency("VND")
@@ -851,33 +907,29 @@ public class PaymentRequestService {
                 .dueAt(businessNow().plus(Duration.ofDays(3)))
                 .build();
 
-        PaymentRequest savedRefund = paymentRequestRepository.save(refundPayment);
-        saveRefundLineItems(initialPayment, savedRefund, rentOnly);
+        return paymentRequestRepository.save(refundPayment);
+    }
 
-        // Update DepositRecord status to REFUND_DUE
-        if(!rentOnly) depositRecordRepository.findByInitialPaymentRequestId(initialPayment.getId())
+    private void linkDepositRefund(PaymentRequest initialPayment, PaymentRequest savedRefund) {
+        depositRecordRepository.findByInitialPaymentRequestId(initialPayment.getId())
                 .filter(record -> record.getOriginalAmount() != null && record.getOriginalAmount().signum() > 0).ifPresent(record -> {
             record.setStatus(DepositStatus.REFUND_DUE);
             record.setRefundPaymentRequestId(savedRefund.getId());
             depositRecordRepository.save(record);
         });
 
-        recordEvent(savedRefund.getId(), PaymentEventType.REFUND_OBLIGATION_CREATED, null,
-                PaymentStatus.AWAITING_TRANSFER, "SYSTEM", "SYSTEM",
-                agreedReason!=null?agreedReason:rentOnly?"Hoàn tiền thuê đã nhận; cọc được xử lý riêng theo thông báo vi phạm":"Hai bên đồng ý hủy hồ sơ trước khi ký; chủ nhà cần hoàn khoản thực nhận và người thuê xác nhận nhận đủ", null);
     }
 
     /** Freeze the allocation from the paid receipt, never from an edited listing or current rental quote. */
-    private void saveRefundLineItems(PaymentRequest source, PaymentRequest refund, boolean rentOnly) {
+    private int saveRefundLineItems(PaymentRequest source, PaymentRequest refund, boolean rentOnly, int order) {
         if (rentOnly) {
-            saveRefundLine(refund, "RENT_REFUND", "Hoàn tiền thuê", refund.getTotalAmount(), 0);
-            return;
+            saveRefundLine(refund, "RENT_REFUND", "Hoàn tiền thuê", refund.getTotalAmount(), order);
+            return order + 1;
         }
         var sourceItems = paymentLineItemRepository.findByPaymentRequestIdOrderBySortOrderAsc(source.getId());
         boolean valid = !sourceItems.isEmpty() && sourceItems.stream().allMatch(item -> item.getAmount() != null && item.getAmount().signum() >= 0);
         BigDecimal sum = valid ? sourceItems.stream().map(com.hs.payment.model.PaymentLineItem::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add) : BigDecimal.ZERO;
-        if (valid && sum.compareTo(refund.getTotalAmount()) == 0) {
-            int order = 0;
+        if (valid && sum.compareTo(source.getTotalAmount()) == 0) {
             for (var item : sourceItems) {
                 if (item.getAmount().signum() == 0) continue;
                 String type = "RENT".equals(item.getType()) ? "RENT_REFUND" : "DEPOSIT".equals(item.getType()) ? "DEPOSIT_REFUND" : "REFUND";
@@ -888,8 +940,9 @@ public class PaymentRequestService {
         } else {
             // Legacy receipts may lack allocation rows. Preserve the known total without inventing rent/deposit amounts.
             boolean deposit = source.getType() == PaymentType.RESERVATION_DEPOSIT;
-            saveRefundLine(refund, deposit ? "DEPOSIT_REFUND" : "REFUND", deposit ? "Hoàn tiền cọc giữ chỗ" : "Hoàn khoản thanh toán đã nhận", refund.getTotalAmount(), 0);
+            saveRefundLine(refund, deposit ? "DEPOSIT_REFUND" : "REFUND", deposit ? "Hoàn tiền cọc giữ chỗ" : "Hoàn khoản thanh toán đã nhận", source.getTotalAmount(), order++);
         }
+        return order;
     }
 
     private void saveRefundLine(PaymentRequest refund, String type, String name, BigDecimal amount, int order) {

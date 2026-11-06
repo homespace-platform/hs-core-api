@@ -42,7 +42,7 @@ class RentalDefaultTest {
     @Mock PlatformTransactionManager transactions; @InjectMocks RentalOnboardingService service;
     Instant now;RentalRequest rental;Contract contract;PaymentRequest rent;DepositRecord deposit;ContractRevision revision;
     @BeforeEach void setup() {
-        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositLedger",new com.hs.payment.service.DepositLedgerService(deposits,payments));
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositLedger",new com.hs.payment.service.DepositLedgerService(deposits,payments,mapper));
         now=Instant.parse("2026-11-02T03:00:00Z");
         when(time.now()).thenAnswer(i->now);when(time.today()).thenAnswer(i->now.atZone(BillingTime.ZONE).toLocalDate());
         rental=RentalRequest.builder().id("r").ownerId("o").renterId("t").status(RentalRequestStatus.ACCEPTED)
@@ -158,7 +158,8 @@ class RentalDefaultTest {
         service.requestCancellation("r","t",new RentalOnboardingService.Cancellation("Hai bên thỏa thuận hủy và hoàn tiền"));
         assertFalse(service.refresh("r","t").canSign());
         var pending=service.decideCancellation("r","o",new RentalOnboardingService.Decision(true,"Thống nhất hoàn lại các khoản"));
-        verify(paymentService).createRefundObligation(rent);verify(paymentService,times(2)).createRefundObligation(any());
+        verify(paymentService).createCancellationRefund(argThat(sources->sources.size()==2 && sources.contains(rent)));
+        verify(paymentService,never()).createRefundObligation(any());
         assertEquals("CANCELLATION_REFUND_PENDING",pending.stage());
         assertEquals(ContractStatus.TENANT_SIGNATURE_PENDING,contract.getStatus());
     }

@@ -91,6 +91,10 @@ public class PaymentRequest extends BaseEntity {
     @Column(name = "breakdown_snapshot", columnDefinition = "TEXT")
     String breakdownSnapshot;
 
+    /** Original confirmed receipts covered by one pre-tenancy cancellation refund. */
+    @Column(name = "refund_sources_snapshot", columnDefinition = "TEXT")
+    String refundSourcesSnapshot;
+
     @Column(name = "excluded_charges_snapshot", columnDefinition = "TEXT")
     String excludedChargesSnapshot;
 

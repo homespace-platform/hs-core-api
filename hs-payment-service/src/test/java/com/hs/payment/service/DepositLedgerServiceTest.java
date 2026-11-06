@@ -13,7 +13,8 @@ import static org.mockito.ArgumentMatchers.*;
 class DepositLedgerServiceTest {
     final DepositRecordRepository deposits=mock(DepositRecordRepository.class);
     final PaymentRequestRepository payments=mock(PaymentRequestRepository.class);
-    final DepositLedgerService service=new DepositLedgerService(deposits,payments);
+    final com.fasterxml.jackson.databind.ObjectMapper mapper=new com.fasterxml.jackson.databind.ObjectMapper();
+    final DepositLedgerService service=new DepositLedgerService(deposits,payments,mapper);
     DepositRecord deposit;
     PaymentRequest initial;
     @BeforeEach void setup(){
@@ -55,6 +56,26 @@ class DepositLedgerServiceTest {
         when(payments.findByRentalRequestIdAndTypeIn(eq("rental"),any())).thenReturn(List.of(refund));
         var result=service.forRental("rental");assertEquals(new BigDecimal("20000000"),result.confirmedRefundedAmount());
         assertEquals(result.confirmedReceivedAmount(),result.confirmedRefundedAmount());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"valid","wrong-source","wrong-total","duplicate-source","malformed","pending"})
+    void groupedRefundCountsOnlyItsVerifiedDepositReceipt(String scenario) {
+        initial.setType(PaymentType.RESERVATION_DEPOSIT);initial.setTotalAmount(deposit.getOriginalAmount());
+        var rent=amount("rent",PaymentType.INITIAL,PaymentDirection.TENANT_TO_LANDLORD,"5000000",PaymentStatus.CONFIRMED);
+        var refund=amount("group",PaymentType.INITIAL_PAYMENT_REFUND,PaymentDirection.LANDLORD_TO_TENANT,"25000000",PaymentStatus.CONFIRMED);
+        refund.setOnboardingKey(InitialRefundSources.key("rental"));
+        refund.setRefundSourcesSnapshot(InitialRefundSources.freeze(List.of(initial,rent),mapper));
+        deposit.setStatus(DepositStatus.REFUNDED);deposit.setRefundPaymentRequestId("group");
+        switch(scenario) {
+            case "wrong-source" -> refund.setRefundSourcesSnapshot(InitialRefundSources.freeze(List.of(rent),mapper));
+            case "wrong-total" -> refund.setTotalAmount(new BigDecimal("30000000"));
+            case "duplicate-source" -> refund.setRefundSourcesSnapshot(InitialRefundSources.freeze(List.of(initial,initial),mapper));
+            case "malformed" -> refund.setRefundSourcesSnapshot("invalid json");
+            case "pending" -> refund.setStatus(PaymentStatus.TRANSFER_REPORTED);
+        }
+        when(payments.findByRentalRequestIdAndTypeIn(eq("rental"),any())).thenReturn(List.of(refund));
+        if("valid".equals(scenario))assertEquals(deposit.getOriginalAmount(),service.forRental("rental").confirmedRefundedAmount());
+        else assertNull(service.forRental("rental").confirmedRefundedAmount());
     }
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings={"pending","different-source","partial","wrong-recipient","not-linked"})

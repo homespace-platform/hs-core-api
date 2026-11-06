@@ -318,16 +318,18 @@ public class RentalOnboardingService {
         if(!actor.equals(r.getOwnerId())||r.getCancellationRequestedAt()==null)throw invalid("Không có đề nghị hủy chờ chủ nhà quyết định.");
         if(p.approve()) {
             boolean refundRequired=false;
+            var receipts=new java.util.ArrayList<com.hs.payment.model.PaymentRequest>();
             for(var type:List.of(PaymentType.RESERVATION_DEPOSIT,PaymentType.INITIAL)) {
                 var payment=payments.findByRentalRequestIdAndTypeForUpdate(id,type).orElse(null);
                 if(payment==null)continue;
                 if(Set.of(PaymentStatus.TRANSFER_REPORTED,PaymentStatus.DISPUTED,PaymentStatus.REJECTED).contains(payment.getStatus()))
                     throw invalid("Phải đối soát khoản chuyển trước khi quyết định hoàn tiền.");
                 if(confirmed(payment)){
-                    if(payment.getTotalAmount().signum()>0){paymentService.createRefundObligation(payment);refundRequired=true;}
+                    if(payment.getTotalAmount().signum()>0){receipts.add(payment);refundRequired=true;}
                 }
                 else {payment.setStatus(PaymentStatus.CANCELLED);payment.setCancelledAt(time.now());payment.setCancelledReason("Hai bên đồng ý hủy hồ sơ nhận nhà");payments.save(payment);}
             }
+            paymentService.createCancellationRefund(receipts);
             r.setHoldExpiresAt(null);
             if(refundRequired)r.setCancellationRefundApprovedAt(time.now());
             else {

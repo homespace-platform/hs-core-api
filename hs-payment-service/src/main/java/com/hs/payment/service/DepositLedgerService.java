@@ -14,6 +14,7 @@ import java.util.List;
 public class DepositLedgerService {
     private final DepositRecordRepository deposits;
     private final PaymentRequestRepository payments;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Transactional(readOnly=true)
     public DepositLedgerView forRental(String rentalId) {
@@ -39,8 +40,9 @@ public class DepositLedgerService {
                 if(p.getType()==PaymentType.INITIAL_PAYMENT_REFUND) {
                     // A combined initial refund contains rent too. Count only its verified deposit principal.
                     boolean fullSourceRefund=originalPayment.filter(source->source.getTotalAmount()!=null
-                            && source.getTotalAmount().compareTo(p.getTotalAmount())==0
-                            && ("REFUND:"+source.getId()).equals(p.getOnboardingKey())).isPresent();
+                            && (source.getTotalAmount().compareTo(p.getTotalAmount())==0
+                                && ("REFUND:"+source.getId()).equals(p.getOnboardingKey())
+                                || InitialRefundSources.covers(p,source,objectMapper))).isPresent();
                     if(fullSourceRefund && received!=null && d.getOriginalAmount()!=null && d.getOriginalAmount().signum()>0
                             && d.getOriginalAmount().compareTo(p.getTotalAmount())<=0) {
                         refunded=refunded.add(d.getOriginalAmount());finalRefundConfirmed=true;

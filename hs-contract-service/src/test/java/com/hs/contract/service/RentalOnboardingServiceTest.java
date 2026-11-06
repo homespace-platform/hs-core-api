@@ -230,11 +230,46 @@ class RentalOnboardingServiceTest {
         when(contracts.findByIdForUpdate("contract")).thenReturn(existing);
         assertThrows(AppException.class,()->service.decideEarlier("rental","change","owner",new RentalOnboardingService.Decision(true,null)));verifyNoInteractions(parking);
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"2026-11-06T10:00:00,false","2026-11-10T10:00:00,true","2026-11-12T10:00:00,true"})
+    void paidDepositAndUnpaidFirstRentRemainCancellableBeforeLeaseSigning(String current,boolean rentOpened) {
+        now=LocalDateTime.parse(current).atZone(BillingTime.ZONE).toInstant();
+        rental.setMoveInDate(LocalDate.of(2026,11,10));rental.setDepositAmount(new BigDecimal("1000000"));
+        deposit.setTotalAmount(new BigDecimal("1000000"));
+        deposit.setConfirmedAt(LocalDateTime.parse("2026-11-06T10:00:00").atZone(BillingTime.ZONE).toInstant());
+        var agreements=mock(com.hs.contract.deposit.DepositAgreementService.class);
+        var signedDeposit=Contract.builder().id("signed-deposit").agreementKind("DEPOSIT").status(ContractStatus.ACTIVE).signedAt(deposit.getConfirmedAt()).build();
+        when(agreements.find("rental")).thenReturn(Optional.of(signedDeposit));when(agreements.signedOrExempt(rental)).thenReturn(true);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",agreements);
+        PaymentRequest first=rentOpened?rent(PaymentStatus.AWAITING_TRANSFER):null;
+        if(first!=null)when(payments.findByRentalRequestIdAndTypeForUpdate("rental",PaymentType.INITIAL)).thenReturn(Optional.of(first));
+        when(payments.findByRentalRequestIdAndTypeForUpdate("rental",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.of(deposit));
+        service.requestCancellation("rental","tenant",new RentalOnboardingService.Cancellation("Đề nghị hủy, chưa đóng tiền tháng đầu"));
+        var view=service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(true,null));
+        verify(paymentService).createCancellationRefund(List.of(deposit));
+        verify(paymentService,never()).createRefundObligation(any());
+        assertEquals("CANCELLATION_REFUND_PENDING",view.stage());assertFalse(view.canSign());
+        assertEquals(PaymentStatus.CONFIRMED,deposit.getStatus());assertEquals(ContractStatus.ACTIVE,signedDeposit.getStatus());
+        if(first!=null)assertEquals(PaymentStatus.CANCELLED,first.getStatus());
+        verifyNoInteractions(parking);verify(listingStatus,never()).releaseReserved(any(),any(),any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=ContractStatus.class,names={"ACTIVE","TERMINATED","EXPIRED","CLOSED"})
+    void aFormalLeaseThatHasAlreadyCompletedSigningCannotUsePreTenancyCancellation(ContractStatus state) {
+        var lease=Contract.builder().id("lease").status(state).signedAt(now).build();
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(lease));
+        when(contracts.findByIdForUpdate("lease")).thenReturn(Optional.of(lease));
+        assertFalse(service.refresh("rental","tenant").canRequestCancellation());
+        assertThrows(AppException.class,()->service.requestCancellation("rental","tenant",new RentalOnboardingService.Cancellation("Đề nghị hủy sau khi hợp đồng đã ký đủ")));
+        verify(paymentService,never()).createRefundObligation(any());
+    }
+
     @Test void cancellationNeedsAgreementAndCreatesRefundRatherThanAutoTransfer() {
         service.requestCancellation("rental","tenant",new RentalOnboardingService.Cancellation("Hai bên thống nhất hủy thuê"));assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());
         when(payments.findByRentalRequestIdAndTypeForUpdate("rental",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.of(deposit));
         var pending=service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(true,null));
-        verify(paymentService).createRefundObligation(deposit);
+        verify(paymentService).createCancellationRefund(List.of(deposit));
         assertEquals("CANCELLATION_REFUND_PENDING",pending.stage());
         assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());
         assertEquals(ListingStatus.RESERVED,rental.getListing().getStatus());
