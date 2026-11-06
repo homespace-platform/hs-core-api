@@ -48,6 +48,8 @@ public class PaymentRequestService {
     private final StorageObjectRepository storageObjectRepository;
     private final PaymentProofUploadSessionService proofUploadSessionService;
     private final BillingTime billingTime;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.hs.payment.receipt.PaymentReceiptService receiptService;
 
     @Value("${homespace.payment.confirmation-window-hours:24}")
     private long confirmationWindowHours = 24;
@@ -549,6 +551,7 @@ public class PaymentRequestService {
         }
 
         if (payment.getStatus() == PaymentStatus.CONFIRMED) {
+            if(receiptService!=null)receiptService.capture(payment);
             publishOnboardingReceipt(payment);
             return toResponse(payment, actorId);
         }
@@ -594,6 +597,7 @@ public class PaymentRequestService {
                 payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"Người thuê xác nhận đã nhận tiền hoàn":"Chủ nhà xác nhận đã nhận đủ tiền", null);
 
         log.info("Payee [{}] CONFIRMED receipt for PaymentRequest [{}]", actorId, paymentRequestId);
+        if(receiptService!=null)receiptService.capture(saved);
         publishOnboardingReceipt(saved);
         if (receiptEvents != null && saved.getType() == PaymentType.INITIAL_PAYMENT_REFUND && saved.getRentalRequestId() != null) {
             receiptEvents.publishEvent(new com.hs.payment.event.InitialRefundConfirmed(saved.getRentalRequestId(), actorId));

@@ -101,6 +101,17 @@ class StorageServiceImplTest {
         assertEquals("PAYMENT_PROOF", response.purpose().name());
     }
 
+    @Test void aClientCannotUploadOrForgeAnOfficialPaymentReceipt() {
+        var request=new CreateUploadRequest("forged.pdf","application/pdf",100L,StoragePurpose.PAYMENT_RECEIPT,StorageVisibility.PRIVATE,"PAYMENT_RECEIPT","r");
+        assertThrows(AppException.class,()->storageService.createUpload(request));
+        verifyNoInteractions(s3Client,presigner);verify(repository,never()).save(any());
+    }
+
+    @Test void generatedReceiptRequiresPdfBytesAndPrivateStorage() {
+        assertThrows(AppException.class,()->storageService.uploadDirect("not a PDF".getBytes(StandardCharsets.US_ASCII),"r.pdf","application/pdf",StoragePurpose.PAYMENT_RECEIPT,"PAYMENT_RECEIPT","r",StorageVisibility.PRIVATE,"SYSTEM"));
+        verifyNoInteractions(s3Client);verify(repository,never()).save(any());
+    }
+
     @Test
     void uploadDirect_validPngProof_success() {
         byte[] validPng = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00};

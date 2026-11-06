@@ -73,6 +73,7 @@ public class StorageServiceImpl implements StorageService {
     @Override
     @Transactional
     public CreateUploadResponse createUpload(CreateUploadRequest request) {
+        if(request.purpose()==StoragePurpose.PAYMENT_RECEIPT)throw new AppException(StorageErrorCode.STORAGE_ACCESS_DENIED);
         String ownerId = currentUserId();
         String normalizedContentType = request.contentType().trim().toLowerCase(Locale.ROOT);
         String referenceType = normalizeReferenceType(request.referenceType());
@@ -533,7 +534,7 @@ public class StorageServiceImpl implements StorageService {
         switch (purpose) {
             case USER_AVATAR -> { typeAllowed = IMAGE_TYPES.contains(contentType); maxSize = 5 * MIB; }
             case CONTRACT_DOCUMENT -> { typeAllowed = DOCUMENT_TYPES.contains(contentType); maxSize = 25 * MIB; }
-            case SIGNATURE_PREPARED_DOCUMENT -> { typeAllowed = contentType.equals("application/pdf"); maxSize = 25 * MIB; }
+            case SIGNATURE_PREPARED_DOCUMENT, PAYMENT_RECEIPT -> { typeAllowed = contentType.equals("application/pdf"); maxSize = 25 * MIB; }
             case IDENTITY_DOCUMENT -> {
                 typeAllowed = IMAGE_TYPES.contains(contentType) || contentType.equals("application/pdf");
                 maxSize = 15 * MIB;
@@ -606,7 +607,7 @@ public class StorageServiceImpl implements StorageService {
                 && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P';
         boolean isPdf = data.length >= 4 && data[0] == '%' && data[1] == 'P' && data[2] == 'D' && data[3] == 'F';
 
-        if (purpose == StoragePurpose.SIGNATURE_PREPARED_DOCUMENT && !isPdf) {
+        if ((purpose == StoragePurpose.SIGNATURE_PREPARED_DOCUMENT || purpose == StoragePurpose.PAYMENT_RECEIPT) && !isPdf) {
             log.warn("Invalid magic bytes for prepared signature PDF");
             throw new AppException(StorageErrorCode.STORAGE_INVALID_FILE_TYPE);
         }

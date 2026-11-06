@@ -9,6 +9,7 @@ public enum StoragePurpose {
     LISTING_VIDEO,
     NEWS_IMAGE,
     PAYMENT_PROOF,
+    PAYMENT_RECEIPT,
     /** PDF trung gian đã chèn signature placeholder — dùng nội bộ trong luồng SmartCA. */
     SIGNATURE_PREPARED_DOCUMENT,
     BRANCH_COVER_IMAGE,
