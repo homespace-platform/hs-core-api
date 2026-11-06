@@ -87,3 +87,12 @@ Lượt cuối backend chạy bằng Maven profile `isolated-build`, tránh đ�
 Schema mới gồm bảng `rental_workflow_records` và các cột nullable trên rental/contract; không backfill/sửa hàng loạt hồ sơ cũ. Cần áp dụng schema qua cấu hình JPA/quy trình triển khai của môi trường trước khi chạy API mới; lượt này không chạy DDL trên DB vận hành.
 
 Không commit/push, deploy hoặc restart dịch vụ vận hành. Hoàn tất ba task được giao và bàn giao tại đây; không triển khai thông báo hay tự thực hiện các hạng mục ngoài phạm vi.
+
+## Rà soát khoản hoàn trước thuê — 06/11/2026
+
+- Ca không đặt cọc, đã xác nhận tiền thuê tháng đầu 1.000.000đ, hai bên đồng ý hủy: tổng cần hoàn 1.000.000đ là đúng. Hai dòng thuê/cọc 0đ trong modal là lỗi hiển thị: nghĩa vụ hoàn chưa lưu line items, còn UI dùng dữ liệu yêu cầu thuê không được truyền đầy đủ để dựng chi tiết.
+- Nghĩa vụ hoàn mới đóng băng các dòng từ chứng từ đã nhận: hoàn thuê, hoàn cọc hoặc cả hai; tổng các dòng bằng tổng nghĩa vụ/QR, không lấy giá Listing hiện tại. Hoàn riêng tiền thuê không tác động cọc giữ lại. Không tạo nghĩa vụ/dòng hoàn 0đ. Khoản gốc và chứng từ đã xác nhận giữ nguyên; gọi lặp không tạo thêm khoản hoàn hoặc dòng tiền.
+- Khoản hoàn lịch sử thiếu chi tiết được UI hiển thị một dòng theo tổng tiền của PaymentRequest và ghi rõ thiếu phân bổ; không tự dựng hai dòng 0đ hoặc đoán lại từ hồ sơ thuê. Nội dung và người nhận trên modal đi theo chiều chuyển: chủ nhà hoàn cho người thuê. Chỉ payer thực tế được mở/gửi báo chuyển; người thuê là bên xác nhận thực nhận khoản hoàn.
+- Sổ cọc trước đây bỏ qua INITIAL_PAYMENT_REFUND nên có thể ghi REFUNDED nhưng số thực hoàn không xác định dù đã có xác nhận. Đã nhận diện khoản hoàn toàn bộ của đúng chứng từ nguồn, đúng bên gửi/nhận và đúng liên kết sổ; chỉ cộng phần cọc gốc, không cộng cả tiền thuê của khoản gộp. Chưa xác nhận, sai nguồn/bên nhận, khoản hoàn thuê riêng hoặc không liên kết không chứng minh đã hoàn cọc.
+- Kiểm thử **101 ca backend**, **52 ca PostgreSQL thật** trên container tạm `hs_workflow_test` và **42 ca web** đều qua; TypeScript và ESLint các file thay đổi đạt. PostgreSQL kiểm tra ca không cọc 1.000.000đ, hoàn gộp tiền thuê/cọc, đối soát, giữ phòng đến khi người thuê xác nhận, chống gọi lặp và các luồng bàn giao/chấm dứt đang có. Test giao diện dùng API giả lập; không gọi ngân hàng, S3 hoặc SmartCA thật.
+- Không sửa dữ liệu/tổng tiền/chứng từ vận hành, không cần reset/seed/backfill CSDL hoặc thêm schema mới. Khởi động lại Core và làm mới web để nhận sửa đổi; container kiểm thử đã được kiểm tra đúng ID/nhãn và dọn sau kiểm thử.

@@ -69,6 +69,59 @@ class PaymentRequestServiceTest {
     private BankAccount landlordAccount;
     private BankAccount tenantAccount;
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"INITIAL,1000000,0","INITIAL,1000000,2000000","RESERVATION_DEPOSIT,0,2000000"})
+    void refundAllocationComesFromThePaidReceiptAndMatchesTheQrTotal(PaymentType type, String rentText, String depositText) throws Exception {
+        BigDecimal rent=new BigDecimal(rentText), deposit=new BigDecimal(depositText), total=rent.add(deposit);
+        var source=PaymentRequest.builder().id("paid").rentalRequestId("rental").listingId("listing").payerId("tenant").payeeId("owner")
+                .type(type).status(PaymentStatus.CONFIRMED).totalAmount(total)
+                .payerBankAccountSnapshot("{\"bankBin\":\"970436\",\"bankCode\":\"VCB\",\"bankName\":\"Bank\",\"accountNumber\":\"222222\",\"accountHolderName\":\"TENANT\"}")
+                .payeeBankAccountSnapshot("{\"accountNumber\":\"111111\"}").build();
+        var rows=List.of(com.hs.payment.model.PaymentLineItem.builder().type("RENT").amount(rent).displayName("Tiền thuê kỳ đầu").build(),
+                com.hs.payment.model.PaymentLineItem.builder().type("DEPOSIT").amount(deposit).displayName("Tiền đặt cọc").build());
+        when(paymentLineItemRepository.findByPaymentRequestIdOrderBySortOrderAsc("paid")).thenReturn(rows);
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-06T08:00:00Z"));
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSREFUND");
+        when(paymentRequestRepository.save(any())).thenAnswer(inv->{PaymentRequest payment=inv.getArgument(0);payment.setId("refund");return payment;});
+        paymentRequestService.createRefundObligation(source);
+        var captured=org.mockito.ArgumentCaptor.forClass(com.hs.payment.model.PaymentLineItem.class);
+        verify(paymentLineItemRepository,times((rent.signum()>0?1:0)+(deposit.signum()>0?1:0))).save(captured.capture());
+        var allocated=captured.getAllValues();
+        assertEquals(0,total.compareTo(allocated.stream().map(com.hs.payment.model.PaymentLineItem::getAmount).reduce(BigDecimal.ZERO,BigDecimal::add)));
+        assertTrue(allocated.stream().allMatch(row->"refund".equals(row.getPaymentRequestId())&&row.getAmount().signum()>0));
+        assertEquals(rent.signum()>0,allocated.stream().anyMatch(row->"RENT_REFUND".equals(row.getType())));
+        assertEquals(deposit.signum()>0,allocated.stream().anyMatch(row->"DEPOSIT_REFUND".equals(row.getType())));
+        verify(vietQrProvider).generateQrImageUrl("970436","222222","TENANT",total,"HSREFUND");
+        var refundCapture=org.mockito.ArgumentCaptor.forClass(PaymentRequest.class);verify(paymentRequestRepository).save(refundCapture.capture());
+        var refund=refundCapture.getValue();assertEquals("owner",refund.getPayerId());assertEquals("tenant",refund.getPayeeId());
+        assertEquals(source.getPayerBankAccountSnapshot(),refund.getPayeeBankAccountSnapshot());
+        assertEquals(PaymentStatus.CONFIRMED,source.getStatus());assertEquals(total,source.getTotalAmount());
+        when(paymentRequestRepository.findByOnboardingKey("REFUND:paid")).thenReturn(Optional.of(refund));
+        paymentRequestService.createRefundObligation(source);
+        verify(paymentRequestRepository,times(1)).save(any());
+        verify(paymentLineItemRepository,times(allocated.size())).save(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void missingOrInconsistentHistoricalAllocationUsesTheKnownRefundTotal(boolean inconsistent) {
+        var source=PaymentRequest.builder().id("paid").type(PaymentType.INITIAL).payerId("tenant").payeeId("owner")
+                .status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("1000000")).build();
+        when(paymentLineItemRepository.findByPaymentRequestIdOrderBySortOrderAsc("paid")).thenReturn(inconsistent
+                ?List.of(com.hs.payment.model.PaymentLineItem.builder().type("DEPOSIT").amount(new BigDecimal("500000")).build()):List.of());
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-06T08:00:00Z"));
+        when(paymentRequestRepository.save(any())).thenAnswer(inv->{PaymentRequest payment=inv.getArgument(0);payment.setId("refund");return payment;});
+        paymentRequestService.createRefundObligation(source);
+        verify(paymentLineItemRepository).save(argThat(row->"REFUND".equals(row.getType())&&row.getAmount().compareTo(source.getTotalAmount())==0));
+    }
+
+    @Test void aZeroRefundCreatesNoPaymentQrOrAllocation() {
+        var source=PaymentRequest.builder().id("paid").status(PaymentStatus.CONFIRMED).totalAmount(BigDecimal.ZERO).build();
+        paymentRequestService.createRefundObligation(source);
+        verifyNoInteractions(paymentLineItemRepository,vietQrProvider,depositRecordRepository);
+        verify(paymentRequestRepository,never()).save(any());
+    }
+
     @Test void rentOnlyRefundDoesNotRefundOrResetRetainedDeposit() {
         var source=PaymentRequest.builder().id("source").contractId("root").rentalRequestId("rental").listingId("listing")
             .payerId("tenant").payeeId("owner").status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("15000000")).build();
@@ -78,6 +131,7 @@ class PaymentRequestServiceTest {
         paymentRequestService.createRentRefundObligation(source,new BigDecimal("5000000"));
         var captor=org.mockito.ArgumentCaptor.forClass(PaymentRequest.class);verify(paymentRequestRepository).save(captor.capture());
         var refund=captor.getValue();assertEquals(new BigDecimal("5000000"),refund.getTotalAmount());assertEquals("root",refund.getContractId());
+        verify(paymentLineItemRepository).save(argThat(row->"RENT_REFUND".equals(row.getType())&&row.getAmount().compareTo(refund.getTotalAmount())==0));
         assertEquals("owner",refund.getPayerId());assertEquals("tenant",refund.getPayeeId());assertEquals(PaymentType.INITIAL_PAYMENT_REFUND,refund.getType());
         assertEquals(PaymentStatus.AWAITING_TRANSFER,refund.getStatus());assertEquals(Instant.parse("2026-11-05T03:00:00Z"),refund.getDueAt());
         verifyNoInteractions(depositRecordRepository);assertEquals(PaymentStatus.CONFIRMED,source.getStatus());

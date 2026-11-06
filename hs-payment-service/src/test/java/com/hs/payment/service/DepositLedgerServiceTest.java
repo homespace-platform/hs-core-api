@@ -48,6 +48,30 @@ class DepositLedgerServiceTest {
         deposit.setStatus(DepositStatus.REFUNDED);deposit.setRefundPaymentRequestId("missing");
         assertNull(service.forRental("rental").confirmedRefundedAmount());assertNull(service.forRental("rental").retainedAmount());
     }
+    @Test void confirmedCombinedInitialRefundCountsOnlyTheDepositPart() {
+        deposit.setStatus(DepositStatus.REFUNDED);deposit.setHeldAmount(BigDecimal.ZERO);deposit.setRefundPaymentRequestId("full-refund");
+        var refund=amount("full-refund",PaymentType.INITIAL_PAYMENT_REFUND,PaymentDirection.LANDLORD_TO_TENANT,"25000000",PaymentStatus.CONFIRMED);
+        refund.setOnboardingKey("REFUND:initial");
+        when(payments.findByRentalRequestIdAndTypeIn(eq("rental"),any())).thenReturn(List.of(refund));
+        var result=service.forRental("rental");assertEquals(new BigDecimal("20000000"),result.confirmedRefundedAmount());
+        assertEquals(result.confirmedReceivedAmount(),result.confirmedRefundedAmount());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings={"pending","different-source","partial","wrong-recipient","not-linked"})
+    void unconfirmedOrUnrelatedInitialRefundDoesNotEstablishDepositRefund(String invalid) {
+        deposit.setStatus(DepositStatus.REFUNDED);deposit.setRefundPaymentRequestId("full-refund");
+        var refund=amount("full-refund",PaymentType.INITIAL_PAYMENT_REFUND,PaymentDirection.LANDLORD_TO_TENANT,"25000000",PaymentStatus.CONFIRMED);
+        refund.setOnboardingKey("REFUND:initial");
+        switch(invalid) {
+            case "pending"->refund.setStatus(PaymentStatus.TRANSFER_REPORTED);
+            case "different-source"->refund.setOnboardingKey("REFUND:other");
+            case "partial"->refund.setTotalAmount(new BigDecimal("5000000"));
+            case "wrong-recipient"->refund.setPayeeId("other");
+            case "not-linked"->refund.setId("other");
+        }
+        when(payments.findByRentalRequestIdAndTypeIn(eq("rental"),any())).thenReturn(List.of(refund));
+        assertNull(service.forRental("rental").confirmedRefundedAmount());
+    }
     @Test void zeroDepositDoesNotRequireOrManufactureReceipt(){
         deposit.setOriginalAmount(BigDecimal.ZERO);deposit.setInitialPaymentRequestId(null);
         assertEquals(0,service.forRental("rental").confirmedReceivedAmount().signum());verify(payments,never()).findById(any());

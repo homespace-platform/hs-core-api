@@ -852,6 +852,7 @@ public class PaymentRequestService {
                 .build();
 
         PaymentRequest savedRefund = paymentRequestRepository.save(refundPayment);
+        saveRefundLineItems(initialPayment, savedRefund, rentOnly);
 
         // Update DepositRecord status to REFUND_DUE
         if(!rentOnly) depositRecordRepository.findByInitialPaymentRequestId(initialPayment.getId())
@@ -864,6 +865,36 @@ public class PaymentRequestService {
         recordEvent(savedRefund.getId(), PaymentEventType.REFUND_OBLIGATION_CREATED, null,
                 PaymentStatus.AWAITING_TRANSFER, "SYSTEM", "SYSTEM",
                 agreedReason!=null?agreedReason:rentOnly?"Hoàn tiền thuê đã nhận; cọc được xử lý riêng theo thông báo vi phạm":"Hai bên đồng ý hủy hồ sơ trước khi ký; chủ nhà cần hoàn khoản thực nhận và người thuê xác nhận nhận đủ", null);
+    }
+
+    /** Freeze the allocation from the paid receipt, never from an edited listing or current rental quote. */
+    private void saveRefundLineItems(PaymentRequest source, PaymentRequest refund, boolean rentOnly) {
+        if (rentOnly) {
+            saveRefundLine(refund, "RENT_REFUND", "Hoàn tiền thuê", refund.getTotalAmount(), 0);
+            return;
+        }
+        var sourceItems = paymentLineItemRepository.findByPaymentRequestIdOrderBySortOrderAsc(source.getId());
+        boolean valid = !sourceItems.isEmpty() && sourceItems.stream().allMatch(item -> item.getAmount() != null && item.getAmount().signum() >= 0);
+        BigDecimal sum = valid ? sourceItems.stream().map(com.hs.payment.model.PaymentLineItem::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add) : BigDecimal.ZERO;
+        if (valid && sum.compareTo(refund.getTotalAmount()) == 0) {
+            int order = 0;
+            for (var item : sourceItems) {
+                if (item.getAmount().signum() == 0) continue;
+                String type = "RENT".equals(item.getType()) ? "RENT_REFUND" : "DEPOSIT".equals(item.getType()) ? "DEPOSIT_REFUND" : "REFUND";
+                String name = "RENT".equals(item.getType()) ? "Hoàn tiền thuê kỳ đầu" : "DEPOSIT".equals(item.getType()) ? "Hoàn tiền đặt cọc"
+                        : "Hoàn " + (item.getDisplayName() == null || item.getDisplayName().isBlank() ? "khoản đã nhận" : item.getDisplayName());
+                saveRefundLine(refund, type, name.substring(0, Math.min(name.length(), 200)), item.getAmount(), order++);
+            }
+        } else {
+            // Legacy receipts may lack allocation rows. Preserve the known total without inventing rent/deposit amounts.
+            boolean deposit = source.getType() == PaymentType.RESERVATION_DEPOSIT;
+            saveRefundLine(refund, deposit ? "DEPOSIT_REFUND" : "REFUND", deposit ? "Hoàn tiền cọc giữ chỗ" : "Hoàn khoản thanh toán đã nhận", refund.getTotalAmount(), 0);
+        }
+    }
+
+    private void saveRefundLine(PaymentRequest refund, String type, String name, BigDecimal amount, int order) {
+        paymentLineItemRepository.save(com.hs.payment.model.PaymentLineItem.builder().paymentRequestId(refund.getId())
+                .type(type).displayName(name).amount(amount).quantity(1).unitPrice(amount).sortOrder(order).build());
     }
 
     @Transactional
