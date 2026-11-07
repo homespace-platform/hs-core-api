@@ -27,6 +27,7 @@ class PaymentReceiptControllerTest {
   void missingIdentityNeverReachesReceiptOrPdfService() {
     assertThrows(AppException.class, () -> controller.list(null, null, null, 1, 12));
     assertThrows(AppException.class, () -> controller.pdf("receipt", true));
+    assertThrows(AppException.class, () -> controller.content("receipt"));
     verifyNoInteractions(service);
   }
 
@@ -40,6 +41,22 @@ class PaymentReceiptControllerTest {
     verify(service).list("tenant", "TENANT", "lease", null, 1, 12);
     verify(service).byPayment("payment", "tenant");
     verify(service).retry("receipt", "tenant");
+  }
+
+  @Test
+  void webViewerReceivesTheSamePrivatePdfBytesAsJsonWithoutFileHeaders() throws Exception {
+    UserContextHolder.set(new UserContext("tenant", null));
+    byte[] pdf = {'%', 'P', 'D', 'F', '-', 0, (byte) 0xff};
+    when(service.pdf("r", "tenant")).thenReturn(pdf);
+    MockMvcBuilders.standaloneSetup(controller).build()
+        .perform(get("/payment-receipts/r/content"))
+        .andExpect(status().isOk())
+        .andExpect(content().contentTypeCompatibleWith("application/json"))
+        .andExpect(header().string("Cache-Control", "no-store"))
+        .andExpect(header().doesNotExist("Content-Disposition"))
+        .andExpect(jsonPath("$.result").value(java.util.Base64.getEncoder().encodeToString(pdf)));
+    verify(service).pdf("r", "tenant");
+    verifyNoMoreInteractions(service);
   }
 
   @Test

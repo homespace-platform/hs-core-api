@@ -52,6 +52,14 @@ public class PaymentReceiptController {
     return ApiResponse.<PaymentReceiptView>builder().result(receipts.retry(id, actor())).build();
   }
 
+  // Download managers can intercept PDF responses before the web app receives them.
+  @GetMapping(value = "/{id}/content", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<ApiResponse<byte[]>> content(@PathVariable String id) {
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore())
+        .body(ApiResponse.<byte[]>builder().result(receipts.pdf(id, actor())).build());
+  }
+
   @GetMapping(value = "/{id}/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
   public ResponseEntity<byte[]> pdf(
       @PathVariable String id, @RequestParam(defaultValue = "false") boolean download) {
