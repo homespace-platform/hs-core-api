@@ -10,6 +10,9 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
     <artifactId>hs-api-service</artifactId>
+    <properties>
+        <spring-boot.run.skip>false</spring-boot.run.skip>
+    </properties>
     <dependencies>
         <dependency>
             <groupId>com.hs</groupId>
@@ -108,6 +111,7 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
                     <mainClass>com.hs.HsApiServiceApplication</mainClass>
+                    <workingDirectory>${maven.multiModuleProjectDirectory}</workingDirectory>
                 </configuration>
             </plugin>
         </plugins>
