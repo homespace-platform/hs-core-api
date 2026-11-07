@@ -1,0 +1,6 @@
+interface:
+  display_name: "Focused Code Review"
+  short_description: "Review changes for actionable defects"
+
+policy:
+  allow_implicit_invocation: false
