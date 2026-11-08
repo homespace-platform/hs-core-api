@@ -102,6 +102,8 @@ Không dùng key của root account; không đưa credential lên Git, tài li�
 
 ### 5. Cấu hình backend
 
+Có thể làm bước này sau, khi chuẩn bị chạy ứng dụng. Kiểm tra S3 ở bước 6 không cần backend hoặc Access Key local.
+
 Điền vào `hs-core-api/.env`:
 
 ```dotenv
@@ -113,25 +115,36 @@ AWS_SECRET_ACCESS_KEY=<secret-access-key-cua-ban>
 
 Điền một dòng cho mỗi giá trị, không bọc dấu nháy. `.env` không được commit. Chạy Core từ thư mục `hs-core-api` để nạp đúng file; nếu dùng IDE với working directory khác, cấu hình đường dẫn hoặc cấp các biến qua Run/Debug Configuration. Khởi động lại Core sau khi sửa.
 
-### 6. Kiểm tra upload từ ứng dụng
+### 6. Kiểm tra trực tiếp trên S3 Console — không cần backend
 
-Sau thời gian chờ ở bước 1, import collection:
+Sau thời gian chờ ở bước 1, dùng file thử riêng; không thay file hợp đồng thật.
+
+**Upload bản A:**
+
+1. Trên máy, tạo file `versioning-demo.txt` có nội dung:
 
 ```text
-hs-infra/postman/Storage Service - Gateway.postman_collection.json
+Day la ban A
 ```
 
-Chạy theo thứ tự:
+2. Mở **S3 → homespace-dev-files → Objects**, tạo/mở thư mục thử `general/versioning-test/`.
+3. Nhấn **Upload → Add files**, chọn `versioning-demo.txt`, rồi **Upload**.
+4. Quay lại danh sách object, bật **Show versions**. Ghi nhận **Version ID** của bản A; với file vừa tạo sau khi bật Versioning, giá trị này phải khác `null`.
 
-| Bước | Thao tác | Kết quả cần thấy |
-|---|---|---|
-| 1 | Get Token | Có token đăng nhập hợp lệ. |
-| 2 | Create Presigned Upload | Có `uploadUrl` trỏ đúng bucket. |
-| 3 | PUT File Directly To S3 | `200 OK`, body có thể trống. Request dùng `No Auth`, gửi file dạng binary và đúng `Content-Type`. |
-| 4 | Complete Upload | Thành công, bản ghi file chuyển `READY`. |
-| 5 | Lấy presigned view/download URL | Xem/tải đúng file vừa upload. |
+**Upload bản B vào cùng key:**
 
-Tiếp tục kiểm tra Versioning theo mục B.2. Một lần upload thành công chưa chứng minh ứng dụng đã đọc theo version cụ thể.
+1. Sửa chính file local đó thành `Day la ban B`, lưu lại và giữ nguyên tên `versioning-demo.txt`.
+2. Upload lại vào **đúng thư mục `general/versioning-test/`**. Key của cả hai lần phải là `general/versioning-test/versioning-demo.txt`.
+3. Quay lại danh sách, refresh và bật **Show versions**.
+4. Chọn riêng từng phiên bản để **Download**. Mở file vừa tải để đối chiếu; trình duyệt có thể thêm hậu tố vào tên khi tải nhiều lần.
+
+| Kiểm tra | Kết quả đúng |
+|---|---|
+| Lịch sử của cùng key | Có hai phiên bản với Version ID khác nhau. |
+| Phiên bản mới nhất | Tải được nội dung `Day la ban B`. |
+| Phiên bản cũ | Vẫn tải được nội dung `Day la ban A`. |
+
+Đạt cả ba kết quả là S3 Versioning hoạt động. Không cần chạy Core, Postman hoặc gửi transaction blockchain. Đây là kiểm tra bằng quyền tài khoản đang đăng nhập Console; chưa kiểm chứng IAM credential của backend, CORS trình duyệt hoặc khả năng HomeSpace đọc đúng version. Các phần đó cần kiểm tra khi chạy ứng dụng sau này.
 
 ## B. Bật Versioning cho bucket đang sử dụng
 
@@ -148,15 +161,7 @@ Không cần đổi bucket, Access Key hoặc `.env` chỉ để bật Versionin
 
 ### B.2. Kiểm tra S3 giữ đúng hai phiên bản
 
-Dùng key thử riêng `general/versioning-demo.txt`, không dùng hợp đồng thật:
-
-1. Upload file nội dung `ban A` từ Console.
-2. Bật **Show versions**, ghi nhận **Version ID** của file.
-3. Upload file nội dung `ban B` vào đúng key cũ.
-4. Bật **Show versions**: phải có hai Version ID khác nhau; bản B là mới nhất.
-5. Mở/tải riêng từng phiên bản: bản A vẫn giữ nội dung cũ.
-
-Đây là kiểm tra S3. Việc HomeSpace lấy đúng phiên bản còn phụ thuộc hỗ trợ backend tại mục D.
+Làm theo **mục A.6** bằng file thử mới. Không cần chạy backend. Nếu thấy hai Version ID khác nhau và tải được đúng nội dung A/B thì phần cấu hình S3 đã đạt; giới hạn của backend được nêu tại mục D.
 
 ## C. Chỉ public avatar nếu cần
 
