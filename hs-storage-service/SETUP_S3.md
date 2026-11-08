@@ -1,6 +1,6 @@
 # Thiết lập AWS S3 cho Storage Service
 
-Tài liệu này hướng dẫn thành viên dự án cấu hình AWS S3 cho môi trường development và lấy Access Key để chạy `hs-api-service` trên máy local.
+Tài liệu này hướng dẫn cấu hình AWS S3 cho môi trường development, bật Versioning cho tài liệu hợp đồng và lấy Access Key để chạy `hs-api-service` trên máy local. Các bước trên AWS Console do bạn thực hiện thủ công.
 
 ## Thông tin dùng chung
 
@@ -25,11 +25,64 @@ Nếu chưa có:
 3. **AWS Region**: chọn `Asia Pacific (Singapore) ap-southeast-1`.
 4. **Object Ownership**: giữ `ACLs disabled (recommended)`.
 5. **Block Public Access**: giữ bật toàn bộ.
-6. **Bucket Versioning**: có thể để `Disable` cho development.
+6. **Bucket Versioning**: chọn `Enable`.
 7. **Default encryption**: giữ mã hóa mặc định `SSE-S3`.
 8. Nhấn **Create bucket**.
 
 Bucket phải để private. Storage Service cấp presigned URL tạm thời để upload, xem và tải file; không cần public bucket.
+
+## 1A. Bật Versioning cho bucket đang sử dụng
+
+Versioning giữ nhiều phiên bản của cùng một object key. Upload file mới cùng key tạo phiên bản mới; bản cũ vẫn còn nếu chưa bị xóa vĩnh viễn hoặc hết hạn theo Lifecycle. Versioning không tự kiểm tra chữ ký/hash và không thay thế blockchain.
+
+### 1A.1. Thao tác trên AWS Console
+
+1. Chọn thời điểm có thể tạm dừng các thao tác ghi file của HomeSpace: upload, tạo PDF, ký số, copy và xóa file. Không thử trên hợp đồng đang có lượt ký xử lý dở.
+2. Mở **S3 → General purpose buckets → homespace-dev-files → Properties**.
+3. Tại **Bucket Versioning**, nhấn **Edit**.
+4. Chọn **Enable**, sau đó **Save changes**.
+5. Quay lại **Properties**, kiểm tra **Bucket Versioning: Enabled**.
+6. Với lần bật đầu tiên, đợi ít nhất **15 phút trước khi tiếp tục PUT/DELETE** theo khuyến nghị của AWS. Sau đó mới mở lại thao tác ghi file của ứng dụng.
+
+Không cần đổi bucket, region, Access Key hoặc biến môi trường chỉ để bật Versioning. Cần bổ sung quyền IAM đọc phiên bản ở mục 3 trước khi backend bắt đầu dùng `versionId`.
+
+### 1A.2. Kiểm tra bằng một file thử
+
+Thực hiện trên key thử riêng, ví dụ `general/versioning-demo.txt`; không ghi đè tài liệu hợp đồng thật.
+
+1. Tại tab **Objects**, upload file thử có nội dung `ban A`.
+2. Bật **Show versions**, mở phiên bản vừa upload và ghi nhận **Version ID**.
+3. Upload file nội dung `ban B` vào **đúng key đó**.
+4. Bật **Show versions**: phải thấy hai phiên bản với Version ID khác nhau, trong đó bản B là mới nhất.
+5. Mở/tải riêng từng phiên bản để xác nhận bản A vẫn chứa nội dung cũ.
+
+Đây là kiểm tra S3, chưa chứng minh HomeSpace đã đọc đúng phiên bản. Không dùng API xóa của ứng dụng để dọn thử rồi cho rằng mọi phiên bản đã được xóa: xóa theo key thường chỉ tạo delete marker.
+
+### 1A.3. Dữ liệu cũ và giới hạn hiện tại của backend
+
+| Trường hợp | Hành vi |
+|---|---|
+| Object có từ trước lúc bật | Giữ nội dung hiện có; Version ID của phiên bản cũ là giá trị đặc biệt `null` của S3. Không tự có lịch sử trước khi bật. |
+| Upload/copy sau lúc bật | S3 cấp Version ID mới cho phiên bản đích. |
+| GET không truyền `versionId` | Lấy phiên bản hiện tại; có thể nhận file mới bị ghi đè cùng key. |
+| GET truyền Version ID cụ thể | Lấy đúng phiên bản đó, cần quyền `s3:GetObjectVersion`. |
+| Xóa theo key, không truyền Version ID | Thường tạo delete marker; các phiên bản cũ vẫn còn và vẫn tính phí lưu trữ. |
+
+**Backend hiện tại chưa lưu S3 `versionId` và chưa truyền nó khi đọc/copy/cấp URL.** Bật Versioning giúp S3 giữ lịch sử ngay, nhưng chưa làm HomeSpace tự cố định PDF đã ký. Phần backend này cần triển khai riêng sau review. Không nhầm S3 Version ID với `revisionId`, `templateVersionId` hay `Version` trong JSON IAM policy.
+
+Luồng phụ lục hiện tạo hồ sơ, revision và các file riêng; không ghi đè PDF hợp đồng gốc. Versioning cần bảo vệ từng object của hợp đồng/phụ lục, không dùng các phiên bản cùng key để thay cho phụ lục nghiệp vụ. Chấp thuận đề xuất chưa đồng nghĩa đã có PDF ký đủ hoặc phụ lục đã đến ngày hiệu lực.
+
+Không tự gán phiên bản mới nhất cho hợp đồng cũ. Khi bổ sung định danh phiên bản cho PDF cũ, phải kiểm tra bytes với hash đã ghi nhận (nếu có) trước khi cố định. Trong SDK, không truyền tham số `versionId` khác với việc truyền chuỗi literal `"null"` để chỉ phiên bản cũ của S3.
+
+### 1A.4. Lưu giữ và chi phí
+
+- Chưa tạo rule Lifecycle xóa **noncurrent versions** cho prefix tài liệu hợp đồng trước khi chốt chính sách lưu giữ. Phiên bản được HomeSpace cố định có thể trở thành noncurrent sau một lần upload cùng key.
+- Versioning giữ nhiều bản nên tăng dung lượng tính phí. Xóa mềm trong ứng dụng hoặc tạo delete marker không thu hồi toàn bộ dung lượng.
+- Nhánh cleanup khi upload/copy lỗi hiện xóa theo key. Sau khi bật Versioning, các bản orphan có thể còn lại sau delete marker; cần sửa cleanup theo version trong đợt backend. Không cấp rộng quyền xóa version hoặc tạo Lifecycle xóa mọi bản cũ để xử lý tạm.
+- Khi đã bật, bucket chỉ có thể chuyển sang **Suspended**, không quay lại trạng thái chưa từng bật. Không Suspend để thử khôi phục; việc đó không xóa lịch sử và không phải rollback dữ liệu.
+- Object Lock là cấu hình riêng để bảo vệ phiên bản khỏi bị xóa trong thời hạn lưu giữ. Chưa bật Object Lock trong bước này; cần chốt chính sách trước. Object Lock vẫn cho phép tạo phiên bản mới cùng key, nên backend vẫn phải cố định Version ID.
+
+Tham khảo AWS: [Bật Versioning và thời gian chờ](https://docs.aws.amazon.com/AmazonS3/latest/userguide/manage-versioning-examples.html), [đọc đúng phiên bản](https://docs.aws.amazon.com/AmazonS3/latest/userguide/RetrievingObjectVersions.html), [delete marker](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html), [Object Lock](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html).
 
 ## 2. Cấu hình CORS cho frontend
 
@@ -60,7 +113,8 @@ Mở **S3 → homespace-dev-files → Permissions → Cross-origin resource shar
     ],
     "ExposeHeaders": [
       "ETag",
-      "x-amz-checksum-sha256"
+      "x-amz-checksum-sha256",
+      "x-amz-version-id"
     ],
     "MaxAgeSeconds": 3600
   }
@@ -78,7 +132,7 @@ Giải thích:
 | `GET` | Xem hoặc tải file bằng presigned URL |
 | `HEAD` | Đọc metadata của object khi cần |
 | `AllowedHeaders: ["*"]` | Cho phép các header mà trình duyệt/AWS cần gửi khi upload |
-| `ExposeHeaders` | Cho phép JavaScript đọc `ETag` và checksum từ response S3 |
+| `ExposeHeaders` | Cho phép JavaScript đọc `ETag`, checksum và Version ID khi S3 trả các header đó; không tự làm backend lưu phiên bản |
 | `MaxAgeSeconds` | Trình duyệt cache kết quả preflight trong 1 giờ |
 
 Không thêm `"*"` vào `AllowedOrigins` cho production. Khi deploy, thêm chính xác domain frontend, ví dụ:
@@ -91,48 +145,15 @@ Không thêm `"*"` vào `AllowedOrigins` cho production. Khi deploy, thêm chín
 
 CORS không làm bucket thành public và không thay thế IAM policy. Request vẫn phải có presigned URL hợp lệ.
 
-## 2A. Public tất cả prefix, trừ user_contract khi chưa dùng được CloudFront
+## 2A. Chỉ public avatar nếu chưa dùng CloudFront
 
-Nếu tài khoản AWS chưa được xác minh để tạo CloudFront, có thể cho phép public read hầu hết object để frontend truy cập trực tiếp. Với yêu cầu hiện tại:
+Mặc định giữ bucket private và bật toàn bộ Block Public Access. Nếu cần URL avatar công khai khi chưa dùng CloudFront, chỉ cho phép `user_avatar/*`; tài liệu hợp đồng, bản PDF chuẩn bị ký, giấy tờ định danh và các prefix còn lại phải private.
 
-- Public read cho mọi object trong bucket.
-- Không public `user_contract/*`.
+**Nếu từng áp dụng hướng dẫn cũ public toàn bucket trừ `user_contract/*`:** kiểm tra bucket policy, bỏ riêng statement `AllowPublicReadAllObjects` do hướng dẫn đó tạo và thay bằng allow avatar dưới đây. Bỏ riêng statement `DenyPublicReadUserContract` cũ: explicit deny với `Principal: "*"` chặn cả IAM/presigned GET, không chỉ người dùng ẩn danh. Giữ nguyên các statement khác chưa được review. Không dựa vào tên `user_contract/` để bảo vệ PDF: code hiện lưu tài liệu theo purpose, ví dụ `contract_document/` và `signature_prepared_document/`.
 
-Prefix cần giữ private:
+### 2A.1. Block Public Access nếu cần public avatar
 
-```text
-user_contract/*
-```
-
-Các prefix khác như `user_avatar/*`, `contract_document/*`, `identity_document/*`, `property_image/*` và `general/*` sẽ public read theo bucket policy.
-
-Luồng truy cập file khi dùng phương án này:
-
-```text
-Frontend -> presigned PUT -> S3
-Frontend -> complete upload -> Storage Service
-Backend tạo URL cố định từ objectKey
-Browser -> public S3 URL của hầu hết prefix
-Browser -> AccessDenied với user_contract/*
-```
-
-URL object public cố định có dạng:
-
-```text
-https://homespace-dev-files.s3.ap-southeast-1.amazonaws.com/{prefix}/{path-to-file}
-```
-
-URL này không tự hết hạn. URL chỉ ngừng hoạt động nếu object bị xóa, đổi key hoặc bucket policy bị thu hồi. Với `user_contract/*`, truy cập trực tiếp sẽ bị từ chối.
-
-### 2A.1. Điều chỉnh Block Public Access của bucket
-
-Mở:
-
-```text
-S3 -> homespace-dev-files -> Permissions -> Block public access -> Edit
-```
-
-Bỏ chọn `Block all public access`, sau đó cấu hình riêng từng mục:
+Mở **S3 → homespace-dev-files → Permissions → Block public access → Edit**. Chỉ khi chọn phương án avatar public mới điều chỉnh:
 
 | Thiết lập | Giá trị |
 |---|---|
@@ -141,111 +162,38 @@ Bỏ chọn `Block all public access`, sau đó cấu hình riêng từng mục:
 | Block public access granted through new public bucket or access point policies | Tắt |
 | Block public and cross-account access through any public bucket or access point policies | Tắt |
 
-Xác nhận cảnh báo và lưu thay đổi.
+Giữ **Object Ownership: Bucket owner enforced**, không dùng public ACL. Nếu account-level Block Public Access chặn policy, cần quản trị viên review ảnh hưởng các bucket khác trước khi thay đổi cấp account; có thể tiếp tục giữ toàn bucket private và dùng presigned URL cho avatar.
 
-Hai mục ACL vẫn phải bật vì dự án sử dụng `Bucket owner enforced` và không cần public object bằng ACL. Chỉ bucket policy được phép public object theo prefix mong muốn.
+### 2A.2. Bucket policy chỉ cho avatar
 
-Nếu lưu bucket policy vẫn báo bị chặn, kiểm tra thêm:
-
-```text
-S3 -> Block Public Access settings for this account
-```
-
-AWS áp dụng cấu hình hạn chế nhất giữa account và bucket. Nếu account đang chặn toàn bộ public bucket policy, cần tắt hai mục liên quan đến public bucket policy ở cấp account. Việc thay đổi cấp account ảnh hưởng các bucket khác, vì vậy phải kiểm tra kỹ từng bucket và không thêm public policy ngoài bucket `homespace-dev-files`.
-
-### 2A.2. Thêm bucket policy public toàn bộ, trừ user_contract
-
-Mở:
-
-```text
-S3 -> homespace-dev-files -> Permissions -> Bucket policy -> Edit
-```
-
-Nếu bucket chưa có policy, dùng:
+Mở **Permissions → Bucket policy → Edit**. Nếu chưa có policy, dùng:
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AllowPublicReadAllObjects",
+      "Sid": "AllowPublicReadAvatars",
       "Effect": "Allow",
       "Principal": "*",
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::homespace-dev-files/*"
-    },
-    {
-      "Sid": "DenyPublicReadUserContract",
-      "Effect": "Deny",
-      "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::homespace-dev-files/user_contract/*"
+      "Resource": "arn:aws:s3:::homespace-dev-files/user_avatar/*"
     }
   ]
 }
 ```
 
-Nếu bucket đã có policy, chỉ thêm object sau vào mảng `Statement`; không xóa các statement hiện tại:
+Nếu có policy, ghép statement allow avatar vào policy sau khi loại bỏ đúng rule public toàn bucket nói trên; không thay toàn bộ policy mà chưa review. Không cấp public `s3:GetObjectVersion`. Không thêm deny mọi principal cho prefix private chỉ để chặn anonymous: khi không có public allow, anonymous không được đọc; IAM backend vẫn cần đọc được theo policy mục 3.
 
-```json
-{
-  "Sid": "AllowPublicReadAllObjects",
-  "Effect": "Allow",
-  "Principal": "*",
-  "Action": "s3:GetObject",
-  "Resource": "arn:aws:s3:::homespace-dev-files/*"
-}
-```
+### 2A.3. Kiểm tra quyền
 
-và thêm tiếp object deny này:
+Dùng key của object thực sự tồn tại, không dùng đường dẫn giả:
 
-```json
-{
-  "Sid": "DenyPublicReadUserContract",
-  "Effect": "Deny",
-  "Principal": "*",
-  "Action": "s3:GetObject",
-  "Resource": "arn:aws:s3:::homespace-dev-files/user_contract/*"
-}
-```
+1. Mở URL avatar không có query presigned trong cửa sổ ẩn danh: chỉ hiển thị nếu đã chọn cấu hình avatar public.
+2. Với PDF hợp đồng, PDF chuẩn bị ký và giấy tờ định danh: URL S3 không có query presigned phải bị từ chối. Kiểm tra cả phiên bản cụ thể nếu đã biết Version ID.
+3. URL presigned do backend cấp cho người dùng có quyền vẫn phải hoạt động. Khi backend dùng phiên bản cụ thể, request cần có `versionId` và IAM cần `s3:GetObjectVersion`.
 
-Do `Deny` luôn được ưu tiên hơn `Allow`, `user_contract/*` vẫn private dù có rule allow toàn bucket.
-
-Policy này chỉ cấp read công khai cho object không thuộc `user_contract/*`. Nó không cấp các quyền sau:
-
-```text
-s3:PutObject
-s3:DeleteObject
-s3:ListBucket
-```
-
-Upload và xóa vẫn phải đi qua IAM/presigned URL của Storage Service.
-
-### 2A.3. Kiểm tra policy public trừ user_contract
-
-Sau khi upload và complete một object không thuộc `user_contract/*`, lấy `objectKey` từ response tạo upload, ví dụ:
-
-```text
-user_avatar/4336d812-4e87-4766-b68b-081a8faabd66/c4e050b2-67fa-4364-a685-adb6421d4d1b.png
-```
-
-Mở cửa sổ ẩn danh và truy cập:
-
-```text
-https://homespace-dev-files.s3.ap-southeast-1.amazonaws.com/user_avatar/4336d812-4e87-4766-b68b-081a8faabd66/c4e050b2-67fa-4364-a685-adb6421d4d1b.png
-```
-
-Kết quả đúng là ảnh hiển thị mà không cần đăng nhập AWS và không cần query string presigned.
-
-Kiểm tra thêm một object thuộc `user_contract/*`, ví dụ:
-
-```text
-https://homespace-dev-files.s3.ap-southeast-1.amazonaws.com/user_contract/abc/contract.pdf
-```
-
-URL S3 trực tiếp của object này phải trả `AccessDenied`; chỉ presigned view/download URL mới được phép hoạt động.
-
-> Object public có thể bị xem hoặc thu thập bởi bất kỳ ai biết URL. Nên đặt tài liệu nhạy cảm dưới `user_contract/` để luôn buộc truy cập qua presigned URL.
+Không xem `AccessDenied` từ URL của key không tồn tại là bằng chứng policy đã bảo vệ đúng một tài liệu thật. Cấu hình bucket/policy chỉ được coi là đã kiểm tra sau khi bạn thực hiện các bước này trên AWS.
 
 ## 3. Tạo IAM policy giới hạn cho bucket
 
@@ -271,6 +219,7 @@ Mở **AWS Console → IAM → Policies → Create policy → JSON**, sau đó d
       "Action": [
         "s3:PutObject",
         "s3:GetObject",
+        "s3:GetObjectVersion",
         "s3:DeleteObject"
       ],
       "Resource": "arn:aws:s3:::homespace-dev-files/*"
@@ -293,7 +242,12 @@ Tiếp tục:
 | `s3:ListBucket` | Kiểm tra/list object trong bucket khi cần |
 | `s3:PutObject` | Upload file bằng presigned URL |
 | `s3:GetObject` | Xem, tải và kiểm tra object đã upload |
-| `s3:DeleteObject` | Xóa file |
+| `s3:GetObjectVersion` | Đọc/HEAD hoặc cấp presigned URL cho một phiên bản cụ thể; cần khi backend cố định `versionId` |
+| `s3:DeleteObject` | Xóa theo key; với bucket Versioning Enabled thường tạo delete marker |
+
+Nếu policy đã tồn tại, sửa **policy đang gắn cho IAM user/role của backend** để thêm `s3:GetObjectVersion` vào nhóm quyền object; không tạo Access Key mới chỉ vì thêm quyền này. Quyền bật Versioning thuộc tài khoản quản trị thao tác Console, không cần cấp cho tiến trình backend.
+
+Không cấp `s3:DeleteObjectVersion` cho backend trong cấu hình này. Đây là quyền xóa vĩnh viễn một phiên bản; chỉ quản trị viên có quy trình lưu giữ/khôi phục mới nên được cấp. `s3:ListBucketVersions` chỉ cần nếu công cụ quản trị thực sự liệt kê lịch sử; backend đọc theo Version ID đã biết không cần quyền này. Xem [quyền đọc object/version](https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html).
 
 ## 4. Tạo IAM user cho Storage Service
 
