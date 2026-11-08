@@ -2,6 +2,7 @@ package com.hs.contract.service.impl;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.contract.advice.ContractErrorCode;
+import com.hs.contract.blockchain.persistence.ContractDocumentProofEnqueuer;
 import com.hs.contract.model.*;
 import com.hs.contract.model.constant.*;
 import com.hs.contract.repository.*;
@@ -30,10 +31,12 @@ class SmartCaDraftIntegrityTest {
     @Mock RentalOnboardingService onboarding;
     @Mock EntityManager entityManager;
     @Mock ListingStatusService listingStatus;
+    @Mock ContractDocumentProofEnqueuer documentProofEnqueuer;
     @InjectMocks SmartCaSignatureServiceImpl service;
 
     @BeforeEach void wireFieldDependencies() {
         ReflectionTestUtils.setField(service,"draftIntegrity",integrity);
+        ReflectionTestUtils.setField(service,"documentProofEnqueuer",documentProofEnqueuer);
         ReflectionTestUtils.setField(service,"onboarding",onboarding);
         ReflectionTestUtils.setField(service,"entityManager",entityManager);
     }
@@ -60,9 +63,11 @@ class SmartCaDraftIntegrityTest {
         when(rentals.findByIdForUpdate("rental")).thenReturn(Optional.of(RentalRequest.builder().id("rental").build()));
         doThrow(new AppException(ContractErrorCode.CONTRACT_DRAFT_READ_ONLY)).when(integrity).validateForDocument(c);
         var context=context("EmbeddingContext","request","root",SignerRole.TENANT,"prepared",0L,8192,"provider-result","certificate","range","identity","HD",1,"reviewed");
-        assertEquals(6070,assertThrows(AppException.class,()->ReflectionTestUtils.invokeMethod(service,"finalizeSignedRequest","request","signed-storage",100L,context)).getCode());
+        assertEquals(6070,assertThrows(AppException.class,()->ReflectionTestUtils.invokeMethod(service,"finalizeSignedRequest","request","signed-storage",100L,context,
+                "0x" + "a".repeat(64))).getCode());
         assertEquals(SignatureRequestStatus.EMBEDDING,request.getStatus());
         verify(requests,never()).save(any());verify(contracts,never()).save(any());verifyNoInteractions(documents,listingStatus);
+        verifyNoInteractions(documentProofEnqueuer);
     }
     private Contract root(){return Contract.builder().id("root").rentalRequestId("rental").tenantId("tenant")
             .currentRevisionId("reviewed").status(ContractStatus.DRAFT).paymentStatus(ContractPaymentStatus.PAID).build();}

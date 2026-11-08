@@ -69,6 +69,12 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- Ethereum ABI and EIP-1559 signing. -->
+        <dependency>
+            <groupId>org.web3j</groupId>
+            <artifactId>core</artifactId>
+            <version>4.14.0</version>
+        </dependency>
         <!-- PDF signing: Apache PDFBox (Apache 2.0) + Bouncy Castle -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>

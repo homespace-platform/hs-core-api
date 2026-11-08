@@ -1,6 +1,7 @@
 package com.hs.contract.service.impl;
 
 import com.hs.contract.deposit.DepositAgreementService;
+import com.hs.contract.blockchain.persistence.ContractDocumentProofEnqueuer;
 import com.hs.contract.model.*;
 import com.hs.contract.model.constant.*;
 import com.hs.contract.repository.*;
@@ -31,6 +32,7 @@ class WorkflowSignatureIsolationTest {
     @Mock ParkingReservationService parking;
     @Mock RentalOnboardingService onboarding;
     @Mock DepositAgreementService depositAgreements;
+    @Mock ContractDocumentProofEnqueuer documentProofEnqueuer;
     @Mock com.hs.contract.service.ContractLifecycleService lifecycle;
     @Mock jakarta.persistence.EntityManager entityManager;
     @InjectMocks SmartCaSignatureServiceImpl service;
@@ -54,6 +56,7 @@ class WorkflowSignatureIsolationTest {
     }
     private Contract run(SignerRole role,ContractStatus status) throws Exception {
         ReflectionTestUtils.setField(service,"depositAgreements",depositAgreements);
+        ReflectionTestUtils.setField(service,"documentProofEnqueuer",documentProofEnqueuer);
         ReflectionTestUtils.setField(service,"onboarding",onboarding);ReflectionTestUtils.setField(service,"lifecycle",lifecycle);
         ReflectionTestUtils.setField(service,"entityManager",entityManager);
         var c=Contract.builder().id("workflow").rentalRequestId("rental").agreementKind("WORKFLOW").parentContractId("root")
@@ -72,7 +75,8 @@ class WorkflowSignatureIsolationTest {
         Class<?> context=Arrays.stream(SmartCaSignatureServiceImpl.class.getDeclaredClasses()).filter(t->t.getSimpleName().equals("EmbeddingContext")).findFirst().orElseThrow();
         var ctor=context.getDeclaredConstructors()[0];ctor.setAccessible(true);
         Object ctx=ctor.newInstance("request","workflow",role,"prepared",0L,8192,"provider-result","certificate","range","identity","DC-1",1,"revision");
-        ReflectionTestUtils.invokeMethod(service,"finalizeSignedRequest","request","signed-storage",100L,ctx);
+        ReflectionTestUtils.invokeMethod(service,"finalizeSignedRequest","request","signed-storage",100L,ctx,
+                "0x" + "a".repeat(64));
         assertEquals(SignatureRequestStatus.SIGNED,request.getStatus());
         return c;
     }

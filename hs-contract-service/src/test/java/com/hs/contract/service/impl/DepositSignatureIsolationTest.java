@@ -1,6 +1,7 @@
 package com.hs.contract.service.impl;
 
 import com.hs.contract.deposit.DepositAgreementService;
+import com.hs.contract.blockchain.persistence.ContractDocumentProofEnqueuer;
 import com.hs.contract.model.*;
 import com.hs.contract.model.constant.*;
 import com.hs.contract.repository.*;
@@ -29,6 +30,7 @@ class DepositSignatureIsolationTest {
     @Mock ParkingReservationService parking;
     @Mock RentalOnboardingService onboarding;
     @Mock DepositAgreementService depositAgreements;
+    @Mock ContractDocumentProofEnqueuer documentProofEnqueuer;
     @Mock jakarta.persistence.EntityManager entityManager;
     @InjectMocks SmartCaSignatureServiceImpl service;
 
@@ -39,15 +41,19 @@ class DepositSignatureIsolationTest {
         verifyNoInteractions(onboarding,payments,listingStatus,parking);
         verify(rentals,never()).save(any());
         verify(documents).save(argThat(d->d.getPurpose()==DocumentPurpose.SIGNED_FINAL && "deposit".equals(d.getContractId())));
+        verify(documentProofEnqueuer).enqueue(eq(c), argThat(d -> d.getPurpose() == DocumentPurpose.SIGNED_FINAL),
+                eq("0x" + "a".repeat(64)));
     }
     @Test void landlordSignatureOpensOnlyTheDepositTenantWindow() throws Exception {
         var c=run(SignerRole.LANDLORD,ContractStatus.LANDLORD_SIGNATURE_PENDING);
         assertEquals(ContractStatus.TENANT_SIGNATURE_PENDING,c.getStatus());assertNull(c.getSignedAt());
         verify(depositAgreements).landlordSigned(c);verify(depositAgreements,never()).bothSigned(any());
         verifyNoInteractions(onboarding,payments,listingStatus,parking);
+        verifyNoInteractions(documentProofEnqueuer);
     }
     private Contract run(SignerRole role,ContractStatus status) throws Exception {
         ReflectionTestUtils.setField(service,"depositAgreements",depositAgreements);
+        ReflectionTestUtils.setField(service,"documentProofEnqueuer",documentProofEnqueuer);
         ReflectionTestUtils.setField(service,"onboarding",onboarding);
         ReflectionTestUtils.setField(service,"entityManager",entityManager);
         var c=Contract.builder().id("deposit").rentalRequestId("rental").agreementKind("DEPOSIT")
@@ -65,7 +71,8 @@ class DepositSignatureIsolationTest {
         Class<?> context=Arrays.stream(SmartCaSignatureServiceImpl.class.getDeclaredClasses()).filter(t->t.getSimpleName().equals("EmbeddingContext")).findFirst().orElseThrow();
         var ctor=context.getDeclaredConstructors()[0];ctor.setAccessible(true);
         Object ctx=ctor.newInstance("request","deposit",role,"prepared",0L,8192,"provider-result","certificate","range","identity","DC-1",1,"revision");
-        ReflectionTestUtils.invokeMethod(service,"finalizeSignedRequest","request","signed-storage",100L,ctx);
+        ReflectionTestUtils.invokeMethod(service,"finalizeSignedRequest","request","signed-storage",100L,ctx,
+                "0x" + "a".repeat(64));
         assertEquals(SignatureRequestStatus.SIGNED,request.getStatus());
         return c;
     }

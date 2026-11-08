@@ -20,6 +20,12 @@ Development uses `JPA_DDL_AUTO=update`. On a fresh local database, start Core to
 
 The web page polls only while a request is in progress. Closing the page does not stop backend reconciliation. A successful confirmation in the VNPT app alone does **not** mark the HomeSpace contract active; the signed PDF must be embedded and verified.
 
+When VNPT explicitly returns rejection/cancellation (`REJECTED`, `CANCELLED`, `CANCELED`), the request becomes `REJECTED`. Expiry and failure keep their distinct statuses. The web reloads the contract for every terminal result, and refreshed server state replaces any locally cached pending request. A rejected landlord request returns the contract to `DRAFT`; a rejected tenant request retains the landlord signature and `TENANT_SIGNATURE_PENDING` for retry.
+
+If provider queries fail past the request deadline, the request becomes `FAILED / PROVIDER_STATE_UNKNOWN`, with the contract kept pending for reconciliation. Neither the retry endpoint nor direct initiation may bypass this unresolved state. A network failure is never treated as proof that the user refused to sign.
+
+PDF cuối của HĐ Cọc/HĐ Thuê có thể được ghi hash lên blockchain sau khi hai bên ký đủ. Xem [hướng dẫn cấu hình và kiểm thử blockchain](BLOCKCHAIN_INTEGRATION.md); tính năng này mặc định tắt và có trạng thái riêng với SmartCA.
+
 ## Live acceptance checklist
 
 - Confirm both parties have Didit VERIFIED KYC, matching CCCD, and a valid VNPT certificate.

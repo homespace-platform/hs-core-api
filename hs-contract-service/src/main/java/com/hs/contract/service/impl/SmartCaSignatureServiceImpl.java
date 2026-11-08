@@ -3,6 +3,8 @@ package com.hs.contract.service.impl;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.context.UserContextHolder;
 import com.hs.contract.advice.ContractErrorCode;
+import com.hs.contract.blockchain.persistence.ContractDocumentProofEnqueuer;
+import com.hs.contract.blockchain.persistence.DocumentProofHash;
 import com.hs.contract.client.SmartCaClient;
 import com.hs.contract.client.SmartCaClient.*;
 import com.hs.contract.config.SmartCaProperties;
@@ -74,6 +76,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     private com.hs.contract.deposit.DepositAgreementService depositAgreements;
     @org.springframework.beans.factory.annotation.Autowired
     private com.hs.contract.service.ContractLifecycleService lifecycle;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ContractDocumentProofEnqueuer documentProofEnqueuer;
 
     private final SignatureRequestRepository requestRepository;
     private final ContractRepository contractRepository;
@@ -347,9 +351,11 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         }
 
         // ---- Step 7: Finalize (transaction) ----
+        String documentHash = embCtx.signerRole() == SignerRole.TENANT
+                ? DocumentProofHash.sha256(signedPdf) : null;
         try {
             new TransactionTemplate(transactionManager).executeWithoutResult(tx ->
-                    finalizeSignedRequest(requestId, signedStorageId, signedPdf.length, embCtx));
+                    finalizeSignedRequest(requestId, signedStorageId, signedPdf.length, embCtx, documentHash));
         } catch (Exception e) {
             log.error("Finalizing SmartCA signature failed for request {}: {}", requestId, e.getMessage(), e);
             markEmbeddingFailed(requestId, "FINALIZE_FAILED", "Không thể hoàn tất hợp đồng sau khi ký");
@@ -378,6 +384,15 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     private String checkIdempotency(String contractId, String currentUserId) {
         Contract contract = requireContractAccess(contractId, currentUserId);
         SignerRole role = requireSignerRole(contract, currentUserId);
+
+        requestRepository.findFirstByContractIdAndSignerRoleOrderByCreatedAtDesc(contractId, role)
+                .filter(req -> req.getStatus() == SignatureRequestStatus.FAILED)
+                .filter(req -> "PROVIDER_STATE_UNKNOWN".equals(req.getFailureCode())
+                        || (req.getProviderSignatureValue() != null && !req.getProviderSignatureValue().isBlank()))
+                .ifPresent(req -> {
+                    throw new AppException(ContractErrorCode.SIGNATURE_RETRY_NOT_ALLOWED,
+                            "Cần đối soát yêu cầu ký cũ với VNPT trước khi gửi lại.");
+                });
 
         List<SignatureRequestStatus> activeStatuses = List.of(
                 SignatureRequestStatus.CREATED,
@@ -565,15 +580,11 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
             result = smartCaClient.getSignatureStatus(transactionId, req.getDocId());
         } catch (AppException e) {
             log.warn("pollAndUpdate: VNPT error for request {}: {}", requestId, e.getMessage());
-            if (req.getStatus() == SignatureRequestStatus.CREATED
-                    && req.getExpiresAt() != null && Instant.now().isAfter(req.getExpiresAt())) {
-                markRequestFailed(requestId, "PROVIDER_STATE_UNKNOWN",
-                        "Không xác định được trạng thái yêu cầu ký tại VNPT; cần đối soát trước khi gửi lại");
-            }
-            updateLastChecked(requestId);
+            handlePollFailure(requestId);
             return;
         } catch (Exception e) {
             log.error("pollAndUpdate: unexpected error for request {}: {}", requestId, e.getMessage());
+            handlePollFailure(requestId);
             return;
         }
 
@@ -604,7 +615,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
             req.setStatus(SignatureRequestStatus.PROVIDER_SIGNED);
         } else if (result.isRejectedOrFailed()) {
             log.info("Request {} rejected/failed by VNPT: status={}", requestId, result.status());
-            req.setStatus(SignatureRequestStatus.REJECTED);
+            req.setStatus(SignatureRequestStatus.valueOf(result.status().toUpperCase(java.util.Locale.ROOT)));
             req.setFailedAt(Instant.now());
             req.setFailureCode(result.failureCode());
             req.setFailureMessage(result.failureMessage());
@@ -633,11 +644,21 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         requestRepository.save(req);
     }
 
-    private void updateLastChecked(String requestId) {
-        requestRepository.findById(requestId).ifPresent(req -> {
+    private void handlePollFailure(String requestId) {
+        new TransactionTemplate(transactionManager).executeWithoutResult(tx ->
+                requestRepository.findByIdForUpdate(requestId).ifPresent(req -> {
+            if (req.getStatus() != SignatureRequestStatus.CREATED
+                    && req.getStatus() != SignatureRequestStatus.PENDING_USER_CONFIRMATION) return;
             req.setLastProviderCheckedAt(Instant.now());
+            if (req.getExpiresAt() != null && !Instant.now().isBefore(req.getExpiresAt())) {
+                req.setStatus(SignatureRequestStatus.FAILED);
+                req.setFailedAt(Instant.now());
+                req.setFailureCode("PROVIDER_STATE_UNKNOWN");
+                req.setFailureMessage("Không xác định được kết quả ký tại VNPT; cần đối soát trước khi gửi lại.");
+                // Chưa biết VNPT đã ký hay chưa: giữ trạng thái hợp đồng, không mở một lần ký mới.
+            }
             requestRepository.save(req);
-        });
+        }));
     }
 
     // =========================================================================
@@ -710,7 +731,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         return stored.id();
     }
 
-    private void finalizeSignedRequest(String requestId, String signedStorageId, long signedPdfSize, EmbeddingContext ctx) {
+    private void finalizeSignedRequest(String requestId, String signedStorageId, long signedPdfSize,
+                                       EmbeddingContext ctx, String documentHash) {
         SignatureRequest req = requestRepository.findById(requestId).orElse(null);
         if (req == null || req.getStatus() != SignatureRequestStatus.EMBEDDING) return;
         Contract contract = contractRepository.findById(ctx.contractId())
@@ -777,6 +799,10 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 log.info("Contract {} tenant signed — now ACTIVE", ctx.contractId());
             }
             contractRepository.save(contract);
+
+        if (ctx.signerRole() == SignerRole.TENANT) {
+            documentProofEnqueuer.enqueue(contract, signedDoc, documentHash);
+        }
 
         log.info("Request {} SIGNED: signedDocId={}", requestId, signedDoc.getId());
     }

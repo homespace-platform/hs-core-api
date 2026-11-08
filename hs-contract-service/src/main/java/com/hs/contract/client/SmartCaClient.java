@@ -324,11 +324,13 @@ public class SmartCaClient {
         }
     }
 
-    private SmartCaStatusResult parseStatusResult(String raw, String queryId, String expectedDocId) {
+    SmartCaStatusResult parseStatusResult(String raw, String queryId, String expectedDocId) {
         try {
             JsonNode root = objectMapper.readTree(raw);
             int code = root.path("status_code").asInt(root.path("status").asInt(-1));
-            if (code != 0 && code != 200 && (root.has("status_code") || root.has("status"))) {
+            boolean hasEnvelopeCode = root.has("status_code") || root.path("status").isNumber()
+                    || root.path("status").asText("").matches("[0-9]+");
+            if (code != 0 && code != 200 && hasEnvelopeCode) {
                 String msg = root.path("message").asText("");
                 log.warn("SmartCA status check returned code={}: {}", code, msg);
                 if (code == 404) throw new AppException(ContractErrorCode.SIGNATURE_REQUEST_NOT_FOUND);
@@ -338,7 +340,18 @@ public class SmartCaClient {
             }
 
             JsonNode data = root.path("data");
-            String status = data.path("status").asText(root.path("status_name").asText("PENDING")).toUpperCase();
+            String status = data.path("status").asText("").strip();
+            if (status.isEmpty()) status = root.path("status_name").asText("").strip();
+            if (status.isEmpty() && root.path("status").isTextual()
+                    && !root.path("status").asText("").matches("[0-9]+")) status = root.path("status").asText("").strip();
+            if (status.isEmpty()) {
+                String messageStatus = root.path("message").asText("").strip().toUpperCase(Locale.ROOT);
+                status = Set.of("REJECTED", "CANCELLED", "CANCELED", "EXPIRED", "FAILED").contains(messageStatus)
+                        ? messageStatus : "PENDING";
+            }
+            status = status.toUpperCase(Locale.ROOT);
+            // Hủy trên app là một kết quả từ chối, không phải trạng thái đang chờ vô thời hạn.
+            if ("CANCELLED".equals(status) || "CANCELED".equals(status)) status = "REJECTED";
 
             // Tìm signature_value trong mảng signatures theo docId
             String signatureValue = null;
