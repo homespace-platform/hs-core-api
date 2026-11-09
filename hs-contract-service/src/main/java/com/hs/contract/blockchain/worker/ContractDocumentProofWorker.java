@@ -36,11 +36,18 @@ public class ContractDocumentProofWorker {
         String token = UUID.randomUUID().toString();
         try {
             if (!leases.acquire(leaseId, token)) return;
-            // shortcut: Chờ finality từng giao dịch; tách gửi và đối soát khi số hợp đồng tăng.
             List<ContractDocumentProof> submitted = proofs.findByStatusOrderByCreatedAtAsc(ProofStatus.SUBMITTED);
-            ContractDocumentProof proof = submitted.isEmpty()
-                    ? proofs.findDue(Instant.now(), PageRequest.of(0, 1)).stream().findFirst().orElse(null)
-                    : submitted.getFirst();
+            // Chỉ cấp nonce tiếp theo sau khi mọi giao dịch đã gửi có receipt hợp lệ trong block.
+            Instant now = Instant.now();
+            ContractDocumentProof proof = null;
+            for (ContractDocumentProof candidate : submitted) {
+                if (candidate.getNextAttemptAt() == null || !candidate.getNextAttemptAt().isAfter(now)) {
+                    proof = candidate;
+                    break;
+                }
+                if (candidate.getBlockNumber() == null || candidate.getErrorCode() != null) return;
+            }
+            if (proof == null) proof = proofs.findDue(now, PageRequest.of(0, 1)).stream().findFirst().orElse(null);
             if (proof == null || (proof.getNextAttemptAt() != null && proof.getNextAttemptAt().isAfter(Instant.now()))) return;
             process(proof, leaseId, token);
         } catch (BlockchainException safe) {
@@ -105,6 +112,11 @@ public class ContractDocumentProofWorker {
                     });
                     return;
                 }
+                if (proof.getBlockNumber() != null && !mutate(proof.getDocumentId(), leaseId, token, current -> {
+                    current.setBlockNumber(null);
+                    current.setBlockHash(null);
+                    current.setRegisteredAt(null);
+                })) return;
                 if (!stored.exists() && proof.getSignedRawTransaction() != null) {
                     broadcast(proof, leaseId, token);
                 } else {

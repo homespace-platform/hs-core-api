@@ -237,4 +237,52 @@ class ContractDocumentProofWorkerTest {
         verify(proofs, never()).findDue(any(), any());
         verifyNoInteractions(registry, storage);
     }
+
+    @Test void minedReceiptAllowsNextProofToLeaveQueueBeforeFinality() {
+        persistedSubmission(); proof.setBlockNumber(42L);
+        proof.setNextAttemptAt(Instant.now().plusSeconds(3600));
+        when(leases.acquire(anyString(), anyString())).thenReturn(true);
+        when(proofs.findByStatusOrderByCreatedAtAsc(ProofStatus.SUBMITTED)).thenReturn(List.of(proof));
+        worker.tick();
+        verify(proofs).findDue(any(), any());
+    }
+
+    @Test void minedReceiptWithRpcErrorStillBlocksNextNonce() {
+        persistedSubmission(); proof.setBlockNumber(42L); proof.setErrorCode("RPC_UNAVAILABLE");
+        proof.setNextAttemptAt(Instant.now().plusSeconds(3600));
+        when(leases.acquire(anyString(), anyString())).thenReturn(true);
+        when(proofs.findByStatusOrderByCreatedAtAsc(ProofStatus.SUBMITTED)).thenReturn(List.of(proof));
+        worker.tick();
+        verify(proofs, never()).findDue(any(), any());
+    }
+
+    @Test void disappearedReceiptClearsMinedMarkerBeforeAnotherNonce() {
+        permitUpdates(); persistedSubmission(); absentOnChain();
+        proof.setBlockNumber(42L); proof.setBlockHash("0xblock"); proof.setRegisteredAt(Instant.EPOCH);
+        when(registry.receipt(31337, ADDRESS, ID, proof.getDocumentHash(), RECORDER, TX)).thenReturn(Optional.empty());
+        worker.process(proof, "lease", "token");
+        assertNull(proof.getBlockNumber());
+        assertNull(proof.getBlockHash());
+        assertNull(proof.getRegisteredAt());
+        assertEquals(ProofStatus.SUBMITTED, proof.getStatus());
+        verify(registry, never()).prepare(anyLong(), anyString(), anyString(), anyString(), anyString(), anyInt());
+    }
+
+    @Test void olderMinedReceiptIsRecheckedBeforeYoungerUnminedTransaction() {
+        persistedSubmission(); proof.setBlockNumber(42L); proof.setNextAttemptAt(Instant.EPOCH);
+        var later = new ContractDocumentProof();
+        later.setDocumentId("later"); later.setStatus(ProofStatus.SUBMITTED);
+        later.setNextAttemptAt(Instant.EPOCH);
+        when(leases.acquire(anyString(), anyString())).thenReturn(true);
+        when(leases.ownsForUpdate(anyString(), anyString())).thenReturn(true);
+        when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        when(proofs.findByIdForUpdate("document")).thenReturn(Optional.of(proof));
+        when(proofs.findByStatusOrderByCreatedAtAsc(ProofStatus.SUBMITTED)).thenReturn(List.of(proof, later));
+        absentOnChain();
+        when(registry.receipt(31337, ADDRESS, ID, proof.getDocumentHash(), RECORDER, TX))
+                .thenReturn(Optional.of(new RegistryClient.Receipt(42, "0xblock", Instant.EPOCH, false)));
+        worker.tick();
+        verify(registry).receipt(31337, ADDRESS, ID, proof.getDocumentHash(), RECORDER, TX);
+        verify(proofs, never()).findByIdForUpdate("later");
+    }
 }
