@@ -77,6 +77,7 @@ class ContractServiceImplTest {
         final ContractRepository contracts = mock(ContractRepository.class);
         final ContractRevisionRepository revisions = mock(ContractRevisionRepository.class);
         final ContractDocumentRepository documents = mock(ContractDocumentRepository.class);
+        final StorageService storage = mock(StorageService.class);
         final com.hs.contract.repository.ContractAmendmentRepository amendments = mock(com.hs.contract.repository.ContractAmendmentRepository.class);
         final java.util.Map<String,Contract> owners = new java.util.HashMap<>();
         final java.util.Map<String,ContractRevision> snapshots = new java.util.HashMap<>();
@@ -92,7 +93,6 @@ class ContractServiceImplTest {
             when(amendments.findByContractIdOrderByCreatedAtDesc("root")).thenAnswer(i -> history);
             when(documents.findByContractIdAndRevisionId(anyString(),anyString())).thenAnswer(i -> files.stream()
                     .filter(d -> d.getContractId().equals(i.getArgument(0)) && d.getRevisionId().equals(i.getArgument(1))).toList());
-            var storage=mock(StorageService.class);
             when(storage.createViewUrl(anyString())).thenAnswer(i -> new com.hs.storage.dto.response.StorageUrlResponse("https://files.example/view/"+i.getArgument(0),java.time.Instant.parse("2026-10-15T10:00:00Z")));
             when(storage.createDownloadUrl(anyString())).thenAnswer(i -> new com.hs.storage.dto.response.StorageUrlResponse("https://files.example/download/"+i.getArgument(0),java.time.Instant.parse("2026-10-15T10:00:00Z")));
             org.springframework.test.util.ReflectionTestUtils.setField(service,"storageService",storage);
@@ -128,12 +128,14 @@ class ContractServiceImplTest {
             f.at("2026-11-14T16:59:59Z");assertEquals("root-pdf",f.service.getEffectiveDocument("root").getId());
             f.at("2026-11-14T17:00:00Z");var current=f.service.getEffectiveDocument("root");
             assertEquals("november-pdf",current.getId());assertEquals("november",current.getContractId());assertEquals("november-revision",current.getRevisionId());
-            assertEquals("https://files.example/view/november-object",current.getViewUrl());
-            assertEquals("https://files.example/download/november-object",current.getDownloadUrl());
+            assertEquals("november-object",current.getStorageObjectId());
+            assertNull(current.getViewUrl());
+            assertNull(current.getDownloadUrl());
             f.at("2026-11-15T10:00:00");assertEquals("november-pdf",f.service.getEffectiveDocument("root").getId());
         }
         assertEquals("SCHEDULED",a.getStatus());assertEquals("root-revision",f.root.getCurrentRevisionId());
         verify(f.contracts,never()).save(any());verify(f.documents,never()).save(any());verify(f.amendments,never()).save(any());
+        verifyNoInteractions(f.storage);
     }
     @Test void effectivePdfSelectsLatestEffectiveSignedTermsNotNewestFileOrFutureOrSupersededProposal() {
         var f=new EffectiveDocumentFixture();

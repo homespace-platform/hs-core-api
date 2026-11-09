@@ -140,6 +140,7 @@ public class StorageServiceImpl implements StorageService {
                     .bucket(object.getBucketName())
                     .key(object.getObjectKey())
                     .build());
+            requireCreatedVersion(head.versionId());
             if (!object.getSizeBytes().equals(head.contentLength())
                     || !object.getContentType().equalsIgnoreCase(head.contentType())) {
                 object.setStatus(StorageStatus.REJECTED);
@@ -152,6 +153,7 @@ public class StorageServiceImpl implements StorageService {
                 try (var is = s3Client.getObject(GetObjectRequest.builder()
                         .bucket(object.getBucketName())
                         .key(object.getObjectKey())
+                        .versionId(head.versionId())
                         .range("bytes=0-63")
                         .build())) {
                     byte[] headerBytes = is.readNBytes(64);
@@ -161,10 +163,11 @@ public class StorageServiceImpl implements StorageService {
                     repository.save(object);
                     throw e;
                 } catch (Exception e) {
-                    log.warn("Failed to read header bytes for magic byte check on object [{}]: {}", object.getId(), e.getMessage());
+                    throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
                 }
             }
 
+            object.setS3VersionId(head.versionId());
             object.setChecksum(normalizeNullable(request.checksum()));
             object.setStatus(StorageStatus.READY);
             return toResponse(repository.save(object));
@@ -213,6 +216,7 @@ public class StorageServiceImpl implements StorageService {
         if (object.getVisibility() != StorageVisibility.PUBLIC) {
             throw new AppException(StorageErrorCode.STORAGE_OBJECT_NOT_PUBLIC);
         }
+        requireDirectAccessAllowed(object);
         return buildS3PublicUrl(object);
     }
 
@@ -310,6 +314,7 @@ public class StorageServiceImpl implements StorageService {
         String extension = extractExtension(fileName);
         String objectKey = buildObjectKey(purpose, effectiveOwnerId, storageId, extension);
 
+        String uploadedVersionId;
         try {
             PutObjectRequest putObject = PutObjectRequest.builder()
                     .bucket(properties.bucket())
@@ -318,7 +323,11 @@ public class StorageServiceImpl implements StorageService {
                     .contentLength((long) data.length)
                     .build();
 
-            s3Client.putObject(putObject, software.amazon.awssdk.core.sync.RequestBody.fromBytes(data));
+            var uploaded = s3Client.putObject(putObject, software.amazon.awssdk.core.sync.RequestBody.fromBytes(data));
+            uploadedVersionId = uploaded == null ? null : uploaded.versionId();
+            requireCreatedVersion(uploadedVersionId);
+        } catch (AppException failure) {
+            throw failure;
         } catch (Exception e) {
             log.error("Failed to putObject to S3 bucket [{}] key [{}]: ", properties.bucket(), objectKey, e);
             throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
@@ -329,6 +338,7 @@ public class StorageServiceImpl implements StorageService {
                 .originalName(fileName.trim())
                 .objectKey(objectKey)
                 .bucketName(properties.bucket())
+                .s3VersionId(uploadedVersionId)
                 .contentType(contentType)
                 .sizeBytes((long) data.length)
                 .extension(extension)
@@ -345,14 +355,7 @@ public class StorageServiceImpl implements StorageService {
             saved = repository.save(object);
         } catch (Exception e) {
             log.error("Failed to save storage object metadata for id={}, cleaning up S3 object key={}", storageId, objectKey, e);
-            try {
-                s3Client.deleteObject(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.builder()
-                        .bucket(properties.bucket())
-                        .key(objectKey)
-                        .build());
-            } catch (Exception s3Ex) {
-                log.warn("Failed to delete orphan S3 object key={}: {}", objectKey, s3Ex.getMessage());
-            }
+            cleanupFailedWrite(objectKey, uploadedVersionId);
             throw e;
         }
 
@@ -369,10 +372,50 @@ public class StorageServiceImpl implements StorageService {
             GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                     .bucket(object.getBucketName())
                     .key(object.getObjectKey())
+                    .versionId(object.getS3VersionId())
                     .build();
             return s3Client.getObjectAsBytes(getObjectRequest).asByteArray();
+        } catch (S3Exception failure) {
+            if (failure.statusCode() == 404) throw new AppException(StorageErrorCode.STORAGE_OBJECT_NOT_FOUND);
+            throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
         } catch (Exception e) {
-            log.error("Failed to download storage object id={} from S3 directly: {}", storageId, e.getMessage(), e);
+            throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
+        }
+    }
+
+    @Override
+    public byte[] downloadDirect(String storageId, long maxBytes) {
+        if (maxBytes <= 0 || maxBytes > Integer.MAX_VALUE - 8L) {
+            throw new IllegalArgumentException("A bounded byte-array download limit is required");
+        }
+        StorageObject object = findActive(storageId);
+        if (object.getStatus() != StorageStatus.READY) {
+            throw new AppException(StorageErrorCode.STORAGE_NOT_READY);
+        }
+        GetObjectRequest request = GetObjectRequest.builder()
+                .bucket(object.getBucketName()).key(object.getObjectKey())
+                .versionId(object.getS3VersionId()).build();
+        try (var input = s3Client.getObject(request)) {
+            Long declaredLength = input.response().contentLength();
+            if (declaredLength != null && declaredLength > maxBytes) {
+                throw new AppException(StorageErrorCode.STORAGE_FILE_TOO_LARGE);
+            }
+            var output = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[16 * 1024];
+            long total = 0;
+            int count;
+            while ((count = input.read(buffer, 0, (int) Math.min(buffer.length, maxBytes - total + 1))) != -1) {
+                total += count;
+                if (total > maxBytes) throw new AppException(StorageErrorCode.STORAGE_FILE_TOO_LARGE);
+                output.write(buffer, 0, count);
+            }
+            return output.toByteArray();
+        } catch (AppException failure) {
+            throw failure;
+        } catch (S3Exception failure) {
+            if (failure.statusCode() == 404) throw new AppException(StorageErrorCode.STORAGE_OBJECT_NOT_FOUND);
+            throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
+        } catch (Exception failure) {
             throw new AppException(StorageErrorCode.STORAGE_PROVIDER_ERROR);
         }
     }
@@ -399,15 +442,21 @@ public class StorageServiceImpl implements StorageService {
         StoragePurpose targetPurpose = expectedPurpose != null ? expectedPurpose : source.getPurpose();
         String newObjectKey = buildObjectKey(targetPurpose, targetOwnerId, newStorageId, extension);
 
+        String copiedVersionId;
         try {
             var copyReq = CopyObjectRequest.builder()
                     .sourceBucket(source.getBucketName())
                     .sourceKey(source.getObjectKey())
+                    .sourceVersionId(source.getS3VersionId())
                     .destinationBucket(properties.bucket())
                     .destinationKey(newObjectKey)
                     .contentType(source.getContentType())
                     .build();
-            s3Client.copyObject(copyReq);
+            var copiedResult = s3Client.copyObject(copyReq);
+            copiedVersionId = copiedResult == null ? null : copiedResult.versionId();
+            requireCreatedVersion(copiedVersionId);
+        } catch (AppException failure) {
+            throw failure;
         } catch (Exception e) {
             log.error("Failed to copy S3 object from [{}/{}] to [{}/{}]: ",
                     source.getBucketName(), source.getObjectKey(), properties.bucket(), newObjectKey, e);
@@ -419,6 +468,7 @@ public class StorageServiceImpl implements StorageService {
                 .originalName(source.getOriginalName())
                 .objectKey(newObjectKey)
                 .bucketName(properties.bucket())
+                .s3VersionId(copiedVersionId)
                 .contentType(source.getContentType())
                 .sizeBytes(source.getSizeBytes())
                 .checksum(source.getChecksum())
@@ -438,7 +488,7 @@ public class StorageServiceImpl implements StorageService {
         } catch (Exception e) {
             log.error("Failed to save copied storage object metadata for id={}, cleaning up S3 object key={}",
                     newStorageId, newObjectKey, e);
-            deleteS3ObjectDirect(newObjectKey);
+            cleanupFailedWrite(newObjectKey, copiedVersionId);
             throw e;
         }
     }
@@ -456,12 +506,30 @@ public class StorageServiceImpl implements StorageService {
         }
     }
 
+    private void cleanupFailedWrite(String objectKey, String versionId) {
+        if (versionId != null) {
+            // shortcut: IAM runtime không xóa version; quản trị viên dọn orphan đúng version theo log.
+            log.warn("Retained orphan S3 version after metadata failure: bucket={}, key={}, versionId={}",
+                    properties.bucket(), objectKey, versionId);
+            return;
+        }
+        deleteS3ObjectDirect(objectKey);
+    }
+
+    private void requireCreatedVersion(String versionId) {
+        if (versionId == null || versionId.isBlank() || "null".equals(versionId)) {
+            throw new AppException(StorageErrorCode.STORAGE_VERSIONING_REQUIRED);
+        }
+    }
+
     private StorageUrlResponse createGetUrl(StorageObject object, boolean inline) {
+        requireDirectAccessAllowed(object);
         String disposition = (inline ? "inline" : "attachment") + "; filename*=UTF-8''"
                 + URLEncoder.encode(object.getOriginalName(), StandardCharsets.UTF_8).replace("+", "%20");
         GetObjectRequest getObject = GetObjectRequest.builder()
                 .bucket(object.getBucketName())
                 .key(object.getObjectKey())
+                .versionId(object.getS3VersionId())
                 .responseContentType(object.getContentType())
                 .responseContentDisposition(disposition)
                 .build();
@@ -471,6 +539,12 @@ public class StorageServiceImpl implements StorageService {
                 .build());
         return new StorageUrlResponse(
                 presigned.url().toString(), Instant.now().plus(properties.downloadUrlDuration()));
+    }
+
+    private void requireDirectAccessAllowed(StorageObject object) {
+        if (accessCheckers.stream().anyMatch(checker -> checker.requiresVerifiedAccess(object))) {
+            throw new AppException(StorageErrorCode.STORAGE_ACCESS_DENIED);
+        }
     }
 
     private StorageObject getAccessibleReadyObject(String storageId) {
@@ -667,6 +741,6 @@ public class StorageServiceImpl implements StorageService {
                 object.getId(), object.getOriginalName(), object.getContentType(), object.getSizeBytes(),
                 object.getChecksum(), object.getExtension(), object.getOwnerId(), object.getReferenceType(),
                 object.getReferenceId(), object.getPurpose(), object.getVisibility(), object.getStatus(),
-                object.getCreatedAt(), object.getUpdatedAt());
+                object.getCreatedAt(), object.getUpdatedAt(), object.getS3VersionId());
     }
 }

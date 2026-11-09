@@ -105,7 +105,7 @@ public class ContractDocumentProofWorker {
                 return;
             }
 
-            byte[] pdf = storage.downloadDirect(proof.getStorageObjectId());
+            byte[] pdf = storage.downloadDirect(proof.getStorageObjectId(), 50L * 1024 * 1024);
             if (!DocumentProofHash.sha256(pdf).equalsIgnoreCase(proof.getDocumentHash())) {
                 throw new BlockchainException("SOURCE_PDF_CHANGED", "PDF lưu trữ không khớp hash lúc ký; cần đối soát.", true);
             }

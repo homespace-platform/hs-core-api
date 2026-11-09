@@ -76,7 +76,7 @@ class ContractDocumentProofWorkerTest {
 
     @Test void savesSignedTransactionBeforeBroadcastAndDoesNotChangeFrozenIdentity() {
         permitUpdates(); absentOnChain();
-        when(storage.downloadDirect("storage")).thenReturn(PDF);
+        when(storage.downloadDirect("storage", 50L * 1024 * 1024)).thenReturn(PDF);
         var signed = new RegistryClient.SignedSubmission(RECORDER, "7", "0xraw-signed", TX);
         when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash())).thenReturn(signed);
         doAnswer(call -> {
@@ -95,7 +95,7 @@ class ContractDocumentProofWorkerTest {
 
     @Test void timeoutAfterBroadcastRetainsExactTransactionAndRestartNeverAllocatesAnotherNonce() {
         permitUpdates(); absentOnChain();
-        when(storage.downloadDirect("storage")).thenReturn(PDF);
+        when(storage.downloadDirect("storage", 50L * 1024 * 1024)).thenReturn(PDF);
         var signed = new RegistryClient.SignedSubmission(RECORDER, "7", "0xraw-signed", TX);
         when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash())).thenReturn(signed);
         doThrow(new BlockchainException("RPC_UNAVAILABLE", "Unavailable")).when(registry).broadcast(31337, ADDRESS, signed);
@@ -141,7 +141,7 @@ class ContractDocumentProofWorkerTest {
 
     @Test void changedStoragePdfCannotBeAnchored() {
         permitUpdates(); absentOnChain();
-        when(storage.downloadDirect("storage")).thenReturn("modified".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(storage.downloadDirect("storage", 50L * 1024 * 1024)).thenReturn("modified".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         worker.process(proof, "lease", "token");
         assertEquals("SOURCE_PDF_CHANGED", proof.getErrorCode());
         assertEquals(ProofStatus.FAILED, proof.getStatus());
@@ -171,7 +171,7 @@ class ContractDocumentProofWorkerTest {
 
     @Test void missingPrivateKeyIsVisibleOnQueuedProofAndRemainsRetryable() {
         permitUpdates(); absentOnChain();
-        when(storage.downloadDirect("storage")).thenReturn(PDF);
+        when(storage.downloadDirect("storage", 50L * 1024 * 1024)).thenReturn(PDF);
         when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash()))
                 .thenThrow(new BlockchainException("PRIVATE_KEY_NOT_CONFIGURED", "Private key not configured"));
         worker.process(proof, "lease", "token");
@@ -192,7 +192,7 @@ class ContractDocumentProofWorkerTest {
     @Test void leaseLostAfterDurableSaveDoesNotBroadcastAndKeepsTransactionForNextWorker() {
         permitUpdates(); absentOnChain();
         when(leases.ownsForUpdate("lease", "token")).thenReturn(true, true, false);
-        when(storage.downloadDirect("storage")).thenReturn(PDF);
+        when(storage.downloadDirect("storage", 50L * 1024 * 1024)).thenReturn(PDF);
         when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash()))
                 .thenReturn(new RegistryClient.SignedSubmission(RECORDER, "7", "0xraw-signed", TX));
         worker.process(proof, "lease", "token");

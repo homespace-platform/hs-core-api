@@ -1315,6 +1315,15 @@ public class ContractServiceImpl implements ContractService {
 
     @Override
     @Transactional(readOnly = true)
+    public ContractDocumentResponse getDocumentMetadata(String documentId) {
+        ContractDocument document = documentRepository.findById(documentId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_DOCUMENT_NOT_FOUND));
+        findContractAndCheckAccess(document.getContractId());
+        return toDocumentResponse(document, false);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public List<ContractDocumentResponse> getDocumentsByContract(String contractId) {
         findContractAndCheckAccess(contractId);
         return documentRepository.findByContractIdOrderByGeneratedAtDesc(contractId).stream()
@@ -1521,10 +1530,15 @@ public class ContractServiceImpl implements ContractService {
     }
 
     private ContractDocumentResponse toDocumentResponse(ContractDocument d) {
+        return toDocumentResponse(d, true);
+    }
+
+    private ContractDocumentResponse toDocumentResponse(ContractDocument d, boolean createUrls) {
         String viewUrl = null;
         String downloadUrl = null;
         // Superseded previews remain readable history, but never become signable again.
-        if (d.getStorageObjectId() != null && (d.getStatus() == DocumentGenerationStatus.READY
+        if (createUrls && d.getPurpose() != com.hs.contract.model.constant.DocumentPurpose.SIGNED_FINAL
+                && d.getStorageObjectId() != null && (d.getStatus() == DocumentGenerationStatus.READY
                 || d.getStatus() == DocumentGenerationStatus.STALE)) {
             try {
                 StorageUrlResponse v = storageService.createViewUrl(d.getStorageObjectId());

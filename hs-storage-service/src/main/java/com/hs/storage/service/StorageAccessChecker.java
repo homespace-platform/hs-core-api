@@ -11,4 +11,7 @@ public interface StorageAccessChecker {
 
     /** Business records can retain attached evidence even when its uploader owns the file. */
     default boolean preventsDeletion(StorageObject object) { return false; }
+
+    /** File bằng chứng phải được phục vụ qua luồng xác thực của module nghiệp vụ. */
+    default boolean requiresVerifiedAccess(StorageObject object) { return false; }
 }

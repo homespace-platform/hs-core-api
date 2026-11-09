@@ -17,7 +17,8 @@ public enum StorageErrorCode implements AppException.ErrorCode {
     STORAGE_PROVIDER_ERROR(3008, "Storage provider request failed", HttpStatus.BAD_GATEWAY),
     STORAGE_UNAUTHENTICATED(3009, "Authentication is required", HttpStatus.UNAUTHORIZED),
     STORAGE_INVALID_PURPOSE(3010, "Storage object has an invalid purpose", HttpStatus.BAD_REQUEST),
-    STORAGE_OBJECT_NOT_PUBLIC(3011, "Storage object is not public", HttpStatus.BAD_REQUEST);
+    STORAGE_OBJECT_NOT_PUBLIC(3011, "Storage object is not public", HttpStatus.BAD_REQUEST),
+    STORAGE_VERSIONING_REQUIRED(3012, "S3 must return a concrete version ID; enable bucket Versioning before uploading", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

@@ -209,14 +209,14 @@ Không dùng key không tồn tại để kết luận policy đã bảo vệ đ
 | Xóa theo key | Thường tạo delete marker; các bản cũ còn lại và vẫn tính phí. |
 | Phụ lục | Có hồ sơ, revision và file riêng; không dùng S3 version thay cho phụ lục nghiệp vụ. |
 
-**Backend hiện chưa lưu hoặc truyền S3 `versionId` khi đọc/copy/cấp URL.** Bật Versioning giúp giữ lịch sử phía S3, chưa tự cố định PDF đã ký và chưa tự phát hiện file bị thay. `revisionId`/`templateVersionId` là ID nghiệp vụ, khác S3 Version ID.
+Backend lưu `s3VersionId` trên `storage_objects`, lấy từ response upload/copy hoặc HEAD khi complete upload. Đọc nội bộ/copy/cấp presigned URL dùng đúng phiên bản đã lưu. URL public của ảnh vẫn trỏ key hiện tại; không áp dụng đường public cho PDF hợp đồng. **Upload/copy/complete mới yêu cầu S3 trả Version ID cụ thể**; nếu bucket chưa bật hoặc đang Suspend thì thao tác không được hoàn tất như bình thường. `revisionId`/`templateVersionId` vẫn là ID nghiệp vụ, khác S3 Version ID.
 
-Khi triển khai backend:
+- Mỗi tài liệu/upload mới tạo key riêng. HĐ gốc và mỗi phụ lục có file riêng; Versioning bảo vệ nội dung từng file khi có ghi đè cùng key.
+- DB trống nghĩa là chưa xác định version, khác chuỗi literal `"null"` dùng cho phiên bản cũ của S3. Không tự backfill latest cho PDF cũ.
+- PDF ký đủ được lưu hash và định danh version; xem/tải qua API xác thực. Không xóa hoặc lấy URL S3 trực tiếp cho PDF cuối qua API storage thông thường. Xem [luồng blockchain và kiểm tra PDF](../docs/BLOCKCHAIN_INTEGRATION.md).
+- Nếu upload/copy thành công nhưng lưu DB lỗi, phiên bản đã tạo có thể còn trên S3. Backend ghi nhận để quản trị đối soát; không tự cấp quyền `DeleteObjectVersion` hoặc xóa mù theo key để dọn dữ liệu versioned.
 
-- Lưu version trả về từ upload/copy; đọc và cấp URL theo đúng version đã lưu.
-- Phân biệt DB trống (chưa xác định version) với chuỗi literal `"null"` (phiên bản cũ của S3 đã xác định).
-- Không tự gán latest cho PDF cũ; cần đối chiếu nội dung với hash blockchain nếu đã có proof.
-- Sửa cleanup upload/copy lỗi: xóa theo key hiện có thể để lại orphan sau delete marker. Không cấp rộng quyền xóa phiên bản để xử lý tạm.
+Với database mới, để Core khởi động và Hibernate tạo schema theo cấu hình `ddl-auto=update` trước khi seed. Cột `s3_version_id` cho phép trống với dữ liệu seed/legacy. Cột khóa cập nhật `row_version` có mặc định `0` để seed SQL hiện có không cần điền riêng. Không reset hoặc backfill database tự động trong bước setup.
 
 Chưa tạo Lifecycle xóa **noncurrent versions** của tài liệu hợp đồng trước khi chốt chính sách lưu giữ: bản cần giữ có thể thành noncurrent sau một lần upload cùng key. Versioning tăng dung lượng tính phí; không thể chuyển bucket về trạng thái chưa từng bật, chỉ có thể **Suspend**.
 

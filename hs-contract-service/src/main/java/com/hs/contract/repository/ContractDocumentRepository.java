@@ -11,6 +11,17 @@ import java.util.Optional;
 @Repository
 public interface ContractDocumentRepository extends JpaRepository<ContractDocument, String> {
 
+    @org.springframework.transaction.annotation.Transactional
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.data.jpa.repository.Query("update ContractDocument d set d.integrityStatus = :status, d.integrityCheckedAt = :checkedAt, d.integrityMessage = :message where d.id = :documentId")
+    int updateIntegrityResult(@org.springframework.data.repository.query.Param("documentId") String documentId,
+            @org.springframework.data.repository.query.Param("status") String status,
+            @org.springframework.data.repository.query.Param("checkedAt") java.time.Instant checkedAt,
+            @org.springframework.data.repository.query.Param("message") String message);
+
+    boolean existsByStorageObjectIdAndPurposeAndDocumentType(String storageObjectId,
+            com.hs.contract.model.constant.DocumentPurpose purpose, ContractDocumentType documentType);
+
     List<ContractDocument> findByContractIdOrderByGeneratedAtDesc(String contractId);
 
     List<ContractDocument> findByContractIdAndRevisionId(String contractId, String revisionId);

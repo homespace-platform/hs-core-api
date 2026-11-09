@@ -341,9 +341,9 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         }
 
         // ---- Step 6: Upload signed PDF (outside transaction) ----
-        String signedStorageId;
+        com.hs.storage.dto.response.StorageObjectResponse signedStorage;
         try {
-            signedStorageId = uploadSignedPdf(embCtx, signedPdf);
+            signedStorage = uploadSignedPdf(embCtx, signedPdf);
         } catch (Exception e) {
             log.error("embedProviderSignature: failed to upload signed PDF for request {}: {}", requestId, e.getMessage());
             markEmbeddingFailed(requestId, "UPLOAD_FAILED", "Không thể lưu PDF đã ký lên storage");
@@ -355,7 +355,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 ? DocumentProofHash.sha256(signedPdf) : null;
         try {
             new TransactionTemplate(transactionManager).executeWithoutResult(tx ->
-                    finalizeSignedRequest(requestId, signedStorageId, signedPdf.length, embCtx, documentHash));
+                    finalizeSignedRequest(requestId, signedStorage.id(), signedPdf.length, embCtx, documentHash,
+                            signedStorage.s3VersionId()));
         } catch (Exception e) {
             log.error("Finalizing SmartCA signature failed for request {}: {}", requestId, e.getMessage(), e);
             markEmbeddingFailed(requestId, "FINALIZE_FAILED", "Không thể hoàn tất hợp đồng sau khi ký");
@@ -710,7 +711,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         );
     }
 
-    private String uploadSignedPdf(EmbeddingContext ctx, byte[] signedPdf) {
+    private com.hs.storage.dto.response.StorageObjectResponse uploadSignedPdf(EmbeddingContext ctx, byte[] signedPdf) {
         DocumentPurpose purpose = ctx.signerRole() == SignerRole.LANDLORD
                 ? DocumentPurpose.SIGNED_LANDLORD
                 : DocumentPurpose.SIGNED_FINAL;
@@ -727,12 +728,16 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 ctx.contractId(),
                 StorageVisibility.PRIVATE
         );
+        if (ctx.signerRole() == SignerRole.TENANT
+                && (stored.s3VersionId() == null || stored.s3VersionId().isBlank() || "null".equals(stored.s3VersionId()))) {
+            throw new AppException(com.hs.contract.blockchain.api.BlockchainProofError.DOCUMENT_VERSION_REQUIRED);
+        }
         log.info("Uploaded signed PDF: storageId={} size={}", stored.id(), signedPdf.length);
-        return stored.id();
+        return stored;
     }
 
     private void finalizeSignedRequest(String requestId, String signedStorageId, long signedPdfSize,
-                                       EmbeddingContext ctx, String documentHash) {
+                                       EmbeddingContext ctx, String documentHash, String s3VersionId) {
         SignatureRequest req = requestRepository.findById(requestId).orElse(null);
         if (req == null || req.getStatus() != SignatureRequestStatus.EMBEDDING) return;
         Contract contract = contractRepository.findById(ctx.contractId())
@@ -755,6 +760,12 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         ContractDocument source = documentRepository.findById(req.getSourceDocumentId())
                 .orElseThrow(() -> new AppException(ContractErrorCode.SIGNATURE_PDF_NOT_READY));
 
+        if (ctx.signerRole() == SignerRole.TENANT && (s3VersionId == null || s3VersionId.isBlank()
+                || "null".equals(s3VersionId) || documentHash == null
+                || !documentHash.matches("0x[0-9a-f]{64}"))) {
+            throw new AppException(com.hs.contract.blockchain.api.BlockchainProofError.DOCUMENT_VERSION_REQUIRED);
+        }
+
         // Lưu document record
         ContractDocument signedDoc = ContractDocument.builder()
                 .contractId(ctx.contractId())
@@ -763,6 +774,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 .documentType(ContractDocumentType.PDF)
                 .purpose(ctx.signerRole() == SignerRole.LANDLORD ? DocumentPurpose.SIGNED_LANDLORD : DocumentPurpose.SIGNED_FINAL)
                 .storageObjectId(signedStorageId)
+                .signedSha256(ctx.signerRole() == SignerRole.TENANT ? documentHash : null)
+                .signedS3VersionId(ctx.signerRole() == SignerRole.TENANT ? s3VersionId : null)
                 .fileName(ctx.contractNumber() + (ctx.signerRole() == SignerRole.LANDLORD ? "_signed_landlord" : "_signed_final") + ".pdf")
                 .fileSize(signedPdfSize)
                 .status(DocumentGenerationStatus.READY)

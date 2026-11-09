@@ -67,10 +67,12 @@ public class ContractDocumentProofEnqueuer {
     }
 
     public static boolean supports(Contract contract, ContractDocument document) {
-        if (contract == null || document == null || contract.getParentContractId() != null) return false;
+        if (contract == null || document == null) return false;
         String kind = contract.getAgreementKind();
-        boolean rootLeaseOrDeposit = kind == null || "LEASE".equals(kind) || "DEPOSIT".equals(kind);
-        return rootLeaseOrDeposit
+        boolean supported = contract.getParentContractId() == null
+                ? kind == null || "LEASE".equals(kind) || "DEPOSIT".equals(kind)
+                : "AMENDMENT".equals(kind);
+        return supported
                 && document.getId() != null && document.getStorageObjectId() != null
                 && Objects.equals(contract.getId(), document.getContractId())
                 && document.getRevisionId() != null

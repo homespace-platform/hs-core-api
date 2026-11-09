@@ -13,6 +13,7 @@ import java.util.UUID;
 @Entity
 @Table(name = "contract_documents", indexes = {
         @Index(name = "idx_doc_contract_rev", columnList = "contract_id, revision_id"),
+        @Index(name = "idx_doc_storage", columnList = "storage_object_id"),
         @Index(name = "idx_doc_status", columnList = "status")
 })
 @Getter
@@ -49,6 +50,23 @@ public class ContractDocument extends BaseEntity {
 
     @Column(name = "storage_object_id", length = 36)
     private String storageObjectId;
+
+    /** Hash của đúng bytes sau khi xác minh chữ ký; không lấy checksum từ client. */
+    @Column(name = "signed_sha256", length = 66, updatable = false)
+    private String signedSha256;
+
+    /** Phiên bản S3 được cố định lúc lưu PDF ký đủ. */
+    @Column(name = "signed_s3_version_id", length = 1024, updatable = false)
+    private String signedS3VersionId;
+
+    @Column(name = "integrity_status", length = 30)
+    private String integrityStatus;
+
+    @Column(name = "integrity_checked_at")
+    private Instant integrityCheckedAt;
+
+    @Column(name = "integrity_message", length = 500)
+    private String integrityMessage;
 
     @Column(name = "file_name", length = 255)
     private String fileName;

@@ -19,6 +19,14 @@ public record StorageObjectResponse(
         StorageVisibility visibility,
         StorageStatus status,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String s3VersionId
 ) {
+    public StorageObjectResponse(String id, String originalName, String contentType, Long sizeBytes,
+            String checksum, String extension, String ownerId, String referenceType, String referenceId,
+            StoragePurpose purpose, StorageVisibility visibility, StorageStatus status,
+            Instant createdAt, Instant updatedAt) {
+        this(id, originalName, contentType, sizeBytes, checksum, extension, ownerId, referenceType,
+                referenceId, purpose, visibility, status, createdAt, updatedAt, null);
+    }
 }

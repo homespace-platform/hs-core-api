@@ -53,6 +53,9 @@ public interface StorageService {
 
     byte[] downloadDirect(String storageId);
 
+    /** Đọc nội bộ có giới hạn bytes thực tế, phục vụ kiểm tra PDF trước khi trả cho người dùng. */
+    byte[] downloadDirect(String storageId, long maxBytes);
+
     StorageObjectResponse copyObject(
             String sourceStorageId,
             String newOwnerId,

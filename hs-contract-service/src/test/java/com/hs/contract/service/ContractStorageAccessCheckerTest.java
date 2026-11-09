@@ -17,6 +17,36 @@ import static org.mockito.Mockito.when;
 class ContractStorageAccessCheckerTest {
 
     @Test
+    void unrelatedMediaDoesNotQueryContractDocumentsForStorageUrlOrDeletion() {
+        var documents = mock(com.hs.contract.repository.ContractDocumentRepository.class);
+        var checker = new ContractStorageAccessChecker(mock(ContractRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(checker, "documentRepository", documents);
+        for (StoragePurpose purpose : StoragePurpose.values()) {
+            if (purpose == StoragePurpose.CONTRACT_DOCUMENT) continue;
+            var object = StorageObject.builder().id("media").purpose(purpose).build();
+            assertFalse(checker.requiresVerifiedAccess(object));
+            assertFalse(checker.preventsDeletion(object));
+        }
+        org.mockito.Mockito.verifyNoInteractions(documents);
+    }
+
+    @Test
+    void finalSignedPdfCannotBeDeletedOrOpenedThroughRawStorageUrl() {
+        var documents = mock(com.hs.contract.repository.ContractDocumentRepository.class);
+        var checker = new ContractStorageAccessChecker(mock(ContractRepository.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(checker, "documentRepository", documents);
+        var object = StorageObject.builder().id("final-storage").purpose(StoragePurpose.CONTRACT_DOCUMENT).build();
+        when(documents.existsByStorageObjectIdAndPurposeAndDocumentType("final-storage",
+                com.hs.contract.model.constant.DocumentPurpose.SIGNED_FINAL,
+                com.hs.contract.model.constant.ContractDocumentType.PDF)).thenReturn(true);
+        assertTrue(checker.requiresVerifiedAccess(object));
+        assertTrue(checker.preventsDeletion(object));
+        object.setId("preview-storage");
+        assertFalse(checker.requiresVerifiedAccess(object));
+        assertFalse(checker.preventsDeletion(object));
+    }
+
+    @Test
     void tenantCanAccessDocumentAfterContractIsSent() {
         ContractRepository repository = mock(ContractRepository.class);
         ContractStorageAccessChecker checker = new ContractStorageAccessChecker(repository);

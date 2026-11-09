@@ -101,13 +101,22 @@ class ContractDocumentProofEnqueuerTest {
     }
 
     @Test
-    void renewalAmendmentAndWorkflowDocumentsAreOutsideTheInitialScope() {
+    void renewalWorkflowAndOrphanAmendmentDocumentsAreOutsideScope() {
         Contract renewal = contract(null);
         renewal.setParentContractId("parent-lease");
         enqueuer.enqueue(renewal, document(), HASH);
         enqueuer.enqueue(contract("AMENDMENT"), document(), HASH);
         enqueuer.enqueue(contract("WORKFLOW"), document(), HASH);
         verifyNoInteractions(proofs);
+    }
+
+    @Test
+    void fullySignedAmendmentReceivesItsOwnProofBeforeEffectiveDate() {
+        Contract amendment = contract("AMENDMENT");
+        amendment.setParentContractId("root-lease");
+        enqueuer.enqueue(amendment, document(), HASH);
+        verify(proofs).save(argThat(proof -> "contract".equals(proof.getContractId())
+                && "pdf-final".equals(proof.getDocumentId()) && HASH.equals(proof.getDocumentHash())));
     }
 
     @Test

@@ -64,7 +64,7 @@ class SmartCaDraftIntegrityTest {
         doThrow(new AppException(ContractErrorCode.CONTRACT_DRAFT_READ_ONLY)).when(integrity).validateForDocument(c);
         var context=context("EmbeddingContext","request","root",SignerRole.TENANT,"prepared",0L,8192,"provider-result","certificate","range","identity","HD",1,"reviewed");
         assertEquals(6070,assertThrows(AppException.class,()->ReflectionTestUtils.invokeMethod(service,"finalizeSignedRequest","request","signed-storage",100L,context,
-                "0x" + "a".repeat(64))).getCode());
+                "0x" + "a".repeat(64), "s3-version-final")).getCode());
         assertEquals(SignatureRequestStatus.EMBEDDING,request.getStatus());
         verify(requests,never()).save(any());verify(contracts,never()).save(any());verifyNoInteractions(documents,listingStatus);
         verifyNoInteractions(documentProofEnqueuer);

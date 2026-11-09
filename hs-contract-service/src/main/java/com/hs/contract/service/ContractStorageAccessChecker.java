@@ -20,6 +20,23 @@ public class ContractStorageAccessChecker implements StorageAccessChecker {
     private final PaymentRequestRepository paymentRequestRepository;
 
     @Autowired
+    private com.hs.contract.repository.ContractDocumentRepository documentRepository;
+
+    @Override
+    public boolean requiresVerifiedAccess(StorageObject object) {
+        return object.getPurpose() == StoragePurpose.CONTRACT_DOCUMENT
+                && documentRepository != null && object.getId() != null
+                && documentRepository.existsByStorageObjectIdAndPurposeAndDocumentType(object.getId(),
+                    com.hs.contract.model.constant.DocumentPurpose.SIGNED_FINAL,
+                    com.hs.contract.model.constant.ContractDocumentType.PDF);
+    }
+
+    @Override
+    public boolean preventsDeletion(StorageObject object) {
+        return requiresVerifiedAccess(object);
+    }
+
+    @Autowired
     public ContractStorageAccessChecker(ContractRepository contractRepository,
             RentalRequestRepository rentalRequestRepository, PaymentRequestRepository paymentRequestRepository) {
         this.contractRepository = contractRepository;

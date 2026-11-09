@@ -76,7 +76,7 @@ class WorkflowSignatureIsolationTest {
         var ctor=context.getDeclaredConstructors()[0];ctor.setAccessible(true);
         Object ctx=ctor.newInstance("request","workflow",role,"prepared",0L,8192,"provider-result","certificate","range","identity","DC-1",1,"revision");
         ReflectionTestUtils.invokeMethod(service,"finalizeSignedRequest","request","signed-storage",100L,ctx,
-                "0x" + "a".repeat(64));
+                "0x" + "a".repeat(64), "s3-version-final");
         assertEquals(SignatureRequestStatus.SIGNED,request.getStatus());
         return c;
     }

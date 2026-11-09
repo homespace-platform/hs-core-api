@@ -60,6 +60,11 @@ class StorageServiceImplTest {
         lenient().when(properties.bucket()).thenReturn("test-bucket");
         lenient().when(properties.region()).thenReturn("ap-southeast-1");
         lenient().when(properties.uploadUrlDuration()).thenReturn(Duration.ofMinutes(15));
+        lenient().when(s3Client.putObject(any(software.amazon.awssdk.services.s3.model.PutObjectRequest.class),
+                any(software.amazon.awssdk.core.sync.RequestBody.class)))
+                .thenReturn(software.amazon.awssdk.services.s3.model.PutObjectResponse.builder().versionId("uploaded-version").build());
+        lenient().when(s3Client.copyObject(any(CopyObjectRequest.class)))
+                .thenReturn(software.amazon.awssdk.services.s3.model.CopyObjectResponse.builder().versionId("copied-version").build());
     }
 
     @AfterEach
@@ -432,7 +437,7 @@ class StorageServiceImplTest {
     }
 
     @Test
-    void copyObject_repoSaveFails_cleansUpS3Object() {
+    void copyObject_repoSaveFails_retainsVersionForAdminCleanup() {
         StorageObject source = StorageObject.builder()
                 .id("src-cleanup")
                 .originalName("photo.jpg")
@@ -452,8 +457,6 @@ class StorageServiceImplTest {
                 storageService.copyObject("src-cleanup", "owner-1", "LISTING", "l-1", StoragePurpose.LISTING_IMAGE));
 
         verify(s3Client).copyObject(any(CopyObjectRequest.class));
-        ArgumentCaptor<DeleteObjectRequest> deleteCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
-        verify(s3Client).deleteObject(deleteCaptor.capture());
-        assertTrue(deleteCaptor.getValue().key().startsWith("listing_image/owner-1/"));
+        verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
     }
 }

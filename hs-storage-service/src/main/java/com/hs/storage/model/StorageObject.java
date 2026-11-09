@@ -33,6 +33,16 @@ public class StorageObject extends BaseEntity {
     @Column(name = "bucket_name", nullable = false)
     String bucketName;
 
+    /** null: legacy chưa xác định; chuỗi "null": phiên bản null của S3 đã được cố định. */
+    @Column(name = "s3_version_id", length = 1024)
+    String s3VersionId;
+
+    @Version
+    @Column(nullable = false)
+    @org.hibernate.annotations.ColumnDefault("0")
+    @Builder.Default
+    Long rowVersion = 0L;
+
     @Column(name = "content_type", nullable = false)
     String contentType;
 
