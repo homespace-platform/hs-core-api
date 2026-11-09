@@ -81,6 +81,7 @@ public class ContractListingSync {
             throw invalid("Hồ sơ giữ chỗ đang thay đổi hoặc chờ xử lý.");
 
         ListingSnapshotDto approved = approvedSnapshot(listing);
+        ListingSnapshotDto accepted = acceptedSnapshot(rental, listing);
         var before = terms.snapshot(base);
         var originalProperty = terms.object(before.get("property"));
         var originalTenant = terms.object(before.get("tenant"));
@@ -91,6 +92,12 @@ public class ContractListingSync {
         var quote = RentalRequest.builder().occupantCount(occupants).motorbikeCount(bikes).carCount(cars).build();
         var source = data.listingTerms(approved, quote);
         var property = new LinkedHashMap<>(source.property());
+        // An omitted listing capacity is not an instruction to erase a signed limit.
+        // Explicit numbers, including zero, remain eligible for an amendment.
+        for (String field : List.of("maxOccupants", "maxVehicles", "maxMotorbikeCount", "maxCarCount"))
+            if ((property.get(field) == null || property.get(field).toString().isBlank())
+                    && originalProperty.get(field) != null)
+                property.put(field, originalProperty.get(field));
         for (String field : List.of("propertyType", "listingCode"))
             if (!Objects.equals(originalProperty.get(field), property.get(field)))
                 throw invalid("Loại tài sản hoặc mã tin không khớp hồ sơ hợp đồng.");
@@ -101,6 +108,7 @@ public class ContractListingSync {
             throw invalid("Giới hạn mới thấp hơn số người hoặc xe đã đăng ký trong hợp đồng.");
 
         var oldCharges = terms.rows(base.getChargesSnapshot());
+        var updatedCharges = mergeApprovedCharges(oldCharges, accepted, approved, source.charges());
         if (source.charges().stream().anyMatch(row -> "STATE_WATER_RATE".equals(row.get("billingMethod"))
                 && !Boolean.TRUE.equals(row.get("includedInRent"))))
             throw invalid("Bảng phí nước theo giá Nhà nước chưa thể lập hóa đơn tự động. Hãy chọn đơn giá hoặc cách tính khác trước khi đồng bộ.");
@@ -108,7 +116,7 @@ public class ContractListingSync {
             Object prepaid=terms.object(before.get("initialPayment")).get("monthlyCharges");
             String digits=Objects.toString(prepaid,"").replaceAll("[^0-9]","");
             BigDecimal paid=prepaid instanceof Number?new BigDecimal(prepaid.toString()):new BigDecimal(digits.isEmpty()?"0":digits);
-            BigDecimal monthly=source.charges().stream().filter(row->!Boolean.TRUE.equals(row.get("includedInRent")))
+            BigDecimal monthly=updatedCharges.stream().filter(row->!Boolean.TRUE.equals(row.get("includedInRent")))
                     .map(row->row.get("estimatedMonthlyAmount")==null?BigDecimal.ZERO:new BigDecimal(row.get("estimatedMonthlyAmount").toString()))
                     .reduce(BigDecimal.ZERO,BigDecimal::add);
             if(paid.signum()>0 && paid.compareTo(monthly)!=0)
@@ -147,7 +155,7 @@ public class ContractListingSync {
         for (String method : List.of("PER_KWH", "PER_M3")) {
             String initial = method.equals("PER_KWH") ? "electricityInitial" : "waterInitial";
             String meterType = method.equals("PER_KWH") ? "electricMeterType" : "waterMeterType";
-            boolean wasMetered = metered(oldCharges,method), isMetered = metered(source.charges(),method);
+            boolean wasMetered = metered(oldCharges,method), isMetered = metered(updatedCharges,method);
             boolean sameMeter = Objects.equals(oldMeters.get(meterType), meters.get(meterType));
             if (!draft && (wasMetered != isMetered || wasMetered && !sameMeter))
                 throw invalid("Bài đăng đã đổi cách tính/công tơ điện nước. Cần đối soát chuỗi chỉ số trước khi đồng bộ phụ lục; không tự thay công tơ đã chốt.");
@@ -161,14 +169,14 @@ public class ContractListingSync {
         updated.put("equipments", source.equipments());
         updated.put("amenities", source.amenities());
         updated.put("policies", policies);
-        updated.put("charges", source.charges());
+        updated.put("charges", updatedCharges);
         updated.put("meters", meters);
         if(!draft) updated.put("financial", updatedFinancial);
         // Association metadata is kept outside the legal Listing snapshot, which intentionally excludes branch IDs.
         updated.put("listingBranchId", listing.getBranchId());
         var changes = new ArrayList<AmendmentComparison>();
         if(!draft) changes.addAll(priceChanges);
-        terms.compareCharges(changes, oldCharges, source.charges());
+        terms.compareCharges(changes, oldCharges, updatedCharges);
         for(String key:List.of("electricMeterType","waterMeterType"))
             add(changes,"meters."+key,"Cách tính theo công tơ",oldMeters.get(key),meters.get(key));
         if (compare) {
@@ -209,6 +217,100 @@ public class ContractListingSync {
 
     private boolean metered(List<Map<String,Object>> charges,String method) {
         return charges.stream().anyMatch(row->method.equals(row.get("billingMethod"))&&!Boolean.TRUE.equals(row.get("includedInRent")));
+    }
+
+    /** Only listing edits change a contract fee. The initial contract can use a different
+     *  display name or note because its fee rows came from the accepted rental quote. */
+    private List<Map<String,Object>> mergeApprovedCharges(List<Map<String,Object>> current,
+            ListingSnapshotDto accepted, ListingSnapshotDto approved, List<Map<String,Object>> approvedRows) {
+        var previous = chargeItems(accepted);
+        var next = chargeItems(approved);
+        // An empty accept-time fee table cannot explain fees already on the contract, so refuse
+        // rather than treating every approved row as a brand-new listing edit.
+        if (previous.isEmpty() && !current.isEmpty())
+            throw invalid("Thiếu bản chụp bài đăng lúc xác nhận thuê; không thể xác định khoản phí đã sửa.");
+        var rendered = new LinkedHashMap<String,Map<String,Object>>();
+        for (var row : approvedRows) {
+            String key = chargeKey(row);
+            if (rendered.put(key, row) != null) throw invalid("Bảng phí bài đăng có khoản phí trùng lặp.");
+        }
+        if (!rendered.keySet().equals(next.keySet()))
+            throw invalid("Bản phí đã duyệt không khớp bảng phí dùng để soạn hợp đồng.");
+        var changed = new HashSet<String>();
+        var keys = new HashSet<>(previous.keySet()); keys.addAll(next.keySet());
+        for (String key : keys) if (!sameCharge(previous.get(key), next.get(key))) changed.add(key);
+        var merged = new ArrayList<Map<String,Object>>();
+        var present = new HashSet<String>();
+        for (var row : current) {
+            String key = chargeKey(row);
+            if (!present.add(key)) throw invalid("Bảng phí hợp đồng có khoản phí trùng lặp.");
+            if (!changed.contains(key)) merged.add(row);
+            else if (rendered.containsKey(key)) merged.add(rendered.get(key));
+        }
+        for (var row : approvedRows) {
+            String key = chargeKey(row);
+            if (changed.contains(key) && !present.contains(key)) merged.add(row);
+        }
+        return merged;
+    }
+
+    private Map<String,ListingSnapshotDto.ChargeItemSnapshot> chargeItems(ListingSnapshotDto snapshot) {
+        var items = new LinkedHashMap<String,ListingSnapshotDto.ChargeItemSnapshot>();
+        if (snapshot.getCharges() == null) return items;
+        for (var item : snapshot.getCharges())
+            if (items.put(chargeKey(item.getChargeType(), item.getCustomName()), item) != null)
+                throw invalid("Bản chụp bài đăng có khoản phí trùng lặp.");
+        return items;
+    }
+
+    private String chargeKey(Map<String,Object> row) {
+        return chargeKey(Objects.toString(row.get("chargeType"), ""), Objects.toString(row.get("name"), ""));
+    }
+
+    private String chargeKey(String type, String name) {
+        String code = Objects.toString(type, "").trim().toUpperCase(Locale.ROOT);
+        if (code.isEmpty()) throw invalid("Khoản phí thiếu loại phí.");
+        return "OTHER".equals(code) || "CUSTOM".equals(code)
+                ? code + ":" + (Objects.toString(name, "").isBlank() ? "Phí dịch vụ khác" : name).trim().toLowerCase(Locale.ROOT) : code;
+    }
+
+    private boolean sameCharge(ListingSnapshotDto.ChargeItemSnapshot a, ListingSnapshotDto.ChargeItemSnapshot b) {
+        if (a == null || b == null) return a == b || inactiveCharge(a == null ? b : a);
+        if (a.isIncludedInRent() && b.isIncludedInRent())
+            return Objects.equals(a.getChargeType(), b.getChargeType())
+                    && Objects.equals(a.getCustomName(), b.getCustomName())
+                    && Objects.equals(chargeDescription(a.getDescription()), chargeDescription(b.getDescription()));
+        return Objects.equals(a.getChargeType(), b.getChargeType())
+                && Objects.equals(a.getBillingMethod(), b.getBillingMethod())
+                && Objects.equals(a.getCurrency(), b.getCurrency())
+                && Objects.equals(a.getUnit(), b.getUnit())
+                && a.isIncludedInRent() == b.isIncludedInRent()
+                && Objects.equals(a.getCustomName(), b.getCustomName())
+                && Objects.equals(chargeDescription(a.getDescription()), chargeDescription(b.getDescription()))
+                && (a.getAmount() == null || b.getAmount() == null
+                    ? a.getAmount() == b.getAmount() : a.getAmount().compareTo(b.getAmount()) == 0);
+    }
+
+    private boolean inactiveCharge(ListingSnapshotDto.ChargeItemSnapshot item) {
+        return item != null && ("NOT_APPLICABLE".equals(item.getBillingMethod()) || "FREE".equals(item.getBillingMethod()))
+                && (item.getAmount() == null || item.getAmount().signum() == 0)
+                && chargeDescription(item.getDescription()).isBlank();
+    }
+
+    private String chargeDescription(String description) {
+        String value = Objects.toString(description, "").trim();
+        return "Khoản phí tham khảo mỗi tháng; xác nhận với chủ nhà khi xem.".equals(value) ? "" : value;
+    }
+
+    private ListingSnapshotDto acceptedSnapshot(RentalRequest rental, Listing listing) {
+        try {
+            var snapshot = mapper.readValue(rental.getListingSnapshot(), ListingSnapshotDto.class);
+            if (snapshot == null || !listing.getId().equals(snapshot.getListingId())
+                    || snapshot.getCategory() != listing.getCategory() || snapshot.getCharges() == null)
+                throw invalid("Thiếu bản chụp bài đăng lúc xác nhận thuê; không thể xác định khoản phí đã sửa.");
+            return snapshot;
+        } catch (AppException e) { throw e; }
+        catch (Exception e) { throw invalid("Không đọc được bản chụp bài đăng lúc xác nhận thuê; không thể đồng bộ an toàn."); }
     }
 
     private boolean numeric(Object value) {

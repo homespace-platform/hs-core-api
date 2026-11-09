@@ -60,6 +60,12 @@ public class PaymentReceiptPdfRenderer {
     context.setVariable("hash", hash);
     context.setVariable("title", refund ? "PHIẾU XÁC NHẬN HOÀN TIỀN" : "PHIẾU XÁC NHẬN THANH TOÁN");
     context.setVariable("money", money(s.total(), s.currency()));
+    if (s.context().settlement() != null) {
+      var settlement = s.context().settlement();
+      context.setVariable("depositMoney", money(settlement.depositAmount(), s.currency()));
+      context.setVariable("deductions", settlement.deductions().stream().map(d -> Map.of(
+          "description", d.description(), "amount", money(d.amount(), s.currency()))).toList());
+    }
     context.setVariable("confirmed", stamp(s.confirmedAt()));
     context.setVariable("reported", stamp(s.reportedAt()));
     context.setVariable(

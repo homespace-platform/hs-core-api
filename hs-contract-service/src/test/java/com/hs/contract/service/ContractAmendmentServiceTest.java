@@ -419,6 +419,22 @@ class ContractAmendmentServiceTest {
         verify(parking,times(1)).activateAmendmentHoldInBranch(eq("root"),eq(child.getId()),eq("rental"),eq("listing"),isNull(),eq(p.effectiveOn()),eq(LocalDate.of(2027,1,14)),eq(1),eq(0));
         verify(parking,atLeastOnce()).validateAmendmentCapacityInBranch("root",child.getId(),"listing",null,p.effectiveOn(),LocalDate.of(2027,1,14),1,0);
     }
+    @Test void validateSigningToleratesDetachedTermsRevisionContractProxy() {
+        var a = request("owner"); var child = approve(a);
+        child.setBranchId("approved-branch");
+        var revision = revisionStore.get(child.getCurrentRevisionId());
+        // SmartCA gatherSigningContext validates outside a Hibernate session; accessing
+        // revision.contract.branchId through a detached lazy association used to become Uncategorized.
+        Contract detached = mock(Contract.class);
+        when(detached.getBranchId()).thenThrow(new org.hibernate.LazyInitializationException(
+                "Could not initialize proxy - no session"));
+        revision.setContract(detached);
+        assertDoesNotThrow(() -> service.validateSigning(child));
+        verify(detached, never()).getBranchId();
+        assertNull(builder.snapshot(revision).get("listingBranchId"));
+        verify(parking, atLeastOnce()).validateAmendmentCapacityInBranch(eq("root"), eq(child.getId()), eq("listing"),
+                eq("approved-branch"), any(), any(), anyInt(), anyInt());
+    }
     @Test void parkingCapacityIsCheckedBeforePreviewSubmissionApprovalAndSigning() {
         var p=payload(Map.of("freeForm",true,"motorbikeCount",3,"carCount",1));
         doThrow(new AppException(com.hs.listing.advice.ListingErrorCode.PARKING_CAPACITY_CHANGED,"Không đủ chỗ"))

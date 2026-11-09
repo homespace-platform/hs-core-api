@@ -34,9 +34,20 @@ public class AmendmentTermsBuilder {
         t.put("systemTerms",systemTerms);
         t.put("landlord", map(r.getLandlordSnapshot())); t.put("lease", map(r.getLeaseSnapshot()));
         t.put("meters", map(r.getInitialMetersSnapshot())); t.put("initialPayment", map(r.getInitialPaymentSnapshot()));
-        t.put("listingBranchId", r.getContract()==null?null:r.getContract().getBranchId());
+        t.put("listingBranchId", listingBranchId(r));
         t.put("billingRules",MonthlyBillingSchedule.rules());
         return t;
+    }
+
+    /** Branch id is owned by the contract row; never force a lazy load when the session is closed. */
+    private static String listingBranchId(ContractRevision r) {
+        var contract = r.getContract();
+        if (contract == null || !org.hibernate.Hibernate.isInitialized(contract)) return null;
+        try {
+            return contract.getBranchId();
+        } catch (org.hibernate.LazyInitializationException ex) {
+            return null;
+        }
     }
 
     public String documentSpecialTerms(Map<String,Object> terms) {
@@ -207,18 +218,24 @@ public class AmendmentTermsBuilder {
     }
     /** Compare actual fee data, never a regenerated sentence or an unrelated row in the table. */
     void compareCharges(List<AmendmentComparison> diff,List<Map<String,Object>> before,List<Map<String,Object>> after) {
-        var names=new LinkedHashSet<String>();before.forEach(r->names.add(Objects.toString(r.get("name"),"")));after.forEach(r->names.add(Objects.toString(r.get("name"),"")));
+        var names=new LinkedHashSet<String>();before.forEach(r->names.add(chargeIdentity(r)));after.forEach(r->names.add(chargeIdentity(r)));
         for(String name:names) {
-            var a=before.stream().filter(r->name.equals(r.get("name"))).findFirst().orElse(null);
-            var b=after.stream().filter(r->name.equals(r.get("name"))).findFirst().orElse(null);
+            var a=before.stream().filter(r->name.equals(chargeIdentity(r))).findFirst().orElse(null);
+            var b=after.stream().filter(r->name.equals(chargeIdentity(r))).findFirst().orElse(null);
             if(a!=null && b!=null && chargeValues(a).equals(chargeValues(b)))continue;
             String key="charges."+Base64.getUrlEncoder().withoutPadding().encodeToString(name.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            diff.add(new AmendmentComparison(key,"Khoản phí · "+name,chargeDescription(a),chargeDescription(b)));
+            diff.add(new AmendmentComparison(key,"Khoản phí · "+Objects.toString(b==null?a.get("name"):b.get("name"),""),chargeDescription(a),chargeDescription(b)));
         }
+    }
+    private String chargeIdentity(Map<String,Object> row) {
+        String type=Objects.toString(row.get("chargeType"),"").trim().toUpperCase(Locale.ROOT);
+        String name=Objects.toString(row.get("name"),"").trim().toLowerCase(Locale.ROOT);
+        // Keep OTHER/CUSTOM identity aligned with ContractListingSync.chargeKey.
+        return type.isBlank() || "OTHER".equals(type) || "CUSTOM".equals(type) ? type+":"+name : type;
     }
     private Map<String,String> chargeValues(Map<String,Object> row) {
         var values=new LinkedHashMap<String,String>();
-        for(String key:List.of("chargeType","billingMethod","includedInRent","unitAmount","estimatedMonthlyAmount","note")) {
+        for(String key:List.of("name","chargeType","billingMethod","includedInRent","unitAmount","estimatedMonthlyAmount","note")) {
             String value=Objects.toString(row.get(key),"").trim();
             if(Set.of("unitAmount","estimatedMonthlyAmount").contains(key))try{value=new BigDecimal(value).stripTrailingZeros().toPlainString();}catch(NumberFormatException ignored){}
             values.put(key,value);
@@ -228,7 +245,8 @@ public class AmendmentTermsBuilder {
     private String chargeDescription(Map<String,Object> row) {
         if(row==null)return "Không có";
         return Objects.toString(row.get("amountAndMethod"),"")+"\nĐơn giá: "+Objects.toString(row.get("unitAmount"),"Chưa có")
-                +"\nCách tính: "+Objects.toString(row.get("billingMethodText"),Objects.toString(row.get("billingMethod"),""))
+                +"\nCách tính: "+Objects.toString(row.get("billingMethodText"),
+                ContractDataBuilder.billingMethodUnitLabel(Objects.toString(row.get("billingMethod"),null)))
                 +"\nTổng phí dự kiến: "+Objects.toString(row.get("estimatedMonthlyAmount"),"Theo sử dụng thực tế")
                 +"\nGhi chú: "+Objects.toString(row.get("note"),"");
     }

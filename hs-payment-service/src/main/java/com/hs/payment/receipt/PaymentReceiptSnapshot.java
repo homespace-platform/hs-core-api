@@ -28,6 +28,9 @@ public record PaymentReceiptSnapshot(
   public record Line(
       String name, BigDecimal amount, Integer quantity, BigDecimal unitPrice, String description) {}
 
+  public record Settlement(BigDecimal depositAmount, List<Deduction> deductions) {}
+  public record Deduction(String description, BigDecimal amount) {}
+
   public record Context(
       String contractNumber,
       String propertyAddress,
@@ -35,7 +38,12 @@ public record PaymentReceiptSnapshot(
       String periodLabel,
       String landlordName,
       String tenantName,
-      String amountWords) {
+      String amountWords,
+      Settlement settlement) {
+    public Context(String contractNumber, String propertyAddress, String unitLabel, String periodLabel,
+        String landlordName, String tenantName, String amountWords) {
+      this(contractNumber, propertyAddress, unitLabel, periodLabel, landlordName, tenantName, amountWords, null);
+    }
     public static Context empty() {
       return new Context(null, null, null, null, null, null, null);
     }

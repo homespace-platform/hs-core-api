@@ -3,13 +3,16 @@ package com.hs.contract.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.contract.repository.*;
+import com.hs.contract.dto.billing.ClosureDeduction;
 import com.hs.contract.service.engine.VietnameseCurrencyTextConverter;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.payment.model.PaymentRequest;
 import com.hs.payment.model.constant.PaymentDirection;
+import com.hs.payment.model.constant.PaymentType;
 import com.hs.payment.receipt.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.math.BigDecimal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -19,6 +22,7 @@ public class ContractPaymentReceiptContext implements PaymentReceiptContextProvi
   private final ContractRepository contracts;
   private final ContractRevisionRepository revisions;
   private final MonthlyInvoiceRepository invoices;
+  private final ContractClosureRepository closures;
   private final RentalRequestRepository rentals;
   private final ObjectMapper mapper;
 
@@ -90,6 +94,30 @@ public class ContractPaymentReceiptContext implements PaymentReceiptContextProvi
           rental.getMoveInDate().format(format)
               + " - trước "
               + rental.getMoveInDate().plusMonths(1).format(format);
+    PaymentReceiptSnapshot.Settlement settlement = null;
+    var closure = p.getType() == PaymentType.DEPOSIT_REFUND
+        ? closures.findByRefundPaymentId(p.getId()).orElseThrow(() -> new IllegalStateException("Missing settlement for deposit refund receipt"))
+        : p.getType() == PaymentType.OTHER_CHARGE ? closures.findByBalancePaymentId(p.getId()).orElse(null) : null;
+    if (closure != null) {
+      List<ClosureDeduction> deductions;
+      try {
+        deductions = mapper.readValue(closure.getDeductionsSnapshot(), new TypeReference<>() {});
+      } catch (Exception e) {
+        throw new IllegalStateException("Invalid settlement deductions for deposit refund receipt", e);
+      }
+      if (deductions == null || deductions.stream().anyMatch(d -> d == null || d.amount() == null
+          || d.amount().signum() < 0 || d.description() == null || d.description().isBlank())
+          || (p.getType() == PaymentType.DEPOSIT_REFUND
+              ? closure.getRefundAmount() == null || closure.getRefundAmount().compareTo(p.getTotalAmount()) != 0
+              : closure.getBalanceAmount() == null || closure.getBalanceAmount().compareTo(p.getTotalAmount()) != 0))
+        throw new IllegalStateException("Settlement does not match deposit refund receipt");
+      var deductionTotal = deductions.stream().map(ClosureDeduction::amount).reduce(BigDecimal.ZERO, BigDecimal::add);
+      var depositAmount = p.getType() == PaymentType.DEPOSIT_REFUND
+          ? p.getTotalAmount().add(deductionTotal) : deductionTotal.subtract(p.getTotalAmount());
+      if (depositAmount.signum() < 0) throw new IllegalStateException("Settlement deductions are less than balance due");
+      settlement = new PaymentReceiptSnapshot.Settlement(depositAmount,
+          deductions.stream().map(d -> new PaymentReceiptSnapshot.Deduction(d.description(), d.amount())).toList());
+    }
     return new PaymentReceiptSnapshot.Context(
         c == null ? null : c.getContractNumber(),
         address,
@@ -97,7 +125,7 @@ public class ContractPaymentReceiptContext implements PaymentReceiptContextProvi
         period,
         ownerName,
         tenantName,
-        VietnameseCurrencyTextConverter.toWords(p.getTotalAmount()));
+        VietnameseCurrencyTextConverter.toWords(p.getTotalAmount()), settlement);
   }
 
   private Map<String, Object> map(String json) {

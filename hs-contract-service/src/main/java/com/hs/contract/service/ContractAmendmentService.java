@@ -268,7 +268,16 @@ public class ContractAmendmentService {
         if (!"APPROVED".equals(a.getStatus()) || !time.now().isBefore(a.getSignBy()) || blocked(c, false) != null) throw invalid("Phụ lục đã hết hạn hoặc hợp đồng không còn cho phép ký.");
         validateBaseAndDate(c, a);
         var changes = businessChanges(builder.map(a.getChangesSnapshot()), replacement(c,a.getPreviousProposalId()),readListingSource(a));
-        validateParking(c,builder.snapshot(terms.require(a.getTermsRevisionId())),changes,a.getEffectiveOn(),agreement.getId());
+        // SmartCA gatherSigningContext validates outside an open Hibernate session. Do not call
+        // AmendmentTermsBuilder.snapshot here: it reads revision.contract.branchId through a lazy
+        // proxy and surfaces as LazyInitializationException → Uncategorized error. Parking only
+        // needs tenant/lease + the appendix contract's already-loaded branchId.
+        ContractRevision revision = terms.require(a.getTermsRevisionId());
+        Map<String,Object> next = new LinkedHashMap<>();
+        next.put("tenant", builder.map(revision.getTenantSnapshot()));
+        next.put("lease", builder.map(revision.getLeaseSnapshot()));
+        next.put("listingBranchId", agreement.getBranchId());
+        validateParking(c, next, changes, a.getEffectiveOn(), agreement.getId());
     }
 
     @Transactional public void signed(Contract agreement) {
