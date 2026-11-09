@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.nio.charset.StandardCharsets;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequiredArgsConstructor
@@ -27,13 +28,16 @@ public class ContractDocumentIntegrityController {
 
     @RequestMapping(value = "/content", method = {RequestMethod.GET, RequestMethod.POST})
     public ResponseEntity<byte[]> content(@PathVariable String documentId,
-            @RequestParam(defaultValue = "false") boolean download) {
+            @RequestParam(defaultValue = "false") boolean download, HttpServletRequest request) {
         var pdf = integrity.content(documentId);
+        boolean appRequest = "POST".equals(request.getMethod());
         String fileName = pdf.fileName() == null ? "hop-dong.pdf" : pdf.fileName().replaceAll("[\\r\\n]", "_");
         var disposition = (download ? ContentDisposition.attachment() : ContentDisposition.inline())
                 .filename(fileName, StandardCharsets.UTF_8).build();
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).contentType(MediaType.APPLICATION_PDF)
-                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+        var response = ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .contentType(appRequest ? MediaType.parseMediaType("application/vnd.homespace.verified-pdf") : MediaType.APPLICATION_PDF);
+        if (!appRequest) response.header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString());
+        return response
                 .header("X-Document-Integrity", pdf.integrity().status())
                 .header("X-Content-Type-Options", "nosniff")
                 .contentLength(pdf.bytes().length).body(pdf.bytes());

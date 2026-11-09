@@ -38,7 +38,9 @@ class ContractDocumentIntegrityControllerTest {
         mvc.perform(get("/contracts/documents/pdf/content?download=true")).andExpect(status().isOk())
                 .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.startsWith("attachment")));
         mvc.perform(post("/api/v1/contracts/documents/pdf/content")).andExpect(status().isOk())
-                .andExpect(content().contentType("application/pdf")).andExpect(content().bytes(bytes))
+                .andExpect(content().contentType("application/vnd.homespace.verified-pdf"))
+                .andExpect(content().bytes(bytes))
+                .andExpect(header().doesNotExist("Content-Disposition"))
                 .andExpect(header().string("Cache-Control", "no-store"));
     }
     @Test void mismatchedFileNeverReturnsPdfBytes() throws Exception {
