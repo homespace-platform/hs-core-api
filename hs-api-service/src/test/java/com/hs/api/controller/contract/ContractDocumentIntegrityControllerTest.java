@@ -37,6 +37,9 @@ class ContractDocumentIntegrityControllerTest {
                 .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.startsWith("inline")));
         mvc.perform(get("/contracts/documents/pdf/content?download=true")).andExpect(status().isOk())
                 .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.startsWith("attachment")));
+        mvc.perform(post("/api/v1/contracts/documents/pdf/content")).andExpect(status().isOk())
+                .andExpect(content().contentType("application/pdf")).andExpect(content().bytes(bytes))
+                .andExpect(header().string("Cache-Control", "no-store"));
     }
     @Test void mismatchedFileNeverReturnsPdfBytes() throws Exception {
         when(service.content("pdf")).thenThrow(new AppException(BlockchainProofError.DOCUMENT_INTEGRITY_MISMATCH));

@@ -87,6 +87,14 @@ public class ContractDocumentProofWorker {
                         proof.getDocumentHash(), proof.getSignerAddress(), proof.getTransactionHash());
                 if (receipt.isPresent()) {
                     RegistryClient.Receipt result = receipt.get();
+                    if (result.finalized() && proof.getCaseId() != null && proof.getDocumentKind() != null) {
+                        RegistryClient.ChainLineage lineage = registry.readLineage(proof.getChainId(),
+                                proof.getRegistryAddress(), proof.getOnChainDocumentId());
+                        if (!proof.getCaseId().equalsIgnoreCase(lineage.caseId())
+                                || proof.getDocumentKind() != lineage.documentKind()) {
+                            throw new BlockchainException("DOCUMENT_LINEAGE_CONFLICT", "Mã hồ sơ hoặc loại văn bản on-chain không khớp proof.", true);
+                        }
+                    }
                     mutate(proof.getDocumentId(), leaseId, token, current -> {
                         current.setBlockNumber(result.blockNumber());
                         current.setBlockHash(result.blockHash());
@@ -109,8 +117,10 @@ public class ContractDocumentProofWorker {
             if (!DocumentProofHash.sha256(pdf).equalsIgnoreCase(proof.getDocumentHash())) {
                 throw new BlockchainException("SOURCE_PDF_CHANGED", "PDF lưu trữ không khớp hash lúc ký; cần đối soát.", true);
             }
-            RegistryClient.SignedSubmission signed = registry.prepare(proof.getChainId(), proof.getRegistryAddress(),
-                    proof.getOnChainDocumentId(), proof.getDocumentHash());
+            RegistryClient.SignedSubmission signed = proof.getCaseId() == null || proof.getDocumentKind() == null
+                    ? registry.prepare(proof.getChainId(), proof.getRegistryAddress(), proof.getOnChainDocumentId(), proof.getDocumentHash())
+                    : registry.prepare(proof.getChainId(), proof.getRegistryAddress(), proof.getOnChainDocumentId(),
+                            proof.getDocumentHash(), proof.getCaseId(), proof.getDocumentKind());
             // Lưu bytes, nonce và hash trước broadcast để đóng khe restart/timeout sau khi gửi.
             if (!mutate(proof.getDocumentId(), leaseId, token, current -> {
                 current.setSignerAddress(signed.signerAddress());

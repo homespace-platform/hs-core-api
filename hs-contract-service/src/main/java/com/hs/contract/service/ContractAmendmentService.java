@@ -67,7 +67,8 @@ public class ContractAmendmentService {
         ContractRevision base = terms.at(c, time.today());
         if (!base.getId().equals(p.baseRevisionId())) throw invalid("Điều khoản đã thay đổi. Tải lại để đối chiếu.");
         if (options != null && !Boolean.TRUE.equals(p.changes().get("freeForm"))) options.validate(c,builder.snapshot(base),p.changes());
-        var result=buildTerms(base,p.changes(),replacing,listingSource(c,base,p.changes()));validateBusinessTerms(c,base,result.terms(),businessChanges(p.changes(),replacing),p.effectiveOn());return result;
+        var source=listingSource(c,base,p.changes());
+        var result=buildTerms(base,p.changes(),replacing,source);validateBusinessTerms(c,base,result.terms(),businessChanges(p.changes(),replacing,source),p.effectiveOn());return result;
     }
 
     @Transactional public AmendmentResponse propose(String id, String actor, AmendmentPayload p) {
@@ -110,7 +111,7 @@ public class ContractAmendmentService {
         if (options != null && !Boolean.TRUE.equals(p.changes().get("freeForm"))) options.validate(c,builder.snapshot(base),p.changes());
         var source = listingSource(c, base, p.changes());
         var result = buildTerms(base, p.changes(),replacing,source);
-        validateBusinessTerms(c,base,result.terms(),businessChanges(p.changes(),replacing),p.effectiveOn());
+        validateBusinessTerms(c,base,result.terms(),businessChanges(p.changes(),replacing,source),p.effectiveOn());
         String reason = text(p.reason(), 10, 2000);
         List<String> evidence = validateEvidence(c, actor, p.evidenceIds());
         Instant cutoff = cutoff(p.effectiveOn());
@@ -228,7 +229,7 @@ public class ContractAmendmentService {
                 ContractRevision base = terms.require(a.getBaseRevisionId());
                 var replacing=replacement(c,a.getPreviousProposalId());
                 var result = buildTerms(base, builder.map(a.getChangesSnapshot()),replacing,readListingSource(a));
-                validateBusinessTerms(c,base,result.terms(),businessChanges(builder.map(a.getChangesSnapshot()),replacing),a.getEffectiveOn());
+                validateBusinessTerms(c,base,result.terms(),businessChanges(builder.map(a.getChangesSnapshot()),replacing,readListingSource(a)),a.getEffectiveOn());
                 Contract agreement = contracts.save(Contract.builder().contractNumber(c.getContractNumber() + "-PL-" + a.getId().substring(0, 8))
                         .parentContractId(c.getId()).agreementKind("AMENDMENT").rentalRequestId(c.getRentalRequestId())
                         .listingId(c.getListingId()).branchId(targetBranch(c,result.terms())).landlordId(c.getLandlordId()).tenantId(c.getTenantId())
@@ -243,12 +244,12 @@ public class ContractAmendmentService {
                         .financialSnapshot(builder.write(t.get("financial"))).chargesSnapshot(builder.write(t.get("charges")))
                         .equipmentSnapshot(builder.write(t.get("equipments"))).amenitiesSnapshot(builder.write(t.get("amenities")))
                         .policiesSnapshot(builder.write(t.get("policies"))).specialTerms(builder.documentSpecialTerms(t))
-                        .initialMetersSnapshot(base.getInitialMetersSnapshot()).initialPaymentSnapshot(base.getInitialPaymentSnapshot())
+                        .initialMetersSnapshot(builder.write(t.get("meters"))).initialPaymentSnapshot(base.getInitialPaymentSnapshot())
                         .revisionNote("Phụ lục điều chỉnh " + a.getId() + "; hiệu lực " + a.getEffectiveOn()).build());
                 agreement.setCurrentRevisionId(revision.getId()); contracts.save(agreement);
                 a.setAgreementContractId(agreement.getId()); a.setTermsRevisionId(revision.getId()); a.setStatus("APPROVED");
                 a.setSignBy(min(a.getSignBy(), time.now().plus(Duration.ofHours(signingHours))));
-                var changes = businessChanges(builder.map(a.getChangesSnapshot()),replacing);
+                var changes = businessChanges(builder.map(a.getChangesSnapshot()),replacing,readListingSource(a));
                 if (parkingChanged(c,t,changes)) {
                     Map<String,Object> tenant = builder.object(t.get("tenant"));
                     parking.holdForAmendmentInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),targetBranch(c,t),
@@ -266,7 +267,7 @@ public class ContractAmendmentService {
         Contract c = contracts.findById(agreement.getParentContractId()).orElseThrow(this::forbidden);
         if (!"APPROVED".equals(a.getStatus()) || !time.now().isBefore(a.getSignBy()) || blocked(c, false) != null) throw invalid("Phụ lục đã hết hạn hoặc hợp đồng không còn cho phép ký.");
         validateBaseAndDate(c, a);
-        var changes = businessChanges(builder.map(a.getChangesSnapshot()), replacement(c,a.getPreviousProposalId()));
+        var changes = businessChanges(builder.map(a.getChangesSnapshot()), replacement(c,a.getPreviousProposalId()),readListingSource(a));
         validateParking(c,builder.snapshot(terms.require(a.getTermsRevisionId())),changes,a.getEffectiveOn(),agreement.getId());
     }
 
@@ -280,7 +281,7 @@ public class ContractAmendmentService {
         if (documents.findByContractIdAndRevisionId(agreement.getId(), agreement.getCurrentRevisionId()).stream()
                 .noneMatch(d -> d.getPurpose() == DocumentPurpose.SIGNED_FINAL && d.getStatus() == DocumentGenerationStatus.READY)) throw invalid("Chưa có PDF hoàn chỉnh đã ký.");
         var replacing=replacement(c,a.getPreviousProposalId());
-        var changes = businessChanges(builder.map(a.getChangesSnapshot()),replacing);
+        var changes = businessChanges(builder.map(a.getChangesSnapshot()),replacing,readListingSource(a));
         var newTerms=builder.snapshot(terms.require(a.getTermsRevisionId()));
         validateBusinessTerms(c,terms.require(a.getBaseRevisionId()),newTerms,changes,a.getEffectiveOn(),agreement.getId());
         if (parkingChanged(c,newTerms,changes)) {
@@ -400,7 +401,8 @@ public class ContractAmendmentService {
         var result = builder.build(base, input, source != null || allowUnchanged);
         if (source == null) return result;
         var updated = new LinkedHashMap<>(result.terms());
-        for (String group : List.of("property", "equipments", "amenities")) updated.put(group, source.terms().get(group));
+        for (String group : List.of("property", "equipments", "amenities", "charges", "meters", "financial"))
+            if(source.terms().containsKey(group))updated.put(group, source.terms().get(group));
         if(source.terms().containsKey("listingBranchId"))updated.put("listingBranchId",source.terms().get("listingBranchId"));
         updated.put("policies", listingSync.mergeListingPolicies(builder.object(updated.get("policies")), source.terms()));
         var property = builder.object(updated.get("property"));
@@ -426,23 +428,44 @@ public class ContractAmendmentService {
         if(replacing==null)return result;
         // Stored comparisons may themselves describe a previous replacement, not the effective base.
         var old=new LinkedHashMap<String,AmendmentComparison>();
-        listingTerms(base,builder.map(replacing.getChangesSnapshot()),readListingSource(replacing),true).comparison().forEach(r->old.put(r.field(),r));
-        var next=new LinkedHashMap<String,AmendmentComparison>();result.comparison().forEach(r->next.put(r.field(),r));
+        listingTerms(base,builder.map(replacing.getChangesSnapshot()),readListingSource(replacing),true).comparison().forEach(r->old.put(comparisonKey(r.field()),r));
+        var next=new LinkedHashMap<String,AmendmentComparison>();result.comparison().forEach(r->next.put(comparisonKey(r.field()),r));
         var keys=new LinkedHashSet<>(old.keySet());keys.addAll(next.keySet());var diff=new ArrayList<AmendmentComparison>();
         for(String key:keys){var a=old.get(key);var b=next.get(key);String before=a==null?b.before():a.after(),after=b==null?a.before():b.after();
             if(!Objects.equals(before,after))diff.add(new AmendmentComparison(key,b==null?a.label():b.label(),before,after));}
         if(diff.isEmpty())throw invalid("Chưa có sửa đổi so với phụ lục đang chờ áp dụng.");
         return new AmendmentTermsBuilder.Result(result.terms(),diff);
     }
+    private String comparisonKey(String field) { return "financial.amountValue".equals(field)?"rentAmount":field; }
     /** Undo/rebuild future lease and parking segments even when a correction returns to base values. */
-    private Map<String,Object> businessChanges(Map<String,Object> changes,ContractAmendment replacing) {
-        if(replacing==null)return changes;
-        var old=builder.map(replacing.getChangesSnapshot());var result=new LinkedHashMap<String,Object>(changes);
+    private Map<String,Object> businessChanges(Map<String,Object> changes,ContractAmendment replacing,ContractListingSync.Preview source) {
+        var adjusted=new LinkedHashMap<String,Object>(changes);
+        if(source!=null) {
+            var financial=new LinkedHashMap<String,Object>();
+            for(var difference:source.differences()) {
+                if(difference.field().startsWith("financial."))financial.put(difference.field().substring("financial.".length()),true);
+                if(difference.field().startsWith("charges."))adjusted.put("charges",source.terms().get("charges"));
+            }
+            if(!financial.isEmpty()) {
+                var fields=new LinkedHashMap<String,Object>(FreeFormAmendmentTerms.map(adjusted.get("fields")));
+                fields.put("financial",financial);adjusted.put("fields",fields);
+            }
+        }
+        if(replacing==null)return adjusted;
+        var old=builder.map(replacing.getChangesSnapshot());var result=new LinkedHashMap<String,Object>(adjusted);
         var previousSource=readListingSource(replacing);
+        var previousChanges=businessChanges(old,null,previousSource);
+        var previousFinancial=FreeFormAmendmentTerms.map(FreeFormAmendmentTerms.map(previousChanges.get("fields")).get("financial"));
+        if(!previousFinancial.isEmpty()) {
+            var fields=new LinkedHashMap<String,Object>(FreeFormAmendmentTerms.map(result.get("fields")));
+            var financial=new LinkedHashMap<String,Object>(previousFinancial);
+            financial.putAll(FreeFormAmendmentTerms.map(fields.get("financial")));fields.put("financial",financial);result.put("fields",fields);
+        }
+        if(previousChanges.containsKey("charges")) result.putIfAbsent("charges",source==null?previousChanges.get("charges"):source.terms().get("charges"));
         if(previousSource!=null && previousSource.terms().containsKey("listingBranchId"))result.put("refreshParkingPool",true);
         for(String key:List.of("motorbikeCount","carCount"))if(old.containsKey(key))result.putIfAbsent(key,old.get(key));
         if(leaseChanged(old)&&!leaseChanged(changes)) {
-            var fields=new LinkedHashMap<String,Object>(builder.object(changes.getOrDefault("fields",Map.of())));
+            var fields=new LinkedHashMap<String,Object>(FreeFormAmendmentTerms.map(result.get("fields")));
             fields.put("lease",Map.of("endDateText",true));result.put("fields",fields);
         }
         return result;
@@ -499,7 +522,7 @@ public class ContractAmendmentService {
                 || !Objects.equals(c.getBranchId(),targetBranch(c,next));
     }
     private void createDepositDelta(Contract c,ContractAmendment a) {
-        var changes=builder.map(a.getChangesSnapshot());
+        var changes=businessChanges(builder.map(a.getChangesSnapshot()),null,readListingSource(a));
         if(!FreeFormAmendmentTerms.map(FreeFormAmendmentTerms.map(changes.get("fields")).get("financial")).containsKey("depositAmountValue"))return;
         var old=builder.map(terms.require(a.getBaseRevisionId()).getFinancialSnapshot());var next=builder.map(terms.require(a.getTermsRevisionId()).getFinancialSnapshot());
         var delta=FreeFormAmendmentTerms.money(next.get("depositAmountValue"),true).subtract(FreeFormAmendmentTerms.money(old.getOrDefault("depositAmountValue","0"),true));

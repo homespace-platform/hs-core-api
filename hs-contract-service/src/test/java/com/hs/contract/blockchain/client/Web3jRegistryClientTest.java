@@ -11,6 +11,7 @@ import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.datatypes.Address;
 import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint256;
+import org.web3j.abi.datatypes.generated.Uint8;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.Hash;
 import org.web3j.crypto.Keys;
@@ -58,6 +59,19 @@ class Web3jRegistryClientTest {
         assertEquals(HASH, result.documentHash());
         assertEquals(Instant.ofEpochSecond(100), result.registeredAt());
         assertTrue(result.exists());
+    }
+
+    @Test void readsOnChainCaseAndDocumentKind() throws IOException {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        doAnswer(invocation -> {
+            EthCall response = new EthCall();
+            response.setResult("0x" + FunctionEncoder.encodeConstructor(calls.getAndIncrement() == 0
+                    ? List.of(new Bytes32(Numeric.hexStringToByteArray(ID))) : List.of(new Uint8(3))));
+            return response;
+        }).when(service).send(argThat(request -> request.getMethod().equals("eth_call")), any());
+        var lineage = client.readLineage(31337, REGISTRY, ID);
+        assertEquals(ID, lineage.caseId());
+        assertEquals(3, lineage.documentKind());
     }
 
     @Test void wrongChainCannotReadOrSendToAnUnintendedNetwork() {
@@ -184,7 +198,7 @@ class Web3jRegistryClientTest {
         properties.setPrivateKey(Numeric.toHexStringNoPrefixZeroPadded(Keys.createEcKeyPair().getPrivateKey(), 64));
         doReturn(owner(RECORDER)).when(service).send(argThat(request -> request.getMethod().equals("eth_call")), any());
         BlockchainException failure = assertThrows(BlockchainException.class,
-                () -> client.prepare(31337, REGISTRY, ID, HASH));
+                () -> client.prepare(31337, REGISTRY, ID, HASH, ID, 2));
         assertEquals("OWNER_MISMATCH", failure.getCode());
         verify(service, never()).send(argThat(request -> request.getMethod().equals("eth_sendRawTransaction")), any());
     }
@@ -206,7 +220,7 @@ class Web3jRegistryClientTest {
                 default -> throw new AssertionError("Unexpected RPC method " + request.getMethod());
             };
         }).when(service).send(any(), any());
-        var signed = client.prepare(31337, REGISTRY, ID, HASH);
+        var signed = client.prepare(31337, REGISTRY, ID, HASH, ID, 2);
         assertEquals("7", signed.nonce());
         assertEquals(credentials.getAddress(), signed.signerAddress());
         assertTrue(signed.rawTransaction().startsWith("0x02"));

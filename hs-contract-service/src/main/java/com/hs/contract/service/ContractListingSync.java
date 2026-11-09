@@ -43,8 +43,6 @@ public class ContractListingSync {
     private final BillingTime time;
     @PersistenceContext private EntityManager entityManager;
 
-    private static final Set<String> OPERATIONAL_FEATURES = Set.of("Đồng hồ điện", "Đồng hồ nước", "Chính sách gửi xe");
-    private static final Set<String> AREA_FEATURES = Set.of("Diện tích sử dụng", "Diện tích phòng");
     private static final Set<String> LISTING_POLICIES = Set.of("listingPolicies", "noticeDaysBeforeMoveOut",
             "noticeDaysBeforeTermination", "depositRefundDays", "petPolicy", "petsAllowed", "smokingPolicy",
             "smokingAllowed", "subleasePolicy", "sublettingAllowed", "overnightGuestPolicy", "propertyInspectionNotice");
@@ -103,51 +101,82 @@ public class ContractListingSync {
             throw invalid("Giới hạn mới thấp hơn số người hoặc xe đã đăng ký trong hợp đồng.");
 
         var oldCharges = terms.rows(base.getChargesSnapshot());
+        if (source.charges().stream().anyMatch(row -> "STATE_WATER_RATE".equals(row.get("billingMethod"))
+                && !Boolean.TRUE.equals(row.get("includedInRent"))))
+            throw invalid("Bảng phí nước theo giá Nhà nước chưa thể lập hóa đơn tự động. Hãy chọn đơn giá hoặc cách tính khác trước khi đồng bộ.");
+        if(draft) {
+            Object prepaid=terms.object(before.get("initialPayment")).get("monthlyCharges");
+            String digits=Objects.toString(prepaid,"").replaceAll("[^0-9]","");
+            BigDecimal paid=prepaid instanceof Number?new BigDecimal(prepaid.toString()):new BigDecimal(digits.isEmpty()?"0":digits);
+            BigDecimal monthly=source.charges().stream().filter(row->!Boolean.TRUE.equals(row.get("includedInRent")))
+                    .map(row->row.get("estimatedMonthlyAmount")==null?BigDecimal.ZERO:new BigDecimal(row.get("estimatedMonthlyAmount").toString()))
+                    .reduce(BigDecimal.ZERO,BigDecimal::add);
+            if(paid.signum()>0 && paid.compareTo(monthly)!=0)
+                throw invalid("Phí dịch vụ đã được thu trước khác bảng phí mới. Cần đối soát khoản đã thu trước khi đồng bộ bản nháp.");
+        }
         var financial = terms.object(before.get("financial"));
         var money = new ArrayList<AmendmentComparison>();
-        if (compare) {
+        var priceChanges = new ArrayList<AmendmentComparison>();
+        var updatedFinancial = new LinkedHashMap<>(financial);
+        {
             var quotedListing = Listing.builder().category(approved.getCategory()).priceAmount(approved.getPriceAmount())
                     .priceUnit(com.hs.listing.model.constant.PriceUnit.valueOf(approved.getPriceUnit()))
                     .depositType(com.hs.listing.model.constant.DepositType.valueOf(approved.getDepositType()))
                     .depositAmount(approved.getDepositAmount()).depositMonths(approved.getDepositMonths()).build();
             BigDecimal rent = cost.calculateEffectiveMonthlyRent(quotedListing, occupants);
             BigDecimal deposit = cost.calculateDeposit(quotedListing, rent, rental.getDepositAmount());
-            compareMoney(money, "amountValue", "Tiền thuê mỗi tháng", financial.get("amountValue"), rent);
-            compareMoney(money, "depositAmountValue", "Tiền đặt cọc", financial.get("depositAmountValue"), deposit);
-            terms.compareCharges(money, oldCharges, source.charges());
+            compareMoney(priceChanges, "financial.amountValue", "Tiền thuê mỗi tháng", financial.get("amountValue"), rent);
+            compareMoney(priceChanges, "financial.depositAmountValue", "Tiền đặt cọc", financial.get("depositAmountValue"), deposit);
+            updatedFinancial.put("amountValue", rent.toPlainString());
+            updatedFinancial.put("amountNumber", ContractRenderService.formatVND(rent) + "/tháng");
+            updatedFinancial.put("amountWords", com.hs.contract.service.engine.VietnameseCurrencyTextConverter.toWords(rent));
+            updatedFinancial.put("depositAmountValue", deposit.toPlainString());
+            updatedFinancial.put("depositAmountNumber", ContractRenderService.formatVND(deposit));
+            updatedFinancial.put("depositAmountWords", com.hs.contract.service.engine.VietnameseCurrencyTextConverter.toWords(deposit));
             if (source.policies().get("paymentCycle") != null)
-                add(money, "financial.paymentCycle", "Chu kỳ thanh toán", financial.get("paymentCycle"), source.policies().get("paymentCycle"));
+                add(priceChanges, "financial.paymentCycle", "Chu kỳ thanh toán", financial.get("paymentCycle"), source.policies().get("paymentCycle"));
+            if(source.policies().get("paymentCycle") != null) {
+                updatedFinancial.put("paymentCycle",source.policies().get("paymentCycle"));
+                updatedFinancial.put("paymentCycleMonths",FreeFormAmendmentTerms.cycleMonths(source.policies().get("paymentCycle")));
+            }
+            if(draft) money.addAll(priceChanges);
         }
 
-        var protectedFeatures = new HashSet<>(OPERATIONAL_FEATURES);
-        if (oldCharges.stream().anyMatch(row -> "PER_M2_MONTH".equals(row.get("billingMethod")))) {
-            for (String key : List.of("areaM2", "areaText")) {
-                if (compare && !Objects.equals(property.get(key), originalProperty.get(key)) && "areaText".equals(key))
-                    add(money, "property.areaText", "Diện tích dùng để tính phí", originalProperty.get(key), property.get(key));
-                if (originalProperty.containsKey(key)) property.put(key, originalProperty.get(key));
-                else property.remove(key);
-            }
-            protectedFeatures.addAll(AREA_FEATURES);
+        var meters = new LinkedHashMap<>(source.meters());
+        var oldMeters = terms.object(before.get("meters"));
+        for (String method : List.of("PER_KWH", "PER_M3")) {
+            String initial = method.equals("PER_KWH") ? "electricityInitial" : "waterInitial";
+            String meterType = method.equals("PER_KWH") ? "electricMeterType" : "waterMeterType";
+            boolean wasMetered = metered(oldCharges,method), isMetered = metered(source.charges(),method);
+            boolean sameMeter = Objects.equals(oldMeters.get(meterType), meters.get(meterType));
+            if (!draft && (wasMetered != isMetered || wasMetered && !sameMeter))
+                throw invalid("Bài đăng đã đổi cách tính/công tơ điện nước. Cần đối soát chuỗi chỉ số trước khi đồng bộ phụ lục; không tự thay công tơ đã chốt.");
+            if(oldMeters.containsKey(initial) && (wasMetered == isMetered || numeric(oldMeters.get(initial)))) meters.put(initial,oldMeters.get(initial));
         }
-        preserveFeatures(originalProperty, property, protectedFeatures);
-        if (compare) for (String key : List.of("electricMeterType", "waterMeterType"))
-            add(money, "meters." + key, "Cách tính theo công tơ", terms.object(before.get("meters")).get(key), source.meters().get(key));
 
         var policies = mergeListingPolicies(terms.object(before.get("policies")), Map.of("policies", source.policies()));
+        if(!draft && source.policies().get("paymentCycle")!=null)policies.put("paymentCycle",source.policies().get("paymentCycle"));
         var updated = new LinkedHashMap<String, Object>();
         updated.put("property", property);
         updated.put("equipments", source.equipments());
         updated.put("amenities", source.amenities());
         updated.put("policies", policies);
+        updated.put("charges", source.charges());
+        updated.put("meters", meters);
+        if(!draft) updated.put("financial", updatedFinancial);
         // Association metadata is kept outside the legal Listing snapshot, which intentionally excludes branch IDs.
         updated.put("listingBranchId", listing.getBranchId());
         var changes = new ArrayList<AmendmentComparison>();
+        if(!draft) changes.addAll(priceChanges);
+        terms.compareCharges(changes, oldCharges, source.charges());
+        for(String key:List.of("electricMeterType","waterMeterType"))
+            add(changes,"meters."+key,"Cách tính theo công tơ",oldMeters.get(key),meters.get(key));
         if (compare) {
-            for (var key : List.of("fullAddress", "unitNumber", "areaText", "floor", "rentalScope", "maxOccupants", "maxVehicles", "features"))
+            for (var key : List.of("fullAddress", "unitNumber", "areaText", "floor", "rentalScope", "maxOccupants", "maxVehicles", "maxMotorbikeCount", "maxCarCount", "features"))
                 add(changes, "property." + key, switch (key) {
                     case "fullAddress" -> "Địa chỉ tài sản"; case "unitNumber" -> "Mã/tên phòng hoặc căn"; case "areaText" -> "Diện tích"; case "floor" -> "Tầng";
                     case "rentalScope" -> "Phạm vi cho thuê"; case "maxOccupants" -> "Số người tối đa";
-                    case "maxVehicles" -> "Số xe tối đa"; default -> "Đặc điểm tài sản";
+                    case "maxVehicles" -> "Số xe tối đa"; case "maxMotorbikeCount" -> "Số xe máy tối đa"; case "maxCarCount" -> "Số ô tô tối đa"; default -> "Đặc điểm tài sản";
                 }, originalProperty.get(key), property.get(key));
             if (!Objects.equals(contract.getBranchId(), listing.getBranchId()))
                 changes.add(new AmendmentComparison("listingBranchId", "Liên kết chi nhánh và chỗ xe", "Theo hồ sơ hợp đồng hiện tại", "Theo bài đăng đã duyệt; kiểm tra lại sức chứa khi áp dụng"));
@@ -176,6 +205,15 @@ public class ContractListingSync {
                     selected + " tháng", minimum + " tháng · ngày thuê cuối " + end.minusDays(1)));
         }
         return new Preview(listing.getApprovedEditId(), base.getId(), updated, proposed, leaseMessage, changes, money);
+    }
+
+    private boolean metered(List<Map<String,Object>> charges,String method) {
+        return charges.stream().anyMatch(row->method.equals(row.get("billingMethod"))&&!Boolean.TRUE.equals(row.get("includedInRent")));
+    }
+
+    private boolean numeric(Object value) {
+        try { return new BigDecimal(Objects.toString(value, "")).signum() >= 0; }
+        catch(NumberFormatException e) { return false; }
     }
 
     public void applyDraftTerm(Contract contract, Preview preview) {
@@ -229,21 +267,6 @@ public class ContractListingSync {
         if (rental.getListingSnapshot() == null) return 0;
         try { return mapper.readTree(rental.getListingSnapshot()).path("minimumLeaseMonths").asInt(0); }
         catch (Exception e) { throw invalid("Không đọc được thời hạn tối thiểu tại thời điểm giữ chỗ."); }
-    }
-
-    private void preserveFeatures(Map<String, Object> before, Map<String, Object> after, Set<String> keys) {
-        if (!(after.get("features") instanceof List<?>)) return;
-        var rows = new ArrayList<Map<String, Object>>();
-        var old = new LinkedHashMap<Object, Map<String, Object>>();
-        for (var row : FreeFormAmendmentTerms.rows(before.get("features")))
-            if (keys.contains(row.get("featureName"))) old.put(row.get("featureName"), row);
-        for (var row : FreeFormAmendmentTerms.rows(after.get("features"))) {
-            Object name = row.get("featureName");
-            if (!keys.contains(name)) rows.add(row);
-            else if (old.containsKey(name)) rows.add(old.remove(name));
-        }
-        rows.addAll(old.values());
-        after.put("features", rows);
     }
 
     private void compareMoney(List<AmendmentComparison> changes, String key, String label, Object before, BigDecimal after) {

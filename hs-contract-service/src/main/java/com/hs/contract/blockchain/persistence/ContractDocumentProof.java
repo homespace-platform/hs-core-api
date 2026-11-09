@@ -39,6 +39,12 @@ public class ContractDocumentProof {
     @Column(name = "document_hash", nullable = false, length = 66, updatable = false)
     private String documentHash;
 
+    @Column(name = "case_id", length = 66, updatable = false)
+    private String caseId;
+
+    @Column(name = "document_kind", updatable = false)
+    private Integer documentKind;
+
     @Column(name = "chain_id", nullable = false, updatable = false)
     private long chainId;
 

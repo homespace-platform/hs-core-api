@@ -66,14 +66,39 @@ public class Web3jRegistryClient implements RegistryClient {
     }
 
     @Override
+    public ChainLineage readLineage(long chainId, String registryAddress, String onChainDocumentId) {
+        requireNetwork(chainId, registryAddress);
+        List<Type> caseResult = call(registryAddress, new Function("caseIds", List.of(bytes32(onChainDocumentId)),
+                List.of(new TypeReference<Bytes32>() {})));
+        List<Type> kindResult = call(registryAddress, new Function("documentKinds", List.of(bytes32(onChainDocumentId)),
+                List.of(new TypeReference<org.web3j.abi.datatypes.generated.Uint8>() {})));
+        if (caseResult.size() != 1 || kindResult.size() != 1) throw incompatible();
+        return new ChainLineage(Numeric.toHexString((byte[]) caseResult.getFirst().getValue()),
+                ((BigInteger) kindResult.getFirst().getValue()).intValueExact());
+    }
+
+    @Override
     public String signerAddress() { return signer().getAddress().toLowerCase(Locale.ROOT); }
 
     @Override
+    public SignedSubmission prepare(long chainId, String registryAddress, String onChainDocumentId, String documentHash,
+            String caseId, int documentKind) {
+        if (documentKind < 1 || documentKind > 3) throw incompatible();
+        return prepareEncoded(chainId, registryAddress, new Function("registerDocumentWithLineage",
+                List.of(bytes32(onChainDocumentId), bytes32(documentHash), bytes32(caseId),
+                        new org.web3j.abi.datatypes.generated.Uint8(documentKind)), List.of()));
+    }
+
+    @Override
     public SignedSubmission prepare(long chainId, String registryAddress, String onChainDocumentId, String documentHash) {
+        return prepareEncoded(chainId, registryAddress, new Function("registerDocument",
+                List.of(bytes32(onChainDocumentId), bytes32(documentHash)), List.of()));
+    }
+
+    private SignedSubmission prepareEncoded(long chainId, String registryAddress, Function function) {
         requireNetwork(chainId, registryAddress);
         Credentials signer = signer();
         requireOwner(registryAddress, signer.getAddress());
-        Function function = new Function("registerDocument", List.of(bytes32(onChainDocumentId), bytes32(documentHash)), List.of());
         String data = FunctionEncoder.encode(function);
         BigInteger nonce = rpc(node().ethGetTransactionCount(signer.getAddress(), DefaultBlockParameterName.PENDING)).getTransactionCount();
         BigInteger priority = rpc(node().ethMaxPriorityFeePerGas()).getMaxPriorityFeePerGas().max(BigInteger.ONE);

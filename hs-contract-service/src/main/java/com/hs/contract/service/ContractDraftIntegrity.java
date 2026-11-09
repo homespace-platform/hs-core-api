@@ -104,7 +104,7 @@ public class ContractDraftIntegrity {
         var savedPolicies = new LinkedHashMap<>(expected.getPolicies());
         FEE_KEYS.forEach(k -> { if (policies.containsKey(k)) savedPolicies.put(k, policies.get(k)); });
         expected.setPolicies(savedPolicies);
-        var originalMeters = map(first(c).getInitialMetersSnapshot());
+        var originalMeters = map(current.getListingSourceVersion() == null ? first(c).getInitialMetersSnapshot() : current.getInitialMetersSnapshot());
         normalizeNonMeterWater(originalMeters, expected.getCharges(), expected.getTenant());
         var meters = new LinkedHashMap<>(originalMeters);
         var currentMeters = map(current.getInitialMetersSnapshot());
@@ -182,10 +182,10 @@ public class ContractDraftIntegrity {
         var meters = map(current.getInitialMetersSnapshot());
         var fixed = new LinkedHashMap<>(meters);
         fixed.remove("electricityInitial"); fixed.remove("waterInitial");
-        var original = map(baseline.getInitialMetersSnapshot());
+        var original = map(current.getListingSourceVersion() == null ? baseline.getInitialMetersSnapshot() : current.getInitialMetersSnapshot());
         original.remove("electricityInitial"); original.remove("waterInitial");
         protectedMapExact("meters", fixed, original);
-        var originalMeterValues=map(baseline.getInitialMetersSnapshot());
+        var originalMeterValues=map(current.getListingSourceVersion() == null ? baseline.getInitialMetersSnapshot() : current.getInitialMetersSnapshot());
         normalizeNonMeterWater(originalMeterValues, expected.getCharges(), expected.getTenant());
         validateMeters(meters, originalMeterValues);
         LatePaymentPolicy.from(map(current.getPoliciesSnapshot()));
@@ -197,6 +197,7 @@ public class ContractDraftIntegrity {
         expected.setProperty(map(current.getPropertySnapshot()));
         expected.setEquipments(rows(current.getEquipmentSnapshot()));
         expected.setAmenities(rows(current.getAmenitiesSnapshot()));
+        expected.setCharges(rows(current.getChargesSnapshot()));
         expected.setPolicies(map(current.getPoliciesSnapshot()));
     }
 

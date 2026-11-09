@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Locale;
@@ -34,13 +35,19 @@ public class ContractDocumentProofEnqueuer {
             throw new IllegalArgumentException("A nonzero SHA-256 PDF hash is required");
         }
         String normalizedHash = documentHash.toLowerCase(Locale.ROOT);
+        String caseId = DocumentProofHash.sha256(("homespace:case:" + contract.getRentalRequestId())
+                .getBytes(StandardCharsets.UTF_8));
+        int documentKind = "DEPOSIT".equals(contract.getAgreementKind()) ? 1
+                : "AMENDMENT".equals(contract.getAgreementKind()) ? 3 : 2;
         var existing = proofs.findById(document.getId());
         if (existing.isPresent()) {
             ContractDocumentProof saved = existing.get();
             if (!normalizedHash.equals(saved.getDocumentHash())
                     || !Objects.equals(document.getStorageObjectId(), saved.getStorageObjectId())
                     || !Objects.equals(document.getRevisionId(), saved.getRevisionId())
-                    || !Objects.equals(contract.getId(), saved.getContractId())) {
+                    || !Objects.equals(contract.getId(), saved.getContractId())
+                    || saved.getCaseId() != null && !Objects.equals(caseId, saved.getCaseId())
+                    || saved.getDocumentKind() != null && !Objects.equals(documentKind, saved.getDocumentKind())) {
                 throw new IllegalStateException("The final PDF already has a different blockchain proof identity");
             }
             return;
@@ -57,6 +64,8 @@ public class ContractDocumentProofEnqueuer {
         proof.setStorageObjectId(document.getStorageObjectId());
         proof.setOnChainDocumentId("0x" + HexFormat.of().formatHex(opaqueId));
         proof.setDocumentHash(normalizedHash);
+        proof.setCaseId(caseId);
+        proof.setDocumentKind(documentKind);
         proof.setChainId(properties.getChainId());
         proof.setRegistryAddress(properties.getRegistryAddress().toLowerCase(Locale.ROOT));
         proof.setStatus(ProofStatus.PENDING);
@@ -67,7 +76,7 @@ public class ContractDocumentProofEnqueuer {
     }
 
     public static boolean supports(Contract contract, ContractDocument document) {
-        if (contract == null || document == null) return false;
+        if (contract == null || document == null || contract.getRentalRequestId() == null) return false;
         String kind = contract.getAgreementKind();
         boolean supported = contract.getParentContractId() == null
                 ? kind == null || "LEASE".equals(kind) || "DEPOSIT".equals(kind)

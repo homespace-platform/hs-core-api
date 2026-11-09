@@ -61,6 +61,8 @@ class ContractDocumentProofEnqueuerTest {
             assertEquals("revision", saved.getRevisionId());
             assertEquals("storage-final", saved.getStorageObjectId());
             assertEquals(HASH, saved.getDocumentHash());
+            assertEquals(DocumentProofHash.sha256("homespace:case:rental".getBytes(StandardCharsets.UTF_8)), saved.getCaseId());
+            assertEquals("DEPOSIT".equals(kind) ? 1 : 2, saved.getDocumentKind());
             assertEquals(11155111L, saved.getChainId());
             assertEquals(REGISTRY, saved.getRegistryAddress());
             assertEquals(ProofStatus.PENDING, saved.getStatus());
@@ -116,7 +118,9 @@ class ContractDocumentProofEnqueuerTest {
         amendment.setParentContractId("root-lease");
         enqueuer.enqueue(amendment, document(), HASH);
         verify(proofs).save(argThat(proof -> "contract".equals(proof.getContractId())
-                && "pdf-final".equals(proof.getDocumentId()) && HASH.equals(proof.getDocumentHash())));
+                && "pdf-final".equals(proof.getDocumentId()) && HASH.equals(proof.getDocumentHash())
+                && proof.getDocumentKind() == 3
+                && DocumentProofHash.sha256("homespace:case:rental".getBytes(StandardCharsets.UTF_8)).equals(proof.getCaseId())));
     }
 
     @Test
@@ -165,9 +169,25 @@ class ContractDocumentProofEnqueuerTest {
         saved.setStorageObjectId("storage-final");
         saved.setDocumentHash(HASH);
         when(proofs.findById("pdf-final")).thenReturn(Optional.of(saved));
+        saved.setCaseId(DocumentProofHash.sha256("homespace:case:rental".getBytes(StandardCharsets.UTF_8)));
+        saved.setDocumentKind(2);
         assertThrows(IllegalStateException.class, () ->
                 enqueuer.enqueue(contract(null), document(), "0x" + "b".repeat(64)));
         verify(proofs, never()).save(any());
+    }
+
+    @Test void retryOfPreviouslyCreatedProofKeepsItsOriginalRegistryAndIdentity() {
+        ContractDocumentProof saved = new ContractDocumentProof();
+        saved.setDocumentId("pdf-final");
+        saved.setContractId("contract");
+        saved.setRevisionId("revision");
+        saved.setStorageObjectId("storage-final");
+        saved.setDocumentHash(HASH);
+        saved.setRegistryAddress("0x" + "2".repeat(40));
+        when(proofs.findById("pdf-final")).thenReturn(Optional.of(saved));
+        assertDoesNotThrow(() -> enqueuer.enqueue(contract("DEPOSIT"), document(), HASH));
+        verify(proofs, never()).save(any());
+        assertNull(saved.getCaseId());
     }
 
     @Test
@@ -179,7 +199,8 @@ class ContractDocumentProofEnqueuerTest {
     }
 
     private static Contract contract(String kind) {
-        return Contract.builder().id("contract").agreementKind(kind).currentRevisionId("revision").build();
+        return Contract.builder().id("contract").rentalRequestId("rental")
+                .agreementKind(kind).currentRevisionId("revision").build();
     }
 
     private static ContractDocument document() {

@@ -15,10 +15,14 @@ public interface RegistryClient {
 
     record Registration(String transactionHash, String recorder) {}
     record Receipt(long blockNumber, String blockHash, Instant registeredAt, boolean finalized) {}
+    record ChainLineage(String caseId, int documentKind) {}
 
     ChainProof readDocument(long chainId, String registryAddress, String onChainDocumentId);
+    ChainLineage readLineage(long chainId, String registryAddress, String onChainDocumentId);
     String signerAddress();
     SignedSubmission prepare(long chainId, String registryAddress, String onChainDocumentId, String documentHash);
+    SignedSubmission prepare(long chainId, String registryAddress, String onChainDocumentId, String documentHash,
+            String caseId, int documentKind);
     void broadcast(long chainId, String registryAddress, SignedSubmission submission);
     Optional<Receipt> receipt(long chainId, String registryAddress, String onChainDocumentId,
             String documentHash, String recorder, String transactionHash);

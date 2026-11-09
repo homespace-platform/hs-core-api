@@ -106,6 +106,29 @@ class ContractAmendmentServiceTest {
         assertEquals(revised.getId(),resolver.at(root,LocalDate.of(2026,11,14)).getId());
         assertEquals("original",resolver.at(root,LocalDate.of(2026,10,14)).getId());
     }
+    @Test void approvedUtilityFeesAndRentFreezeIntoAppendixWithoutRewritingSignedRoot() {
+        String oldCharges="[{\"name\":\"Điện\",\"chargeType\":\"ELECTRICITY\",\"billingMethod\":\"PER_KWH\",\"unitAmount\":\"2925\",\"includedInRent\":false},{\"name\":\"Nước\",\"chargeType\":\"WATER\",\"billingMethod\":\"PER_M3\",\"unitAmount\":\"18750\",\"includedInRent\":false}]";
+        original.setChargesSnapshot(oldCharges);
+        var next=builder.snapshot(original);
+        var charges=builder.rows("[{\"name\":\"Điện\",\"chargeType\":\"ELECTRICITY\",\"billingMethod\":\"PER_KWH\",\"unitAmount\":\"4000\",\"includedInRent\":false,\"amountAndMethod\":\"4.000 / kWh\"},{\"name\":\"Nước\",\"chargeType\":\"WATER\",\"billingMethod\":\"PER_M3\",\"unitAmount\":\"30000\",\"includedInRent\":false,\"amountAndMethod\":\"30.000 / m³\"}]");
+        next.put("charges",charges);builder.object(next.get("financial")).put("amountValue","11000000");
+        var financial=new LinkedHashMap<>(builder.map(original.getFinancialSnapshot()));financial.put("amountValue","11000000");next.put("financial",financial);
+        var differences=new ArrayList<AmendmentComparison>();builder.compareCharges(differences,builder.rows(oldCharges),charges);
+        differences.add(new AmendmentComparison("financial.amountValue","Tiền thuê","10000000","11000000"));
+        var source=new ContractListingSync.Preview("approved-fees","original",next,null,null,differences,List.of());
+        when(listingSync.preview(root,original,"approved-fees")).thenReturn(source);
+        when(listingSync.mergeListingPolicies(anyMap(),anyMap())).thenAnswer(i->i.getArgument(0));
+        var request=payload(Map.of("freeForm",true,"listingSourceVersion","approved-fees"));
+        var preview=service.preview("root","owner",request);
+        assertEquals(List.of("4000","30000"),builder.rows(builder.write(preview.terms().get("charges"))).stream().map(row->row.get("unitAmount")).toList());
+        service.propose("root","owner",request);var proposal=proposals.getFirst();
+        when(listingSync.preview(any(),any(),any())).thenThrow(new IllegalStateException("Later listing edit must not be reread"));
+        var agreement=approve(proposal);var revision=revisionStore.get(agreement.getCurrentRevisionId());
+        assertEquals(charges,builder.rows(revision.getChargesSnapshot()));
+        assertEquals("11000000",builder.map(revision.getFinancialSnapshot()).get("amountValue"));
+        assertEquals(oldCharges,original.getChargesSnapshot());assertEquals("original",root.getCurrentRevisionId());
+        assertEquals(original.getInitialPaymentSnapshot(),revision.getInitialPaymentSnapshot());
+    }
     @Test void landlordProposesAndTenantApprovesWithoutChangingSignedRoot() {
         for (String actor : List.of("owner")) {
             proposals.clear(); var a = request(actor); var child = approve(a);

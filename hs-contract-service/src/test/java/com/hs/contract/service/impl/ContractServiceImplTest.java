@@ -296,6 +296,58 @@ class ContractServiceImplTest {
     }
 
     @Test
+    void listingSyncPersistsApprovedRatesAndKeepsMeterReadingsEnteredInTheSameSave() {
+        var contracts = mock(ContractRepository.class);
+        var revisions = mock(ContractRevisionRepository.class);
+        var documents = mock(ContractDocumentRepository.class);
+        var service = createService(contracts, revisions, documents, mock(ContractTemplateVersionRepository.class));
+        var sync = mock(com.hs.contract.service.ContractListingSync.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "listingSync", sync);
+        var contract = Contract.builder().id("contract-1").landlordId("landlord-1")
+                .tenantId("tenant-1").status(ContractStatus.DRAFT).currentRevisionId("revision-1").build();
+        var current = ContractRevision.builder().id("revision-1").contract(contract).build();
+        when(contracts.findById("contract-1")).thenReturn(Optional.of(contract));
+        when(contracts.findByIdForUpdate("contract-1")).thenReturn(Optional.of(contract));
+        when(revisions.findById("revision-1")).thenReturn(Optional.of(current));
+        when(revisions.save(any())).thenAnswer(call -> {
+            ContractRevision saved = call.getArgument(0);
+            saved.setId("revision-2");
+            when(revisions.findById("revision-2")).thenReturn(Optional.of(saved));
+            return saved;
+        });
+        when(documents.findByContractIdOrderByGeneratedAtDesc("contract-1")).thenReturn(List.of());
+        var charges = List.of(Map.<String, Object>of("chargeType", "ELECTRICITY", "billingMethod", "PER_KWH", "unitAmount", "4000"),
+                Map.<String, Object>of("chargeType", "WATER", "billingMethod", "PER_M3", "unitAmount", "30000"));
+        var source = new com.hs.contract.service.ContractListingSync.Preview("approved", "revision-1",
+                Map.of("property", Map.of("fullAddress", "Địa chỉ đã duyệt"), "equipments", List.of(), "amenities", List.of(),
+                        "charges", charges, "meters", Map.of("electricityInitial", "100", "waterInitial", "200"),
+                        "policies", Map.of()), null, null, List.of(), List.of());
+        when(sync.source(contract, current, "approved")).thenReturn(source);
+        when(sync.mergeListingPolicies(any(), any())).thenReturn(Map.of());
+        UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
+        var request = new UpdateContractRevisionRequest();
+        request.setBaseRevisionId("revision-1");
+        request.setListingSourceVersion("approved");
+        request.setFinancial(Map.of("amountValue", "3000000"));
+        request.setMeters(Map.of("electricityInitial", "150", "waterInitial", "250"));
+
+        service.updateRevision("contract-1", request);
+
+        var saved = org.mockito.ArgumentCaptor.forClass(ContractRevision.class);
+        verify(revisions).save(saved.capture());
+        var mapper = new ObjectMapper();
+        try {
+            var rows = mapper.readTree(saved.getValue().getChargesSnapshot());
+            assertEquals("4000", rows.get(0).get("unitAmount").asText());
+            assertEquals("30000", rows.get(1).get("unitAmount").asText());
+            var meters = mapper.readTree(saved.getValue().getInitialMetersSnapshot());
+            assertEquals("150", meters.get("electricityInitial").asText());
+            assertEquals("250", meters.get("waterInitial").asText());
+        } catch (Exception e) { throw new AssertionError(e); }
+        assertEquals("approved", saved.getValue().getListingSourceVersion());
+    }
+
+    @Test
     void lateFeeCannotBeSavedWhenWordTemplateCannotShowSignedClause() {
         ContractRepository contracts = mock(ContractRepository.class);
         ContractTemplateVersionRepository templates = mock(ContractTemplateVersionRepository.class);

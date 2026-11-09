@@ -568,6 +568,11 @@ public class ContractServiceImpl implements ContractService {
             var rowsType = new TypeReference<List<Map<String, Object>>>() {};
             request.setEquipments(fromJson(toJson(sync.terms().get("equipments")), rowsType));
             request.setAmenities(fromJson(toJson(sync.terms().get("amenities")), rowsType));
+            request.setCharges(fromJson(toJson(sync.terms().get("charges")), rowsType));
+            var sourceMeters=fromJson(toJson(sync.terms().get("meters")), MAP_TYPE);
+            for(String reading:List.of("electricityInitial","waterInitial"))
+                if(request.getMeters()!=null && request.getMeters().containsKey(reading))sourceMeters.put(reading,request.getMeters().get(reading));
+            request.setMeters(sourceMeters);
             request.setPolicies(listingSync.mergeListingPolicies(request.getPolicies(), sync.terms()));
             listingSync.applyDraftTerm(contract, sync);
             if (sync.proposedMonths() != null) {

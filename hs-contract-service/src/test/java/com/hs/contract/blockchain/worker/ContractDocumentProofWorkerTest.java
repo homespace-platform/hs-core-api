@@ -53,6 +53,8 @@ class ContractDocumentProofWorkerTest {
         proof.setRegistryAddress(ADDRESS);
         proof.setOnChainDocumentId(ID);
         proof.setDocumentHash(DocumentProofHash.sha256(PDF));
+        proof.setCaseId("0x" + "5".repeat(64));
+        proof.setDocumentKind(2);
         proof.setNextAttemptAt(Instant.EPOCH);
     }
 
@@ -74,11 +76,12 @@ class ContractDocumentProofWorkerTest {
         proof.setStatus(ProofStatus.SUBMITTED);
     }
 
+
     @Test void savesSignedTransactionBeforeBroadcastAndDoesNotChangeFrozenIdentity() {
         permitUpdates(); absentOnChain();
         when(storage.downloadDirect("storage", 50L * 1024 * 1024)).thenReturn(PDF);
         var signed = new RegistryClient.SignedSubmission(RECORDER, "7", "0xraw-signed", TX);
-        when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash())).thenReturn(signed);
+        when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash(), proof.getCaseId(), 2)).thenReturn(signed);
         doAnswer(call -> {
             assertEquals(TX, proof.getTransactionHash());
             assertEquals("0xraw-signed", proof.getSignedRawTransaction());
@@ -97,14 +100,14 @@ class ContractDocumentProofWorkerTest {
         permitUpdates(); absentOnChain();
         when(storage.downloadDirect("storage", 50L * 1024 * 1024)).thenReturn(PDF);
         var signed = new RegistryClient.SignedSubmission(RECORDER, "7", "0xraw-signed", TX);
-        when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash())).thenReturn(signed);
+        when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash(), proof.getCaseId(), 2)).thenReturn(signed);
         doThrow(new BlockchainException("RPC_UNAVAILABLE", "Unavailable")).when(registry).broadcast(31337, ADDRESS, signed);
         worker.process(proof, "lease", "token");
         assertEquals(ProofStatus.SUBMITTED, proof.getStatus());
         assertEquals("RPC_UNAVAILABLE", proof.getErrorCode());
         when(registry.receipt(31337, ADDRESS, ID, proof.getDocumentHash(), RECORDER, TX)).thenReturn(Optional.empty());
         worker.process(proof, "lease", "token");
-        verify(registry, times(1)).prepare(anyLong(), anyString(), anyString(), anyString());
+        verify(registry, times(1)).prepare(anyLong(), anyString(), anyString(), anyString(), anyString(), anyInt());
         verify(registry, times(2)).broadcast(31337, ADDRESS, signed);
         assertEquals("7", proof.getNonce());
         assertEquals(TX, proof.getTransactionHash());
@@ -117,12 +120,14 @@ class ContractDocumentProofWorkerTest {
                 .thenReturn(Optional.of(new RegistryClient.Registration(TX, RECORDER)));
         when(registry.receipt(31337, ADDRESS, ID, proof.getDocumentHash(), RECORDER, TX))
                 .thenReturn(Optional.of(new RegistryClient.Receipt(42, "0xblock", Instant.EPOCH, true)));
+        when(registry.readLineage(31337, ADDRESS, ID))
+                .thenReturn(new RegistryClient.ChainLineage(proof.getCaseId(), 2));
         worker.process(proof, "lease", "token");
         assertEquals(ProofStatus.CONFIRMED, proof.getStatus());
         assertEquals(42L, proof.getBlockNumber());
         assertNotNull(proof.getConfirmedAt());
         assertNotNull(proof.getNextAttemptAt());
-        verify(registry, never()).prepare(anyLong(), anyString(), anyString(), anyString());
+        verify(registry, never()).prepare(anyLong(), anyString(), anyString(), anyString(), anyString(), anyInt());
         verify(registry, never()).broadcast(anyLong(), anyString(), any());
         verifyNoInteractions(storage);
     }
@@ -135,7 +140,7 @@ class ContractDocumentProofWorkerTest {
         assertEquals("DOCUMENT_HASH_CONFLICT", proof.getErrorCode());
         assertEquals(ID, proof.getOnChainDocumentId());
         assertNotNull(proof.getNextAttemptAt());
-        verify(registry, never()).prepare(anyLong(), anyString(), anyString(), anyString());
+        verify(registry, never()).prepare(anyLong(), anyString(), anyString(), anyString(), anyString(), anyInt());
         verifyNoInteractions(storage);
     }
 
@@ -145,7 +150,7 @@ class ContractDocumentProofWorkerTest {
         worker.process(proof, "lease", "token");
         assertEquals("SOURCE_PDF_CHANGED", proof.getErrorCode());
         assertEquals(ProofStatus.FAILED, proof.getStatus());
-        verify(registry, never()).prepare(anyLong(), anyString(), anyString(), anyString());
+        verify(registry, never()).prepare(anyLong(), anyString(), anyString(), anyString(), anyString(), anyInt());
     }
 
     @Test void minedReceiptMustWaitForFinality() {
@@ -157,6 +162,17 @@ class ContractDocumentProofWorkerTest {
         assertNull(proof.getConfirmedAt());
         assertEquals("0xblock", proof.getBlockHash());
         verify(registry, never()).broadcast(anyLong(), anyString(), any());
+    }
+
+    @Test void finalizedReceiptWithWrongCaseDoesNotConfirmProof() {
+        permitUpdates(); persistedSubmission(); absentOnChain();
+        when(registry.receipt(31337, ADDRESS, ID, proof.getDocumentHash(), RECORDER, TX))
+                .thenReturn(Optional.of(new RegistryClient.Receipt(42, "0xblock", Instant.EPOCH, true)));
+        when(registry.readLineage(31337, ADDRESS, ID))
+                .thenReturn(new RegistryClient.ChainLineage("0x" + "f".repeat(64), 2));
+        worker.process(proof, "lease", "token");
+        assertEquals(ProofStatus.FAILED, proof.getStatus());
+        assertEquals("DOCUMENT_LINEAGE_CONFLICT", proof.getErrorCode());
     }
 
     @Test void invalidReceiptIsTerminalWithoutTouchingContractOrSignatureServices() {
@@ -172,7 +188,7 @@ class ContractDocumentProofWorkerTest {
     @Test void missingPrivateKeyIsVisibleOnQueuedProofAndRemainsRetryable() {
         permitUpdates(); absentOnChain();
         when(storage.downloadDirect("storage", 50L * 1024 * 1024)).thenReturn(PDF);
-        when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash()))
+        when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash(), proof.getCaseId(), 2))
                 .thenThrow(new BlockchainException("PRIVATE_KEY_NOT_CONFIGURED", "Private key not configured"));
         worker.process(proof, "lease", "token");
         assertEquals(ProofStatus.PENDING, proof.getStatus());
@@ -193,7 +209,7 @@ class ContractDocumentProofWorkerTest {
         permitUpdates(); absentOnChain();
         when(leases.ownsForUpdate("lease", "token")).thenReturn(true, true, false);
         when(storage.downloadDirect("storage", 50L * 1024 * 1024)).thenReturn(PDF);
-        when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash()))
+        when(registry.prepare(31337, ADDRESS, ID, proof.getDocumentHash(), proof.getCaseId(), 2))
                 .thenReturn(new RegistryClient.SignedSubmission(RECORDER, "7", "0xraw-signed", TX));
         worker.process(proof, "lease", "token");
         assertEquals(TX, proof.getTransactionHash());

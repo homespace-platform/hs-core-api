@@ -31,7 +31,7 @@ public class ContractDocumentProofQueryService {
         if (proof == null) {
             return new BlockchainProofResponse(document.getId(), document.getContractId(), document.getRevisionId(),
                     "NOT_AVAILABLE", null, null, null, null, null, null, null, null, null, null,
-                    "Chưa có proof blockchain cho tài liệu này. Proof được tạo cho PDF cuối khi tính năng được bật và hai bên ký hoàn tất.");
+                    "Chưa có proof blockchain cho tài liệu này. Proof được tạo cho PDF cuối khi tính năng được bật và hai bên ký hoàn tất.", null, null);
         }
         requireSameArtifact(document, proof);
         String message = switch (proof.getStatus()) {
@@ -43,7 +43,8 @@ public class ContractDocumentProofQueryService {
         return new BlockchainProofResponse(document.getId(), document.getContractId(), document.getRevisionId(),
                 proof.getStatus().name(), proof.getDocumentHash(), proof.getOnChainDocumentId(), proof.getChainId(),
                 proof.getRegistryAddress(), proof.getTransactionHash(), proof.getBlockNumber(), proof.getBlockHash(),
-                proof.getRegisteredAt(), proof.getConfirmedAt(), proof.getErrorCode(), message);
+                proof.getRegisteredAt(), proof.getConfirmedAt(), proof.getErrorCode(), message,
+                proof.getCaseId(), proof.getDocumentKind());
     }
 
     public VerifyDocumentHashResponse verify(String documentId, String candidateHash) {

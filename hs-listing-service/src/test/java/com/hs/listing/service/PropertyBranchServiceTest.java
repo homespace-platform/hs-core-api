@@ -145,7 +145,7 @@ class PropertyBranchServiceTest {
     }
 
     @Test
-    void testUpdateBranch_syncsChargesToActiveListings() {
+    void testUpdateBranch_preservesIndependentListingCharges() {
         String ownerId = "owner-1";
         String branchId = "branch-1";
 
@@ -197,12 +197,9 @@ class PropertyBranchServiceTest {
         assertNotNull(resp);
         assertEquals("Tòa nhà Sunrise Cập Nhật", resp.getName());
 
-        // Verify that l1 and l2 charges were cleared and replaced with the 2 new charges
-        assertEquals(2, l1.getCharges().size());
-        assertEquals(new BigDecimal("4000"), l1.getCharges().get(0).getAmount());
-        assertEquals(2, l2.getCharges().size());
-        assertEquals(new BigDecimal("4000"), l2.getCharges().get(0).getAmount());
-
-        verify(listingRepository).saveAll(List.of(l1, l2));
+        assertEquals(1, l1.getCharges().size());
+        assertEquals(new BigDecimal("3000"), l1.getCharges().getFirst().getAmount());
+        assertTrue(l2.getCharges().isEmpty());
+        verify(listingRepository, never()).saveAll(any());
     }
 }

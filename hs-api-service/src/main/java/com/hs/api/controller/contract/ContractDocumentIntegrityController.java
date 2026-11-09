@@ -25,7 +25,7 @@ public class ContractDocumentIntegrityController {
                 .body(ApiResponse.<DocumentIntegrityResponse>builder().result(integrity.check(documentId)).build());
     }
 
-    @GetMapping("/content")
+    @RequestMapping(value = "/content", method = {RequestMethod.GET, RequestMethod.POST})
     public ResponseEntity<byte[]> content(@PathVariable String documentId,
             @RequestParam(defaultValue = "false") boolean download) {
         var pdf = integrity.content(documentId);

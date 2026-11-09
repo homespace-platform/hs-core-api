@@ -175,17 +175,6 @@ public class PropertyBranchService {
 
         PropertyBranch updated = branchRepository.save(branch);
 
-        // Đồng bộ toàn bộ biểu phí mới sang các tin đăng đang hoạt động thuộc chi nhánh
-        List<Listing> branchListings = listingRepository.findAllByBranchIdAndActiveTrue(updated.getId());
-        for (Listing l : branchListings) {
-            l.getCharges().clear();
-            List<ListingCharge> newCharges = BranchChargeMappingHelper.mapBranchChargesToListing(updated.getDefaultCharges(), l);
-            l.getCharges().addAll(newCharges);
-        }
-        if (!branchListings.isEmpty()) {
-            listingRepository.saveAll(branchListings);
-        }
-
         return mapToResponse(updated);
     }
 

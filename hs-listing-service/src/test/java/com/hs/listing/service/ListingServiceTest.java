@@ -108,7 +108,7 @@ class ListingServiceTest {
     }
 
     @Test
-    void rejectsListingWithIncompleteBranchCharges() {
+    void listingChargesRemainIndependentOfIncompleteBranchDefaults() {
         var branchRepo = mock(PropertyBranchRepository.class);
         var listingRepo = mock(ListingRepository.class);
         var addressRepo = mock(ListingAddressRepository.class);
@@ -177,11 +177,20 @@ class ListingServiceTest {
                 com.hs.listing.model.constant.ListingCategory.ROOM,
                 java.time.LocalDate.now(), java.math.BigDecimal.valueOf(25),
                 null, null,
-                pricing, null, null, null, null, roomDetail, null, null, null, null,
+                pricing, null, null, null, null, roomDetail, null, null, null,
+                java.util.List.of(new com.hs.listing.dto.request.ListingChargeRequest(
+                        com.hs.listing.model.constant.ListingEnums.ChargeType.ELECTRICITY,
+                        com.hs.listing.model.constant.ListingEnums.BillingMethod.PER_KWH,
+                        java.math.BigDecimal.valueOf(4000), "VND", "kWh", false, null, null, 1)),
                 addressSource, java.util.List.of(mediaReq), java.util.List.of(), java.util.List.of());
 
-        AppException ex = assertThrows(AppException.class, () -> service.upsert("owner-1", req));
-        assertEquals(com.hs.listing.advice.ListingErrorCode.BRANCH_CHARGES_INCOMPLETE.getCode(), ex.getCode());
+        var listing = com.hs.listing.model.Listing.builder().branchId(branchId)
+                .charges(new java.util.ArrayList<>()).build();
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service, "attachCharges", listing, req);
+        assertEquals(1, listing.getCharges().size());
+        assertEquals(java.math.BigDecimal.valueOf(4000), listing.getCharges().getFirst().getAmount());
+        assertEquals(com.hs.listing.model.constant.ListingEnums.BillingMethod.PER_KWH,
+                listing.getCharges().getFirst().getBillingMethod());
     }
 
     @Test

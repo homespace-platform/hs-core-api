@@ -605,19 +605,7 @@ public class ListingService {
     }
 
     private void attachCharges(Listing l, CreateListingRequest r) {
-        if (l.getBranchId() != null && !l.getBranchId().isBlank()) {
-            PropertyBranch branch = branchRepository.findByIdAndActiveTrue(l.getBranchId())
-                    .orElseThrow(() -> error(400, "INVALID_BRANCH", "Chi nhánh không tồn tại hoặc đã bị ngừng hoạt động"));
-            List<String> missing = BranchChargeMappingHelper.findMissingCharges(branch.getCategory(), branch.getDefaultCharges());
-            if (!missing.isEmpty()) {
-                throw new AppException(com.hs.listing.advice.ListingErrorCode.BRANCH_CHARGES_INCOMPLETE,
-                        "Biểu phí chi nhánh '" + branch.getName() + "' chưa hoàn chỉnh (còn thiếu: " + String.join(", ", missing) + "). Vui lòng cập nhật đầy đủ biểu phí chi nhánh trước khi đăng tin.");
-            }
-            List<ListingCharge> branchListingCharges = BranchChargeMappingHelper.mapBranchChargesToListing(branch.getDefaultCharges(), l);
-            l.getCharges().addAll(branchListingCharges);
-            return;
-        }
-
+        // Branch fees only prefill a new listing form; each listing stores its own approved price table.
         if (r.charges() == null)
             return;
         for (var q : r.charges()) {

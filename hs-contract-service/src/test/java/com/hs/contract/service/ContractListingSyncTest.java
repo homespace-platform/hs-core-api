@@ -74,7 +74,7 @@ class ContractListingSyncTest {
         assertEquals(3, preview.proposedMonths());
         assertEquals("29/04/2027", ((Map<?, ?>) preview.terms().get("lease")).get("endDateText"));
         assertEquals(6, rental.getLeaseMonths());
-        assertEquals(List.of("amountValue", "depositAmountValue"),
+        assertEquals(List.of("financial.amountValue", "financial.depositAmountValue"),
                 preview.financialDifferences().stream().map(row -> row.field()).toList());
         assertFalse(preview.terms().containsKey("financial"));
         verifyNoInteractions(parking);
@@ -102,10 +102,10 @@ class ContractListingSyncTest {
 
     @Test void directSourceSkipsComparisonsButKeepsApprovedDataAndTermSafety() {
         var source = sync.source(contract, revision, "approved");
-        assertTrue(source.differences().isEmpty()); assertTrue(source.financialDifferences().isEmpty());
+        assertTrue(source.differences().isEmpty()); assertEquals(2,source.financialDifferences().size());
         assertEquals("Địa chỉ mới", ((Map<?, ?>)source.terms().get("property")).get("fullAddress"));
         assertEquals(3, source.proposedMonths()); assertEquals(6, rental.getLeaseMonths());
-        verifyNoInteractions(costs, parking); verify(rentals, never()).save(any());
+        verifyNoInteractions(parking); verify(rentals, never()).save(any());
         sync.applyDraftTerm(contract, source);
         assertEquals(3, rental.getLeaseMonths()); assertEquals(new BigDecimal("3000000"), rental.getDepositAmount());
         assertFalse(source.terms().containsKey("financial"));
@@ -182,5 +182,79 @@ class ContractListingSyncTest {
         assertEquals(4,quote.getValue().getOccupantCount());assertEquals(2,quote.getValue().getMotorbikeCount());
         assertEquals(1,quote.getValue().getCarCount());assertNotSame(rental,quote.getValue());
         verify(costs).calculateEffectiveMonthlyRent(any(Listing.class),eq(4));
+    }
+
+    @Test void approvedUtilityRatesAreStagedForDraftAndAmendmentWithoutChangingReadingsOrOriginalTerms() throws Exception {
+        var old=List.of(charge("Điện","ELECTRICITY","PER_KWH","2925"),charge("Nước","WATER","PER_M3","18750"));
+        var approved=List.of(charge("Điện","ELECTRICITY","PER_KWH","4000"),charge("Nước","WATER","PER_M3","30000"));
+        revision.setChargesSnapshot(mapper.writeValueAsString(old));
+        revision.setInitialMetersSnapshot("{\"electricityInitial\":\"123\",\"waterInitial\":\"456\",\"electricMeterType\":\"Riêng\",\"waterMeterType\":\"Riêng\"}");
+        when(data.listingTerms(any(),any())).thenReturn(new ContractDataBuilder.ListingTerms(
+                Map.of("listingCode","HS001"),List.of(),List.of(),approved,Map.of(),
+                Map.of("electricityInitial","","waterInitial","","electricMeterType","Riêng","waterMeterType","Riêng")));
+        for(boolean draft:List.of(true,false)) {
+            contract.setStatus(draft?ContractStatus.DRAFT:ContractStatus.ACTIVE);
+            listing.setStatus(draft?ListingStatus.RESERVED:ListingStatus.RENTED);
+            var result=draft?sync.source(contract,revision,"approved"):sync.preview(contract,revision,"approved");
+            assertEquals(approved,result.terms().get("charges"));
+            assertEquals("123",((Map<?,?>)result.terms().get("meters")).get("electricityInitial"));
+            assertEquals("456",((Map<?,?>)result.terms().get("meters")).get("waterInitial"));
+            assertEquals(2,result.differences().stream().filter(row->row.field().startsWith("charges.")).count());
+        }
+        assertEquals(old,new AmendmentTermsBuilder(mapper).rows(revision.getChargesSnapshot()));
+        assertEquals(new BigDecimal("3000000"),rental.getDepositAmount());
+    }
+
+    @Test void approvedFeesCanBecomeFreeBeAddedOrRemovedAndAreaMatchesPerSquareMeterEstimate() throws Exception {
+        revision.setChargesSnapshot(mapper.writeValueAsString(List.of(charge("Internet","INTERNET","PER_MONTH","100000"))));
+        var free=charge("Internet","INTERNET","FREE","0");
+        var areaCharge=new LinkedHashMap<>(charge("Dịch vụ","OTHER","PER_M2_MONTH","2000"));
+        areaCharge.put("estimatedMonthlyAmount","60000");
+        when(data.listingTerms(any(),any())).thenReturn(new ContractDataBuilder.ListingTerms(
+                Map.of("listingCode","HS001","areaM2","30","areaText","30 m²"),List.of(),List.of(),List.of(free,areaCharge),Map.of(),Map.of()));
+        var result=sync.source(contract,revision,"approved");
+        assertEquals(List.of(free,areaCharge),result.terms().get("charges"));
+        assertEquals("30",((Map<?,?>)result.terms().get("property")).get("areaM2"));
+        when(data.listingTerms(any(),any())).thenReturn(new ContractDataBuilder.ListingTerms(Map.of("listingCode","HS001"),List.of(),List.of(),List.of(),Map.of(),Map.of()));
+        assertEquals(List.of(),sync.source(contract,revision,"approved").terms().get("charges"));
+    }
+
+    @Test void activeMeterChainChangesAreExplicitlyBlockedInsteadOfSilentlyPreservingOldListingValues() throws Exception {
+        contract.setStatus(ContractStatus.ACTIVE);listing.setStatus(ListingStatus.RENTED);
+        revision.setChargesSnapshot(mapper.writeValueAsString(List.of(charge("Nước","WATER","PER_M3","18750"))));
+        when(data.listingTerms(any(),any())).thenReturn(new ContractDataBuilder.ListingTerms(Map.of("listingCode","HS001"),List.of(),List.of(),
+                List.of(charge("Nước","WATER","PER_PERSON_MONTH","30000")),Map.of(),Map.of()));
+        assertThrows(AppException.class,()->sync.preview(contract,revision,"approved"));
+        verify(rentals,never()).save(any());
+    }
+
+    @Test void approvedStateWaterRateIsRejectedBeforeItCanBlockFutureInvoices() {
+        var stateWater = charge("Nước", "WATER", "STATE_WATER_RATE", "0");
+        when(data.listingTerms(any(), any())).thenReturn(new ContractDataBuilder.ListingTerms(
+                Map.of("listingCode", "HS001"), List.of(), List.of(), List.of(stateWater), Map.of(), Map.of()));
+        assertThrows(AppException.class, () -> sync.source(contract, revision, "approved"));
+        contract.setStatus(ContractStatus.ACTIVE);
+        listing.setStatus(ListingStatus.RENTED);
+        assertThrows(AppException.class, () -> sync.preview(contract, revision, "approved"));
+        verify(rentals, never()).save(any());
+    }
+
+    @Test void draftKeepsPaidRentButShowsEveryDifferenceWhileActiveFinancialSourceIsStageable() {
+        var draft=sync.source(contract,revision,"approved");
+        assertFalse(draft.terms().containsKey("financial"));
+        assertEquals(2,draft.financialDifferences().size());
+        contract.setStatus(ContractStatus.ACTIVE);listing.setStatus(ListingStatus.RENTED);
+        var active=sync.preview(contract,revision,"approved");
+        assertEquals("3500000",((Map<?,?>)active.terms().get("financial")).get("amountValue"));
+        assertEquals("0",((Map<?,?>)active.terms().get("financial")).get("depositAmountValue"));
+        assertTrue(active.financialDifferences().isEmpty());
+        assertEquals(2,active.differences().stream().filter(row->row.field().startsWith("financial.")).count());
+    }
+
+    private static Map<String,Object> charge(String name,String type,String method,String rate) {
+        var row=new LinkedHashMap<String,Object>();
+        row.put("name",name);row.put("chargeType",type);row.put("billingMethod",method);row.put("unitAmount",rate);
+        row.put("includedInRent",false);row.put("note","-");row.put("estimatedMonthlyAmount",null);
+        row.put("amountAndMethod",rate+" / "+method);return row;
     }
 }

@@ -303,6 +303,19 @@ class ContractDraftIntegrityTest {
         assertNotNull(policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().property(Map.of("maxOccupants","","maxVehicles","")).build()));
         assertCode(6070,()->policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().property(Map.of("maxOccupants",5)).build()));
     }
+    @Test void approvedListingFeesRemainCanonicalOnLaterSaveRenderAndSigningChecks() throws Exception {
+        var current=copy();current.setId("r2");current.setRevisionNumber(2);current.setListingSourceVersion("approved");
+        current.setChargesSnapshot("[{\"name\":\"Điện\",\"chargeType\":\"ELECTRICITY\",\"billingMethod\":\"PER_KWH\",\"unitAmount\":\"4000\",\"includedInRent\":false,\"amountAndMethod\":\"4.000 / kWh\"},{\"name\":\"Nước\",\"chargeType\":\"WATER\",\"billingMethod\":\"PER_M3\",\"unitAmount\":\"30000\",\"includedInRent\":false,\"amountAndMethod\":\"30.000 / m³\"}]");
+        current.setInitialMetersSnapshot("{\"electricityInitial\":\"123\",\"waterInitial\":\"456\",\"electricMeterType\":\"Riêng\",\"waterMeterType\":\"Riêng\"}");
+        var saved=policy.prepareUpdate(c,current,UpdateContractRevisionRequest.builder().meters(Map.of("electricityInitial","124")).build());
+        assertEquals(List.of("4000","30000"),saved.getCharges().stream().map(row->row.get("unitAmount")).toList());
+        assertEquals("124",saved.getMeters().get("electricityInitial"));assertEquals("456",saved.getMeters().get("waterInitial"));
+        current.setInitialMetersSnapshot(mapper.writeValueAsString(saved.getMeters()));
+        policy.validateForDocument(c,current);
+        c.setCurrentRevisionId("r2");when(revisions.findById("r2")).thenReturn(Optional.of(current));policy.validateForDocument(c);
+        assertEquals("[]",original.getChargesSnapshot());assertEquals(new BigDecimal("3000000"),rental.getDepositAmount());
+        assertCode(6070,()->policy.prepareUpdate(c,current,UpdateContractRevisionRequest.builder().charges(List.of()).build()));
+    }
     ContractRevision copy() throws Exception { return mapper.readValue(mapper.writeValueAsString(original),ContractRevision.class); }
     void assertCode(int code, org.junit.jupiter.api.function.Executable action) { assertEquals(code,assertThrows(AppException.class,action).getCode()); }
 }

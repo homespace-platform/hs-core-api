@@ -1,14 +1,34 @@
-# Đồng bộ bài đăng đã duyệt vào hợp đồng — 05/11/2026
+# Đồng bộ bài đăng đã duyệt vào hợp đồng
 
 ## Luồng sử dụng
 
-1. Trong bản nháp và chế độ phụ lục, các trường nguồn Listing (địa chỉ, diện tích, đặc điểm, tiện ích, tài sản bàn giao, nội quy) chỉ đọc. API cũng chặn sửa tay các nhóm này.
+1. Trong bản nháp và chế độ phụ lục, các trường nguồn Listing (địa chỉ, diện tích, đặc điểm, tiện ích, tài sản bàn giao, nội quy, biểu phí dịch vụ và kiểu đồng hồ) lấy từ bản đã duyệt. Giá trị nguồn phải được áp dụng đầy đủ qua thao tác đồng bộ, không chỉ liệt kê chênh lệch rồi giữ dữ liệu cũ.
 2. Chủ nhà sửa bài gốc, gửi duyệt → `status=PENDING_REVIEW`, xuất hiện trong tab Chờ duyệt của chủ tin/admin và ngừng xuất hiện trong tìm kiếm công khai. Nội dung mới nằm riêng trong `pendingEditPayload`; nội dung đã duyệt vẫn phục vụ hồ sơ thuê hiện tại. `reviewOperationalStatus` giữ tình trạng vận hành, `reviewOriginStatus` giữ nguồn gửi duyệt; không hủy tiền/chữ ký/hồ sơ thuê chỉ vì gửi chỉnh sửa. Hàng chờ bao gồm bản sửa của tin PUBLISHED/RESERVED/RENTED/HIDDEN/EXPIRED.
 3. Admin xem nội dung đã gửi ngay trong trang chi tiết thông thường và dùng nút Duyệt/Từ chối cùng hộp xác nhận như tin mới. Không có khối so sánh hoặc nút duyệt bản sửa riêng. API chi tiết admin dựng bản xem từ nội dung đang chờ, không ghi vào Listing thật; địa chỉ, ảnh, tiện ích, nội thất, phí và nội quy đều lấy từ nội dung này. Client gửi đúng `pendingEditId`; token cũ bị chặn nếu chủ nhà gửi lại. Duyệt nội dung RESERVED/RENTED trả về **trạng thái vận hành tại lúc quyết định**, không khôi phục mù trạng thái trước khi sửa. Duyệt tin PUBLISHED/EXPIRED → PUBLISHED với thời hạn hiển thị mới; từ chối → REJECTED. Tin HIDDEN sửa nội dung vẫn HIDDEN. Tin nháp/bị từ chối/hết hạn gửi đăng lại theo luồng thông thường → admin duyệt thành PUBLISHED.
 4. Nút **Cập nhật dữ liệu từ bài đăng** lấy ngay bản đã duyệt, không mở hộp so sánh hoặc yêu cầu chọn lại. Trên hợp đồng gốc DRAFT, một lần bấm sẽ lưu dữ liệu vào revision rồi tự kết xuất Word/PDF, kể cả không có chênh lệch nội dung. Dữ liệu liên hệ/chỉ số/thỏa thuận đang nhập được lưu cùng lần đó. Còn thiếu thông tin bắt buộc thì form chỉ rõ ô cần hoàn thiện, chưa tạo file thiếu dữ liệu.
-5. Bản nháp gửi mã nguồn Listing đã duyệt và revision hợp đồng để chống lưu đè. Nhánh lấy/lưu dữ liệu trực tiếp không dựng bảng so sánh nội dung hoặc chênh lệch tiền. Giá/cọc/phí/chu kỳ/cách tính điện nước đã chốt vẫn theo nghiệp vụ tài chính hiện có. Ghi revision mới rồi kết xuất đúng revision đó; file cũ bị đánh dấu STALE. Kết xuất lỗi vẫn giữ bản nháp đã lưu, lần thử lại chỉ kết xuất. Chưa ký mới được sửa; các khóa chữ ký/đối soát cũ vẫn áp dụng.
+5. Bản nháp gửi mã nguồn Listing đã duyệt và revision hợp đồng để chống lưu đè. Phí dịch vụ được cập nhật, gồm đơn giá điện/nước; kiểu đồng hồ cập nhật nhưng giữ chỉ số đầu kỳ đang nhập. Giá thuê, tiền cọc và chu kỳ đã chốt trong hồ sơ thanh toán không bị sửa ngầm: nếu bài đăng có chênh lệch, UI phải báo rõ khoản được giữ theo hồ sơ thuê. Ghi revision mới rồi kết xuất đúng revision đó; file cũ bị đánh dấu STALE. Kết xuất lỗi vẫn giữ bản nháp đã lưu, lần thử lại chỉ kết xuất. Lần lưu/ký tiếp theo phải giữ biểu phí nguồn đã đồng bộ, không quay về phí của revision đầu.
 6. Với hợp đồng ACTIVE, nút cập nhật đưa ngay dữ liệu vào phụ lục đang soạn, không mở đối chiếu Listing. Việc gửi đề xuất/đồng ý/ký vẫn theo luồng phụ lục; bảng thay đổi của đề xuất được giữ để các bên duyệt và lưu lịch sử. Snapshot nguồn đóng băng ngay khi gửi đề xuất, nên Listing sửa tiếp không đổi nội dung người thuê đang duyệt. Áp dụng sau đồng ý, đủ chữ ký và tới đầu kỳ hợp lệ; không ghi đè file hợp đồng đã ký.
-7. Chênh lệch tiền xử lý qua **Soạn thỏa thuận tài chính** của phụ lục riêng. Không ghép giá/cọc/phí mới với yêu cầu đồng bộ Listing. Hóa đơn và giao dịch đã thu giữ lịch sử; điều chỉnh cọc dùng luồng thu/hoàn phần chênh lệch hiện có. Trước khi hợp đồng có hiệu lực, nút cập nhật dữ liệu không tự đổi thỏa thuận thanh toán đã xác nhận.
+7. Với phụ lục của hợp đồng ACTIVE, dữ liệu đồng bộ bao gồm phí dịch vụ và các thay đổi giá thuê/cọc/chu kỳ từ bài đăng đã duyệt. Backend xác định đây là thay đổi tài chính và áp dụng các kiểm tra ngày hiệu lực, hóa đơn đã phát hành và chênh lệch cọc hiện có. Thay đổi chưa hỗ trợ phải bị chặn với lý do cụ thể, không bỏ qua rồi báo thành công. Không ghép giá trị tài chính tùy ý từ client để thay thế nguồn đã duyệt. Hóa đơn/giao dịch đã thu và PDF đã ký giữ nguyên; ký đủ phụ lục và tới ngày hợp lệ mới thay đổi điều khoản hiệu lực.
+
+Hóa đơn tính phí điện/nước theo đơn giá trong revision có hiệu lực tại **đầu kỳ sử dụng**; tiền thuê trả trước cho kỳ sau lấy revision ở **đầu kỳ sau**. Hóa đơn đã phát hành giữ dòng tiền và revision của nó. Phí nước `STATE_WATER_RATE` hiện chưa được bộ lập hóa đơn hỗ trợ, nên thao tác đồng bộ báo lỗi trước khi lưu hoặc gửi phụ lục; chủ nhà cần sửa cách tính trên bài đăng và được duyệt lại.
+
+## Phạm vi field và kiểm tra hồi quy
+
+| Nhóm bài đăng | Dữ liệu phải đồng bộ |
+|---|---|
+| Tài sản | Địa chỉ, mã phòng/căn, tầng, diện tích, phạm vi thuê, đặc điểm theo ROOM/HOUSE/APARTMENT. |
+| Sức chứa | Giới hạn người/xe từng loại; không thay số người/xe thực tế, không thấp hơn số đang đăng ký. |
+| Dịch vụ | Tất cả khoản phí: thêm/xóa, đơn giá, phương pháp, bao gồm/miễn phí, ghi chú và thứ tự; tính lại dự kiến theo người/xe/diện tích hiện hành. |
+| Đồng hồ/xe | Kiểu đồng hồ và đặc điểm hiển thị tương ứng, chính sách xe; giữ chỉ số công tơ đầu kỳ. Thay cấu trúc công tơ phải qua ràng buộc liên tục chỉ số. |
+| Nội thất | Tên, số lượng, tình trạng, ghi chú, thứ tự. |
+| Tiện ích | Tiện ích chọn từ danh mục và tự nhập; bỏ giá trị đã xóa. |
+| Nội quy | Các dòng chính sách và alias của chúng; không giữ alias mâu thuẫn khi dòng nguồn đã đổi/xóa. |
+| Tài chính | Phụ lục cập nhật từ nguồn trong giới hạn nghiệp vụ; bản nháp giữ khoản đã chốt và báo rõ chênh lệch. |
+| Thời hạn tối thiểu | Theo logic thời hạn hiện có; không tự đổi ngày/thời hạn đã thỏa thuận. |
+
+Không sao chép metadata quảng cáo (ảnh/video, tiêu đề/mô tả bán hàng, rating/lượt xem, chat/lịch xem nhà) vào điều khoản; không ghi đè danh tính, ngân hàng, thanh toán lịch sử hoặc PDF đã ký.
+
+Ca hồi quy chính: bài đăng được duyệt từ điện `2925`/nước `18750` thành `4000`/`30000` → đồng bộ → bản nháp/phụ lục và nội dung phí xuất tài liệu phải đúng giá mới. HĐ gốc đã ký giữ giá cũ; phụ lục chỉ thay điều khoản từ mốc hiệu lực hợp lệ. Kiểm tra thêm lưu lại bản nháp, khóa nguồn lỗi thời/chờ duyệt, phí bị xóa hoặc chuyển miễn phí/bao gồm, feature theo loại tài sản và chỉ số công tơ không bị mất.
 
 ## Sửa thông tin phòng đang giữ chỗ/cho thuê
 
@@ -35,9 +55,9 @@
 
 ## API và dữ liệu
 
-- GET `/api/v1/contracts/{id}/listing-sync`: lấy dữ liệu nguồn đã duyệt. Hợp đồng DRAFT dùng `ContractListingSync.source`, bỏ tính bảng chênh lệch; ACTIVE giữ dữ liệu so sánh phục vụ đề xuất phụ lục và lịch sử.
+- GET `/api/v1/contracts/{id}/listing-sync`: lấy dữ liệu nguồn đã duyệt. Hợp đồng DRAFT dùng `ContractListingSync.source`: trả các điều khoản có thể áp dụng, chênh lệch biểu phí và cảnh báo riêng cho giá thuê/cọc/chu kỳ đã chốt. ACTIVE trả bảng chênh lệch đầy đủ để xem và lập phụ lục.
 - PATCH revision bản nháp: `baseRevisionId` + `listingSourceVersion`. Client không gửi lại dữ liệu Listing để tin cậy.
-- Payload phụ lục: `changes: {freeForm: true, listingSourceVersion: "…"}`; có thể kèm thông tin các bên/thỏa thuận riêng. Không kèm sửa tiền thuê/cọc/phí.
+- Payload phụ lục: `changes: {freeForm: true, listingSourceVersion: "…"}`; có thể kèm thông tin các bên/thỏa thuận riêng. Client không gửi giá thuê/cọc/phí thay thế cùng mã nguồn này; backend tự lấy các khoản đó từ bản bài đăng đã duyệt, đóng băng vào đề xuất và kiểm tra điều kiện áp dụng.
 - PATCH `/api/v1/admin/listings/{listingId}/edits/{editId}`: `{approve: true}` hoặc `{approve: false, reason: "…"}`. Token cũ bị từ chối.
 - GET chi tiết tin admin: `listing` hiển thị nội dung đã gửi duyệt (nếu có), `status=PENDING_REVIEW`, `operationalStatus` là tình trạng vận hành, `protectedRental` cho biết còn hồ sơ thuê được bảo vệ. Chỉ dùng bản chiếu để xem, không lưu Listing. Không dựng được nội dung thì trả `reviewError`, chặn Phê duyệt nhưng vẫn cho Từ chối. Chủ tin/người đã có yêu cầu thuê vẫn xem nội dung đã duyệt; khách không liên quan không đọc được tin đang chờ duyệt.
 - Source snapshot được đóng băng tại lần duyệt, gồm cả địa chỉ/tiện ích từ chi nhánh. Không dựng lại từ dữ liệu chi nhánh có thể đã sửa sau đó.
@@ -61,3 +81,9 @@ Khởi tạo CSDL dev mới: dừng Core trước khi người vận hành reset
 - Web **23 ca**, admin **21 ca**; TypeScript web/admin và ESLint các file giao diện thay đổi đều qua. Các test giao diện dùng API giả lập, không phải E2E với tài khoản/dịch vụ thật.
 - PostgreSQL kiểm tra thực tế: ACCEPTED vẫn khóa phòng dù trạng thái tin bị đổi; hợp đồng thuê gốc đang ký/ACTIVE/EXPIRED/TERMINATED giữ khóa đến khi xác nhận trả phòng; CANCELLED/CLOSED không khóa; HĐ cọc/phụ lục không tạo khóa riêng; trạng thái vận hành và nguồn gửi duyệt được lưu/đọc lại đúng khi ký trong lúc chờ.
 - Đã kiểm tra và dọn đúng container tạm sau khi chạy. Không đọc/sửa/reset CSDL vận hành, không gọi ngân hàng/S3/SmartCA thật, không sinh SQL vá cột riêng. Khởi động lại Core để nạp code và hai cột nullable `review_operational_status`, `review_origin_status` qua mapping Hibernate hiện có; làm mới web/admin trước khi thử luồng mới.
+
+### Nghiệm thu đồng bộ đầy đủ điều khoản — 09/11/2026
+
+- Đã đọc hồ sơ dev của Listing `30e2776a-9b07-1e1c-08e3-e1bfacffc02c` ở chế độ chỉ đọc: bản duyệt có điện `4000` và nước `30000`; HĐ thuê gốc đã ký còn `2925` và `18750`. Đây là dữ liệu đầu vào đúng để kiểm tra phụ lục; không sửa bản ký gốc.
+- Backend: 107 ca đồng bộ/kiểm tra bản nháp/phụ lục, 151 ca ranh giới dựng tài liệu, ký và hóa đơn, cùng 1 ca lưu bản nháp đồng thời giữ chỉ số công tơ đều qua. Web: 26 ca tập trung qua; TypeScript và ESLint các component liên quan qua.
+- Chưa chạy E2E ghi vào hồ sơ dev thật, chưa gọi SmartCA, S3 hoặc Sepolia. Khi kiểm tra thủ công cần khởi động lại Core/Web, lập phụ lục từ bản bài đăng đã duyệt, kiểm tra phí trong PDF phụ lục và xác nhận chỉ có hiệu lực sau khi hai bên ký và đến ngày áp dụng.

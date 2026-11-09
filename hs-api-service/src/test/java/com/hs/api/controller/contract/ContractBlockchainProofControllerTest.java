@@ -18,7 +18,7 @@ class ContractBlockchainProofControllerTest {
 
     @Test void bothRouteAliasesUseTheDocumentScopedReadAndDisableCaching() throws Exception {
         when(proofs.get("pdf")).thenReturn(new BlockchainProofResponse("pdf", "contract", "revision", "NOT_AVAILABLE",
-                null, null, null, null, null, null, null, null, null, null, "Chưa có proof"));
+                null, null, null, null, null, null, null, null, null, null, "Chưa có proof", null, null));
         for (String prefix : new String[]{"/contracts", "/api/v1/contracts"}) {
             mvc.perform(get(prefix + "/documents/pdf/blockchain-proof"))
                     .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))

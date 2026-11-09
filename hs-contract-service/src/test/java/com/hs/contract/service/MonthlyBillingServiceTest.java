@@ -174,6 +174,54 @@ class MonthlyBillingServiceTest {
         assertEquals("revision",root.getCurrentRevisionId());
     }
 
+    @Test void scheduledUtilityRateAppliesToNextPeriodWithoutRepricingIssuedInvoice() {
+        var amendmentRepository = mock(com.hs.contract.repository.ContractAmendmentRepository.class);
+        var resolver = new ContractTermsResolver(amendmentRepository, revisions);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "terms", resolver);
+        var root = contracts.findById("contract").orElseThrow();
+        var old = revisions.findById("revision").orElseThrow();
+        old.setChargesSnapshot(old.getChargesSnapshot().replace("3500", "20000").replace("3.500", "20.000"));
+        var updated = ContractRevision.builder().id("appendix-revision")
+                .financialSnapshot(old.getFinancialSnapshot())
+                .chargesSnapshot(old.getChargesSnapshot().replace("20000", "30000").replace("20.000", "30.000"))
+                .initialMetersSnapshot(old.getInitialMetersSnapshot()).build();
+        when(revisions.findById("appendix-revision")).thenReturn(Optional.of(updated));
+        var signed = com.hs.contract.model.ContractAmendment.builder().contractId(root.getId())
+                .status("SCHEDULED").signedAt(Instant.parse("2026-10-31T03:00:00Z"))
+                .effectiveOn(LocalDate.of(2026, 11, 1)).termsRevisionId("appendix-revision").build();
+        when(amendmentRepository.findByContractIdOrderByCreatedAtDesc(root.getId())).thenReturn(List.of(signed));
+
+        var first = service.issue("invoice", "landlord", new IssueMonthlyInvoiceRequest(
+                new BigDecimal("150"), new BigDecimal("12"), List.of()));
+        assertEquals(new BigDecimal("20000"), first.lines().stream()
+                .filter(line -> "ELECTRICITY".equals(line.type())).findFirst().orElseThrow().unitPrice());
+        var issuedLines = invoice.getLineItemsSnapshot();
+        var issuedTotal = invoice.getTotalAmount();
+        var issuedRevision = invoice.getCostTermsRevisionId();
+
+        var following = MonthlyInvoice.builder().id("following").contractId("contract")
+                .periodIndex(1).periodStart(LocalDate.of(2026, 11, 1))
+                .periodEndExclusive(LocalDate.of(2026, 12, 1))
+                .status(MonthlyInvoiceStatus.DRAFT).totalAmount(BigDecimal.ZERO).build();
+        when(invoices.findByIdForUpdate("following")).thenReturn(Optional.of(following));
+        when(invoices.findContractIdByInvoiceId("following")).thenReturn(Optional.of("contract"));
+        when(invoices.findByContractIdAndPeriodIndex("contract", 0)).thenReturn(Optional.of(invoice));
+        when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(following, invoice));
+        when(time.today()).thenReturn(LocalDate.of(2026, 12, 1));
+        when(time.now()).thenReturn(Instant.parse("2026-12-01T03:00:00Z"));
+        var next = service.issue("following", "landlord", new IssueMonthlyInvoiceRequest(
+                new BigDecimal("200"), new BigDecimal("14"), List.of()));
+
+        var electricity = next.lines().stream().filter(line -> "ELECTRICITY".equals(line.type()))
+                .findFirst().orElseThrow();
+        assertEquals(new BigDecimal("30000"), electricity.unitPrice());
+        assertEquals(new BigDecimal("1500000"), electricity.amount());
+        assertEquals("appendix-revision", following.getCostTermsRevisionId());
+        assertEquals(issuedLines, invoice.getLineItemsSnapshot());
+        assertEquals(issuedTotal, invoice.getTotalAmount());
+        assertEquals(issuedRevision, invoice.getCostTermsRevisionId());
+    }
+
     @Test void expiredContractStillIssuesItsFinalCostsButNotNextRent() {
         contracts.findById("contract").orElseThrow().setStatus(ContractStatus.EXPIRED);
         when(rentals.findById("rental")).thenReturn(Optional.of(RentalRequest.builder()
@@ -314,6 +362,18 @@ class MonthlyBillingServiceTest {
         assertEquals(new BigDecimal("5307000"), result.totalAmount());
         assertEquals(List.of("RENT", "SERVICE_FEE", "ELECTRICITY", "WATER"),
                 result.lines().stream().map(l -> l.type()).toList());
+    }
+
+    @Test void customMonthlyListingFeeAppearsOnMonthlyInvoice() {
+        ContractRevision revision = revisions.findById("revision").orElseThrow();
+        revision.setChargesSnapshot("[{\"name\":\"Thang máy\",\"chargeType\":\"OTHER\",\"billingMethod\":\"PER_MONTH\",\"unitAmount\":\"80000\",\"estimatedMonthlyAmount\":\"80000\",\"amountAndMethod\":\"80.000 VNĐ / tháng\",\"includedInRent\":false}]");
+
+        var result = service.issue("invoice", "landlord", new IssueMonthlyInvoiceRequest(null, null, List.of()));
+
+        var fee = result.lines().stream().filter(line -> "SERVICE_FEE".equals(line.type())).findFirst().orElseThrow();
+        assertEquals("Thang máy", fee.description());
+        assertEquals(new BigDecimal("80000"), fee.unitPrice());
+        assertEquals(new BigDecimal("80000"), fee.amount());
     }
 
     @Test
