@@ -43,7 +43,8 @@ class WorkflowSignatureIsolationTest {
         verify(lifecycle).applyRenewalAfterSignatures(c);
         verifyNoInteractions(onboarding,payments,listingStatus,parking);
         verify(rentals,never()).save(any());
-        verify(documents).save(argThat(d->d.getPurpose()==DocumentPurpose.SIGNED_FINAL && "workflow".equals(d.getContractId())));
+        verify(documents).save(argThat(d->d.getPurpose()==DocumentPurpose.SIGNED_FINAL && "workflow".equals(d.getContractId())
+                && "DC-1_da_ky_hai_ben.pdf".equals(d.getFileName())));
     }
     @Test void firstWorkflowSignatureOnlyOpensTheSecondSignerWindow() throws Exception {
         var c=run(SignerRole.LANDLORD,ContractStatus.LANDLORD_SIGNATURE_PENDING);

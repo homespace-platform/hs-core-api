@@ -42,7 +42,8 @@ class DepositSignatureIsolationTest {
         verifyNoInteractions(onboarding,payments,listingStatus,parking);
         verify(rentals,never()).save(any());
         verify(documents).save(argThat(d->d.getPurpose()==DocumentPurpose.SIGNED_FINAL && "deposit".equals(d.getContractId())
-                && ("0x" + "a".repeat(64)).equals(d.getSignedSha256()) && "s3-version-final".equals(d.getSignedS3VersionId())));
+                && ("0x" + "a".repeat(64)).equals(d.getSignedSha256()) && "s3-version-final".equals(d.getSignedS3VersionId())
+                && "DC-1_da_ky_hai_ben.pdf".equals(d.getFileName())));
         verify(documentProofEnqueuer).enqueue(eq(c), argThat(d -> d.getPurpose() == DocumentPurpose.SIGNED_FINAL),
                 eq("0x" + "a".repeat(64)));
     }

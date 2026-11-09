@@ -711,13 +711,16 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         );
     }
 
+    private static String signedPdfFileName(EmbeddingContext ctx) {
+        return ctx.contractNumber() + (ctx.signerRole() == SignerRole.LANDLORD ? "_signed_landlord" : "_da_ky_hai_ben") + ".pdf";
+    }
+
     private com.hs.storage.dto.response.StorageObjectResponse uploadSignedPdf(EmbeddingContext ctx, byte[] signedPdf) {
         DocumentPurpose purpose = ctx.signerRole() == SignerRole.LANDLORD
                 ? DocumentPurpose.SIGNED_LANDLORD
                 : DocumentPurpose.SIGNED_FINAL;
 
-        String suffix = ctx.signerRole() == SignerRole.LANDLORD ? "signed_landlord" : "signed_final";
-        String fileName = ctx.contractNumber() + "_" + suffix + ".pdf";
+        String fileName = signedPdfFileName(ctx);
 
         var stored = storageService.uploadDirect(
                 signedPdf,
@@ -776,7 +779,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 .storageObjectId(signedStorageId)
                 .signedSha256(ctx.signerRole() == SignerRole.TENANT ? documentHash : null)
                 .signedS3VersionId(ctx.signerRole() == SignerRole.TENANT ? s3VersionId : null)
-                .fileName(ctx.contractNumber() + (ctx.signerRole() == SignerRole.LANDLORD ? "_signed_landlord" : "_signed_final") + ".pdf")
+                .fileName(signedPdfFileName(ctx))
                 .fileSize(signedPdfSize)
                 .status(DocumentGenerationStatus.READY)
                 .generatedAt(Instant.now())
