@@ -25,23 +25,21 @@ public class MembershipCheckoutService {
     private static final Logger log = LoggerFactory.getLogger(MembershipCheckoutService.class);
     private final MembershipOrderRepository orders;
     private final MembershipService memberships;
-    private final VnpaySigner signer;
     private final SepaySigner sepaySigner;
-    @Value("${homespace.membership.vnpay.tmn-code:}") private String tmnCode;
-    @Value("${homespace.membership.sepay.merchant-id:}") private String sepayMerchantId;
-    @Value("${homespace.membership.sepay.checkout-url:https://pay-sandbox.sepay.vn/v1/checkout/init}") private String sepayCheckoutUrl;
-    @Value("${homespace.membership.sepay.return-url:}") private String sepayReturnUrl;
-    @Value("${homespace.membership.sepay.ipn-secret:}") private String sepayIpnSecret;
+    @Value("${homespace.membership.sepay.merchant-id}") private String sepayMerchantId;
+    @Value("${homespace.membership.sepay.checkout-url}") private String sepayCheckoutUrl;
+    @Value("${homespace.membership.sepay.return-url}") private String sepayReturnUrl;
+    @Value("${homespace.membership.sepay.ipn-secret}") private String sepayIpnSecret;
 
     public record Checkout(String orderId, String paymentUrl, int amountVnd, String provider, Map<String, String> formFields) {}
     public record OrderView(String id, String tier, int amountVnd, String status, Instant createdAt, Instant paidAt, String provider) {
         static OrderView from(MembershipOrder o) {
+            // Legacy rows may store null provider from the pre-SePay era; surface as VNPAY without rewriting storage.
             return new OrderView(o.getId(), o.getTier().name(), o.getAmountVnd(), o.getStatus().name(),
                     o.getCreatedAt(), o.getPaidAt(),
                     o.getProvider() == null ? MembershipOrder.Provider.VNPAY.name() : o.getProvider().name());
         }
     }
-    public record IpnResponse(String RspCode, String Message) {}
 
     @Transactional
     public Checkout checkout(String ownerId, MembershipTier tier, MembershipOrder.Provider provider) {
@@ -157,49 +155,6 @@ public class MembershipCheckoutService {
         o.setTransactionNo(transactionId);
         o.setPaidAt(now);
         return true;
-    }
-
-    @Transactional
-    public IpnResponse ipn(Map<String, String> fields) {
-        if (!signer.verify(fields) || !tmnCode.equals(fields.get("vnp_TmnCode")))
-            return new IpnResponse("97", "Invalid signature or merchant");
-        String id = fields.get("vnp_TxnRef");
-        if (id == null) return new IpnResponse("01", "Order not found");
-        MembershipOrder preview = orders.findById(id).orElse(null);
-        if (preview == null) return new IpnResponse("01", "Order not found");
-        memberships.lockOwner(preview.getOwnerId());
-        MembershipOrder o = orders.lockById(id).orElse(null);
-        if (o == null) return new IpnResponse("01", "Order not found");
-        if (o.getProvider() == MembershipOrder.Provider.SEPAY)
-            return new IpnResponse("01", "Order not found");
-        if (!String.valueOf(o.getAmountVnd() * 100L).equals(fields.get("vnp_Amount")))
-            return new IpnResponse("04", "Invalid amount");
-        if ((o.getStatus() == MembershipOrder.Status.EXPIRED || o.getStatus() == MembershipOrder.Status.CANCELLED)
-                && "00".equals(fields.get("vnp_ResponseCode"))
-                && "00".equals(fields.get("vnp_TransactionStatus"))) {
-            o.setStatus(MembershipOrder.Status.REVIEW);
-            o.setTransactionNo(fields.get("vnp_TransactionNo"));
-            o.setPaidAt(Instant.now());
-            return new IpnResponse("00", "Late payment recorded for manual reconciliation");
-        }
-        if (o.getStatus() != MembershipOrder.Status.PENDING)
-            return new IpnResponse("02", "Order already confirmed");
-        if (!"00".equals(fields.get("vnp_ResponseCode")) || !"00".equals(fields.get("vnp_TransactionStatus"))) {
-            o.setStatus(MembershipOrder.Status.FAILED);
-            return new IpnResponse("00", "Payment failed and recorded");
-        }
-        if (fields.get("vnp_TransactionNo") == null || fields.get("vnp_TransactionNo").isBlank())
-            return new IpnResponse("99", "Missing transaction number");
-        if (!memberships.activate(o.getOwnerId(), o.getTier(), o.isUpgrade())) {
-            o.setStatus(MembershipOrder.Status.REVIEW);
-            o.setTransactionNo(fields.get("vnp_TransactionNo"));
-            o.setPaidAt(Instant.now());
-            return new IpnResponse("00", "Payment recorded for manual reconciliation");
-        }
-        o.setStatus(MembershipOrder.Status.PAID);
-        o.setPaidAt(Instant.now());
-        o.setTransactionNo(fields.get("vnp_TransactionNo"));
-        return new IpnResponse("00", "Confirm Success");
     }
 
     private static boolean isBlank(String value) {

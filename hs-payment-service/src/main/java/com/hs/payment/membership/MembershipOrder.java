@@ -33,5 +33,6 @@ public class MembershipOrder {
     private String transactionNo;
 
     public enum Status { PENDING, PAID, FAILED, EXPIRED, CANCELLED, REVIEW }
+    /** VNPAY retained for historical rows only; new checkouts accept SEPAY. */
     public enum Provider { VNPAY, SEPAY }
 }

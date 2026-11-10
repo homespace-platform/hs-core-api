@@ -20,7 +20,7 @@ public class BillingTime {
     public static final ZoneId ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
     private final Instant fixed;
 
-    public BillingTime(@Value("${homespace.time.simulated-at:}") String simulatedAt,
+    public BillingTime(@Value("${homespace.time.simulated-at}") String simulatedAt,
                        Environment environment) {
         if (simulatedAt == null || simulatedAt.isBlank()) {
             fixed = null;

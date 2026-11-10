@@ -26,9 +26,7 @@ SEPAY_IPN_SECRET=<Secret Key IPN do bạn đặt trong SePay>
 
 `SEPAY_SECRET_KEY` dùng để ký form checkout HMAC-SHA256; `SEPAY_IPN_SECRET` dùng để kiểm tra header IPN. Không dùng chung hai khóa. `SEPAY_RETURN_URL` là URL trang kết quả phía frontend, không phải URL IPN. Backend gắn `orderId` vào URL khi tạo từng đơn. Cấu hình `.env` cần được nạp lại bằng cách khởi động lại Core API.
 
-Schema hiện tại thêm cột `membership_orders.provider` bằng Hibernate khi `JPA_DDL_AUTO=update`. Nếu môi trường dùng `validate` hoặc `none`, hãy thêm cột `provider varchar(16)` (cho phép `NULL` để các đơn VNPay cũ vẫn đọc được) theo quy trình migration của môi trường đó **trước** khi khởi động phiên bản Core API mới.
-
-Các biến `VNPAY_*` trong `.env` hiện đã được comment vì VNPay tạm ngừng tạo đơn mới. Nếu còn đơn VNPay đã thanh toán nhưng chưa nhận IPN, phải đối soát chúng trước khi loại bỏ hẳn cấu hình cũ.
+Schema hiện tại thêm cột `membership_orders.provider` bằng Hibernate khi `JPA_DDL_AUTO=update`. Nếu môi trường dùng `validate` hoặc `none`, hãy thêm cột `provider varchar(16)` (cho phép `NULL` để các đơn legacy trước SePay vẫn đọc được) theo quy trình migration của môi trường đó **trước** khi khởi động phiên bản Core API mới. Đơn lịch sử có `provider=VNPAY` hoặc `NULL` vẫn hiển thị đúng; không được đổi nhãn chúng thành SePay. Backend không còn endpoint IPN VNPay.
 
 ## 3. Mở URL callback công khai trên máy local
 
@@ -47,8 +45,8 @@ Khi chạy Next.js ở chế độ development qua `*.trycloudflare.com`, route 
 
 ## 4. Kiểm thử Sandbox
 
-1. Đăng nhập tài khoản chủ nhà, chọn Starter/Pro/Business rồi chọn **SePay**. VNPay hiển thị nhưng không bấm được.
-2. HomeSpace gọi `POST /api/v1/membership/checkout` với `provider=SEPAY`, lưu đơn `PENDING`, trả về action URL và các hidden field đã ký. Trình duyệt gửi **form POST** tới `https://pay-sandbox.sepay.vn/v1/checkout/init`.
+1. Đăng nhập tài khoản chủ nhà, chọn Starter/Pro/Business rồi chọn **SePay**.
+2. HomeSpace gọi `POST /api/v1/membership/checkout` với `provider=SEPAY`, lưu đơn `PENDING`, trả về action URL và các hidden field đã ký. Trình duyệt gửi **form POST** tới `https://pay-sandbox.sepay.vn/v1/checkout/init`. Checkout với `provider=VNPAY` bị từ chối (`MEMBERSHIP_PROVIDER_UNAVAILABLE`).
 3. Hoàn tất giao dịch giả lập trên SePay. Kiểm tra IPN trong trang quản lý SePay và `GET /api/v1/membership/orders/{id}` trên HomeSpace. Chỉ sau IPN hợp lệ đơn mới thành `PAID` và lượt đăng được cấp.
 4. Thử gửi lại cùng IPN: lượt đăng không được cấp lần hai. Thử hủy đơn `PENDING`; nếu thông báo thanh toán thành công đến sau khi hủy hoặc hết hạn, đơn phải vào `REVIEW` để đối soát, không tự cấp lượt.
 

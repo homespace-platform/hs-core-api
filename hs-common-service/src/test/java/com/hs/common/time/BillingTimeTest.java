@@ -25,10 +25,10 @@ class BillingTimeTest {
     }
 
     @Test
-    void environmentPlaceholderResolvesBlankDefaultAndVietnameseSimulation() {
+    void environmentPlaceholderRequiresConfigurationAndAcceptsBlankOrSimulatedTime() {
         MockEnvironment environment = environment("test");
-        String placeholder = "${HOMESPACE_TIME_SIMULATED_AT:}";
-        assertEquals("", environment.resolveRequiredPlaceholders(placeholder));
+        String placeholder = "${HOMESPACE_TIME_SIMULATED_AT}";
+        assertThrows(IllegalArgumentException.class, () -> environment.resolveRequiredPlaceholders(placeholder));
         environment.setProperty("HOMESPACE_TIME_SIMULATED_AT", "");
         assertEquals("", environment.resolveRequiredPlaceholders(placeholder));
         environment.setProperty("HOMESPACE_TIME_SIMULATED_AT", "2026-11-15T10:00:00");

@@ -63,11 +63,6 @@ public class MembershipController {
                 .result(checkout.cancel(requireUserId(), id)).build();
     }
 
-    @GetMapping("/vnpay/ipn")
-    public MembershipCheckoutService.IpnResponse ipn(@RequestParam Map<String, String> fields) {
-        return checkout.ipn(fields);
-    }
-
     @PostMapping("/sepay/ipn")
     public ResponseEntity<Map<String, Boolean>> sepayIpn(
             @RequestHeader(value = "X-Secret-Key", required = false) String secret,

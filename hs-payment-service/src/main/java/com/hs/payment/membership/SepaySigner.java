@@ -19,7 +19,7 @@ public class SepaySigner {
             "success_url", "error_url", "cancel_url");
     private final String secret;
 
-    public SepaySigner(@Value("${homespace.membership.sepay.secret-key:}") String secret) {
+    public SepaySigner(@Value("${homespace.membership.sepay.secret-key}") String secret) {
         this.secret = secret;
     }
 

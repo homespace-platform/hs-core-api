@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Instant;
-import java.util.Map;
 import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -17,12 +16,11 @@ import static org.mockito.Mockito.*;
 class MembershipCheckoutServiceTest {
     private final MembershipOrderRepository orders = mock(MembershipOrderRepository.class);
     private final MembershipService memberships = mock(MembershipService.class);
-    private final VnpaySigner signer = new VnpaySigner("test-only-secret");
-    private final MembershipCheckoutService service = new MembershipCheckoutService(orders, memberships, signer,
+    private final MembershipCheckoutService service = new MembershipCheckoutService(orders, memberships,
             new SepaySigner("test-sepay-secret"));
 
     @Test
-    void sepayCheckoutCreatesSignedPostFormAndDisablesVnpay() {
+    void sepayCheckoutCreatesSignedPostFormAndRejectsVnpay() {
         ReflectionTestUtils.setField(service, "sepayMerchantId", "MERCHANT_TEST");
         ReflectionTestUtils.setField(service, "sepayCheckoutUrl", "https://pay-sandbox.sepay.vn/v1/checkout/init");
         ReflectionTestUtils.setField(service, "sepayReturnUrl", "https://example.test/dashboard/membership/return");
@@ -60,7 +58,7 @@ class MembershipCheckoutServiceTest {
         assertEquals(error.getCode(), assertThrows(AppException.class,
                 () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY)).getCode());
 
-        var withoutSigningSecret = new MembershipCheckoutService(orders, memberships, signer, new SepaySigner(""));
+        var withoutSigningSecret = new MembershipCheckoutService(orders, memberships, new SepaySigner(""));
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayMerchantId", "MERCHANT_TEST");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayCheckoutUrl", "https://pay-sandbox.sepay.vn/v1/checkout/init");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayReturnUrl", "https://example.test/dashboard/membership/return");
@@ -127,70 +125,18 @@ class MembershipCheckoutServiceTest {
     }
 
     @Test
-    void crossProviderIpnCannotActivateOrder() throws Exception {
-        ReflectionTestUtils.setField(service, "tmnCode", "TESTCODE");
-        MembershipOrder order = order();
+    void sepayIpnIgnoresLegacyVnpayOrders() throws Exception {
+        MembershipOrder order = legacyVnpayOrder();
         when(orders.findById("order1")).thenReturn(Optional.of(order));
         when(orders.lockById("order1")).thenReturn(Optional.of(order));
         assertFalse(service.sepayIpn(sepayCallback()));
-        order.setProvider(MembershipOrder.Provider.SEPAY);
-        var callback = signed(Map.of("vnp_TmnCode", "TESTCODE", "vnp_TxnRef", "order1",
-                "vnp_Amount", "4900000", "vnp_ResponseCode", "00", "vnp_TransactionStatus", "00",
-                "vnp_TransactionNo", "123"));
-        assertEquals("01", service.ipn(callback).RspCode());
         verify(memberships, never()).activate(anyString(), any(), anyBoolean());
-    }
-
-    @Test
-    void signedIpnActivatesOnceAndDuplicateCannotGrantAgain() {
-        ReflectionTestUtils.setField(service, "tmnCode", "TESTCODE");
-        MembershipOrder order = order();
-        when(orders.findById("order1")).thenReturn(Optional.of(order));
-        when(orders.lockById("order1")).thenReturn(Optional.of(order));
-        when(memberships.activate("owner", MembershipTier.STARTER, false)).thenReturn(true);
-        Map<String, String> callback = signed(Map.of("vnp_TmnCode", "TESTCODE", "vnp_TxnRef", "order1",
-                "vnp_Amount", "4900000", "vnp_ResponseCode", "00", "vnp_TransactionStatus", "00",
-                "vnp_TransactionNo", "123"));
-
-        assertEquals("00", service.ipn(callback).RspCode());
-        assertEquals(MembershipOrder.Status.PAID, order.getStatus());
-        assertEquals("02", service.ipn(callback).RspCode());
-        verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false);
-    }
-
-    @Test
-    void amountMismatchAndFailedStatusNeverActivate() {
-        ReflectionTestUtils.setField(service, "tmnCode", "TESTCODE");
-        MembershipOrder order = order();
-        when(orders.findById("order1")).thenReturn(Optional.of(order));
-        when(orders.lockById("order1")).thenReturn(Optional.of(order));
-        var wrongAmount = signed(Map.of("vnp_TmnCode", "TESTCODE", "vnp_TxnRef", "order1",
-                "vnp_Amount", "1", "vnp_ResponseCode", "00", "vnp_TransactionStatus", "00"));
-        assertEquals("04", service.ipn(wrongAmount).RspCode());
-        var failed = signed(Map.of("vnp_TmnCode", "TESTCODE", "vnp_TxnRef", "order1",
-                "vnp_Amount", "4900000", "vnp_ResponseCode", "00", "vnp_TransactionStatus", "01"));
-        assertEquals("00", service.ipn(failed).RspCode());
-        assertEquals(MembershipOrder.Status.FAILED, order.getStatus());
-        verify(memberships, never()).activate(anyString(), any(), anyBoolean());
-    }
-
-    @Test
-    void lateSuccessIsFlaggedForReconciliationWithoutActivation() {
-        ReflectionTestUtils.setField(service, "tmnCode", "TESTCODE");
-        MembershipOrder order = order(); order.setStatus(MembershipOrder.Status.EXPIRED);
-        when(orders.findById("order1")).thenReturn(Optional.of(order));
-        when(orders.lockById("order1")).thenReturn(Optional.of(order));
-        var callback = signed(Map.of("vnp_TmnCode", "TESTCODE", "vnp_TxnRef", "order1",
-                "vnp_Amount", "4900000", "vnp_ResponseCode", "00", "vnp_TransactionStatus", "00",
-                "vnp_TransactionNo", "123"));
-        assertEquals("00", service.ipn(callback).RspCode());
-        assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
-        verify(memberships, never()).activate(anyString(), any(), anyBoolean());
+        assertEquals(MembershipOrder.Status.PENDING, order.getStatus());
     }
 
     @Test
     void cancelOnlyOwnPendingOrderAndKeepTerminalStatus() {
-        MembershipOrder order = order();
+        MembershipOrder order = legacyVnpayOrder();
         when(orders.findById("order1")).thenReturn(Optional.of(order));
         when(orders.lockById("order1")).thenReturn(Optional.of(order));
 
@@ -205,40 +151,27 @@ class MembershipCheckoutServiceTest {
     }
 
     @Test
-    void successAfterCancellationRequiresReviewWithoutGrantingUses() {
-        ReflectionTestUtils.setField(service, "tmnCode", "TESTCODE");
-        MembershipOrder order = order();
+    void nullProviderSurfacesAsVnpayWithoutMutatingStorage() {
+        MembershipOrder order = legacyVnpayOrder();
+        order.setProvider(null);
         when(orders.findById("order1")).thenReturn(Optional.of(order));
-        when(orders.lockById("order1")).thenReturn(Optional.of(order));
-        service.cancel("owner", "order1");
-        var callback = signed(Map.of("vnp_TmnCode", "TESTCODE", "vnp_TxnRef", "order1",
-                "vnp_Amount", "4900000", "vnp_ResponseCode", "00", "vnp_TransactionStatus", "00",
-                "vnp_TransactionNo", "123"));
-
-        assertEquals("00", service.ipn(callback).RspCode());
-        assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
-        assertEquals("02", service.ipn(callback).RspCode());
-        verify(memberships, never()).activate(anyString(), any(), anyBoolean());
+        assertEquals("VNPAY", service.order("owner", "order1").provider());
+        assertNull(order.getProvider());
     }
 
-    private Map<String, String> signed(Map<String, String> fields) {
-        var result = new java.util.HashMap<>(fields);
-        result.put("vnp_SecureHash", signer.sign(result));
-        return result;
-    }
-
-    private MembershipOrder order() {
+    private MembershipOrder legacyVnpayOrder() {
         MembershipOrder o = new MembershipOrder();
         o.setId("order1"); o.setOwnerId("owner"); o.setTier(MembershipTier.STARTER);
         o.setAmountVnd(49_000); o.setStatus(MembershipOrder.Status.PENDING);
+        o.setProvider(MembershipOrder.Provider.VNPAY);
         o.setCreatedAt(Instant.now());
+        o.setExpiresAt(Instant.now().plusSeconds(900));
         return o;
     }
 
     private MembershipOrder sepayOrder() {
-        MembershipOrder o = order();
+        MembershipOrder o = legacyVnpayOrder();
         o.setProvider(MembershipOrder.Provider.SEPAY);
-        o.setExpiresAt(Instant.now().plusSeconds(900));
         return o;
     }
 
