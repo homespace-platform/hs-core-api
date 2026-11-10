@@ -35,6 +35,8 @@ public class ListingStatusService {
     private final ListingRepository listingRepository;
     private final ListingStatusHistoryRepository historyRepository;
     private final ViewingAppointmentService appointmentService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.listing.membership.MembershipService memberships;
     private final int publicationDurationDays;
 
     public ListingStatusService(
@@ -65,6 +67,11 @@ public class ListingStatusService {
         }
         ListingStatus target = action == ListingSubmissionAction.SAVE_DRAFT
                 ? ListingStatus.DRAFT : ListingStatus.PENDING_REVIEW;
+        if (target == ListingStatus.PENDING_REVIEW && listing.getPublicationReservation() == null
+                && !hasRemainingPublicationWindow(listing) && memberships != null)
+            memberships.reserve(listing, actorType == ListingStatusActorType.ADMIN);
+        if (target == ListingStatus.DRAFT && listing.getPublicationReservation() != null && memberships != null)
+            memberships.finish(listing, false);
         change(listing, target, null, actorId, actorType, false);
     }
 
@@ -97,6 +104,8 @@ public class ListingStatusService {
                 && hasRemainingPublicationWindow(listing)) {
             throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
         }
+        if (target == ListingStatus.PENDING_REVIEW && !hasRemainingPublicationWindow(listing)
+                && memberships != null) memberships.reserve(listing, false);
         change(listing, target, normalizeReason(note), ownerId, ListingStatusActorType.USER, false);
         return listing;
     }
@@ -118,6 +127,16 @@ public class ListingStatusService {
                 && (reason == null || reason.isBlank())) {
             throw new AppException(ListingErrorCode.MODERATION_REASON_REQUIRED);
         }
+        if (target == ListingStatus.PENDING_REVIEW && !hasRemainingPublicationWindow(listing)
+                && memberships != null) memberships.reserve(listing, true);
+        if (target == ListingStatus.PUBLISHED && listing.getPublicationReservation() == null
+                && !hasRemainingPublicationWindow(listing) && memberships != null) memberships.reserve(listing, true);
+        if ((target == ListingStatus.PUBLISHED || target == ListingStatus.REJECTED)
+                && listing.getPublicationReservation() != null && memberships != null)
+            memberships.finish(listing, target == ListingStatus.PUBLISHED);
+        if ((target == ListingStatus.VIOLATION || target == ListingStatus.HIDDEN)
+                && listing.getPublicationReservation() != null && memberships != null)
+            memberships.finish(listing, false);
         change(listing, target, normalizeReason(reason), adminId, ListingStatusActorType.ADMIN, true);
         if (target == ListingStatus.VIOLATION) {
             listing.setPendingEditId(null); listing.setPendingEditPayload(null);
@@ -207,6 +226,10 @@ public class ListingStatusService {
             throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
         changeOperational(listing, ListingStatus.PUBLISHED, "Đã chấm dứt hợp đồng và xác nhận bàn giao phòng",
                 ownerId, ListingStatusActorType.SYSTEM, true);
+        if (memberships != null) {
+            memberships.reserve(listing, false);
+            memberships.finish(listing, true);
+        }
         Instant now = Instant.now();
         listing.setPublishedAt(now);
         listing.setExpiresAt(now.plus(publicationDurationDays, ChronoUnit.DAYS));
@@ -305,12 +328,13 @@ public class ListingStatusService {
         if (target == ListingStatus.PUBLISHED && listing.getExpiresAt() != null && !hasRemainingPublicationWindow(listing))
             target = ListingStatus.EXPIRED;
         if (publicationReview && (operational == ListingStatus.PUBLISHED || operational == ListingStatus.EXPIRED))
-            target = approve ? ListingStatus.PUBLISHED : ListingStatus.REJECTED;
+            target = approve ? (hasRemainingPublicationWindow(listing) ? ListingStatus.PUBLISHED : ListingStatus.EXPIRED)
+                    : ListingStatus.REJECTED;
         if (target == ListingStatus.PUBLISHED) requireUnoccupied(listing);
         listing.setReviewOperationalStatus(null); listing.setReviewOriginStatus(null);
         change(listing, target, (approve ? "Đã duyệt nội dung " : "Từ chối nội dung ") + listing.getPendingEditId()
                 + (reason == null || reason.isBlank() ? "" : ": " + reason.trim()), actorId, ListingStatusActorType.ADMIN, false,
-                approve && publicationReview && target == ListingStatus.PUBLISHED);
+                false);
         cancelAppointmentsIfUnavailable(listing,operational,target);
     }
 

@@ -64,6 +64,8 @@ public class Listing extends BaseEntity {
     private Instant publishedAt;
     @Column(name = "expires_at")
     private Instant expiresAt;
+    @Column(name = "publication_reservation", length = 8)
+    private String publicationReservation;
     @Column(length = 36)
     private String pendingEditId;
     @Column(columnDefinition = "text")

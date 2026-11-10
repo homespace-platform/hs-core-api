@@ -331,9 +331,7 @@ class ListingStatusServiceTest {
         verifyNoInteractions(appointments);
         service.finishContentReview(listing,"admin",true,null);
         assertEquals(initial==ListingStatus.EXPIRED?ListingStatus.PUBLISHED:initial,listing.getStatus());
-        if(initial==ListingStatus.PUBLISHED || initial==ListingStatus.EXPIRED)
-            assertTrue(listing.getExpiresAt().isAfter(originalExpiry));
-        else assertEquals(originalExpiry,listing.getExpiresAt());
+        assertEquals(originalExpiry,listing.getExpiresAt());
         assertNull(listing.getReviewOperationalStatus()); assertNull(listing.getReviewOriginStatus());
     }
 
@@ -412,7 +410,8 @@ class ListingStatusServiceTest {
         assertEquals(1,service.expirePublishedListings(Instant.now()));
         assertEquals(ListingStatus.PENDING_REVIEW,listing.getStatus()); assertEquals(ListingStatus.EXPIRED,listing.getOperationalStatus());
         service.finishContentReview(listing,"admin",true,null);
-        assertEquals(ListingStatus.PUBLISHED,listing.getStatus()); assertTrue(listing.getExpiresAt().isAfter(Instant.now()));
+        assertEquals(ListingStatus.EXPIRED,listing.getStatus());
+        assertTrue(listing.getExpiresAt().isBefore(Instant.now()));
     }
 
     @org.junit.jupiter.params.ParameterizedTest

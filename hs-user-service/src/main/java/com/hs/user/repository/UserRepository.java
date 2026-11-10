@@ -8,6 +8,8 @@ import com.hs.user.model.User;
 
 
 public interface UserRepository extends JpaRepository<User, String> {
+    @org.springframework.data.jpa.repository.Query(value = "SELECT * FROM users WHERE id = :id FOR UPDATE", nativeQuery = true)
+    Optional<User> lockMembershipOwner(@org.springframework.data.repository.query.Param("id") String id);
     Optional<User> findByEmail(String email);
 
     boolean existsByRole_Name(String roleName);
