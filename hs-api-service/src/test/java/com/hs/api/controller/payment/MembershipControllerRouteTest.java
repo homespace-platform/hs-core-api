@@ -22,7 +22,8 @@ class MembershipControllerRouteTest {
     void plansAreAvailableAtThePathReceivedFromGateway() throws Exception {
         var memberships = mock(MembershipService.class);
         when(memberships.plans()).thenReturn(List.of());
-        var mvc = standaloneSetup(new MembershipController(memberships, mock(MembershipCheckoutService.class))).build();
+        var mvc = standaloneSetup(new MembershipController(memberships, mock(MembershipCheckoutService.class),
+                mock(com.hs.payment.service.EthPaymentService.class))).build();
 
         mvc.perform(get("/membership/plans")).andExpect(status().isOk());
         mvc.perform(get("/api/v1/membership/plans")).andExpect(status().isOk());
@@ -31,7 +32,8 @@ class MembershipControllerRouteTest {
     @Test
     void sepayIpnRequiresConfiguredSecretBeforeAcknowledging() throws Exception {
         var checkout = mock(MembershipCheckoutService.class);
-        var mvc = standaloneSetup(new MembershipController(mock(MembershipService.class), checkout)).build();
+        var mvc = standaloneSetup(new MembershipController(mock(MembershipService.class), checkout,
+                mock(com.hs.payment.service.EthPaymentService.class))).build();
         var request = post("/membership/sepay/ipn").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"notification_type\":\"ORDER_PAID\"}");
 

@@ -69,11 +69,16 @@ public class MembershipService {
 
     @Transactional
     public boolean activate(String ownerId, MembershipTier target, boolean upgrade) {
+        return activateAt(ownerId, target, upgrade, Instant.now());
+    }
+
+    @Transactional
+    public boolean activateAt(String ownerId, MembershipTier target, boolean upgrade, Instant paymentTime) {
         ListingMembership m = locked(ownerId);
         Instant now = Instant.now();
         if (upgrade) {
             if (!active(m, now) || m.getTier().ordinal() >= target.ordinal() || m.getFirstPaidAt() == null
-                    || !now.isBefore(m.getFirstPaidAt().plus(24, ChronoUnit.HOURS)))
+                    || paymentTime == null || !paymentTime.isBefore(m.getFirstPaidAt().plus(24, ChronoUnit.HOURS)))
                 return false;
             // The first purchase timestamp deliberately remains unchanged across upgrades.
         } else {

@@ -8,6 +8,8 @@ import com.hs.listing.membership.MembershipService;
 import com.hs.listing.membership.MembershipTier;
 import com.hs.payment.membership.MembershipCheckoutService;
 import com.hs.payment.membership.MembershipOrder;
+import com.hs.payment.dto.EthPaymentDtos;
+import com.hs.payment.service.EthPaymentService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -27,6 +29,7 @@ public class MembershipController {
     private static final ObjectMapper IPN_MAPPER = new ObjectMapper();
     private final MembershipService memberships;
     private final MembershipCheckoutService checkout;
+    private final EthPaymentService ethPayment;
 
     public record CheckoutRequest(@NotNull MembershipTier tier, @NotNull MembershipOrder.Provider provider) {}
 
@@ -61,6 +64,32 @@ public class MembershipController {
     public ApiResponse<MembershipCheckoutService.OrderView> cancel(@PathVariable String id) {
         return ApiResponse.<MembershipCheckoutService.OrderView>builder()
                 .result(checkout.cancel(requireUserId(), id)).build();
+    }
+
+    @GetMapping("/orders/{id}/eth/challenge")
+    public ApiResponse<EthPaymentDtos.Challenge> ethChallenge(@PathVariable String id, @RequestParam String wallet) {
+        return ApiResponse.<EthPaymentDtos.Challenge>builder()
+                .result(ethPayment.challenge(id, requireUserId(), wallet)).build();
+    }
+
+    @PostMapping("/orders/{id}/eth/quote")
+    public ApiResponse<EthPaymentDtos.Quote> ethQuote(@PathVariable String id,
+            @RequestBody @Valid EthPaymentDtos.CreateQuote request) {
+        return ApiResponse.<EthPaymentDtos.Quote>builder()
+                .result(ethPayment.quote(id, requireUserId(), request)).build();
+    }
+
+    @PostMapping("/orders/{id}/eth/settle")
+    public ApiResponse<MembershipCheckoutService.OrderView> ethSettle(@PathVariable String id,
+            @RequestBody @Valid EthPaymentDtos.Settle request) {
+        return ApiResponse.<MembershipCheckoutService.OrderView>builder()
+                .result(ethPayment.settle(id, requireUserId(), request)).build();
+    }
+
+    @GetMapping("/orders/{id}/eth/status")
+    public ApiResponse<EthPaymentDtos.Status> ethStatus(@PathVariable String id) {
+        return ApiResponse.<EthPaymentDtos.Status>builder()
+                .result(ethPayment.status(id, requireUserId())).build();
     }
 
     @PostMapping("/sepay/ipn")

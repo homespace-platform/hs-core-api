@@ -20,6 +20,7 @@ public class MembershipOrder {
     private int amountVnd;
     @Column(nullable = false)
     private boolean upgrade;
+    private Instant upgradeDeadline;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 16)
     private Status status;
     @Enumerated(EnumType.STRING) @Column(length = 16)
@@ -33,6 +34,6 @@ public class MembershipOrder {
     private String transactionNo;
 
     public enum Status { PENDING, PAID, FAILED, EXPIRED, CANCELLED, REVIEW }
-    /** VNPAY retained for historical rows only; new checkouts accept SEPAY. */
-    public enum Provider { VNPAY, SEPAY }
+    /** VNPAY retained for historical rows only. */
+    public enum Provider { VNPAY, SEPAY, ETH }
 }

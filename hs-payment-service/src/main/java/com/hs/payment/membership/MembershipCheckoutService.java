@@ -4,6 +4,8 @@ import com.hs.common.advice.entity.AppException;
 import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.membership.MembershipService;
 import com.hs.listing.membership.MembershipTier;
+import com.hs.payment.repository.EthPaymentQuoteRepository;
+import com.hs.payment.service.EthPaymentChainClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -26,34 +28,43 @@ public class MembershipCheckoutService {
     private final MembershipOrderRepository orders;
     private final MembershipService memberships;
     private final SepaySigner sepaySigner;
+    private final EthPaymentQuoteRepository ethQuotes;
+    private final EthPaymentChainClient ethChain;
     @Value("${homespace.membership.sepay.merchant-id}") private String sepayMerchantId;
     @Value("${homespace.membership.sepay.checkout-url}") private String sepayCheckoutUrl;
     @Value("${homespace.membership.sepay.return-url}") private String sepayReturnUrl;
     @Value("${homespace.membership.sepay.ipn-secret}") private String sepayIpnSecret;
 
     public record Checkout(String orderId, String paymentUrl, int amountVnd, String provider, Map<String, String> formFields) {}
-    public record OrderView(String id, String tier, int amountVnd, String status, Instant createdAt, Instant paidAt, String provider) {
-        static OrderView from(MembershipOrder o) {
+    public record OrderView(String id, String tier, int amountVnd, String status, Instant createdAt, Instant paidAt,
+                            String provider, String txHash) {
+        public static OrderView from(MembershipOrder o) {
             // Legacy rows may store null provider from the pre-SePay era; surface as VNPAY without rewriting storage.
             return new OrderView(o.getId(), o.getTier().name(), o.getAmountVnd(), o.getStatus().name(),
                     o.getCreatedAt(), o.getPaidAt(),
-                    o.getProvider() == null ? MembershipOrder.Provider.VNPAY.name() : o.getProvider().name());
+                    o.getProvider() == null ? MembershipOrder.Provider.VNPAY.name() : o.getProvider().name(),
+                    o.getProvider() == MembershipOrder.Provider.ETH && o.getTransactionNo() != null
+                            ? "0x" + o.getTransactionNo() : null);
         }
     }
 
     @Transactional
     public Checkout checkout(String ownerId, MembershipTier tier, MembershipOrder.Provider provider) {
-        if (provider != MembershipOrder.Provider.SEPAY)
+        if (provider != MembershipOrder.Provider.SEPAY && provider != MembershipOrder.Provider.ETH)
             throw new AppException(ListingErrorCode.MEMBERSHIP_PROVIDER_UNAVAILABLE);
-        if (isBlank(sepayMerchantId) || isBlank(sepayReturnUrl) || isBlank(sepayCheckoutUrl)
-                || isBlank(sepayIpnSecret) || !sepaySigner.isConfigured())
+        if (provider == MembershipOrder.Provider.SEPAY && (isBlank(sepayMerchantId) || isBlank(sepayReturnUrl) || isBlank(sepayCheckoutUrl)
+                || isBlank(sepayIpnSecret) || !sepaySigner.isConfigured()))
             throw new AppException(ListingErrorCode.MEMBERSHIP_PROVIDER_NOT_CONFIGURED);
         MembershipService.Quote quote = memberships.quote(ownerId, tier); // Locks owner for concurrent orders.
         Instant now = Instant.now();
+        boolean pending = false;
         for (MembershipOrder previous : orders.findByOwnerIdAndStatus(ownerId, MembershipOrder.Status.PENDING)) {
-            if (!previous.getExpiresAt().isAfter(now)) previous.setStatus(MembershipOrder.Status.EXPIRED);
+            if (!previous.getExpiresAt().isAfter(now)) {
+                requireEthQuoteCleared(previous);
+                previous.setStatus(MembershipOrder.Status.EXPIRED);
+            } else pending = true;
         }
-        if (orders.existsByOwnerIdAndStatusAndExpiresAtAfter(ownerId, MembershipOrder.Status.PENDING, now))
+        if (pending)
             throw new AppException(ListingErrorCode.MEMBERSHIP_ORDER_PENDING);
         MembershipOrder order = new MembershipOrder();
         order.setId(UUID.randomUUID().toString().replace("-", ""));
@@ -61,11 +72,14 @@ public class MembershipCheckoutService {
         order.setTier(tier);
         order.setAmountVnd(quote.amountVnd());
         order.setUpgrade(quote.upgrade());
+        order.setUpgradeDeadline(quote.upgrade() ? quote.upgradeDeadline() : null);
         order.setStatus(MembershipOrder.Status.PENDING);
-        order.setProvider(MembershipOrder.Provider.SEPAY);
+        order.setProvider(provider);
         order.setCreatedAt(now);
         order.setExpiresAt(now.plus(15, java.time.temporal.ChronoUnit.MINUTES));
         orders.save(order);
+        if (provider == MembershipOrder.Provider.ETH)
+            return new Checkout(order.getId(), "", order.getAmountVnd(), provider.name(), Map.of());
         String callback = sepayReturnUrl + (sepayReturnUrl.contains("?") ? "&" : "?") + "orderId=" + order.getId();
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("order_amount", String.valueOf(order.getAmountVnd()));
@@ -97,8 +111,17 @@ public class MembershipCheckoutService {
         MembershipOrder o = orders.lockById(id)
                 .orElseThrow(() -> new AppException(ListingErrorCode.MEMBERSHIP_ORDER_NOT_FOUND));
         if (!o.getOwnerId().equals(ownerId)) throw new AppException(ListingErrorCode.LISTING_FORBIDDEN);
-        if (o.getStatus() == MembershipOrder.Status.PENDING) o.setStatus(MembershipOrder.Status.CANCELLED);
+        if (o.getStatus() == MembershipOrder.Status.PENDING) {
+            requireEthQuoteCleared(o);
+            o.setStatus(MembershipOrder.Status.CANCELLED);
+        }
         return OrderView.from(o);
+    }
+
+    private void requireEthQuoteCleared(MembershipOrder order) {
+        if (order.getProvider() != MembershipOrder.Provider.ETH) return;
+        ethQuotes.findFirstByOrderIdOrderByExpiresAtDesc(order.getId())
+                .ifPresent(ethChain::requireFinalizedUnpaid);
     }
 
     public boolean sepayAuthenticated(String suppliedSecret) {

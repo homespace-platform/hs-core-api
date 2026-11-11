@@ -38,6 +38,26 @@ class MembershipServiceTest {
     }
 
     @Test
+    void ethUpgradeUsesVerifiedMiningTimeAtTwentyFourHourBoundary() {
+        Instant firstPaidAt = Instant.now().minus(25, ChronoUnit.HOURS);
+        ListingMembership before = membership(MembershipTier.STARTER, 2, 0);
+        before.setFirstPaidAt(firstPaidAt);
+        before.setPaidPriceVnd(49_000);
+        ListingMembership after = membership(MembershipTier.STARTER, 2, 0);
+        after.setFirstPaidAt(firstPaidAt);
+        after.setPaidPriceVnd(49_000);
+        when(users.lockMembershipOwner("owner")).thenReturn(Optional.of(new User()));
+        when(repository.findById("owner")).thenReturn(Optional.of(before), Optional.of(after));
+
+        assertTrue(service.activateAt("owner", MembershipTier.PRO, true,
+                firstPaidAt.plus(24, ChronoUnit.HOURS).minusSeconds(1)));
+        assertEquals(MembershipTier.PRO, before.getTier());
+        assertFalse(service.activateAt("owner", MembershipTier.PRO, true,
+                firstPaidAt.plus(24, ChronoUnit.HOURS).plusSeconds(1)));
+        assertEquals(MembershipTier.STARTER, after.getTier());
+    }
+
+    @Test
     void pendingReservationsPreventFreeOveruseAndApprovalConsumesOnce() {
         ListingMembership m = new ListingMembership();
         m.setOwnerId("owner"); m.setFreeUsed(2);

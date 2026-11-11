@@ -33,7 +33,13 @@ public enum PaymentErrorCode implements AppException.ErrorCode {
     DISPUTE_CASE_NOT_FOUND(7024,"Không tìm thấy hồ sơ đối soát",HttpStatus.NOT_FOUND),
     DISPUTE_CASE_INVALID(7025,"Nội dung xử lý đối soát không hợp lệ",HttpStatus.BAD_REQUEST),
     DISPUTE_CASE_STALE(7026,"Hồ sơ đối soát đã thay đổi. Vui lòng tải lại trước khi xử lý.",HttpStatus.CONFLICT),
-    DISPUTE_CASE_ACTION_NOT_ALLOWED(7027,"Thao tác không hợp lệ với trạng thái đối soát hiện tại",HttpStatus.CONFLICT);
+    DISPUTE_CASE_ACTION_NOT_ALLOWED(7027,"Thao tác không hợp lệ với trạng thái đối soát hiện tại",HttpStatus.CONFLICT),
+    ETH_PRICE_UNAVAILABLE(7028, "Không có tỷ giá ETH/VND mới và hợp lệ", HttpStatus.SERVICE_UNAVAILABLE),
+    ETH_PAYMENT_INVALID(7029, "Thanh toán ETH không hợp lệ", HttpStatus.BAD_REQUEST),
+    ETH_PAYMENT_NOT_READY(7030, "Thanh toán ETH chưa được xác nhận trên Sepolia", HttpStatus.CONFLICT),
+    ETH_PAYMENT_NOT_CONFIGURED(7031, "Thanh toán ETH chưa được cấu hình an toàn", HttpStatus.SERVICE_UNAVAILABLE),
+    ETH_QUOTE_ALREADY_ISSUED(7032, "Đơn hội viên này đã có báo giá ETH đang hiệu lực", HttpStatus.CONFLICT),
+    ETH_PAYMENT_REVIEW_REQUIRED(7033, "Thanh toán ETH có thể đang chờ xác nhận; cần đối soát trước khi tiếp tục", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

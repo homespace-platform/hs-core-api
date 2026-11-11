@@ -4,6 +4,8 @@ import com.hs.listing.membership.MembershipService;
 import com.hs.listing.membership.MembershipTier;
 import com.hs.common.advice.entity.AppException;
 import com.hs.listing.advice.ListingErrorCode;
+import com.hs.payment.model.EthPaymentQuote;
+import com.hs.payment.advice.PaymentErrorCode;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -16,8 +18,42 @@ import static org.mockito.Mockito.*;
 class MembershipCheckoutServiceTest {
     private final MembershipOrderRepository orders = mock(MembershipOrderRepository.class);
     private final MembershipService memberships = mock(MembershipService.class);
+    private final com.hs.payment.repository.EthPaymentQuoteRepository ethQuotes = mock(com.hs.payment.repository.EthPaymentQuoteRepository.class);
+    private final com.hs.payment.service.EthPaymentChainClient ethChain = mock(com.hs.payment.service.EthPaymentChainClient.class);
     private final MembershipCheckoutService service = new MembershipCheckoutService(orders, memberships,
-            new SepaySigner("test-sepay-secret"));
+            new SepaySigner("test-sepay-secret"), ethQuotes, ethChain);
+
+    @Test
+    void ethCheckoutNeedsNoSepayConfigurationAndKeepsOrderPending() {
+        when(memberships.quote("owner", MembershipTier.STARTER)).thenReturn(
+                new MembershipService.Quote("STARTER", 49_000, "NEW", 10, null, null, false));
+        var checkout = service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.ETH);
+        assertEquals("ETH", checkout.provider());
+        assertEquals(49_000, checkout.amountVnd());
+        assertTrue(checkout.formFields().isEmpty());
+        verify(orders).save(argThat(o -> o.getProvider() == MembershipOrder.Provider.ETH
+                && o.getStatus() == MembershipOrder.Status.PENDING));
+    }
+
+    @Test
+    void signedEthQuoteBlocksCancellationUntilFinalizedUnpaid() {
+        MembershipOrder order = new MembershipOrder();
+        order.setId("order1");
+        order.setOwnerId("owner");
+        order.setTier(MembershipTier.STARTER);
+        order.setProvider(MembershipOrder.Provider.ETH);
+        order.setStatus(MembershipOrder.Status.PENDING);
+        EthPaymentQuote quote = new EthPaymentQuote();
+        when(orders.findById("order1")).thenReturn(Optional.of(order));
+        when(orders.lockById("order1")).thenReturn(Optional.of(order));
+        when(ethQuotes.findFirstByOrderIdOrderByExpiresAtDesc("order1")).thenReturn(Optional.of(quote));
+        doThrow(new AppException(PaymentErrorCode.ETH_PAYMENT_REVIEW_REQUIRED))
+                .when(ethChain).requireFinalizedUnpaid(quote);
+        assertThrows(AppException.class, () -> service.cancel("owner", "order1"));
+        assertEquals(MembershipOrder.Status.PENDING, order.getStatus());
+        doNothing().when(ethChain).requireFinalizedUnpaid(quote);
+        assertEquals("CANCELLED", service.cancel("owner", "order1").status());
+    }
 
     @Test
     void sepayCheckoutCreatesSignedPostFormAndRejectsVnpay() {
@@ -58,7 +94,7 @@ class MembershipCheckoutServiceTest {
         assertEquals(error.getCode(), assertThrows(AppException.class,
                 () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY)).getCode());
 
-        var withoutSigningSecret = new MembershipCheckoutService(orders, memberships, new SepaySigner(""));
+        var withoutSigningSecret = new MembershipCheckoutService(orders, memberships, new SepaySigner(""), ethQuotes, ethChain);
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayMerchantId", "MERCHANT_TEST");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayCheckoutUrl", "https://pay-sandbox.sepay.vn/v1/checkout/init");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayReturnUrl", "https://example.test/dashboard/membership/return");

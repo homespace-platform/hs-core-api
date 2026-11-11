@@ -1,13 +1,13 @@
 # Ghi nhận PDF hợp đồng lên blockchain
 
-Tính năng chạy trong `hs-contract-service`, được Core API nạp cùng luồng ký SmartCA. Phạm vi là **HĐ Cọc, HĐ Thuê gốc và phụ lục AMENDMENT đã ký đủ**. Registry đã deploy có thể dùng tiếp; không cần deploy lại Solidity cho tính năng này.
+Tính năng chạy trong `hs-contract-service`, được Core API nạp cùng luồng ký SmartCA. Phạm vi là **HĐ Cọc, HĐ Thuê gốc và phụ lục AMENDMENT đã ký đủ**. Khi deploy registry mới, cập nhật địa chỉ backend trước khi bật worker; dữ liệu proof trên registry cũ không tự chuyển sang registry mới.
 
 ## 1. Luồng xử lý
 
 1. Chủ nhà ký SmartCA, tạo PDF `SIGNED_LANDLORD`: chưa gửi blockchain.
 2. Người thuê ký tiếp; backend nhúng và xác minh đủ hai chữ ký, upload PDF riêng tư `SIGNED_FINAL`, cố định phiên bản S3 của file.
 3. Backend lưu SHA-256 từ đúng bytes PDF đó kể cả khi blockchain tắt; khi tính năng bật và cấu hình hợp lệ, lưu yêu cầu proof cùng transaction hoàn tất ký. HĐ Cọc, HĐ Thuê và mỗi phụ lục có tài liệu/ID/proof riêng.
-4. Worker đọc yêu cầu đã commit, đối chiếu bytes trong storage và gọi `registerDocument(bytes32 documentId, bytes32 documentHash)` bằng ví hệ thống.
+4. Worker đọc yêu cầu đã commit, đối chiếu bytes trong storage và gọi `registerDocumentWithLineage(bytes32 documentId, bytes32 documentHash, bytes32 caseId, uint8 documentKind)` bằng ví hệ thống.
 5. Worker kiểm tra receipt, sự kiện `DocumentRegistered`, hash trong registry, block canonical và mốc `finalized`, rồi đánh dấu `CONFIRMED`.
 
 RPC lỗi hoặc ví thiếu gas không đảo chữ ký, không đổi trạng thái nghiệp vụ của cọc/thuê. Blockchain có trạng thái riêng. Hệ thống không chỉnh sửa hoặc chèn mã proof vào PDF sau khi ký.
@@ -31,28 +31,28 @@ File cần điền: **`hs-core-api/.env`**. Core tự đọc file này khi chạ
 Các giá trị kết nối/private key được để trống. Công tắc giữ `false` cho đến khi bạn cấu hình xong:
 
 ```dotenv
-BLOCKCHAIN_ENABLED=false
-BLOCKCHAIN_RPC_URL=
-BLOCKCHAIN_REGISTRY_ADDRESS=
-BLOCKCHAIN_PRIVATE_KEY=
+CONTRACT_DOCUMENT_REGISTRY_ENABLED=false
+CONTRACT_DOCUMENT_REGISTRY_RPC_URL=
+CONTRACT_DOCUMENT_REGISTRY_ADDRESS=
+CONTRACT_DOCUMENT_REGISTRY_OWNER_PRIVATE_KEY=
 ```
 
 | Biến | Bạn điền gì? |
 |---|---|
-| `BLOCKCHAIN_ENABLED` | `false` để tắt; đổi `true` sau khi kiểm tra xong. Khi bật và có hợp đồng mới ký đủ, backend sẽ tự gửi transaction và dùng Sepolia ETH. |
-| `BLOCKCHAIN_RPC_URL` | URL Ethereum **Sepolia** của Alchemy/provider bạn đang dùng. |
-| `BLOCKCHAIN_REGISTRY_ADDRESS` | Địa chỉ `ContractDocumentRegistry` đã deploy và test; lấy đúng địa chỉ hiện tại, không lấy địa chỉ ví hay transaction hash. |
-| `BLOCKCHAIN_PRIVATE_KEY` | Private key của ví `owner()` hiện tại của registry: 64 ký tự hex, có thể có tiền tố `0x`. Không điền địa chỉ ví, seed phrase hoặc mật khẩu. |
+| `CONTRACT_DOCUMENT_REGISTRY_ENABLED` | `false` để tắt; đổi `true` sau khi kiểm tra xong. Khi bật và có hợp đồng mới ký đủ, backend sẽ tự gửi transaction và dùng Sepolia ETH. |
+| `CONTRACT_DOCUMENT_REGISTRY_RPC_URL` | URL Ethereum **Sepolia** của Alchemy/provider bạn đang dùng. |
+| `CONTRACT_DOCUMENT_REGISTRY_ADDRESS` | Địa chỉ `ContractDocumentRegistry` đã deploy và test; lấy đúng địa chỉ hiện tại, không lấy địa chỉ ví hay transaction hash. |
+| `CONTRACT_DOCUMENT_REGISTRY_OWNER_PRIVATE_KEY` | Private key của ví `owner()` hiện tại của registry: 64 ký tự hex, có thể có tiền tố `0x`. Không điền địa chỉ ví, seed phrase hoặc mật khẩu. |
 
-Backend Java dùng Web3j `Credentials.create(...)` để ký trực tiếp bằng `BLOCKCHAIN_PRIVATE_KEY`; không cần file keystore hoặc mật khẩu. Hai biến `BLOCKCHAIN_KEYSTORE_PATH` và `BLOCKCHAIN_KEYSTORE_PASSWORD` cũ không còn được dùng. Foundry/Cast vẫn có thể dùng `ACCOUNT=sepoliaKey` để bạn deploy hoặc thao tác thủ công; cấu hình đó độc lập với backend.
+Backend Java dùng Web3j `Credentials.create(...)` để ký trực tiếp bằng `CONTRACT_DOCUMENT_REGISTRY_OWNER_PRIVATE_KEY`; không cần file keystore hoặc mật khẩu. Foundry/Cast vẫn có thể dùng `ACCOUNT=sepoliaKey` để bạn deploy hoặc thao tác thủ công; cấu hình đó độc lập với backend.
 
-Trong `application.properties`, `${BLOCKCHAIN_PRIVATE_KEY:}` đọc khóa từ biến môi trường/file `.env`; mặc định trống. Bạn tự điền khóa thật vào `.env` hoặc cấp biến môi trường khi chạy server/container. File `.env` đã được Git ignore; backend không trả khóa qua API hoặc ghi khóa vào log/database. Không đưa biến này vào frontend `NEXT_PUBLIC_*`.
+Trong `application.properties`, `${CONTRACT_DOCUMENT_REGISTRY_OWNER_PRIVATE_KEY}` đọc khóa từ biến môi trường/file `.env`. Bạn tự điền khóa thật vào `.env` hoặc cấp biến môi trường khi chạy server/container. File `.env` đã được Git ignore; backend không trả khóa qua API hoặc ghi khóa vào log/database. Không đưa biến này vào frontend `NEXT_PUBLIC_*`.
 
 Core đọc `.env` theo định dạng Java `.properties`: điền giá trị trên một dòng, không bọc dấu nháy. Test dùng khóa ngẫu nhiên tạo trong bộ nhớ, không đọc ví thật của bạn.
 
 Trong `hs-api-service/src/main/resources/application.properties`, mạng mặc định là Sepolia `11155111`, chu kỳ worker 10 giây, hẹn đối soát lại 30 giây và timeout mỗi RPC 15 giây. Không cần Etherscan API key để gửi/đọc proof: API key đó chỉ phục vụ bước verify source khi deploy.
 
-**Sau khi điền:** bảo đảm ví owner có Sepolia ETH, đổi `BLOCKCHAIN_ENABLED=true`, rồi khởi động lại Core bằng cách bạn đang dùng. Cấu hình RPC/private key được cache trong tiến trình; thay đổi cấu hình cần restart. Không dùng đồng thời ví owner để gửi transaction thủ công khi worker đang xử lý hàng đợi.
+**Sau khi điền:** bảo đảm ví owner có Sepolia ETH, đổi `CONTRACT_DOCUMENT_REGISTRY_ENABLED=true`, rồi khởi động lại Core bằng cách bạn đang dùng. Cấu hình RPC/private key được cache trong tiến trình; thay đổi cấu hình cần restart. Không dùng đồng thời ví owner để gửi transaction thủ công khi worker đang xử lý hàng đợi.
 
 ## 3. Kiểm tra kết nối trước khi bật
 
@@ -63,13 +63,13 @@ Khối PowerShell dưới chỉ lấy RPC và địa chỉ registry từ `.env`,
 ```powershell
 $blockchainConfig = @{}
 foreach ($line in Get-Content -LiteralPath .env -ErrorAction Stop) {
-    if ($line -match '^\s*(BLOCKCHAIN_RPC_URL|BLOCKCHAIN_REGISTRY_ADDRESS)\s*=\s*(.*?)\s*$') {
+    if ($line -match '^\s*(CONTRACT_DOCUMENT_REGISTRY_RPC_URL|CONTRACT_DOCUMENT_REGISTRY_ADDRESS)\s*=\s*(.*?)\s*$') {
         $blockchainConfig[$Matches[1]] = $Matches[2]
     }
 }
-cast chain-id --rpc-url $blockchainConfig.BLOCKCHAIN_RPC_URL
+cast chain-id --rpc-url $blockchainConfig.CONTRACT_DOCUMENT_REGISTRY_RPC_URL
 if ($LASTEXITCODE -ne 0) { throw 'Không đọc được chain ID.' }
-cast call $blockchainConfig.BLOCKCHAIN_REGISTRY_ADDRESS 'owner()(address)' --rpc-url $blockchainConfig.BLOCKCHAIN_RPC_URL
+cast call $blockchainConfig.CONTRACT_DOCUMENT_REGISTRY_ADDRESS 'owner()(address)' --rpc-url $blockchainConfig.CONTRACT_DOCUMENT_REGISTRY_RPC_URL
 if ($LASTEXITCODE -ne 0) { throw 'Không đọc được owner của registry.' }
 ```
 
