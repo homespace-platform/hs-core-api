@@ -36,11 +36,6 @@
         </dependency>
         <dependency>
             <groupId>com.hs</groupId>
-            <artifactId>hs-notification-service</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.hs</groupId>
             <artifactId>hs-payment-service</artifactId>
             <version>${project.version}</version>
         </dependency>
