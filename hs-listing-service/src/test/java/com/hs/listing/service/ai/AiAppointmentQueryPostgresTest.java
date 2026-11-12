@@ -94,7 +94,7 @@ class AiAppointmentQueryPostgresTest {
 
     @BeforeEach
     void setUp() {
-        booking = new ViewingAppointmentService(appointments, listings, mock(ListingAddressRepository.class), mock(StorageProperties.class));
+        booking = new ViewingAppointmentService(appointments, listings, mock(ListingAddressRepository.class), mock(StorageProperties.class), mock(com.hs.listing.notification.AppointmentNotificationWriter.class));
         service = new AiAppointmentQueryService(appointments, listings, booking, em, Clock.fixed(NOW, VN));
         Listing l1 = listing(L1, ALICE, "Phong tro Phu Loi", ListingStatus.PUBLISHED);
         Listing l2 = listing(L2, DAN, "Can ho Thu Duc", ListingStatus.PUBLISHED);

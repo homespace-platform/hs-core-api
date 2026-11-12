@@ -16,6 +16,9 @@ public interface ListingRepository extends JpaRepository<Listing, String>, JpaSp
     Page<Listing> findAllByOwnerIdAndActiveTrue(String ownerId, Pageable pageable);
     Optional<Listing> findByIdAndActiveTrue(String id);
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("SELECT l FROM Listing l WHERE l.id = :id AND l.active = true")
+    Optional<Listing> findByIdForAppointmentCreation(@org.springframework.data.repository.query.Param("id") String id);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     List<Listing> findAllByStatusAndActiveTrueAndExpiresAtLessThanEqual(ListingStatus status, Instant expiresAt);
     long countByOwnerIdAndStatusAndActiveTrue(String ownerId, ListingStatus status);
     @org.springframework.data.jpa.repository.Query("SELECT COUNT(l) FROM Listing l WHERE l.branchId = :branchId AND l.active = true")

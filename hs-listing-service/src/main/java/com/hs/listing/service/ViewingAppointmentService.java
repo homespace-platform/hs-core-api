@@ -3,6 +3,9 @@ package com.hs.listing.service;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.dto.PageResponse;
+import com.hs.listing.notification.AppointmentNotificationWriter;
+import static com.hs.listing.notification.AppointmentNotificationWriter.Event.*;
+import static com.hs.listing.notification.AppointmentNotificationWriter.Side.*;
 import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.dto.request.*;
 import com.hs.listing.dto.response.AppointmentResponse;
@@ -51,6 +54,7 @@ public class ViewingAppointmentService {
     private final ListingRepository listingRepository;
     private final ListingAddressRepository addressRepository;
     private final StorageProperties storageProperties;
+    private final AppointmentNotificationWriter notifications;
 
     // Định nghĩa các khung giờ 1 tiếng cố định cho từng buổi
     private static final List<TimeSlotDef> MORNING_SLOTS = List.of(
@@ -183,7 +187,7 @@ public class ViewingAppointmentService {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
 
-        Listing listing = listingRepository.findByIdAndActiveTrue(req.listingId())
+        Listing listing = listingRepository.findByIdForAppointmentCreation(req.listingId())
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
 
         // 1. Chỉ được đặt lịch khi bài đăng đang ở trạng thái PUBLISHED
@@ -244,6 +248,7 @@ public class ViewingAppointmentService {
         appointment.setActive(true);
 
         ViewingAppointment saved = appointmentRepository.save(appointment);
+        notifications.enqueue(saved, BOOKING_REQUESTED, OWNER);
         log.info("Renter {} successfully requested viewing appointment {} for listing {} on {} at {}-{}",
                 renterId, saved.getId(), req.listingId(), req.appointmentDate(), req.startTime(), req.endTime());
 
@@ -270,6 +275,7 @@ public class ViewingAppointmentService {
             apt.setOwnerNote(req.ownerNote().trim());
         }
         ViewingAppointment confirmedApt = appointmentRepository.save(apt);
+        notifications.enqueue(confirmedApt, BOOKING_CONFIRMED, RENTER);
         log.info("Owner {} APPROVED viewing appointment {} for listing {} on {} at {}-{}",
                 ownerId, appointmentId, apt.getListing().getId(), apt.getAppointmentDate(), apt.getStartTime(), apt.getEndTime());
 
@@ -289,7 +295,9 @@ public class ViewingAppointmentService {
 
         apt.setStatus(AppointmentStatus.REJECTED);
         apt.setRejectReason(req.rejectReason().trim());
+        clearReschedule(apt);
         ViewingAppointment saved = appointmentRepository.save(apt);
+        notifications.enqueue(saved, BOOKING_REJECTED, RENTER);
         log.info("Owner {} REJECTED viewing appointment {} with reason: {}", ownerId, appointmentId, req.rejectReason());
 
         return toResponse(saved);
@@ -300,7 +308,7 @@ public class ViewingAppointmentService {
     // =========================================================================
     @Transactional
     public AppointmentResponse requestReschedule(String renterId, String appointmentId, RescheduleAppointmentRequest req) {
-        ViewingAppointment apt = appointmentRepository.findByIdWithListing(appointmentId)
+        ViewingAppointment apt = appointmentRepository.findByIdForUpdate(appointmentId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.APPOINTMENT_NOT_FOUND));
 
         if (!renterId.equals(apt.getRenterId())) {
@@ -344,6 +352,7 @@ public class ViewingAppointmentService {
         apt.setRescheduleReason(req.rescheduleReason() != null ? req.rescheduleReason().trim() : null);
 
         ViewingAppointment saved = appointmentRepository.save(apt);
+        notifications.enqueue(saved, BOOKING_RESCHEDULE_REQUESTED, OWNER);
         log.info("Renter {} requested reschedule for appointment {} to {} {}-{}",
                 renterId, appointmentId, req.proposedDate(), req.proposedStartTime(), req.proposedEndTime());
 
@@ -357,7 +366,7 @@ public class ViewingAppointmentService {
     public AppointmentResponse approveReschedule(String ownerId, String appointmentId) {
         ViewingAppointment apt = getAppointmentForOwner(ownerId, appointmentId);
 
-        if (!Boolean.TRUE.equals(apt.getRescheduleRequested())) {
+        if (!isActiveAppointment(apt) || !Boolean.TRUE.equals(apt.getRescheduleRequested())) {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_STATUS);
         }
 
@@ -380,6 +389,7 @@ public class ViewingAppointmentService {
         apt.setRescheduleReason(null);
 
         ViewingAppointment saved = appointmentRepository.save(apt);
+        notifications.enqueue(saved, BOOKING_RESCHEDULE_APPROVED, RENTER);
         log.info("Owner {} APPROVED reschedule for appointment {}. New schedule: {} {}-{}",
                 ownerId, appointmentId, newDate, newStart, newEnd);
 
@@ -393,7 +403,7 @@ public class ViewingAppointmentService {
     public AppointmentResponse rejectReschedule(String ownerId, String appointmentId, RejectAppointmentRequest req) {
         ViewingAppointment apt = getAppointmentForOwner(ownerId, appointmentId);
 
-        if (!Boolean.TRUE.equals(apt.getRescheduleRequested())) {
+        if (!isActiveAppointment(apt) || !Boolean.TRUE.equals(apt.getRescheduleRequested())) {
             throw new AppException(ListingErrorCode.INVALID_APPOINTMENT_STATUS);
         }
 
@@ -406,6 +416,7 @@ public class ViewingAppointmentService {
         apt.setRescheduleReason(null);
 
         ViewingAppointment saved = appointmentRepository.save(apt);
+        notifications.enqueue(saved, BOOKING_RESCHEDULE_REJECTED, RENTER);
         log.info("Owner {} REJECTED reschedule for appointment {}", ownerId, appointmentId);
 
         return toResponse(saved);
@@ -416,7 +427,7 @@ public class ViewingAppointmentService {
     // =========================================================================
     @Transactional
     public AppointmentResponse cancelByRenter(String renterId, String appointmentId, CancelAppointmentRequest req) {
-        ViewingAppointment apt = appointmentRepository.findByIdWithListing(appointmentId)
+        ViewingAppointment apt = appointmentRepository.findByIdForUpdate(appointmentId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.APPOINTMENT_NOT_FOUND));
 
         if (!renterId.equals(apt.getRenterId())) {
@@ -430,7 +441,9 @@ public class ViewingAppointmentService {
         apt.setStatus(AppointmentStatus.CANCELLED);
         apt.setCancelledBy(AppointmentCancelledBy.RENTER);
         apt.setCancelReason(req != null && req.cancelReason() != null ? req.cancelReason().trim() : "Khách hàng tự hủy lịch hẹn");
+        clearReschedule(apt);
         ViewingAppointment saved = appointmentRepository.save(apt);
+        notifications.enqueue(saved, BOOKING_CANCELLED, OWNER);
         log.info("Renter {} CANCELLED appointment {}", renterId, appointmentId);
 
         return toResponse(saved);
@@ -450,7 +463,9 @@ public class ViewingAppointmentService {
         apt.setStatus(AppointmentStatus.CANCELLED);
         apt.setCancelledBy(AppointmentCancelledBy.OWNER);
         apt.setCancelReason(req != null && req.cancelReason() != null ? req.cancelReason().trim() : "Chủ nhà hủy lịch hẹn");
+        clearReschedule(apt);
         ViewingAppointment saved = appointmentRepository.save(apt);
+        notifications.enqueue(saved, BOOKING_CANCELLED, RENTER);
         log.info("Owner {} CANCELLED appointment {}", ownerId, appointmentId);
 
         return toResponse(saved);
@@ -469,7 +484,9 @@ public class ViewingAppointmentService {
 
         apt.setStatus(AppointmentStatus.COMPLETED);
         apt.setCompletedAt(Instant.now());
+        clearReschedule(apt);
         ViewingAppointment saved = appointmentRepository.save(apt);
+        notifications.enqueue(saved, BOOKING_COMPLETED, RENTER);
         log.info("Owner {} marked appointment {} as COMPLETED", ownerId, appointmentId);
 
         return toResponse(saved);
@@ -480,6 +497,11 @@ public class ViewingAppointmentService {
     // =========================================================================
     @Transactional
     public void cancelActiveAppointmentsForListing(String listingId, ListingStatus newStatus) {
+        cancelActiveAppointmentsForListing(listingId, newStatus, null);
+    }
+
+    @Transactional
+    public void cancelActiveAppointmentsForListing(String listingId, ListingStatus newStatus, String actorId) {
         if (listingId == null || listingId.isBlank()) return;
 
         LocalDate today = LocalDate.now(VIETNAM_ZONE);
@@ -494,13 +516,12 @@ public class ViewingAppointmentService {
             apt.setStatus(AppointmentStatus.CANCELLED);
             apt.setCancelledBy(AppointmentCancelledBy.SYSTEM);
             apt.setCancelReason("Tin đăng không còn hiển thị (chuyển sang trạng thái " + newStatus + ")");
+            clearReschedule(apt);
             appointmentRepository.save(apt);
+            if (!apt.getRenterId().equals(actorId)) notifications.enqueue(apt, BOOKING_CANCELLED, RENTER);
+            if (!apt.getOwnerId().equals(actorId)) notifications.enqueue(apt, BOOKING_CANCELLED, OWNER);
 
-            // TODO: [EMAIL NOTIFICATION] Gửi email thông báo hủy lịch xem nhà tới khách hàng khi email service hoàn thiện.
-            // Template params: renterName, renterEmail, listingTitle, listingAddress, appointmentDate, timeSlot, cancelReason
-            log.warn("[EMAIL_NOTIFICATION_TODO] Listing [{}] changed status to [{}]. Auto-cancelled appointment [{}] of renter [{}] (Email: {}). Scheduled for: {} {}-{}",
-                    listingId, newStatus, apt.getId(), apt.getRenterName(), apt.getRenterEmail(),
-                    apt.getAppointmentDate(), apt.getStartTime(), apt.getEndTime());
+
         }
 
         log.info("Auto-cancelled {} active appointment(s) for listing {} due to status transition to {}",
@@ -510,6 +531,16 @@ public class ViewingAppointmentService {
     // =========================================================================
     // 12. CÁC API TRUY VẤN DANH SÁCH (QUERIES)
     // =========================================================================
+    @Transactional(readOnly = true)
+    public AppointmentResponse getAppointment(String userId, String appointmentId) {
+        if (userId == null || userId.isBlank()) throw new AppException(ErrorCode.UNAUTHENTICATED);
+        ViewingAppointment apt = appointmentRepository.findByIdWithListing(appointmentId)
+                .orElseThrow(() -> new AppException(ListingErrorCode.APPOINTMENT_NOT_FOUND));
+        if (!userId.equals(apt.getOwnerId()) && !userId.equals(apt.getRenterId()))
+            throw new AppException(ListingErrorCode.APPOINTMENT_FORBIDDEN);
+        return toResponse(apt);
+    }
+
     @Transactional(readOnly = true)
     public PageResponse<AppointmentResponse> getMyBookings(String renterId, AppointmentStatus status, LocalDate date, int page, int size) {
         if (renterId == null || renterId.isBlank()) {
@@ -603,7 +634,10 @@ public class ViewingAppointmentService {
         List<ViewingAppointment> expiredList = appointmentRepository.findExpiredPendingAppointments(today, now);
         for (ViewingAppointment apt : expiredList) {
             apt.setStatus(AppointmentStatus.EXPIRED);
+            clearReschedule(apt);
             appointmentRepository.save(apt);
+            notifications.enqueue(apt, BOOKING_EXPIRED, OWNER);
+            notifications.enqueue(apt, BOOKING_EXPIRED, RENTER);
         }
         return expiredList.size();
     }
@@ -616,7 +650,10 @@ public class ViewingAppointmentService {
         for (ViewingAppointment apt : pastList) {
             apt.setStatus(AppointmentStatus.COMPLETED);
             apt.setCompletedAt(Instant.now());
+            clearReschedule(apt);
             appointmentRepository.save(apt);
+            notifications.enqueue(apt, BOOKING_COMPLETED, OWNER);
+            notifications.enqueue(apt, BOOKING_COMPLETED, RENTER);
         }
         return pastList.size();
     }
@@ -624,11 +661,24 @@ public class ViewingAppointmentService {
     // =========================================================================
     // HELPER METHODS
     // =========================================================================
+    private static boolean isActiveAppointment(ViewingAppointment apt) {
+        return apt.getStatus() == AppointmentStatus.PENDING || apt.getStatus() == AppointmentStatus.CONFIRMED;
+    }
+
+    private static void clearReschedule(ViewingAppointment apt) {
+        apt.setRescheduleRequested(false);
+        apt.setProposedDate(null);
+        apt.setProposedStartTime(null);
+        apt.setProposedEndTime(null);
+        apt.setProposedSlotType(null);
+        apt.setRescheduleReason(null);
+    }
+
     private ViewingAppointment getAppointmentForOwner(String ownerId, String appointmentId) {
         if (ownerId == null || ownerId.isBlank()) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
-        ViewingAppointment apt = appointmentRepository.findByIdWithListing(appointmentId)
+        ViewingAppointment apt = appointmentRepository.findByIdForUpdate(appointmentId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.APPOINTMENT_NOT_FOUND));
         if (!ownerId.equals(apt.getOwnerId())) {
             throw new AppException(ListingErrorCode.APPOINTMENT_FORBIDDEN);

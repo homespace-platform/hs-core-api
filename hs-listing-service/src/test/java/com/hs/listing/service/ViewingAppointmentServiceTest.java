@@ -38,6 +38,7 @@ class ViewingAppointmentServiceTest {
     private ListingAddressRepository addressRepository;
     private StorageProperties storageProperties;
     private ViewingAppointmentService appointmentService;
+    private com.hs.listing.notification.AppointmentNotificationWriter notifications;
 
     private Listing testListing;
     private final String LISTING_ID = "listing-123";
@@ -49,12 +50,13 @@ class ViewingAppointmentServiceTest {
         listingRepository = mock(ListingRepository.class);
         addressRepository = mock(ListingAddressRepository.class);
         storageProperties = mock(StorageProperties.class);
+        notifications = mock(com.hs.listing.notification.AppointmentNotificationWriter.class);
 
         appointmentService = new ViewingAppointmentService(
                 appointmentRepository,
                 listingRepository,
                 addressRepository,
-                storageProperties
+                storageProperties, notifications
         );
 
         testListing = Listing.builder()
@@ -68,6 +70,7 @@ class ViewingAppointmentServiceTest {
         testListing.setActive(true);
 
         when(listingRepository.findByIdAndActiveTrue(LISTING_ID)).thenReturn(Optional.of(testListing));
+        when(listingRepository.findByIdForAppointmentCreation(LISTING_ID)).thenReturn(Optional.of(testListing));
     }
 
     @Nested
@@ -270,7 +273,7 @@ class ViewingAppointmentServiceTest {
                     .appointmentDate(futureDate).startTime(start).endTime(end)
                     .status(AppointmentStatus.PENDING).build();
 
-            when(appointmentRepository.findByIdWithListing("apt-1")).thenReturn(Optional.of(aptToApprove));
+            when(appointmentRepository.findByIdForUpdate("apt-1")).thenReturn(Optional.of(aptToApprove));
             when(appointmentRepository.save(any(ViewingAppointment.class))).thenAnswer(inv -> inv.getArgument(0));
 
             ApproveAppointmentRequest approveReq = new ApproveAppointmentRequest("Nho den dung gio nhe");
@@ -301,7 +304,7 @@ class ViewingAppointmentServiceTest {
                     .rescheduleRequested(false)
                     .build();
 
-            when(appointmentRepository.findByIdWithListing("apt-reschedule")).thenReturn(Optional.of(existingApt));
+            when(appointmentRepository.findByIdForUpdate("apt-reschedule")).thenReturn(Optional.of(existingApt));
             when(appointmentRepository.save(any(ViewingAppointment.class))).thenAnswer(inv -> inv.getArgument(0));
 
             RescheduleAppointmentRequest req = new RescheduleAppointmentRequest(

@@ -391,7 +391,7 @@ class ListingStatusServiceTest {
         listing.setExpiresAt(Instant.now().minusSeconds(1));
         service.finishContentReview(listing,"admin",true,null);
         assertEquals(ListingStatus.EXPIRED,listing.getStatus());
-        verify(appointments).cancelActiveAppointmentsForListing("listing-1",ListingStatus.EXPIRED);
+        verify(appointments).cancelActiveAppointmentsForListing("listing-1",ListingStatus.EXPIRED,"admin");
     }
 
     @Test
@@ -399,7 +399,7 @@ class ListingStatusServiceTest {
         Listing listing=publishedListingWithWindow(Duration.ofDays(1));
         service.beginContentReview(listing,"owner-1"); verifyNoInteractions(appointments);
         service.finishContentReview(listing,"admin",false,"Cần sửa");
-        verify(appointments).cancelActiveAppointmentsForListing("listing-1",ListingStatus.REJECTED);
+        verify(appointments).cancelActiveAppointmentsForListing("listing-1",ListingStatus.REJECTED,"admin");
     }
 
     @Test

@@ -21,6 +21,10 @@ public interface ViewingAppointmentRepository
         @Query("SELECT va FROM ViewingAppointment va JOIN FETCH va.listing l WHERE va.id = :id AND va.active = true")
         Optional<ViewingAppointment> findByIdWithListing(@Param("id") String id);
 
+        @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+        @Query("SELECT va FROM ViewingAppointment va WHERE va.id = :id AND va.active = true")
+        Optional<ViewingAppointment> findByIdForUpdate(@Param("id") String id);
+
         @Query("SELECT va FROM ViewingAppointment va WHERE va.renterId = :renterId AND va.listing.id = :listingId AND va.active = true AND va.status IN :statuses")
         List<ViewingAppointment> findActiveByRenterIdAndListingId(
                         @Param("renterId") String renterId,
@@ -46,6 +50,7 @@ public interface ViewingAppointmentRepository
                         @Param("startTime") LocalTime startTime,
                         @Param("confirmedId") String confirmedId);
 
+        @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
         @Query("SELECT va FROM ViewingAppointment va WHERE va.listing.id = :listingId AND va.active = true AND va.status IN :statuses AND (va.appointmentDate > :today OR (va.appointmentDate = :today AND va.endTime > :now))")
         List<ViewingAppointment> findActiveFutureAppointmentsByListing(
                         @Param("listingId") String listingId,
@@ -57,11 +62,13 @@ public interface ViewingAppointmentRepository
 
         long countByOwnerIdAndActiveTrue(String ownerId);
 
+        @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
         @Query("SELECT va FROM ViewingAppointment va WHERE va.status = com.hs.listing.model.constant.AppointmentStatus.PENDING AND va.active = true AND (va.appointmentDate < :today OR (va.appointmentDate = :today AND va.endTime < :now))")
         List<ViewingAppointment> findExpiredPendingAppointments(
                         @Param("today") LocalDate today,
                         @Param("now") LocalTime now);
 
+        @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
         @Query("SELECT va FROM ViewingAppointment va WHERE va.status = com.hs.listing.model.constant.AppointmentStatus.CONFIRMED AND va.active = true AND (va.appointmentDate < :today OR (va.appointmentDate = :today AND va.endTime < :now))")
         List<ViewingAppointment> findPastConfirmedAppointments(
                         @Param("today") LocalDate today,

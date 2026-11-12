@@ -277,7 +277,7 @@ public class ListingStatusService {
         if (nearbyEvents != null && target == ListingStatus.PUBLISHED)
             nearbyEvents.publishEvent(new com.hs.listing.nearby.NearbyTypes.ScanChanged(listing.getId()));
 
-        cancelAppointmentsIfUnavailable(listing,previous,target);
+        cancelAppointmentsIfUnavailable(listing,previous,target,actorId);
 
         historyRepository.save(ListingStatusHistory.builder()
                 .listingId(listing.getId())
@@ -335,7 +335,7 @@ public class ListingStatusService {
         change(listing, target, (approve ? "Đã duyệt nội dung " : "Từ chối nội dung ") + listing.getPendingEditId()
                 + (reason == null || reason.isBlank() ? "" : ": " + reason.trim()), actorId, ListingStatusActorType.ADMIN, false,
                 false);
-        cancelAppointmentsIfUnavailable(listing,operational,target);
+        cancelAppointmentsIfUnavailable(listing,operational,target,actorId);
     }
 
     private void changeOperational(Listing listing, ListingStatus target, String reason, String actorId,
@@ -347,17 +347,13 @@ public class ListingStatusService {
         listing.setReviewOperationalStatus(target); listingRepository.save(listing);
         historyRepository.save(ListingStatusHistory.builder().listingId(listing.getId()).fromStatus(previous).toStatus(target)
                 .reason("Trong thời gian chờ duyệt: " + reason).changedBy(actorId).changedByType(actorType).build());
-        cancelAppointmentsIfUnavailable(listing,previous,target);
+        cancelAppointmentsIfUnavailable(listing,previous,target,actorId);
     }
 
-    private void cancelAppointmentsIfUnavailable(Listing listing, ListingStatus previous, ListingStatus target) {
+    private void cancelAppointmentsIfUnavailable(Listing listing, ListingStatus previous, ListingStatus target, String actorId) {
         if (target != ListingStatus.PUBLISHED && target != ListingStatus.RESERVED
                 && (previous == ListingStatus.PUBLISHED || previous == ListingStatus.RESERVED)) {
-            try {
-                appointmentService.cancelActiveAppointmentsForListing(listing.getId(),target);
-            } catch (Exception ignored) {
-                // Keep the same behavior as ordinary lifecycle transitions.
-            }
+            appointmentService.cancelActiveAppointmentsForListing(listing.getId(), target, actorId);
         }
     }
 }

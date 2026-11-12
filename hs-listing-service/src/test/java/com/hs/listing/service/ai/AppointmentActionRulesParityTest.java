@@ -104,9 +104,9 @@ class AppointmentActionRulesParityTest {
 
     private static ViewingAppointmentService serviceFor(ViewingAppointment appointment) {
         ViewingAppointmentRepository appointments = mock(ViewingAppointmentRepository.class);
-        when(appointments.findByIdWithListing(anyString())).thenReturn(Optional.of(appointment));
+        when(appointments.findByIdForUpdate(anyString())).thenReturn(Optional.of(appointment));
         when(appointments.save(any(ViewingAppointment.class))).thenAnswer(call -> call.getArgument(0));
         return new ViewingAppointmentService(appointments, mock(ListingRepository.class), mock(ListingAddressRepository.class),
-                mock(StorageProperties.class));
+                mock(StorageProperties.class), mock(com.hs.listing.notification.AppointmentNotificationWriter.class));
     }
 }

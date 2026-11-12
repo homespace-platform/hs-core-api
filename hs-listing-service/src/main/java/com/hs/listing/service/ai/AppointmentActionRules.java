@@ -59,7 +59,8 @@ public final class AppointmentActionRules {
                 if (status != AppointmentStatus.PENDING) reasons.add("STATUS_NOT_PENDING");
             }
             case APPROVE_RESCHEDULE, REJECT_RESCHEDULE -> {
-                if (!rescheduleRequested) reasons.add("NO_PENDING_RESCHEDULE_REQUEST");
+                if (!pendingOrConfirmed(status)) reasons.add("STATUS_NOT_PENDING_OR_CONFIRMED");
+                else if (!rescheduleRequested) reasons.add("NO_PENDING_RESCHEDULE_REQUEST");
             }
             case CANCEL -> {
                 if (!pendingOrConfirmed(status)) reasons.add("STATUS_NOT_PENDING_OR_CONFIRMED");

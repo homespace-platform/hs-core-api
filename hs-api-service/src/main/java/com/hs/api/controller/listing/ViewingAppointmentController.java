@@ -46,6 +46,13 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @GetMapping("/{id}")
+    public ApiResponse<AppointmentResponse> getAppointment(@PathVariable String id) {
+        return ApiResponse.<AppointmentResponse>builder()
+                .result(appointmentService.getAppointment(requireUserId(), id))
+                .build();
+    }
+
     @PostMapping
     public ApiResponse<AppointmentResponse> createAppointment(@RequestBody @Valid CreateAppointmentRequest req) {
         UserContext context = requireUserContext();
