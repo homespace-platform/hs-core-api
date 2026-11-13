@@ -10,6 +10,9 @@ import com.hs.listing.model.Listing;
 import com.hs.listing.model.PropertyBranch;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.model.constant.*;
+import com.hs.listing.notification.RentalRequestNotificationOutbox;
+import com.hs.listing.notification.RentalRequestNotificationOutboxRepository;
+import com.hs.listing.notification.RentalRequestNotificationWriter;
 import com.hs.listing.port.RentalPaymentLifecyclePort;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.PropertyBranchRepository;
@@ -60,11 +63,11 @@ import static org.mockito.Mockito.*;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.jpa.open-in-view=false"})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import(RentalRequestService.class)
+@Import({RentalRequestService.class, RentalRequestNotificationWriter.class})
 class RentalRequestApprovalPostgresTest {
     @SpringBootConfiguration
     @EntityScan("com.hs")
-    @EnableJpaRepositories(basePackageClasses = {RentalRequestRepository.class, ListingRepository.class})
+    @EnableJpaRepositories(basePackageClasses = {RentalRequestRepository.class, ListingRepository.class, RentalRequestNotificationOutboxRepository.class})
     @EnableJpaAuditing
     static class Config {
         @Bean ObjectMapper mapper() { return new ObjectMapper().findAndRegisterModules(); }
@@ -75,6 +78,7 @@ class RentalRequestApprovalPostgresTest {
     @Autowired RentalRequestService service;
     @Autowired ListingRepository listings;
     @Autowired RentalRequestRepository requests;
+    @Autowired RentalRequestNotificationOutboxRepository outbox;
     @MockitoBean RentalCostCalculator calculator;
     @MockitoBean ParkingReservationService parking;
     @MockitoBean ListingStatusService listingStatus;
@@ -87,6 +91,7 @@ class RentalRequestApprovalPostgresTest {
 
     @BeforeEach
     void setup() {
+        outbox.deleteAllInBatch();
         requests.deleteAllInBatch();
         listings.deleteAllInBatch();
         branches.deleteAllInBatch();
@@ -159,6 +164,48 @@ class RentalRequestApprovalPostgresTest {
         assertEquals(2, requests.findByListingIdAndStatus(otherListing.listingId(), RentalRequestStatus.PENDING).size());
         assertEquals(ListingStatus.RESERVED, listings.findById(selected.listingId()).orElseThrow().getStatus());
         verify(payments, times(1)).createInitialPayment(any(), any());
+
+        // Exactly one ACCEPTED (renter) plus one AUTO_REJECTED per really-rejected contender; nothing for
+        // the inactive, historical or other-listing rows.
+        var expectedContenders = new java.util.TreeSet<String>();
+        for (var row : rejected) if (!row.getId().equals(historical.getId())) expectedContenders.add(row.getId() + "|" + row.getRenterId());
+        assertEquals(13, expectedContenders.size());
+        var seen = new java.util.TreeSet<String>();
+        int accepted = 0;
+        for (var row : outbox.findAll()) {
+            var event = json.readTree(row.getPayload());
+            var data = event.get("data");
+            assertEquals(row.getRentalRequestId(), data.get("requestId").asText());
+            assertEquals("RENTER", data.get("recipientSide").asText());
+            assertEquals(1, event.get("recipients").size());
+            assertEquals(java.util.Set.of("requestId", "recipientSide", "listingTitle"), fieldNames(data));
+            if ("RENTAL_REQUEST_ACCEPTED".equals(event.get("eventType").asText())) {
+                accepted++;
+                assertEquals(selected.firstId(), row.getRentalRequestId());
+                assertEquals("tenant-1", event.get("recipients").get(0).asText());
+            } else {
+                assertEquals("RENTAL_REQUEST_AUTO_REJECTED", event.get("eventType").asText());
+                seen.add(row.getRentalRequestId() + "|" + event.get("recipients").get(0).asText());
+            }
+        }
+        assertEquals(1, accepted);
+        assertEquals(expectedContenders, seen);
+        assertEquals(14, outbox.count());
+        assertFalse(seen.stream().anyMatch(v -> v.startsWith(inactive.getId()) || v.startsWith(historical.getId())));
+        assertTrue(requests.findByListingIdAndStatus(otherListing.listingId(), RentalRequestStatus.PENDING).stream()
+                .noneMatch(r -> seen.stream().anyMatch(v -> v.startsWith(r.getId()))));
+    }
+
+    private final tools.jackson.databind.json.JsonMapper json = tools.jackson.databind.json.JsonMapper.builder().build();
+
+    private static java.util.Set<String> fieldNames(tools.jackson.databind.JsonNode node) {
+        var names = new java.util.TreeSet<String>();
+        node.propertyNames().forEach(names::add);
+        return names;
+    }
+
+    private List<String> eventTypes() {
+        return outbox.findAll().stream().map(r -> json.readTree(r.getPayload()).get("eventType").asText()).sorted().toList();
     }
 
     @ParameterizedTest
@@ -174,6 +221,13 @@ class RentalRequestApprovalPostgresTest {
         assertTrue(requests.findByListingIdAndStatus(data.listingId(), RentalRequestStatus.PENDING).isEmpty());
         verify(payments, times(1)).createInitialPayment(any(), any());
         verify(parking, times(1)).createHeldReservations(any(), any(), any());
+        // One winner notice and one auto-reject for the loser; the loser never gets ACCEPTED.
+        assertEquals(List.of("RENTAL_REQUEST_ACCEPTED", "RENTAL_REQUEST_AUTO_REJECTED"), eventTypes());
+        String winner = requests.findByListingIdAndStatus(data.listingId(), RentalRequestStatus.ACCEPTED).getFirst().getId();
+        for (var row : outbox.findAll()) {
+            boolean acceptedEvent = row.getPayload().contains("\"RENTAL_REQUEST_ACCEPTED\"");
+            assertEquals(acceptedEvent, winner.equals(row.getRentalRequestId()));
+        }
     }
 
     private boolean accept(String requestId) {
@@ -198,6 +252,48 @@ class RentalRequestApprovalPostgresTest {
         assertEquals(2, requests.findByListingIdAndStatus(data.listingId(), RentalRequestStatus.PENDING).size());
         assertTrue(requests.findByListingIdAndStatus(data.listingId(), RentalRequestStatus.REJECTED).isEmpty());
         assertEquals(ListingStatus.PUBLISHED, listings.findById(data.listingId()).orElseThrow().getStatus());
+        assertEquals(0, outbox.count());
+    }
+
+    @Test
+    void parkingFailureRollsBackAcceptanceContenderRejectionAndOutboxTogether() {
+        var data = fixture(false);
+        doThrow(new IllegalStateException("Cannot hold parking"))
+                .when(parking).createHeldReservations(any(), any(), any());
+
+        assertThrows(IllegalStateException.class, () -> service.acceptRentalRequest("owner", data.firstId()));
+
+        assertEquals(2, requests.findByListingIdAndStatus(data.listingId(), RentalRequestStatus.PENDING).size());
+        assertTrue(requests.findByListingIdAndStatus(data.listingId(), RentalRequestStatus.ACCEPTED).isEmpty());
+        assertEquals(0, outbox.count());
+    }
+
+    @Test
+    void submitRejectAndRenterCancelEachWriteOneSideSpecificDurableEvent() {
+        var data = fixture(false);
+        var listing = listings.findById(data.listingId()).orElseThrow();
+        var created = service.createRentalRequest("late-tenant", null, new CreateRentalRequest(
+                data.listingId(), TODAY.plusDays(1), 6, 1, 0, 0, "Khách mới", "0900000000", null, null, null, true));
+        service.rejectRentalRequest("owner", data.secondId(), new com.hs.listing.dto.request.RejectRentalRequest("Lý do riêng tư"));
+        var cancellable = saveRequest(listing, RentalRequestStatus.PENDING, "tenant-cancel");
+        service.cancelRentalRequest("tenant-cancel", cancellable.getId());
+        assertThrows(AppException.class, () -> service.cancelRentalRequest("tenant-cancel", cancellable.getId()));
+        assertThrows(AppException.class, () -> service.rejectRentalRequest("intruder", data.firstId(), null));
+        var rows = outbox.findAll().stream().sorted(java.util.Comparator.comparing(RentalRequestNotificationOutbox::getId)).toList();
+        assertEquals(3, rows.size());
+        var submitted = json.readTree(rows.get(0).getPayload());
+        assertEquals("RENTAL_REQUEST_SUBMITTED", submitted.get("eventType").asText());
+        assertEquals("OWNER", submitted.get("data").get("recipientSide").asText());
+        assertEquals("owner", submitted.get("recipients").get(0).asText());
+        assertEquals(created.id(), rows.get(0).getRentalRequestId());
+        var rejectedEvent = json.readTree(rows.get(1).getPayload());
+        assertEquals("RENTAL_REQUEST_REJECTED", rejectedEvent.get("eventType").asText());
+        assertEquals("tenant-2", rejectedEvent.get("recipients").get(0).asText());
+        assertFalse(rows.get(1).getPayload().contains("riêng tư"));
+        var cancelled = json.readTree(rows.get(2).getPayload());
+        assertEquals("RENTAL_REQUEST_CANCELLED", cancelled.get("eventType").asText());
+        assertEquals("OWNER", cancelled.get("data").get("recipientSide").asText());
+        assertEquals("owner", cancelled.get("recipients").get(0).asText());
     }
 
     @Test
@@ -216,6 +312,108 @@ class RentalRequestApprovalPostgresTest {
 
         assertTrue(requests.findByListingIdAndStatus(data.listingId(), RentalRequestStatus.PENDING).isEmpty());
         assertEquals(1, requests.findByListingIdAndStatus(data.listingId(), RentalRequestStatus.ACCEPTED).size());
+    }
+
+    @Test
+    void acceptRacingWithRenterCancelNotifiesOnlyTheWinningTransition() throws Exception {
+        var data = fixture(false);
+        var outcomes = race(() -> accept(data.firstId()), () -> {
+            try {
+                service.cancelRentalRequest("tenant-1", data.firstId());
+                return true;
+            } catch (AppException error) {
+                assertEquals(ListingErrorCode.INVALID_RENTAL_REQUEST_STATUS.getCode(), error.getCode());
+                return false;
+            }
+        });
+        var first = requests.findById(data.firstId()).orElseThrow();
+        var types = eventTypes();
+        if (first.getStatus() == RentalRequestStatus.ACCEPTED) {
+            assertEquals(List.of("RENTAL_REQUEST_ACCEPTED", "RENTAL_REQUEST_AUTO_REJECTED"), types);
+            assertEquals(true, outcomes.getFirst());
+            assertEquals(false, outcomes.getLast());
+        } else {
+            assertEquals(RentalRequestStatus.CANCELLED_BY_RENTER, first.getStatus());
+            // Cancel won: the owner is told; the second request stays unaffected unless accepted afterwards.
+            assertEquals(List.of("RENTAL_REQUEST_CANCELLED"), types);
+            assertEquals(RentalRequestStatus.PENDING, requests.findById(data.secondId()).orElseThrow().getStatus());
+        }
+    }
+
+    @Test
+    void responseExpiryRacingWithRenterCancelProducesExactlyOneTerminalNotification() throws Exception {
+        var data = fixture(false);
+        var request = requests.findById(data.firstId()).orElseThrow();
+        request.setRespondBy(NOW.minusSeconds(5));
+        requests.saveAndFlush(request);
+        race(() -> {
+            service.expirePendingHoldRequests(NOW);
+            return true;
+        }, () -> {
+            try {
+                service.cancelRentalRequest("tenant-1", data.firstId());
+            } catch (AppException error) {
+                assertEquals(ListingErrorCode.INVALID_RENTAL_REQUEST_STATUS.getCode(), error.getCode());
+            }
+            return true;
+        });
+        var status = requests.findById(data.firstId()).orElseThrow().getStatus();
+        if (status == RentalRequestStatus.EXPIRED) {
+            assertEquals(List.of("RENTAL_REQUEST_EXPIRED", "RENTAL_REQUEST_EXPIRED"), eventTypes());
+            var recipients = outbox.findAll().stream()
+                    .map(r -> json.readTree(r.getPayload()).get("recipients").get(0).asText()).sorted().toList();
+            assertEquals(List.of("owner", "tenant-1"), recipients);
+        } else {
+            assertEquals(RentalRequestStatus.CANCELLED_BY_RENTER, status);
+            assertEquals(List.of("RENTAL_REQUEST_CANCELLED"), eventTypes());
+        }
+    }
+
+    @Test
+    void overdueRequestCannotBeAcceptedWhileResponseExpiryIsRunning() throws Exception {
+        var data = fixture(false);
+        var request = requests.findById(data.firstId()).orElseThrow();
+        request.setRespondBy(NOW.minusSeconds(5));
+        requests.saveAndFlush(request);
+        race(() -> {
+            try {
+                service.acceptRentalRequest("owner", data.firstId());
+                fail("An overdue response must not be accepted");
+            } catch (AppException expected) {
+                // The expiry job may already have committed, or accept observes the overdue PENDING row.
+            }
+            return true;
+        }, () -> {
+            service.expirePendingHoldRequests(NOW);
+            return true;
+        });
+        assertEquals(RentalRequestStatus.EXPIRED, requests.findById(data.firstId()).orElseThrow().getStatus());
+        assertEquals(RentalRequestStatus.PENDING, requests.findById(data.secondId()).orElseThrow().getStatus());
+        assertEquals(List.of("RENTAL_REQUEST_EXPIRED", "RENTAL_REQUEST_EXPIRED"), eventTypes());
+        var recipients = outbox.findAll().stream()
+                .map(r -> json.readTree(r.getPayload()).get("recipients").get(0).asText()).sorted().toList();
+        assertEquals(List.of("owner", "tenant-1"), recipients);
+        verify(payments, never()).createInitialPayment(any(), any());
+    }
+
+    @Test
+    void holdExpiryNotifiesBothPartiesOnceAndProtectedOrAlreadyTerminalRequestsStaySilent() {
+        var data = fixture(false);
+        service.acceptRentalRequest("owner", data.firstId());
+        outbox.deleteAllInBatch();
+        var accepted = requests.findById(data.firstId()).orElseThrow();
+        accepted.setHoldExpiresAt(NOW.minusSeconds(5));
+        requests.saveAndFlush(accepted);
+        when(payments.isHoldProtected(data.firstId())).thenReturn(true);
+        assertEquals(0, service.expirePendingHoldRequests(NOW));
+        assertEquals(0, outbox.count());
+        when(payments.isHoldProtected(data.firstId())).thenReturn(false);
+        assertEquals(1, service.expirePendingHoldRequests(NOW));
+        assertEquals(0, service.expirePendingHoldRequests(NOW));
+        assertEquals(List.of("RENTAL_HOLD_EXPIRED", "RENTAL_HOLD_EXPIRED"), eventTypes());
+        var recipients = outbox.findAll().stream()
+                .map(r -> json.readTree(r.getPayload()).get("recipients").get(0).asText()).sorted().toList();
+        assertEquals(List.of("owner", "tenant-1"), recipients);
     }
 
     private <T> List<T> race(Callable<T> first, Callable<T> second) throws Exception {

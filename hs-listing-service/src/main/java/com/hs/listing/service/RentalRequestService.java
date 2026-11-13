@@ -12,6 +12,9 @@ import com.hs.listing.model.*;
 import com.hs.listing.model.constant.DepositType;
 import com.hs.listing.model.constant.ListingStatus;
 import com.hs.listing.model.constant.RentalRequestStatus;
+import com.hs.listing.notification.RentalRequestNotificationWriter;
+import com.hs.listing.notification.RentalRequestNotificationWriter.Event;
+import com.hs.listing.notification.RentalRequestNotificationWriter.Side;
 import com.hs.listing.port.RentalPaymentLifecyclePort;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.RentalRequestRepository;
@@ -62,6 +65,7 @@ public class RentalRequestService {
     private final PropertyBranchRepository propertyBranchRepository;
     private final ObjectMapper objectMapper;
     private final RentalPaymentLifecyclePort rentalPaymentLifecyclePort;
+    private final RentalRequestNotificationWriter notifications;
     private List<RentalHoldProtectionChecker> holdProtectionCheckers = List.of();
     @Autowired(required=false) private com.hs.common.time.BillingTime businessTime;
     @Autowired private com.hs.listing.repository.RentalStartChangeRepository startChanges;
@@ -88,6 +92,7 @@ public class RentalRequestService {
             PropertyBranchRepository propertyBranchRepository,
             ObjectMapper objectMapper,
             @Autowired(required = false) RentalPaymentLifecyclePort rentalPaymentLifecyclePort,
+            RentalRequestNotificationWriter notifications,
             @Value("${rental.hold-duration-minutes:60}") long holdDurationMinutes) {
         this.rentalRequestRepository = rentalRequestRepository;
         this.listingRepository = listingRepository;
@@ -99,6 +104,7 @@ public class RentalRequestService {
         this.propertyBranchRepository = propertyBranchRepository;
         this.objectMapper = objectMapper;
         this.rentalPaymentLifecyclePort = rentalPaymentLifecyclePort;
+        this.notifications = notifications;
         this.holdDuration = Duration.ofMinutes(Math.max(holdDurationMinutes, 1L));
     }
 
@@ -112,10 +118,11 @@ public class RentalRequestService {
             ParkingReservationService parkingReservationService,
             PropertyBranchRepository propertyBranchRepository,
             ObjectMapper objectMapper,
+            RentalRequestNotificationWriter notifications,
             long holdDurationMinutes) {
         this(rentalRequestRepository, listingRepository, listingStatusService, addressRepository,
                 storageProperties, rentalCostCalculator, parkingReservationService, propertyBranchRepository,
-                objectMapper, null, holdDurationMinutes);
+                objectMapper, null, notifications, holdDurationMinutes);
     }
 
     @Autowired(required = false)
@@ -250,6 +257,7 @@ public class RentalRequestService {
                 .build();
 
         RentalRequest saved = rentalRequestRepository.save(rentalRequest);
+        notifications.enqueue(saved, Event.RENTAL_REQUEST_SUBMITTED, Side.OWNER);
         log.info("Renter [{}] submitted rental request [{}] for listing [{}]", renterId, saved.getId(), listing.getId());
         return toResponse(saved);
     }
@@ -331,9 +339,19 @@ public class RentalRequestService {
         // PENDING requests have no payment or parking hold. Reject them in one
         // conditional update, in the SAME transaction as the selected request's
         // hold/payment. A failed acceptance must leave every contender unchanged.
+        // Row-lock the exact contenders first so notifications match what the bulk update really rejects.
+        List<RentalRequest> contenders = rentalRequestRepository.findCompetingPendingForUpdate(
+                listingId, requestId, RentalRequestStatus.PENDING);
         int rejected = rentalRequestRepository.rejectCompetingPendingRequests(
                 listingId, requestId, RentalRequestStatus.PENDING, RentalRequestStatus.REJECTED,
                 "Chủ nhà đã chấp thuận yêu cầu thuê khác cho tin đăng này.", now, ownerId);
+        if (rejected != contenders.size()) {
+            throw new IllegalStateException("Competing rental request set changed during acceptance");
+        }
+        notifications.enqueue(saved, Event.RENTAL_REQUEST_ACCEPTED, Side.RENTER);
+        for (RentalRequest contender : contenders) {
+            notifications.enqueue(contender, Event.RENTAL_REQUEST_AUTO_REJECTED, Side.RENTER);
+        }
 
         log.info("Owner [{}] ACCEPTED rental request [{}]. Listing [{}] RESERVED until [{}]; rejected [{}] competing requests",
                 ownerId, requestId, listing.getId(), holdExpiresAt, rejected);
@@ -375,6 +393,7 @@ public class RentalRequestService {
 
         // Giải phóng slot xe (nếu có)
         parkingReservationService.releaseReservationsForRequest(requestId);
+        notifications.enqueue(saved, Event.RENTAL_REQUEST_REJECTED, Side.RENTER);
 
         log.info("Owner [{}] REJECTED rental request [{}]", ownerId, requestId);
         return toResponse(saved);
@@ -412,6 +431,7 @@ public class RentalRequestService {
 
         // Giải phóng slot xe (nếu có)
         parkingReservationService.releaseReservationsForRequest(requestId);
+        notifications.enqueue(saved, Event.RENTAL_REQUEST_CANCELLED, Side.OWNER);
 
         log.info("Renter [{}] CANCELLED rental request [{}]", renterId, requestId);
         return toResponse(saved);
@@ -545,6 +565,7 @@ public class RentalRequestService {
             var locked=rentalRequestRepository.findByIdForUpdate(pending.getId()).orElseThrow();
             if(locked.getStatus()==RentalRequestStatus.PENDING && locked.getRespondBy()!=null && !now.isBefore(locked.getRespondBy())) {
                 locked.setStatus(RentalRequestStatus.EXPIRED); rentalRequestRepository.save(locked);
+                notifications.enqueueOthers(locked, "SYSTEM", Event.RENTAL_REQUEST_EXPIRED);
             }
         }
         List<RentalRequest> expiredList = rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(
@@ -585,6 +606,7 @@ public class RentalRequestService {
                 log.info("[RENTAL_HOLD_EXPIRED] Rental request [{}] expired. Listing [{}] returned to PUBLISHED.",
                         req.getId(), listing.getId());
             }
+            notifications.enqueueOthers(req, "SYSTEM", Event.RENTAL_HOLD_EXPIRED);
         }
 
         return expiredCount;

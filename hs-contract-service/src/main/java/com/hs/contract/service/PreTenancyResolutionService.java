@@ -7,6 +7,8 @@ import com.hs.contract.model.constant.*;
 import com.hs.contract.repository.*;
 import com.hs.contract.deposit.DepositAgreementService;
 import com.hs.listing.model.constant.*;
+import com.hs.listing.notification.RentalRequestNotificationWriter;
+import com.hs.listing.notification.RentalRequestNotificationWriter.Event;
 import com.hs.listing.repository.*;
 import com.hs.listing.service.*;
 import com.hs.payment.model.constant.*;
@@ -35,6 +37,7 @@ public class PreTenancyResolutionService {
     private final RentalStartChangeRepository changes;
     private final ComplaintCaseService complaints;
     private final DisputeCaseRepository cases;
+    private final RentalRequestNotificationWriter notifications;
     @Value("${rental.resolution-response-hours:48}") private long responseHours=48;
     @Value("${homespace.payment.contract-due-hours:48}") private long signingHours=48;
 
@@ -46,7 +49,8 @@ public class PreTenancyResolutionService {
         if(activeComplaint(s))throw support.invalid("Cần xử lý khiếu nại đang mở trước khi gửi đề nghị khác.");
         if(responseHours<1||responseHours>720)throw new IllegalStateException("rental.resolution-response-hours must be 1..720");
         support.propose(s,p,support.text(p.reason()),support.evidence(s,p.evidenceIds()),support.time.now().plus(Duration.ofHours(responseHours)));
-        s.rental().setResolutionWorkflowId(s.record().getId());support.rentals.save(s.rental());return view(s);
+        s.rental().setResolutionWorkflowId(s.record().getId());support.rentals.save(s.rental());
+        notifications.enqueueOthers(s.rental(),actor,Event.RENTAL_CANCELLATION_REQUESTED);return view(s);
     }
     @Transactional public RentalWorkflowView act(String rental,String actor,String action,RentalWorkflowPayloads.Action p){
         var s=support.lock(rental,actor,"CANCELLATION");support.version(s,p.expectedRevision());String reason=support.text(p.reason());
@@ -61,11 +65,12 @@ public class PreTenancyResolutionService {
                     throw support.invalid("Cần hết hạn phản hồi, đã liên hệ khách và xác nhận phòng chưa bàn giao. Chỉ được hoàn toàn bộ tiền.");
                 complete(s);
             }
-            case "WITHDRAW" -> {if(!actor.equals(w.getProposedBy()))throw support.missing();w.setStatus("WITHDRAWN");resume(s);}
-            case "REJECT" -> {support.otherProposer(s);w.setStatus("REJECTED");resume(s);}
+            case "WITHDRAW" -> {if(!actor.equals(w.getProposedBy()))throw support.missing();w.setStatus("WITHDRAWN");resume(s);notifications.enqueueOthers(s.rental(),actor,Event.RENTAL_CANCELLATION_WITHDRAWN);}
+            case "REJECT" -> {support.otherProposer(s);w.setStatus("REJECTED");resume(s);notifications.enqueueOthers(s.rental(),actor,Event.RENTAL_CANCELLATION_REJECTED);}
             case "ESCALATE" -> {
                 var complaint=complaints.openFromWorkflow(rental,actor,"CANCELLATION",w.getRevision(),reason);
                 w.setComplaintId(complaint.id());w.setStatus("DISPUTED");
+                notifications.enqueueOthers(s.rental(),actor,Event.RENTAL_CANCELLATION_DISPUTED);
                 // Keep the signing pause until the case is resolved and an explicit new proposal is reviewed.
             }
             default -> throw support.invalid("Thao tác không hợp lệ.");
@@ -81,10 +86,12 @@ public class PreTenancyResolutionService {
     }
     private RentalWorkflowView resumeAction(RentalWorkflowSupport.Source s,String action,RentalWorkflowPayloads.Action p){
         var w=s.record();String reason=support.text(p.reason());resumeReady(s);
+        Event event;
         switch(action){
             case "REQUEST_RESUME"->{
                 support.acknowledge(p);if(!"DISPUTED".equals(w.getStatus()))throw support.invalid("Không có hồ sơ sau khiếu nại cần tiếp tục.");
                 w.setStatus("RESUME_PROPOSED");w.setProposedBy(s.actor());w.setOwnerConfirmedAt(support.owner(s)?support.time.now():null);w.setTenantConfirmedAt(support.owner(s)?null:support.time.now());
+                event=Event.RENTAL_RESUME_REQUESTED;
             }
             case "RESUME"->{
                 support.acknowledge(p);support.otherProposer(s);if(!"RESUME_PROPOSED".equals(w.getStatus()))throw support.invalid("Chưa có đề nghị tiếp tục thuê.");
@@ -93,15 +100,18 @@ public class PreTenancyResolutionService {
                 // Both parties explicitly reopen the existing lease-signing window; no receipt or terms are rewritten.
                 if(s.contract()!=null&&s.contract().getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING){s.contract().setTenantSigningDueAt(support.time.now().plus(Duration.ofHours(signingHours)));support.contracts.save(s.contract());}
                 w.setStatus("RESUMED");w.setRespondBy(null);resume(s);
+                event=Event.RENTAL_RESUMED;
             }
             case "DECLINE_RESUME","WITHDRAW_RESUME"->{
                 if(!"RESUME_PROPOSED".equals(w.getStatus()))throw support.invalid("Không có đề nghị tiếp tục đang chờ.");
                 if("DECLINE_RESUME".equals(action))support.otherProposer(s);else if(!s.actor().equals(w.getProposedBy()))throw support.missing();
                 w.setStatus("DISPUTED");w.setOwnerConfirmedAt(null);w.setTenantConfirmedAt(null);
+                event="DECLINE_RESUME".equals(action)?Event.RENTAL_RESUME_REJECTED:Event.RENTAL_RESUME_WITHDRAWN;
             }
             default->throw support.invalid("Thao tác không hợp lệ.");
         }
-        support.save(s,action,reason,List.of());return view(s);
+        support.save(s,action,reason,List.of());
+        notifications.enqueueOthers(s.rental(),s.actor(),event);return view(s);
     }
     private boolean activeComplaint(RentalWorkflowSupport.Source s){return cases.findByActiveKey("RENTAL:"+s.rental().getId()+":TERMINATION").isPresent();}
     private void eligible(RentalWorkflowSupport.Source s){
@@ -157,6 +167,8 @@ public class PreTenancyResolutionService {
             support.rentals.save(r);
             s.record().setStatus("REFUND_PENDING");
             s.record().setRespondBy(null);
+            // The request stays ACCEPTED until every refund receipt is confirmed; this is not a cancellation yet.
+            notifications.enqueueOthers(r,s.actor(),Event.RENTAL_CANCELLATION_REFUND_PENDING);
         }else finishCancellation(s,listing,dc);
     }
 
@@ -191,6 +203,7 @@ public class PreTenancyResolutionService {
                 .stream().noneMatch(other->!other.getId().equals(r.getId())))
             listingStatus.releaseReserved(listing,s.actor(),"Hoàn tất hủy hồ sơ trước khi thuê");
         s.record().setStatus("COMPLETED");s.record().setRespondBy(null);
+        notifications.enqueueOthers(r,s.actor(),Event.RENTAL_REQUEST_CANCELLED);
     }
     private RentalWorkflowView view(RentalWorkflowSupport.Source s){
         var actions=new ArrayList<String>();String blocked=null;var w=s.record();

@@ -53,14 +53,24 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 /** Opt-in, disposable DB only. No bank, S3 or signing provider calls. */
-@EnabledIfEnvironmentVariable(named="HS_WORKFLOW_TEST_PG_URL",matches="jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/hs_workflow_test")
+@org.junit.jupiter.api.condition.EnabledIf("databaseIsAllowed")
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
-@TestPropertySource(properties={"spring.datasource.url=${HS_WORKFLOW_TEST_PG_URL}","spring.datasource.username=postgres",
-    "spring.datasource.password=hs_workflow_test","spring.jpa.hibernate.ddl-auto=create-drop","spring.profiles.active=test"})
-@Import({ContractLifecycleService.class,MonthlyBillingService.class,FinalRentCalculator.class,WorkflowDocumentService.class,WorkflowDocumentCommitter.class,WorkflowDocumentRetentionChecker.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class,ComplaintCaseService.class,ComplaintEvidenceAccessChecker.class,RentalWorkflowSupport.class,PreTenancyResolutionService.class,RentalOnboardingService.class,MoveInHandoverService.class,MutualTerminationService.class,RentalWorkflowEvidenceAccessChecker.class})
+@TestPropertySource(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.profiles.active=test"})
+@Import({com.hs.listing.notification.RentalRequestNotificationWriter.class,ContractLifecycleService.class,MonthlyBillingService.class,FinalRentCalculator.class,WorkflowDocumentService.class,WorkflowDocumentCommitter.class,WorkflowDocumentRetentionChecker.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class,ComplaintCaseService.class,ComplaintEvidenceAccessChecker.class,RentalWorkflowSupport.class,PreTenancyResolutionService.class,RentalOnboardingService.class,MoveInHandoverService.class,MutualTerminationService.class,RentalWorkflowEvidenceAccessChecker.class})
 class RentalWorkflowPostgresTest {
+    static final String LEGACY_URL="jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/hs_workflow_test";
+    static final String DEDICATED_URL="jdbc:postgresql://[^/]+/core_rental_notification_test_[A-Za-z0-9]+";
+    static boolean legacyDatabase(){var url=System.getenv("HS_WORKFLOW_TEST_PG_URL");return url!=null&&url.matches(LEGACY_URL);}
+    static boolean dedicatedDatabase(){var url=System.getenv("HS_TEST_PG_URL");return url!=null&&url.matches(DEDICATED_URL);}
+    static boolean databaseIsAllowed(){return legacyDatabase()||dedicatedDatabase();}
+    @org.springframework.test.context.DynamicPropertySource static void database(org.springframework.test.context.DynamicPropertyRegistry registry){
+        boolean legacy=legacyDatabase();
+        registry.add("spring.datasource.url",()->System.getenv(legacy?"HS_WORKFLOW_TEST_PG_URL":"HS_TEST_PG_URL"));
+        registry.add("spring.datasource.username",()->legacy?"postgres":System.getenv("HS_TEST_PG_USER"));
+        registry.add("spring.datasource.password",()->legacy?"hs_workflow_test":System.getenv("HS_TEST_PG_PASSWORD"));
+    }
     @SpringBootConfiguration @EntityScan("com.hs")
-    @EnableJpaRepositories(basePackageClasses={ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class,com.hs.contract.deposit.DepositAgreementRepository.class})
+    @EnableJpaRepositories(basePackageClasses={com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class,com.hs.contract.deposit.DepositAgreementRepository.class})
     @EnableJpaAuditing static class Config {
         @Bean ObjectMapper mapper(){return new ObjectMapper().findAndRegisterModules();}
         @Bean MutableTime time(Environment env){return new MutableTime(env);}
@@ -158,6 +168,14 @@ class RentalWorkflowPostgresTest {
     @MockitoBean com.hs.contract.deposit.DepositAgreementService depositAgreements;
     @Autowired com.hs.contract.deposit.DepositAgreementRepository depositAgreementRecords;
     @Autowired RentalOnboardingEventRepository onboardingEvents;
+    @Autowired com.hs.listing.notification.RentalRequestNotificationOutboxRepository notices;
+    /** This rental's durable notices as TYPE:SIDE:recipient in enqueue order (per-request FIFO). */
+    List<String> events(){
+        var json=tools.jackson.databind.json.JsonMapper.builder().build();
+        return notices.findAll().stream().filter(r->rentalId.equals(r.getRentalRequestId()))
+            .sorted(java.util.Comparator.comparing(com.hs.listing.notification.RentalRequestNotificationOutbox::getId))
+            .map(r->{var e=json.readTree(r.getPayload());return e.get("eventType").asText()+":"+e.get("data").get("recipientSide").asText()+":"+e.get("recipients").get(0).asText();}).toList();
+    }
     @BeforeEach void signedFixture() throws Exception {when(workflowRenderer.render(any(),any(),any())).thenReturn("test PDF supplied by converter mock".getBytes(java.nio.charset.StandardCharsets.UTF_8));when(pdfEngine.addSignaturePage(any())).thenAnswer(c->c.getArgument(0));when(storageService.uploadDirect(any(byte[].class),anyString(),anyString(),any(),anyString(),anyString(),any(),anyString())).thenAnswer(c->{String file=UUID.randomUUID().toString();storage.saveAndFlush(StorageObject.builder().id(file).ownerId(c.getArgument(7)).originalName(c.getArgument(1)).objectKey("workflow/"+file).bucketName("test").contentType(c.getArgument(2)).sizeBytes((long)((byte[])c.getArgument(0)).length).referenceType(c.getArgument(4)).referenceId(c.getArgument(5)).purpose(c.getArgument(3)).visibility(c.getArgument(6)).status(StorageStatus.READY).build());var dto=mock(com.hs.storage.dto.response.StorageObjectResponse.class);when(dto.id()).thenReturn(file);return dto;});tx(()->{var c=contracts.findById(id).orElseThrow();c.setSignedAt(time.now().minusSeconds(30L*86400));contracts.save(c);
         var last=invoices.findByContractIdAndPeriodIndex(id,2).orElseThrow();last.setStatus(MonthlyInvoiceStatus.DRAFT);invoices.save(last);});}
     RentalWorkflowPayloads.Action action(long revision){return new RentalWorkflowPayloads.Action(revision,"Đã đối chiếu nội dung và xác nhận thực tế",true,true);}
@@ -166,6 +184,24 @@ class RentalWorkflowPostgresTest {
     void beforeLease(){tx(()->{var r=rentals.findById(rentalId).orElseThrow();r.setStatus(RentalRequestStatus.ACCEPTED);rentals.save(r);var c=contracts.findById(id).orElseThrow();c.setStatus(ContractStatus.DRAFT);c.setSignedAt(null);contracts.save(c);var l=properties.findById(listingId).orElseThrow();l.setStatus(ListingStatus.RESERVED);properties.save(l);});}
 
     RentalWorkflowView proposeCancel(){beforeLease();return cancellation.propose(rentalId,"owner",new RentalWorkflowPayloads.Cancellation(0L,"Không hoàn tất ký, đề nghị hoàn toàn bộ tiền",List.of()));}
+    @Test void zeroValueConfirmedReceiptCancelsImmediatelyWithoutARefundPendingNotice(){
+        // Covers the existing no-refund branch: a confirmed zero-value receipt has no money to return.
+        beforeLease();
+        tx(()->{
+            var r=rentals.findById(rentalId).orElseThrow();r.setDepositAmount(BigDecimal.ZERO);rentals.save(r);
+            var cash=paymentRepo.findByRentalRequestIdAndType(rentalId,PaymentType.RESERVATION_DEPOSIT).orElseThrow();
+            cash.setTotalAmount(BigDecimal.ZERO);paymentRepo.save(cash);
+            var ledger=deposits.findByRentalRequestId(rentalId).orElseThrow();
+            ledger.setOriginalAmount(BigDecimal.ZERO);ledger.setHeldAmount(BigDecimal.ZERO);ledger.setRefundableAmount(BigDecimal.ZERO);deposits.save(ledger);
+        });
+        var proposed=cancellation.propose(rentalId,"owner",new RentalWorkflowPayloads.Cancellation(0L,"Thống nhất kết thúc hồ sơ chưa phát sinh tiền",List.of()));
+        var done=cancellation.act(rentalId,"tenant","ACCEPT",action(proposed.revision()));
+        assertEquals("COMPLETED",done.status());assertTrue(done.refundPayments().isEmpty());
+        assertEquals(RentalRequestStatus.CANCELLED_BY_OWNER,rentals.findById(rentalId).orElseThrow().getStatus());
+        assertEquals(List.of("RENTAL_CANCELLATION_REQUESTED:RENTER:tenant","RENTAL_REQUEST_CANCELLED:OWNER:owner"),events());
+        assertThrows(AppException.class,()->cancellation.act(rentalId,"tenant","ACCEPT",action(proposed.revision())));
+        assertEquals(2,events().size());
+    }
     @Test void fullRefundWorksWithoutAnyDepositDocumentAndKeepsReceiptIndependent(){
         var proposed=proposeCancel();assertEquals("PROPOSED",proposed.status());assertNotNull(rentals.findById(rentalId).orElseThrow().getResolutionWorkflowId());
         var done=cancellation.act(rentalId,"tenant","ACCEPT",action(proposed.revision()));
@@ -445,6 +481,74 @@ class RentalWorkflowPostgresTest {
     }
     @Test void cancellationEscalatesToExistingCaseAndKeepsSigningPaused(){var p=proposeCancel();var next=cancellation.act(rentalId,"tenant","ESCALATE",action(p.revision()));assertEquals("DISPUTED",next.status());assertNotNull(next.complaintId());assertNotNull(rentals.findById(rentalId).orElseThrow().getResolutionWorkflowId());assertThrows(AppException.class,()->cancellation.propose(rentalId,"owner",new RentalWorkflowPayloads.Cancellation(next.revision(),"Đề xuất khác trong khi có khiếu nại",List.of())));}
     @Test void withdrawalUnpausesSigningAndPreservesPriorProposal(){var p=proposeCancel();var done=cancellation.act(rentalId,"owner","WITHDRAW",action(p.revision()));assertEquals("WITHDRAWN",done.status());assertNull(rentals.findById(rentalId).orElseThrow().getResolutionWorkflowId());assertEquals(2,done.history().size());}
+
+    @Test void proposeAcceptRefundReceiptWriteOnePendingThenExactlyOneFinalCancelEvent(){
+        var p=proposeCancel();
+        assertEquals(List.of("RENTAL_CANCELLATION_REQUESTED:RENTER:tenant"),events());
+        var done=cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision()));
+        // Refund is still owed: the request is ACCEPTED, so the notice must say pending, never cancelled.
+        assertEquals(RentalRequestStatus.ACCEPTED,rentals.findById(rentalId).orElseThrow().getStatus());
+        assertEquals(List.of("RENTAL_CANCELLATION_REQUESTED:RENTER:tenant","RENTAL_CANCELLATION_REFUND_PENDING:OWNER:owner"),events());
+        String refund=done.refundPayments().getFirst().id();
+        markRefundReported(refund);
+        assertEquals(2,events().size()); // a reported (not confirmed) transfer is not a cancellation
+        payments.confirmReceipt(refund,"tenant");
+        assertEquals(List.of("RENTAL_CANCELLATION_REQUESTED:RENTER:tenant","RENTAL_CANCELLATION_REFUND_PENDING:OWNER:owner",
+            "RENTAL_REQUEST_CANCELLED:OWNER:owner"),events());
+        payments.confirmReceipt(refund,"tenant"); // replayed receipt
+        assertEquals(3,events().size());
+    }
+    @Test void failedReleaseRollsBackRefundConfirmationAndTheFinalCancelNotice(){
+        var p=proposeCancel();var pending=cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision()));
+        String refund=pending.refundPayments().getFirst().id();markRefundReported(refund);
+        doThrow(new IllegalStateException("release failure")).when(listings).releaseReserved(any(),anyString(),anyString());
+        assertThrows(IllegalStateException.class,()->payments.confirmReceipt(refund,"tenant"));
+        assertEquals(List.of("RENTAL_CANCELLATION_REQUESTED:RENTER:tenant","RENTAL_CANCELLATION_REFUND_PENDING:OWNER:owner"),events());
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,paymentRepo.findById(refund).orElseThrow().getStatus());
+        reset(listings);
+        payments.confirmReceipt(refund,"tenant"); // retry after the failure commits the one final notice
+        assertEquals("RENTAL_REQUEST_CANCELLED:OWNER:owner",events().getLast());assertEquals(3,events().size());
+    }
+    @Test void withdrawRejectAndEscalateNotifyTheCounterpart(){
+        var p=proposeCancel();cancellation.act(rentalId,"owner","WITHDRAW",action(p.revision()));
+        assertEquals(List.of("RENTAL_CANCELLATION_REQUESTED:RENTER:tenant","RENTAL_CANCELLATION_WITHDRAWN:RENTER:tenant"),events());
+    }
+    @Test void counterpartRejectIsReportedToTheProposer(){
+        var p=proposeCancel();cancellation.act(rentalId,"tenant","REJECT",action(p.revision()));
+        assertEquals(List.of("RENTAL_CANCELLATION_REQUESTED:RENTER:tenant","RENTAL_CANCELLATION_REJECTED:OWNER:owner"),events());
+    }
+    @Test void escalationIsReportedToTheProposerWithoutAnAdminFeed(){
+        var p=proposeCancel();cancellation.act(rentalId,"tenant","ESCALATE",action(p.revision()));
+        assertEquals(List.of("RENTAL_CANCELLATION_REQUESTED:RENTER:tenant","RENTAL_CANCELLATION_DISPUTED:OWNER:owner"),events());
+    }
+    @Test void deniedOrStaleWorkflowActionsWriteNothing(){
+        var p=proposeCancel();
+        assertThrows(AppException.class,()->cancellation.act(rentalId,"owner","ACCEPT",action(p.revision()))); // proposer cannot accept own proposal
+        assertThrows(AppException.class,()->cancellation.act(rentalId,"outsider","REJECT",action(p.revision())));
+        assertThrows(AppException.class,()->cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision()+99)));
+        assertEquals(List.of("RENTAL_CANCELLATION_REQUESTED:RENTER:tenant"),events());
+    }
+    @Test void resumeRequestAndConfirmNotifyTheCounterpartAfterSuccessfulSave(){
+        var w=resolvedCancellation();var requested=cancellation.act(rentalId,"owner","REQUEST_RESUME",action(w.revision()));
+        cancellation.act(rentalId,"tenant","RESUME",action(requested.revision()));
+        var tail=events().subList(2,events().size());
+        assertEquals(List.of("RENTAL_RESUME_REQUESTED:RENTER:tenant","RENTAL_RESUMED:OWNER:owner"),tail);
+    }
+    @Test void resumeDeclineAndWithdrawNotifyTheCounterpart(){
+        var w=resolvedCancellation();var requested=cancellation.act(rentalId,"owner","REQUEST_RESUME",action(w.revision()));
+        cancellation.act(rentalId,"tenant","DECLINE_RESUME",action(requested.revision()));
+        assertEquals("RENTAL_RESUME_REJECTED:OWNER:owner",events().getLast());
+    }
+    @Test void resumeWithdrawIsReportedToTheOtherParty(){
+        var w=resolvedCancellation();var requested=cancellation.act(rentalId,"owner","REQUEST_RESUME",action(w.revision()));
+        cancellation.act(rentalId,"owner","WITHDRAW_RESUME",action(requested.revision()));
+        assertEquals("RENTAL_RESUME_WITHDRAWN:RENTER:tenant",events().getLast());
+    }
+    @Test void invalidResumeAttemptsWriteNoResumeNotice(){
+        var w=proposeCancel();w=cancellation.act(rentalId,"tenant","ESCALATE",action(w.revision()));var open=w;
+        assertThrows(AppException.class,()->cancellation.act(rentalId,"owner","REQUEST_RESUME",action(open.revision())));
+        assertTrue(events().stream().noneMatch(e->e.contains("RESUME")));
+    }
     @Test void releaseFailureRollsBackRefundConfirmationAndCancellation(){
         var proposal=proposeCancel();
         var pending=cancellation.act(rentalId,"tenant","ACCEPT",action(proposal.revision()));
@@ -549,6 +653,7 @@ class RentalWorkflowPostgresTest {
             assertEquals(PaymentStatus.CONFIRMED,receipt.get(15,TimeUnit.SECONDS).status());
             assertEquals(PaymentStatus.CONFIRMED,retry.get(15,TimeUnit.SECONDS).status());
             verify(parking,times(1)).releaseReservationsForRequest(rentalId);
+            assertEquals(List.of("RENTAL_CANCELLATION_REQUESTED:RENTER:tenant","RENTAL_CANCELLATION_REFUND_PENDING:OWNER:owner","RENTAL_REQUEST_CANCELLED:OWNER:owner"),events());
         } finally {pool.shutdownNow();}
     }
     String evidence(String actor){String id=UUID.randomUUID().toString();tx(()->storage.saveAndFlush(StorageObject.builder().id(id).ownerId(actor).originalName("source.pdf").objectKey("source/"+id).bucketName("test").contentType("application/pdf").sizeBytes(100L).purpose(StoragePurpose.GENERAL).visibility(StorageVisibility.PRIVATE).status(StorageStatus.READY).referenceType("RENTAL_COMPLAINT_EVIDENCE").referenceId(rentalId).build()));return id;}

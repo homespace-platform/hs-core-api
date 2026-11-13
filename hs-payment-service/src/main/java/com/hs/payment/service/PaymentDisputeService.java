@@ -13,6 +13,8 @@ import com.hs.payment.model.constant.*;
 import com.hs.payment.repository.*;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.listing.model.constant.*;
+import com.hs.listing.notification.RentalRequestNotificationWriter;
+import com.hs.listing.notification.RentalRequestNotificationWriter.Event;
 import com.hs.storage.repository.StorageObjectRepository;
 import com.hs.storage.model.constant.*;
 import jakarta.persistence.*;
@@ -39,6 +41,7 @@ public class PaymentDisputeService {
     private final StorageObjectRepository storage;
     private final ObjectMapper mapper;
     private final BillingTime time;
+    private final RentalRequestNotificationWriter notifications;
     @PersistenceContext private EntityManager em;
     @Value("${rental.first-rent-window-hours:24}") private long reopenHours=24;
     @Value("${homespace.payment.confirmation-window-hours:24}") private long confirmationHours=24;
@@ -211,6 +214,7 @@ public class PaymentDisputeService {
     private void route(DisputeCase c,PaymentRequest p,DisputeResolution resolution,String actor,String reason,boolean administrator) {
         validateRoute(c,p,resolution);
         PaymentStatus next;
+        com.hs.listing.model.RentalRequest extendedHold=null;
         if(resolution==DisputeResolution.REVIEW_TRANSFER) {
             next=PaymentStatus.TRANSFER_REPORTED;
             p.setConfirmationDueAt(time.now().plus(Duration.ofHours(confirmationHours)));
@@ -220,6 +224,7 @@ public class PaymentDisputeService {
                 Instant opens=p.getOpensAt()!=null&&p.getOpensAt().isAfter(time.now())?p.getOpensAt():time.now();
                 p.setDueAt(opens.plus(Duration.ofHours(reopenHours)));next=PaymentStatus.AWAITING_TRANSFER;
                 var r=rentals.findById(p.getRentalRequestId()).orElseThrow(this::missing);
+                if(!Objects.equals(r.getHoldExpiresAt(),p.getDueAt()))extendedHold=r;
                 r.setHoldExpiresAt(p.getDueAt());rentals.save(r);
             }
             p.setConfirmationDueAt(null);
@@ -238,6 +243,8 @@ public class PaymentDisputeService {
                 .fromStatus(PaymentStatus.DISPUTED).toStatus(next).actorId(actor).actorRole(administrator?"ADMIN":role(p,actor))
                 .reason(reason).createdAt(time.now()).metadataJson(json(Map.of("caseId",c.getId(),"resolution",resolution.name(),
                         "previousStatus",Objects.toString(c.getPreviousPaymentStatus(),"UNKNOWN"),"receiptConfirmed",false))).build());
+        // Only a real deadline change; the acting admin (or party) is not notified about their own action.
+        if(extendedHold!=null)notifications.enqueueOthers(extendedHold,actor,Event.RENTAL_HOLD_EXTENDED);
     }
 
     private void attachEvidence(DisputeCase c,PaymentRequest p,String actor,String storageId,String reason) {

@@ -10,6 +10,9 @@ import com.hs.contract.repository.*;
 import com.hs.contract.service.engine.ContractDataBuilder;
 import com.hs.listing.model.*;
 import com.hs.listing.model.constant.RentalRequestStatus;
+import com.hs.listing.notification.RentalRequestNotificationWriter;
+import com.hs.listing.notification.RentalRequestNotificationWriter.Event;
+import com.hs.listing.notification.RentalRequestNotificationWriter.Side;
 import com.hs.listing.repository.*;
 import com.hs.listing.service.*;
 import com.hs.payment.dto.PaymentRequestResponse;
@@ -62,6 +65,7 @@ public class RentalOnboardingService {
     private final ObjectMapper mapper;
     private final com.hs.contract.service.engine.ContractDataBuilder builder;
     private final PlatformTransactionManager transactions;
+    private final RentalRequestNotificationWriter notifications;
     @Value("${rental.start-change-response-hours:24}") private long responseHours=24;
     @Value("${rental.first-rent-window-hours:24}") private long rentWindowHours=24;
     @Value("${homespace.payment.contract-due-hours:48}") private long signingHours=48;
@@ -104,6 +108,7 @@ public class RentalOnboardingService {
         for(var c:changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId())) {
             if("REQUESTED".equals(c.getStatus())&&(!time.now().isBefore(c.getRespondBy())||c.getRequestedDate().isBefore(time.today()))) {
                 c.setStatus("EXPIRED");c.setDecidedAt(time.now());c.setDecidedBy("SYSTEM");changes.save(c);
+                notifications.enqueueOthers(r,"SYSTEM",Event.RENTAL_START_CHANGE_EXPIRED);
             }
         }
         if(r.getStatus()!=RentalRequestStatus.ACCEPTED)return;
@@ -198,6 +203,7 @@ public class RentalOnboardingService {
         changes.save(RentalStartChange.builder().rentalRequestId(id).previousDate(r.getMoveInDate()).requestedDate(request.startsOn())
             .reason(request.reason().trim()).status("REQUESTED").requestedAt(time.now())
             .respondBy(min(time.now().plus(Duration.ofHours(responseHours)),request.startsOn().plusDays(1).atStartOfDay(BillingTime.ZONE).toInstant())).build());
+        notifications.enqueue(r,Event.RENTAL_START_CHANGE_REQUESTED,Side.OWNER);
         return view(r,actor);
     }
     private void validateDate(RentalRequest r,LocalDate date) {
@@ -241,13 +247,15 @@ public class RentalOnboardingService {
             }
         }
         change.setStatus(decision.approve()?"APPROVED":"REJECTED");change.setDecidedAt(time.now());change.setDecidedBy(actor);change.setResponseNote(decision.note());changes.save(change);
+        notifications.enqueue(r,decision.approve()?Event.RENTAL_START_CHANGE_APPROVED:Event.RENTAL_START_CHANGE_REJECTED,Side.RENTER);
         sync(r);return view(r,actor);
     }
     @Transactional public View withdrawEarlier(String id,String changeId,String actor) {
         var r=rental(id,actor);sync(r);
         var c=changes.findById(changeId).filter(x->id.equals(x.getRentalRequestId())).orElseThrow(()->invalid("Không tìm thấy đề nghị."));
         if(!actor.equals(r.getRenterId())||!"REQUESTED".equals(c.getStatus()))throw invalid("Không thể rút đề nghị này.");
-        c.setStatus("WITHDRAWN");c.setDecidedAt(time.now());c.setDecidedBy(actor);changes.save(c);return view(r,actor);
+        c.setStatus("WITHDRAWN");c.setDecidedAt(time.now());c.setDecidedBy(actor);changes.save(c);
+        notifications.enqueue(r,Event.RENTAL_START_CHANGE_WITHDRAWN,Side.OWNER);return view(r,actor);
     }
     @Transactional public void validateSigning(String rentalId,String actor) {
         var r=rental(rentalId,actor);sync(r);
@@ -291,6 +299,7 @@ public class RentalOnboardingService {
         parking.releaseReservationsForRequest(id);
         if(held)listingStatus.releaseReserved(r.getListing(),actor,reason);
         audit(r,actor,owner?"OWNER_CANCELLED_UNPAID":"TENANT_CANCELLED_UNPAID",reason);
+        notifications.enqueueOthers(r,actor,Event.RENTAL_REQUEST_CANCELLED);
         return view(r,actor);
     }
     private void requireUnsigned(RentalRequest r) {
@@ -323,7 +332,8 @@ public class RentalOnboardingService {
         var r=rental(id,actor);requireUnsigned(r);
         if(!actor.equals(r.getRenterId())||r.getCancellationRequestedAt()!=null)throw invalid("Không thể gửi đề nghị này.");
         r.setCancellationRequestedAt(time.now());r.setCancellationReason(p.reason().trim());rentals.save(r);
-        audit(r,actor,"CANCELLATION_REQUESTED",p.reason().trim());return view(r,actor);
+        audit(r,actor,"CANCELLATION_REQUESTED",p.reason().trim());
+        notifications.enqueue(r,Event.RENTAL_CANCELLATION_REQUESTED,Side.OWNER);return view(r,actor);
     }
     @Transactional public View decideCancellation(String id,String actor,Decision p) {
         var r=rental(id,actor);requireUnsigned(r);
@@ -352,6 +362,9 @@ public class RentalOnboardingService {
             rentals.save(r);
         }else {r.setCancellationRequestedAt(null);r.setCancellationReason(null);rentals.save(r);}
         audit(r,actor,p.approve()?"CANCELLATION_APPROVED":"CANCELLATION_REJECTED",p.note());
+        // Refund still owed: the request stays ACCEPTED and is not cancelled until the tenant confirms every receipt.
+        notifications.enqueue(r,!p.approve()?Event.RENTAL_CANCELLATION_REJECTED
+            :r.getStatus()==RentalRequestStatus.ACCEPTED?Event.RENTAL_CANCELLATION_REFUND_PENDING:Event.RENTAL_REQUEST_CANCELLED,Side.RENTER);
         return view(r,actor);
     }
     public record ReviewDecision(boolean received,@NotBlank @Size(min=10,max=1000) String reason) {}
@@ -363,7 +376,8 @@ public class RentalOnboardingService {
         contracts.findByRentalRequestId(id).ifPresent(c->{
             if(c.getTenantSigningDueAt()!=null){c.setTenantSigningDueAt(rent.getContractDueAt());contracts.save(c);}
         });
-        audit(r,actor,"SIGNING_REOPENED",note.reason());return view(r,actor);
+        audit(r,actor,"SIGNING_REOPENED",note.reason());
+        notifications.enqueue(r,Event.RENTAL_SIGNING_WINDOW_REOPENED,Side.RENTER);return view(r,actor);
     }
     @Transactional public View resolveReview(String id,String paymentId,String actor,ReviewDecision decision) {
         var r=rental(id,actor);
@@ -378,7 +392,11 @@ public class RentalOnboardingService {
                 ||p.getStatus()==PaymentStatus.AWAITING_TRANSFER&&p.getDueAt()!=null&&!time.now().isBefore(p.getDueAt())))throw invalid("Khoản chuyển không ở trạng thái cần đối soát.");
         audit(r,actor,decision.received()?"PAYMENT_RECEIPT_VERIFIED":"PAYMENT_REOPENED",decision.reason());
         if(decision.received()) {p.setStatus(PaymentStatus.TRANSFER_REPORTED);payments.saveAndFlush(p);paymentService.confirmReceipt(p.getId(),actor);}
-        else {p.setStatus(PaymentStatus.AWAITING_TRANSFER);p.setRejectedReason(decision.reason().trim());p.setDueAt(time.now().plus(Duration.ofHours(rentWindowHours)));payments.save(p);r.setHoldExpiresAt(p.getDueAt());rentals.save(r);}
+        else {
+            var previousHold=r.getHoldExpiresAt();
+            p.setStatus(PaymentStatus.AWAITING_TRANSFER);p.setRejectedReason(decision.reason().trim());p.setDueAt(time.now().plus(Duration.ofHours(rentWindowHours)));payments.save(p);r.setHoldExpiresAt(p.getDueAt());rentals.save(r);
+            if(!Objects.equals(previousHold,r.getHoldExpiresAt()))notifications.enqueue(r,Event.RENTAL_HOLD_EXTENDED,Side.RENTER);
+        }
         sync(r);return view(r,actor);
     }
     private Instant min(Instant a,Instant b){return a.isBefore(b)?a:b;}
@@ -482,11 +500,15 @@ public class RentalOnboardingService {
         }
         r.setDefaultNoticeFingerprint(defaultFingerprint(r,kind));rentals.save(r);
         audit(r,actor,"DEFAULT_NOTICE",kind+"; hạn phản hồi "+r.getDefaultRespondBy()+"; "+reason);
+        notifications.enqueueOthers(r,actor,Event.RENTAL_DEFAULT_NOTICE_ISSUED);
     }
     @Transactional public View disputeDefault(String id,String actor,Cancellation note) {
         var r=rental(id,actor);
         if(!actor.equals(r.getRenterId()) || r.getDefaultNoticeAt()==null || r.getStatus()!=RentalRequestStatus.ACCEPTED)throw invalid("Không có thông báo đang xử lý.");
-        r.setDefaultDisputedAt(time.now());rentals.save(r);audit(r,actor,"DEFAULT_DISPUTED",note.reason());return view(r,actor);
+        // Already disputed for this notice: repeat returns the current view without a new audit or notification.
+        if(r.getDefaultDisputedAt()!=null&&!r.getDefaultDisputedAt().isBefore(r.getDefaultNoticeAt()))return view(r,actor);
+        r.setDefaultDisputedAt(time.now());rentals.save(r);audit(r,actor,"DEFAULT_DISPUTED",note.reason());
+        notifications.enqueue(r,Event.RENTAL_DEFAULT_DISPUTED,Side.OWNER);return view(r,actor);
     }
     public record DefaultCompletion(@NotBlank @Size(min=10,max=500) String reason,
                                     @AssertTrue boolean tenantNotified,@AssertTrue boolean vacantPossessionConfirmed) {}
@@ -523,6 +545,7 @@ public class RentalOnboardingService {
         if(depositAgreements!=null && !com.hs.contract.deposit.DepositAgreementService.isExempt(r) && depositAgreements.signedOrExempt(r))
             depositAgreements.terminateForTenantDefault(id,"Lỗi Bên B (người thuê): "+r.getDefaultNoticeKind()+"; "+note.reason());
         audit(r,actor,"DEFAULT_COMPLETED","Lỗi Bên B (người thuê): "+r.getDefaultNoticeKind()+"; giữ cọc "+deposit.getRetainedAmount()+"; "+note.reason());
+        notifications.enqueueOthers(r,actor,Event.RENTAL_REQUEST_CANCELLED_BY_SYSTEM);
     }
     /** Called under a rental lock by the scheduler. Never infer tenant fault from an unsigned/unready agreement. */
     @Transactional public void processDue(String id) {

@@ -43,6 +43,7 @@ class RentalOnboardingServiceTest {
     @Mock ContractDataBuilder builder; @Mock PlatformTransactionManager transactions;
     @Mock ContractTemplateVersionRepository draftTemplates;
     @Mock com.hs.payment.service.DepositLedgerService depositLedger;
+    @Mock com.hs.listing.notification.RentalRequestNotificationWriter notifications;
     @InjectMocks RentalOnboardingService service;
     Instant now; RentalRequest rental; PaymentRequest deposit;
     @BeforeEach void setup() {
@@ -276,5 +277,96 @@ class RentalOnboardingServiceTest {
         assertFalse(pending.canSign());assertFalse(pending.canPrepareContract());assertFalse(pending.canRequestCancellation());
         assertThrows(AppException.class,()->service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(false,null)));
         verifyNoInteractions(parking,listingStatus);
+    }
+
+    private static final String REASON="Đề nghị hủy hồ sơ thuê nhà";
+    @Test void startChangeRequestApproveRejectWithdrawEachNotifyTheirExactSide() {
+        service.requestEarlier("rental","tenant",new RentalOnboardingService.StartRequest(LocalDate.of(2026,10,25),"Nhận nhà sớm theo lịch mới"));
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_START_CHANGE_REQUESTED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.OWNER);
+        var c=pending();
+        service.decideEarlier("rental","change","owner",new RentalOnboardingService.Decision(false,null));
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_START_CHANGE_REJECTED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.RENTER);
+        c.setStatus("REQUESTED");
+        service.decideEarlier("rental","change","owner",new RentalOnboardingService.Decision(true,null));
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_START_CHANGE_APPROVED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.RENTER);
+        rental.setMoveInDate(LocalDate.of(2026,11,1));c.setStatus("REQUESTED");c.setPreviousDate(rental.getMoveInDate());
+        service.withdrawEarlier("rental","change","tenant");
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_START_CHANGE_WITHDRAWN,com.hs.listing.notification.RentalRequestNotificationWriter.Side.OWNER);
+        verifyNoMoreInteractions(notifications);
+    }
+    @Test void deniedStartChangeActionsNeverNotify() {
+        pending();
+        assertThrows(AppException.class,()->service.decideEarlier("rental","change","tenant",new RentalOnboardingService.Decision(true,null)));
+        assertThrows(AppException.class,()->service.withdrawEarlier("rental","change","owner"));
+        assertThrows(AppException.class,()->service.requestEarlier("rental","owner",new RentalOnboardingService.StartRequest(LocalDate.of(2026,10,25),"không đúng vai trò")));
+        verifyNoInteractions(notifications);
+    }
+    @Test void failedApprovalAfterSideEffectsDoesNotLeaveANotification() {
+        pending();doThrow(new IllegalStateException("capacity")).when(calculator).calculate(any(),any(),anyInt(),anyInt(),anyInt(),anyInt(),any());
+        assertThrows(IllegalStateException.class,()->service.decideEarlier("rental","change","owner",new RentalOnboardingService.Decision(true,null)));
+        verifyNoInteractions(notifications);
+    }
+    @Test void expiredStartChangeIsNotifiedToBothAsSystemOnlyOnTheActualTransition() {
+        var c=pending();c.setRespondBy(now.minusSeconds(1));
+        service.refresh("rental","tenant");
+        assertEquals("EXPIRED",c.getStatus());assertEquals("SYSTEM",c.getDecidedBy());
+        verify(notifications,times(1)).enqueueOthers(rental,"SYSTEM",com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_START_CHANGE_EXPIRED);
+        service.refresh("rental","owner");service.refresh("rental","tenant"); // already terminal: nothing to transition again
+        verify(notifications,times(1)).enqueueOthers(any(),anyString(),any());
+        verifyNoMoreInteractions(notifications);
+    }
+    @Test void cancellationRequestAndOwnerRejectNotifyTheCounterpart() {
+        service.requestCancellation("rental","tenant",new RentalOnboardingService.Cancellation(REASON));
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_CANCELLATION_REQUESTED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.OWNER);
+        service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(false,"Chưa đồng ý"));
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_CANCELLATION_REJECTED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.RENTER);
+        assertNull(rental.getCancellationRequestedAt());verifyNoMoreInteractions(notifications);
+    }
+    @Test void refundRequiredApprovalIsPendingNeverACancelledEvent() {
+        service.requestCancellation("rental","tenant",new RentalOnboardingService.Cancellation(REASON));
+        when(payments.findByRentalRequestIdAndTypeForUpdate("rental",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.of(deposit));
+        service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(true,null));
+        assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_CANCELLATION_REFUND_PENDING,com.hs.listing.notification.RentalRequestNotificationWriter.Side.RENTER);
+        verify(notifications,never()).enqueue(any(),eq(com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_REQUEST_CANCELLED),any());
+    }
+    @Test void approvalWithNoMoneyToRefundIsTheActualCancellation() {
+        service.requestCancellation("rental","tenant",new RentalOnboardingService.Cancellation(REASON));
+        deposit.setTotalAmount(BigDecimal.ZERO); // nothing was received, so there is no refund obligation
+        when(payments.findByRentalRequestIdAndTypeForUpdate("rental",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.of(deposit));
+        service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(true,null));
+        assertEquals(RentalRequestStatus.CANCELLED_BY_RENTER,rental.getStatus());
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_REQUEST_CANCELLED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.RENTER);
+        verify(notifications,never()).enqueue(any(),eq(com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_CANCELLATION_REFUND_PENDING),any());
+    }
+    @Test void cancellationDecisionByWrongPartyOrWithoutRequestNotifiesNobody() {
+        assertThrows(AppException.class,()->service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(true,null)));
+        assertThrows(AppException.class,()->service.requestCancellation("rental","owner",new RentalOnboardingService.Cancellation(REASON)));
+        verifyNoInteractions(notifications);
+    }
+    @Test void reopeningSigningNotifiesRenterAndWrongActorDoesNot() {
+        var p=rent(PaymentStatus.CONFIRMED);rental.setMoveInDate(LocalDate.of(2026,10,21));
+        when(payments.findByRentalRequestIdAndTypeForUpdate("rental",PaymentType.INITIAL)).thenReturn(Optional.of(p));
+        assertThrows(AppException.class,()->service.reopenSigning("rental","tenant",new RentalOnboardingService.Cancellation("Không phải chủ nhà")));
+        verifyNoInteractions(notifications);
+        service.reopenSigning("rental","owner",new RentalOnboardingService.Cancellation("Đã đối soát đầy đủ hai bên"));
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_SIGNING_WINDOW_REOPENED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.RENTER);
+    }
+    @Test void reviewReopenOnlyNotifiesWhenTheDeadlineActuallyChanges() {
+        var p=rent(PaymentStatus.REJECTED);
+        when(payments.findById("rent")).thenReturn(Optional.of(p));
+        rental.setHoldExpiresAt(now.plusSeconds(60));
+        service.resolveReview("rental","rent","owner",new RentalOnboardingService.ReviewDecision(false,"Chưa nhận được tiền chuyển"));
+        assertEquals(now.plusSeconds(86400),rental.getHoldExpiresAt());
+        verify(notifications,times(1)).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_HOLD_EXTENDED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.RENTER);
+        p.setStatus(PaymentStatus.REJECTED); // same clock instant: reopening again yields the same deadline
+        service.resolveReview("rental","rent","owner",new RentalOnboardingService.ReviewDecision(false,"Vẫn chưa nhận được tiền"));
+        verify(notifications,times(1)).enqueue(any(),eq(com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_HOLD_EXTENDED),any());
+    }
+    @Test void receiptVerifiedOrDeniedReviewSendsNoRentalNotification() {
+        var p=rent(PaymentStatus.REJECTED);when(payments.findById("rent")).thenReturn(Optional.of(p));
+        service.resolveReview("rental","rent","owner",new RentalOnboardingService.ReviewDecision(true,"Đã nhận đủ tiền chuyển"));
+        assertThrows(AppException.class,()->service.resolveReview("rental","rent","tenant",new RentalOnboardingService.ReviewDecision(false,"Không phải chủ nhà")));
+        verifyNoInteractions(notifications);
     }
 }

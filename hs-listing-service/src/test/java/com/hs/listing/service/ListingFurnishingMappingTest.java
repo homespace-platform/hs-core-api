@@ -36,7 +36,8 @@ class ListingFurnishingMappingTest {
         var requests = new RentalRequestService(mock(RentalRequestRepository.class), mock(ListingRepository.class),
                 mock(ListingStatusService.class), mock(ListingAddressRepository.class), mock(StorageProperties.class),
                 mock(RentalCostCalculator.class), mock(ParkingReservationService.class),
-                mock(PropertyBranchRepository.class), new ObjectMapper(), 60);
+                mock(PropertyBranchRepository.class), new ObjectMapper(),
+                mock(com.hs.listing.notification.RentalRequestNotificationWriter.class), 60);
         var snapshot = requests.buildListingSnapshotDto(listing);
         assertEquals(category, snapshot.getCategory());
         assertEquals(2, snapshot.getFurnishings().size());

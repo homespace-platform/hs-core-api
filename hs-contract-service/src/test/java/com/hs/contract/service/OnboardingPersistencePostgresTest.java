@@ -40,10 +40,10 @@ import static org.mockito.ArgumentMatchers.*;
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.datasource.url=${HS_TEST_PG_URL}","spring.datasource.username=${HS_TEST_PG_USER:postgres}",
     "spring.datasource.password=${HS_TEST_PG_PASSWORD:test}","spring.jpa.hibernate.ddl-auto=create-drop","spring.jpa.show-sql=false","spring.profiles.active=test"})
-@Import({RentalOnboardingService.class,ParkingReservationService.class,com.hs.payment.service.DepositLedgerService.class})
+@Import({com.hs.listing.notification.RentalRequestNotificationWriter.class,RentalOnboardingService.class,ParkingReservationService.class,com.hs.payment.service.DepositLedgerService.class})
 class OnboardingPersistencePostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs")
-    @EnableJpaRepositories(basePackageClasses={RentalRequestRepository.class,PaymentRequestRepository.class,ContractRepository.class})
+    @EnableJpaRepositories(basePackageClasses={com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,ContractRepository.class})
     @EnableJpaAuditing static class Config {
         @Bean BillingTime time(Environment env){return new MutableTime(env);}
         @Bean ObjectMapper mapper(){return new ObjectMapper().findAndRegisterModules();}
@@ -61,6 +61,14 @@ class OnboardingPersistencePostgresTest {
     @MockitoBean com.hs.contract.deposit.DepositAgreementService depositAgreements;
     @Autowired RentalOnboardingService service;
     @Autowired RentalRequestRepository rentals;
+    @Autowired com.hs.listing.notification.RentalRequestNotificationOutboxRepository notices;
+    /** This rental's durable notices as TYPE:SIDE:recipient in enqueue order. */
+    List<String> events() {
+        var json=tools.jackson.databind.json.JsonMapper.builder().build();
+        return notices.findAll().stream().filter(r->id.equals(r.getRentalRequestId()))
+            .sorted(java.util.Comparator.comparing(com.hs.listing.notification.RentalRequestNotificationOutbox::getId))
+            .map(r->{var e=json.readTree(r.getPayload());return e.get("eventType").asText()+":"+e.get("data").get("recipientSide").asText()+":"+e.get("recipients").get(0).asText();}).toList();
+    }
     @Autowired ListingRepository listings;
     @Autowired PaymentRequestRepository payments;
     @Autowired RentalStartChangeRepository changes;
@@ -396,6 +404,23 @@ class OnboardingPersistencePostgresTest {
         var r=rentals.findById(id).orElseThrow();assertEquals(LocalDate.of(2026,10,25),r.getMoveInDate());assertEquals(new BigDecimal("5000000.00"),r.getMonthlyRentPrice());
         assertEquals("APPROVED",changes.findById(change).orElseThrow().getStatus());
         assertEquals(LocalDate.of(2027,1,25),service.refresh(id,"owner").endExclusive());
+        assertEquals(List.of("RENTAL_START_CHANGE_REQUESTED:OWNER:owner","RENTAL_START_CHANGE_APPROVED:RENTER:tenant"),events());
+    }
+    @Test void startChangeRejectAndWithdrawPersistExactSideSpecificNotices() {
+        service.requestEarlier(id,"tenant",new RentalOnboardingService.StartRequest(LocalDate.of(2026,10,25),"Thống nhất nhận nhà sớm"));
+        String change=changes.findByRentalRequestIdOrderByRequestedAtDesc(id).getFirst().getId();
+        service.decideEarlier(id,change,"owner",new RentalOnboardingService.Decision(false,"Chưa thể bàn giao"));
+        service.requestEarlier(id,"tenant",new RentalOnboardingService.StartRequest(LocalDate.of(2026,10,26),"Đề nghị lại ngày khác"));
+        String second=changes.findByRentalRequestIdOrderByRequestedAtDesc(id).stream().filter(c->"REQUESTED".equals(c.getStatus())).findFirst().orElseThrow().getId(); // the clock is frozen, so order by status not time
+        service.withdrawEarlier(id,second,"tenant");
+        assertEquals(List.of("RENTAL_START_CHANGE_REQUESTED:OWNER:owner","RENTAL_START_CHANGE_REJECTED:RENTER:tenant",
+            "RENTAL_START_CHANGE_REQUESTED:OWNER:owner","RENTAL_START_CHANGE_WITHDRAWN:OWNER:owner"),events());
+    }
+    @Test void expiredStartChangeNotifiesBothPartiesOnceAsSystemEvenWhenARenterRefreshesIt() {
+        service.requestEarlier(id,"tenant",new RentalOnboardingService.StartRequest(LocalDate.of(2026,10,25),"Thống nhất nhận nhà sớm"));
+        ((MutableTime)clock).current=Instant.parse("2026-10-23T03:00:00Z");
+        service.refresh(id,"tenant");service.refresh(id,"owner");service.refresh(id,"tenant");
+        assertEquals(List.of("RENTAL_START_CHANGE_REQUESTED:OWNER:owner","RENTAL_START_CHANGE_EXPIRED:OWNER:owner","RENTAL_START_CHANGE_EXPIRED:RENTER:tenant"),events());
     }
     @Test void failedCapacityDecisionRollsBackBothDateAndDecision() {
         service.requestEarlier(id,"tenant",new RentalOnboardingService.StartRequest(LocalDate.of(2026,10,25),"Thống nhất nhận nhà sớm"));
@@ -413,5 +438,7 @@ class OnboardingPersistencePostgresTest {
         assertEquals(LocalDate.of(2026,11,1),rentals.findById(id).orElseThrow().getMoveInDate());
         assertEquals("REQUESTED",changes.findById(change).orElseThrow().getStatus());
         assertEquals(ParkingReservationStatus.HELD,reservations.findById(holdId).orElseThrow().getStatus());
+        // The failed approval rolled its notice back; only the committed request notice remains.
+        assertEquals(List.of("RENTAL_START_CHANGE_REQUESTED:OWNER:owner"),events());
     }
 }

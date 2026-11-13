@@ -51,10 +51,10 @@ import static org.mockito.ArgumentMatchers.*;
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.datasource.url=${HS_LIFECYCLE_TEST_PG_URL}","spring.datasource.username=postgres",
     "spring.datasource.password=hs_phase03_test","spring.jpa.hibernate.ddl-auto=create-drop","spring.profiles.active=test"})
-@Import({ContractLifecycleService.class,MonthlyBillingService.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class})
+@Import({com.hs.listing.notification.RentalRequestNotificationWriter.class,ContractLifecycleService.class,MonthlyBillingService.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class})
 class ContractLifecyclePhase03PostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs")
-    @EnableJpaRepositories(basePackageClasses={ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class})
+    @EnableJpaRepositories(basePackageClasses={com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class})
     @EnableJpaAuditing static class Config {
         @Bean ObjectMapper mapper(){return new ObjectMapper().findAndRegisterModules();}
         @Bean MutableTime time(Environment env){return new MutableTime(env);}

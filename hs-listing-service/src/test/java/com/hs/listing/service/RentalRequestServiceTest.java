@@ -10,6 +10,9 @@ import com.hs.listing.model.RentalRequest;
 import com.hs.listing.model.constant.DepositType;
 import com.hs.listing.model.constant.ListingStatus;
 import com.hs.listing.model.constant.RentalRequestStatus;
+import com.hs.listing.notification.RentalRequestNotificationOutbox;
+import com.hs.listing.notification.RentalRequestNotificationOutboxRepository;
+import com.hs.listing.notification.RentalRequestNotificationWriter;
 import com.hs.listing.port.RentalPaymentLifecyclePort;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.PropertyBranchRepository;
@@ -151,6 +154,7 @@ class RentalRequestServiceTest {
         propertyBranchRepository = mock(PropertyBranchRepository.class);
         objectMapper = new ObjectMapper();
 
+        outbox = mock(RentalRequestNotificationOutboxRepository.class);
         rentalRequestService = new RentalRequestService(
                 rentalRequestRepository,
                 listingRepository,
@@ -162,8 +166,29 @@ class RentalRequestServiceTest {
                 propertyBranchRepository,
                 objectMapper,
                 rentalPaymentLifecyclePort,
+                new RentalRequestNotificationWriter(outbox, "test.rental.notifications"),
                 15
         );
+    }
+
+    private RentalRequestNotificationOutboxRepository outbox;
+    private final tools.jackson.databind.json.JsonMapper eventJson = tools.jackson.databind.json.JsonMapper.builder().build();
+
+    /** Saved outbox rows as "EVENT_TYPE:SIDE:recipient:requestId", in enqueue order. */
+    private List<String> events() {
+        var rows = org.mockito.ArgumentCaptor.forClass(RentalRequestNotificationOutbox.class);
+        verify(outbox, atLeast(0)).save(rows.capture());
+        return rows.getAllValues().stream().map(row -> {
+            var event = eventJson.readTree(row.getPayload());
+            assertEquals(row.getRentalRequestId(), event.get("data").get("requestId").asText());
+            return event.get("eventType").asText() + ":" + event.get("data").get("recipientSide").asText()
+                    + ":" + event.get("recipients").get(0).asText() + ":" + row.getRentalRequestId();
+        }).toList();
+    }
+
+    private RentalRequest party(String id, RentalRequestStatus status, Listing listing) {
+        return RentalRequest.builder().id(id).listing(listing).ownerId("owner-1").renterId("renter-" + id)
+                .status(status).build();
     }
 
     @Test
@@ -254,6 +279,20 @@ class RentalRequestServiceTest {
         verify(rentalRequestRepository, times(1)).save(any(RentalRequest.class));
         // Verify PENDING request NEVER creates reservations (slot is NOT held)
         verify(parkingReservationService, never()).createHeldReservations(any(), any(), any());
+        // Submission notifies the persisted listing owner only, never the submitting renter.
+        assertEquals(List.of("RENTAL_REQUEST_SUBMITTED:OWNER:owner-1:" + res.id()), events());
+    }
+
+    @Test
+    void createRentalRequest_deniedPathsEnqueueNothing() {
+        Listing own = Listing.builder().id("listing-1").ownerId("user-1").status(ListingStatus.PUBLISHED)
+                .priceAmount(BigDecimal.valueOf(5000000)).build();
+        when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(own));
+        CreateRentalRequest req = new CreateRentalRequest(
+                "listing-1", LocalDate.now().plusDays(5), 12, 1, 0, 0, "Nguyen Van A", "0901234567", "a@gmail.com", null, "Note", true);
+        assertThrows(AppException.class, () -> rentalRequestService.createRentalRequest("user-1", null, req));
+        assertThrows(AppException.class, () -> rentalRequestService.createRentalRequest(null, null, req));
+        verifyNoInteractions(outbox);
     }
 
     @Test
@@ -284,10 +323,21 @@ class RentalRequestServiceTest {
         when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(req1));
         when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
         when(rentalRequestRepository.save(any(RentalRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        // Exactly the locked contenders the bulk update will reject, in deterministic order.
+        var contender1 = party("req-2", RentalRequestStatus.PENDING, listing);
+        var contender2 = party("req-3", RentalRequestStatus.PENDING, listing);
+        when(rentalRequestRepository.findCompetingPendingForUpdate("listing-1", "req-1", RentalRequestStatus.PENDING))
+                .thenReturn(List.of(contender1, contender2));
+        when(rentalRequestRepository.rejectCompetingPendingRequests(
+                anyString(), anyString(), any(), any(), anyString(), any(), anyString())).thenReturn(2);
 
         RentalRequestResponse res = rentalRequestService.acceptRentalRequest("owner-1", "req-1");
 
         assertNotNull(res);
+        assertEquals(List.of(
+                "RENTAL_REQUEST_ACCEPTED:RENTER:renter-1:req-1",
+                "RENTAL_REQUEST_AUTO_REJECTED:RENTER:renter-req-2:req-2",
+                "RENTAL_REQUEST_AUTO_REJECTED:RENTER:renter-req-3:req-3"), events());
         assertEquals(RentalRequestStatus.ACCEPTED, res.status());
         assertNotNull(res.acceptedAt());
         assertNotNull(res.holdExpiresAt());
@@ -307,6 +357,7 @@ class RentalRequestServiceTest {
         order.verify(listingRepository).findByIdForUpdate("listing-1");
         order.verify(rentalRequestRepository).findByIdForUpdate("req-1");
         order.verify(rentalPaymentLifecyclePort).createInitialPayment(eq(req1), any());
+        order.verify(rentalRequestRepository).findCompetingPendingForUpdate("listing-1", "req-1", RentalRequestStatus.PENDING);
         order.verify(rentalRequestRepository).rejectCompetingPendingRequests(
                 anyString(), anyString(), any(), any(), anyString(), any(), anyString());
 
@@ -334,6 +385,52 @@ class RentalRequestServiceTest {
         verifyNoInteractions(propertyBranchRepository, parkingReservationService, rentalPaymentLifecyclePort, listingStatusService);
         verify(rentalRequestRepository, never()).rejectCompetingPendingRequests(
                 anyString(), anyString(), any(), any(), anyString(), any(), anyString());
+        verify(rentalRequestRepository, never()).findCompetingPendingForUpdate(anyString(), anyString(), any());
+        verifyNoInteractions(outbox);
+    }
+
+    private RentalRequest acceptableRequest(Listing listing) {
+        var request = RentalRequest.builder().id("req-1").listing(listing).ownerId("owner-1").renterId("renter-1")
+                .status(RentalRequestStatus.PENDING).moveInDate(LocalDate.now().plusDays(1)).leaseMonths(6)
+                .effectiveMonthlyRent(new BigDecimal("5000000")).depositAmount(new BigDecimal("5000000")).build();
+        when(rentalRequestRepository.findListingIdByRequestId("req-1")).thenReturn(Optional.of("listing-1"));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(request));
+        when(listingRepository.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
+        when(rentalRequestRepository.save(any(RentalRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        return request;
+    }
+
+    @Test
+    void acceptRentalRequest_failedPaymentOrChangedContenderSetEnqueuesNothing() {
+        Listing listing = Listing.builder().id("listing-1").ownerId("owner-1").status(ListingStatus.PUBLISHED).build();
+        var request = acceptableRequest(listing);
+        doThrow(new IllegalStateException("payment down")).when(rentalPaymentLifecyclePort).createInitialPayment(any(), any());
+        assertThrows(IllegalStateException.class, () -> rentalRequestService.acceptRentalRequest("owner-1", "req-1"));
+        verify(rentalRequestRepository, never()).findCompetingPendingForUpdate(anyString(), anyString(), any());
+        verify(rentalRequestRepository, never()).rejectCompetingPendingRequests(
+                anyString(), anyString(), any(), any(), anyString(), any(), anyString());
+
+        // Bulk update disagreeing with the locked snapshot must abort before any notification.
+        doNothing().when(rentalPaymentLifecyclePort).createInitialPayment(any(), any());
+        request.setStatus(RentalRequestStatus.PENDING); // the failed first attempt rolled back in a real transaction
+        when(rentalRequestRepository.findCompetingPendingForUpdate("listing-1", "req-1", RentalRequestStatus.PENDING))
+                .thenReturn(List.of(party("req-2", RentalRequestStatus.PENDING, listing)));
+        when(rentalRequestRepository.rejectCompetingPendingRequests(
+                anyString(), anyString(), any(), any(), anyString(), any(), anyString())).thenReturn(0);
+        assertThrows(IllegalStateException.class, () -> rentalRequestService.acceptRentalRequest("owner-1", "req-1"));
+        verifyNoInteractions(outbox);
+    }
+
+    @Test
+    void acceptRentalRequest_forbiddenOrNonPendingEnqueuesNothingAndMutatesNothing() {
+        Listing listing = Listing.builder().id("listing-1").ownerId("owner-1").status(ListingStatus.PUBLISHED).build();
+        var request = acceptableRequest(listing);
+        assertThrows(AppException.class, () -> rentalRequestService.acceptRentalRequest("intruder", "req-1"));
+        request.setStatus(RentalRequestStatus.ACCEPTED);
+        assertThrows(AppException.class, () -> rentalRequestService.acceptRentalRequest("owner-1", "req-1"));
+        assertThrows(AppException.class, () -> rentalRequestService.acceptRentalRequest(" ", "req-1"));
+        verify(rentalRequestRepository, never()).save(any());
+        verifyNoInteractions(outbox);
     }
 
     @Test
@@ -343,6 +440,7 @@ class RentalRequestServiceTest {
                 .id("req-1")
                 .listing(listing)
                 .ownerId("owner-1")
+                .renterId("renter-1")
                 .status(RentalRequestStatus.PENDING)
                 .build();
 
@@ -354,6 +452,24 @@ class RentalRequestServiceTest {
 
         assertEquals(RentalRequestStatus.REJECTED, res.status());
         assertEquals("Khong phu hop", res.rejectReason());
+        // Only the renter is told; the reason never reaches the payload.
+        assertEquals(List.of("RENTAL_REQUEST_REJECTED:RENTER:renter-1:req-1"), events());
+        verify(outbox).save(argThat(row -> !row.getPayload().contains("Khong phu hop")));
+    }
+
+    @Test
+    void rejectRentalRequest_deniedAndFailedSideEffectsEnqueueNothing() {
+        RentalRequest req = RentalRequest.builder().id("req-1").ownerId("owner-1").renterId("renter-1")
+                .status(RentalRequestStatus.PENDING).build();
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(req));
+        when(rentalRequestRepository.save(any(RentalRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        assertThrows(AppException.class, () -> rentalRequestService.rejectRentalRequest("renter-1", "req-1", null));
+        assertThrows(AppException.class, () -> rentalRequestService.rejectRentalRequest(null, "req-1", null));
+        doThrow(new IllegalStateException("payment down")).when(rentalPaymentLifecyclePort).cancelPayment(anyString(), anyString());
+        assertThrows(IllegalStateException.class, () -> rentalRequestService.rejectRentalRequest("owner-1", "req-1", null));
+        req.setStatus(RentalRequestStatus.REJECTED); // repeat after commit
+        assertThrows(AppException.class, () -> rentalRequestService.rejectRentalRequest("owner-1", "req-1", null));
+        verifyNoInteractions(outbox);
     }
 
     @Test
@@ -372,6 +488,11 @@ class RentalRequestServiceTest {
 
         RentalRequestResponse res = rentalRequestService.cancelRentalRequest("renter-1", "req-1");
         assertEquals(RentalRequestStatus.CANCELLED_BY_RENTER, res.status());
+        assertEquals(List.of("RENTAL_REQUEST_CANCELLED:OWNER:owner-1:req-1"), events());
+        // A repeat on the now-terminal request or a stranger never duplicates the notice.
+        assertThrows(AppException.class, () -> rentalRequestService.cancelRentalRequest("renter-1", "req-1"));
+        assertThrows(AppException.class, () -> rentalRequestService.cancelRentalRequest("owner-1", "req-1"));
+        assertEquals(1, events().size());
     }
 
     @Test
@@ -384,6 +505,7 @@ class RentalRequestServiceTest {
         RentalRequest expiredReq = RentalRequest.builder()
                 .id("req-1")
                 .listing(listing)
+                .ownerId("owner-1").renterId("renter-1")
                 .status(RentalRequestStatus.ACCEPTED)
                 .holdExpiresAt(Instant.now().minusSeconds(3600))
                 .build();
@@ -397,6 +519,36 @@ class RentalRequestServiceTest {
         assertEquals(1, expiredCount);
         assertEquals(RentalRequestStatus.EXPIRED, expiredReq.getStatus());
         verify(listingStatusService, times(1)).releaseReserved(eq(listing), eq("SYSTEM"), anyString());
+        // SYSTEM transition tells both persisted parties, owner first.
+        assertEquals(List.of("RENTAL_HOLD_EXPIRED:OWNER:owner-1:req-1", "RENTAL_HOLD_EXPIRED:RENTER:renter-1:req-1"), events());
+    }
+
+    @Test
+    void expirePendingHoldRequests_pendingResponseExpiryNotifiesBothOnlyOnActualTransition() {
+        Instant now = Instant.now();
+        var expired = party("req-1", RentalRequestStatus.PENDING, null);
+        expired.setRespondBy(now.minusSeconds(5));
+        var answeredMeanwhile = party("req-2", RentalRequestStatus.PENDING, null);
+        answeredMeanwhile.setRespondBy(now.minusSeconds(5));
+        var extended = party("req-3", RentalRequestStatus.PENDING, null);
+        extended.setRespondBy(now.minusSeconds(5));
+        when(rentalRequestRepository.findByStatusAndRespondByLessThanEqual(RentalRequestStatus.PENDING, now))
+                .thenReturn(List.of(expired, answeredMeanwhile, extended));
+        when(rentalRequestRepository.findByIdForUpdate("req-1")).thenReturn(Optional.of(expired));
+        // After the row lock, req-2 turned out to be decided and req-3's deadline moved: both must be skipped.
+        var decided = party("req-2", RentalRequestStatus.REJECTED, null);
+        decided.setRespondBy(now.minusSeconds(5));
+        when(rentalRequestRepository.findByIdForUpdate("req-2")).thenReturn(Optional.of(decided));
+        var later = party("req-3", RentalRequestStatus.PENDING, null);
+        later.setRespondBy(now.plusSeconds(600));
+        when(rentalRequestRepository.findByIdForUpdate("req-3")).thenReturn(Optional.of(later));
+
+        assertEquals(0, rentalRequestService.expirePendingHoldRequests(now));
+
+        assertEquals(RentalRequestStatus.EXPIRED, expired.getStatus());
+        assertEquals(RentalRequestStatus.REJECTED, decided.getStatus());
+        assertEquals(RentalRequestStatus.PENDING, later.getStatus());
+        assertEquals(List.of("RENTAL_REQUEST_EXPIRED:OWNER:owner-1:req-1", "RENTAL_REQUEST_EXPIRED:RENTER:renter-req-1:req-1"), events());
     }
 
     @Test
@@ -427,6 +579,7 @@ class RentalRequestServiceTest {
         assertEquals(RentalRequestStatus.ACCEPTED, request.getStatus());
         verify(rentalRequestRepository, never()).save(request);
         verify(listingStatusService, never()).releaseReserved(any(), anyString(), anyString());
+        verifyNoInteractions(outbox);
     }
 
     @Test
@@ -665,6 +818,7 @@ class RentalRequestServiceTest {
         RentalRequest req = RentalRequest.builder()
                 .id("req-1")
                 .listing(listing)
+                .ownerId("owner-1").renterId("renter-1")
                 .status(RentalRequestStatus.ACCEPTED)
                 .holdExpiresAt(now.minusSeconds(10))
                 .build();

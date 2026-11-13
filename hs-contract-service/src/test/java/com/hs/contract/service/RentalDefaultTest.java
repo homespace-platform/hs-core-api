@@ -41,6 +41,7 @@ class RentalDefaultTest {
     @Mock BillingTime time; @Spy ObjectMapper mapper=new ObjectMapper(); @Mock ContractDataBuilder builder;
     @Mock com.hs.contract.deposit.DepositAgreementService depositAgreements;
     @Mock DisputeCaseRepository complaintCases;
+    @Mock com.hs.listing.notification.RentalRequestNotificationWriter notifications;
     @Mock PlatformTransactionManager transactions; @InjectMocks RentalOnboardingService service;
     Instant now;RentalRequest rental;Contract contract;PaymentRequest rent;DepositRecord deposit;ContractRevision revision;
     @BeforeEach void setup() {
@@ -266,5 +267,72 @@ class RentalDefaultTest {
         unpaidHold();assertThrows(AppException.class,()->service.cancelUnpaid("r","stranger"));
         when(signatures.findByContractIdOrderByCreatedAtDesc("c")).thenReturn(List.of(SignatureRequest.builder().status(SignatureRequestStatus.CREATED).build()));
         assertThrows(AppException.class,()->service.cancelUnpaid("r","o"));verifyNoInteractions(parking,listingStatus);
+    }
+
+    private static final String NOTICE="Thông báo nghĩa vụ đã quá hạn";
+    @Test void ownerDefaultNoticeTellsOnlyTheTenantOnceAndIdenticalRepeatIsSilent() {
+        notice();
+        assertThrows(AppException.class,this::notice); // the final window is already open, so a repeat is refused
+        verify(notifications,times(1)).enqueueOthers(rental,"o",com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_DEFAULT_NOTICE_ISSUED);
+        verifyNoMoreInteractions(notifications);
+    }
+    @Test void rejectedNoticeSendsNothing() {
+        rental.setReservationPolicyVersion(null);assertThrows(AppException.class,this::notice);
+        assertThrows(AppException.class,()->service.notifyDefault("r","t",new RentalOnboardingService.Cancellation(NOTICE)));
+        verifyNoInteractions(notifications);
+    }
+    @Test void tenantDisputeNotifiesOwnerOnceAndRepeatReturnsCurrentViewWithoutAuditOrEvent() {
+        notice();clearInvocations(notifications,events);
+        service.disputeDefault("r","t",new RentalOnboardingService.Cancellation("Tôi cần đối soát khoản chuyển"));
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_DEFAULT_DISPUTED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.OWNER);
+        verify(events,times(1)).save(any());
+        var disputedAt=rental.getDefaultDisputedAt();now=now.plusSeconds(60);
+        service.disputeDefault("r","t",new RentalOnboardingService.Cancellation("Tôi gửi lại đối soát lần nữa"));
+        assertEquals(disputedAt,rental.getDefaultDisputedAt());
+        verifyNoMoreInteractions(notifications);verify(events,times(1)).save(any());
+    }
+    @Test void disputeByOwnerOrWithoutNoticeSendsNothing() {
+        assertThrows(AppException.class,()->service.disputeDefault("r","t",new RentalOnboardingService.Cancellation("Không có thông báo nào")));
+        notice();clearInvocations(notifications);
+        assertThrows(AppException.class,()->service.disputeDefault("r","o",new RentalOnboardingService.Cancellation("Chủ nhà không được tự khiếu nại")));
+        verifyNoInteractions(notifications);
+    }
+    @Test void ownerCompletionNotifiesRenterOnceAndRetryOrBlockedCompletionIsSilent() {
+        notice();
+        assertThrows(AppException.class,()->service.completeDefault("r","o",decision())); // grace has not elapsed
+        verify(notifications,never()).enqueueOthers(any(),anyString(),eq(com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_REQUEST_CANCELLED_BY_SYSTEM));
+        elapsed();service.completeDefault("r","o",decision());service.completeDefault("r","o",decision());
+        verify(notifications,times(1)).enqueueOthers(rental,"o",com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_REQUEST_CANCELLED_BY_SYSTEM);
+    }
+    @Test void schedulerNoticeAndCompletionUseSystemActorSoBothPartiesAreTold() {
+        when(contracts.findByRentalRequestId("r")).thenReturn(Optional.empty());
+        signedDeposit();service.processDue("r");
+        verify(notifications).enqueueOthers(rental,"SYSTEM",com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_DEFAULT_NOTICE_ISSUED);
+        elapsed();service.processDue("r");service.processDue("r");
+        verify(notifications,times(1)).enqueueOthers(rental,"SYSTEM",com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_REQUEST_CANCELLED_BY_SYSTEM);
+        verifyNoMoreInteractions(notifications);
+    }
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"o","t"})
+    void activeCancelUnpaidTellsTheCounterpartAndNoopRetriesAreSilent(String actor) {
+        unpaidHold();service.cancelUnpaid("r",actor);
+        verify(notifications,times(1)).enqueueOthers(rental,actor,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_REQUEST_CANCELLED);
+        service.cancelUnpaid("r","o");service.cancelUnpaid("r","t");
+        verifyNoMoreInteractions(notifications);
+    }
+    @Test void blockedOrStrangerCancelUnpaidSendsNothing() {
+        unpaidHold();assertThrows(AppException.class,()->service.cancelUnpaid("r","stranger"));
+        rent.setStatus(PaymentStatus.TRANSFER_REPORTED);assertThrows(AppException.class,()->service.cancelUnpaid("r","o"));
+        verifyNoInteractions(notifications);
+    }
+    @Test void pendingRequestCancelUsesSameCounterpartRule() {
+        unpaidHold();rental.setStatus(RentalRequestStatus.PENDING);service.cancelUnpaid("r","t");
+        verify(notifications).enqueueOthers(rental,"t",com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_REQUEST_CANCELLED);
+    }
+    @Test void cancellationRequestAndRejectNotifyTheCounterpart() {
+        service.requestCancellation("r","t",new RentalOnboardingService.Cancellation("Muốn hủy trước khi ký hợp đồng"));
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_CANCELLATION_REQUESTED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.OWNER);
+        service.decideCancellation("r","o",new RentalOnboardingService.Decision(false,null));
+        verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_CANCELLATION_REJECTED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.RENTER);
+        verifyNoMoreInteractions(notifications);
     }
 }

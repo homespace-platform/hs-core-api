@@ -34,6 +34,18 @@ public interface RentalRequestRepository extends JpaRepository<RentalRequest, St
             @org.springframework.data.repository.query.Param("at") Instant at,
             @org.springframework.data.repository.query.Param("actorId") String actorId);
 
+    /** Exact contenders of {@link #rejectCompetingPendingRequests}: same predicate, row-locked, deterministic order. */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("""
+            SELECT r FROM RentalRequest r
+            WHERE r.listing.id = :listingId AND r.id <> :acceptedId AND r.status = :pending AND r.active = true
+            ORDER BY r.id
+            """)
+    List<RentalRequest> findCompetingPendingForUpdate(
+            @org.springframework.data.repository.query.Param("listingId") String listingId,
+            @org.springframework.data.repository.query.Param("acceptedId") String acceptedId,
+            @org.springframework.data.repository.query.Param("pending") RentalRequestStatus pending);
+
     List<RentalRequest> findByListingIdAndStatus(String listingId, RentalRequestStatus status);
 
     org.springframework.data.domain.Page<RentalRequest> findByStatus(RentalRequestStatus status, org.springframework.data.domain.Pageable pageable);

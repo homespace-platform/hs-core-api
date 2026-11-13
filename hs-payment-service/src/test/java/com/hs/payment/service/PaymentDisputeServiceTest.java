@@ -38,7 +38,9 @@ class PaymentDisputeServiceTest {
     final RentalRequestRepository rentals=mock(RentalRequestRepository.class);
     final StorageObjectRepository storage=mock(StorageObjectRepository.class);
     final BillingTime time=mock(BillingTime.class);
-    final PaymentDisputeService service=new PaymentDisputeService(cases,events,payments,evidence,paymentEvents,deposits,rentals,storage,new ObjectMapper(),time);
+    final com.hs.listing.notification.RentalRequestNotificationOutboxRepository outbox=mock(com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class);
+    final PaymentDisputeService service=new PaymentDisputeService(cases,events,payments,evidence,paymentEvents,deposits,rentals,storage,new ObjectMapper(),time,
+        new com.hs.listing.notification.RentalRequestNotificationWriter(outbox,"test.rental.notifications"));
     final List<DisputeCase> rows=new ArrayList<>();
     final List<DisputeCaseEvent> history=new ArrayList<>();
     final List<PaymentEvidence> files=new ArrayList<>();
@@ -74,6 +76,21 @@ class PaymentDisputeServiceTest {
         .purpose(StoragePurpose.PAYMENT_PROOF).visibility(StorageVisibility.PRIVATE).status(StorageStatus.READY).build();}
     void admin(String actor){UserContextHolder.set(new UserContext(actor,null));SecurityContextHolder.getContext().setAuthentication(
         UsernamePasswordAuthenticationToken.authenticated(actor,"n/a",List.of(new SimpleGrantedAuthority("ADMIN"))));}
+    /** Saved rental-request notices as "EVENT:SIDE:recipient" in enqueue order. */
+    List<String> notices(){
+        var saved=org.mockito.ArgumentCaptor.forClass(com.hs.listing.notification.RentalRequestNotificationOutbox.class);
+        verify(outbox,atLeast(0)).save(saved.capture());
+        var json=tools.jackson.databind.json.JsonMapper.builder().build();
+        return saved.getAllValues().stream().map(r->{var e=json.readTree(r.getPayload());
+            return e.get("eventType").asText()+":"+e.get("data").get("recipientSide").asText()+":"+e.get("recipients").get(0).asText();}).toList();
+    }
+    RentalRequest onboardingRental(){
+        p.setType(PaymentType.INITIAL);
+        var rental=RentalRequest.builder().id("rental").ownerId("owner").renterId("tenant").status(RentalRequestStatus.ACCEPTED)
+            .moveInDate(LocalDate.of(2026,11,3)).listing(Listing.builder().status(ListingStatus.RESERVED).build()).build();
+        when(rentals.findById("rental")).thenReturn(Optional.of(rental));when(rentals.findByIdForUpdate("rental")).thenReturn(Optional.of(rental));
+        return rental;
+    }
     void code(int code,org.junit.jupiter.api.function.Executable call){assertEquals(code,assertThrows(AppException.class,call).getCode());}
 
     @ParameterizedTest @EnumSource(PaymentType.class)
@@ -93,6 +110,7 @@ class PaymentDisputeServiceTest {
         assertEquals(now.plusSeconds(86400),p.getConfirmationDueAt());assertNull(c.getActiveKey());
         assertEquals(new BigDecimal("3000000"),p.getTotalAmount());verifyNoInteractions(deposits);
         assertEquals("REVIEW_TRANSFER",new ObjectMapper().convertValue(readMetadata(history.getLast()),Map.class).get("resolution"));
+        assertEquals(List.of(),notices()); // unrelated (non-onboarding) payment never touches rental-request notifications
     }
     Map<?,?> readMetadata(DisputeCaseEvent e){try{return new ObjectMapper().readValue(e.getMetadataJson(),Map.class);}catch(Exception ex){throw new RuntimeException(ex);}}
     @Test void reviewRequiresValidEvidenceNotJustAnUnrelatedStorageId(){
@@ -203,5 +221,25 @@ class PaymentDisputeServiceTest {
         rental.setStatus(RentalRequestStatus.CANCELLED_BY_OWNER);code(7027,()->act(c,"owner","ACCEPT",null));
         rental.setStatus(RentalRequestStatus.ACCEPTED);act(c,"owner","ACCEPT",null);
         assertEquals(now.plusSeconds(86400),p.getDueAt());assertEquals(p.getDueAt(),rental.getHoldExpiresAt());assertEquals(LocalDate.of(2026,11,3),rental.getMoveInDate());
+        // Blocked attempt notified nobody; the accepting owner is suppressed, only the renter hears about the new deadline.
+        assertEquals(List.of("RENTAL_HOLD_EXTENDED:RENTER:tenant"),notices());
+    }
+    @Test void onboardingReopenWithUnchangedDeadlineAndReviewRouteSendNothing(){
+        var rental=onboardingRental();rental.setHoldExpiresAt(now.plusSeconds(86400)); // reopen window equals the current deadline
+        var c=open();act(c,"tenant","PROPOSE",DisputeResolution.REOPEN_TRANSFER);act(c,"owner","ACCEPT",null);
+        assertEquals(now.plusSeconds(86400),rental.getHoldExpiresAt());assertEquals(List.of(),notices());
+    }
+    @Test void onboardingReviewTransferDoesNotMoveHoldOrNotify(){
+        var rental=onboardingRental();var held=rental.getHoldExpiresAt();
+        var c=open();proof("tenant");act(c,"tenant","PROPOSE",DisputeResolution.REVIEW_TRANSFER);act(c,"owner","ACCEPT",null);
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,p.getStatus());assertEquals(held,rental.getHoldExpiresAt());assertEquals(List.of(),notices());
+    }
+    @Test void adminDecisionExtendingHoldNotifiesBothPersistedParties(){
+        var rental=onboardingRental();
+        var c=open();act(c,"tenant","ESCALATE",null);admin("admin");
+        service.adminAct(c.getId(),"admin","CLAIM",action(c,null));
+        service.adminAct(c.getId(),"admin","DECIDE",action(c,DisputeResolution.REOPEN_TRANSFER));
+        assertEquals(now.plusSeconds(86400),rental.getHoldExpiresAt());
+        assertEquals(List.of("RENTAL_HOLD_EXTENDED:OWNER:owner","RENTAL_HOLD_EXTENDED:RENTER:tenant"),notices());
     }
 }
