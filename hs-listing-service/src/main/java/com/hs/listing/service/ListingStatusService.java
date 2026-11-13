@@ -5,6 +5,7 @@ import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.ListingStatusHistory;
 import com.hs.listing.model.constant.*;
+import com.hs.listing.notification.ListingNotificationWriter;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.ListingStatusHistoryRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +38,8 @@ public class ListingStatusService {
     private final ViewingAppointmentService appointmentService;
     @org.springframework.beans.factory.annotation.Autowired
     private com.hs.listing.membership.MembershipService memberships;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ListingNotificationWriter notifications;
     private final int publicationDurationDays;
 
     public ListingStatusService(
@@ -142,6 +145,16 @@ public class ListingStatusService {
             listing.setPendingEditId(null); listing.setPendingEditPayload(null);
             listing.setReviewOperationalStatus(null); listing.setReviewOriginStatus(null);
         }
+        // Decision-level event, after validation and the state change; a VIOLATION that discards a pending edit
+        // is only a status change, never an edit rejection. Joins the caller's transaction (MANDATORY).
+        var event = switch (target) {
+            case PUBLISHED -> ListingNotificationWriter.Event.LISTING_APPROVED;
+            case REJECTED -> ListingNotificationWriter.Event.LISTING_REJECTED;
+            case EXPIRED -> ListingNotificationWriter.Event.LISTING_EXPIRED;
+            default -> ListingNotificationWriter.Event.LISTING_STATUS_CHANGED;
+        };
+        notifications.enqueue(listing, adminId, event, null,
+                event == ListingNotificationWriter.Event.LISTING_STATUS_CHANGED ? target : null);
         return listing;
     }
 
@@ -150,9 +163,11 @@ public class ListingStatusService {
         var expired = new java.util.ArrayList<>(listingRepository.findAllByStatusAndActiveTrueAndExpiresAtLessThanEqual(
                 ListingStatus.PUBLISHED, now));
         expired.addAll(listingRepository.findPendingReviewsPastPublicationExpiry(now));
-        expired.forEach(listing -> changeOperational(
-                listing, ListingStatus.EXPIRED, "Publication period expired", "SYSTEM",
-                ListingStatusActorType.SYSTEM, true));
+        expired.forEach(listing -> {
+            changeOperational(listing, ListingStatus.EXPIRED, "Publication period expired", "SYSTEM",
+                    ListingStatusActorType.SYSTEM, true);
+            notifications.enqueue(listing, "SYSTEM", ListingNotificationWriter.Event.LISTING_EXPIRED);
+        });
         return expired.size();
     }
 

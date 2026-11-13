@@ -38,6 +38,8 @@ public class ListingService {
     private RentalRequestService listingSnapshots;
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.context.ApplicationEventPublisher nearbyEvents;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.listing.notification.ListingNotificationWriter notifications;
     private final ListingRepository listingRepository;
     private final ListingAddressRepository addressRepository;
     private final StorageObjectRepository storageObjectRepository;
@@ -135,6 +137,8 @@ public class ListingService {
         Listing saved = listingRepository.save(listing);
         linkStorageObjects(saved);
         upsertAddress(saved, ownerId, request.addressSource());
+        // Draft or pending only: creation never claims approval. Suppressed when the admin is the owner.
+        notifications.enqueue(saved, adminId, com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_CREATED);
         return response(saved);
     }
 
@@ -168,6 +172,8 @@ public class ListingService {
         linkStorageObjects(saved);
         upsertAddress(saved, saved.getOwnerId(), request.addressSource());
         if (saved.getApprovedEditId() != null) captureApprovedSnapshot(saved);
+        // Policy: every accepted admin save is an update (new snapshot/revision), so separate saves each notify.
+        notifications.enqueue(saved, adminId, com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_UPDATED);
         return response(saved);
     }
 
@@ -261,7 +267,12 @@ public class ListingService {
         listingStatusService.finishContentReview(listing,adminId,approve,reason);
         listing.setPendingEditId(null);
         listing.setPendingEditPayload(null);
-        return listingRepository.save(listing);
+        Listing saved = listingRepository.save(listing);
+        // Driven by the decision and the captured editId, not by the resulting listing status.
+        notifications.enqueue(saved, adminId, approve
+                ? com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_EDIT_APPROVED
+                : com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_EDIT_REJECTED, editId, null);
+        return saved;
     }
 
     private void captureApprovedSnapshot(Listing listing) {

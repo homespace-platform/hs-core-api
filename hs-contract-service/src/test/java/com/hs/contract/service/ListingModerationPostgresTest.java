@@ -52,6 +52,8 @@ class ListingModerationPostgresTest {
     @Autowired ListingStatusService statuses;
     @Autowired EntityManager entityManager;
     @MockitoBean ViewingAppointmentService appointments;
+    @MockitoBean com.hs.listing.notification.ListingNotificationWriter notifications;
+    @MockitoBean com.hs.listing.membership.MembershipService memberships;
 
     private Listing listing() {
         return listings.saveAndFlush(Listing.builder().ownerId("owner").title("Moderation test").description("Test")

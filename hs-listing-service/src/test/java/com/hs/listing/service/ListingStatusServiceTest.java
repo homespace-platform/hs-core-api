@@ -5,6 +5,9 @@ import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.ListingStatusHistory;
 import com.hs.listing.model.constant.*;
+import com.hs.listing.notification.ListingNotificationOutbox;
+import com.hs.listing.notification.ListingNotificationOutboxRepository;
+import com.hs.listing.notification.ListingNotificationWriter;
 import com.hs.listing.repository.ListingRepository;
 import com.hs.listing.repository.ListingStatusHistoryRepository;
 import org.junit.jupiter.api.Test;
@@ -20,11 +23,106 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ListingStatusServiceTest {
+    private final ListingNotificationOutboxRepository outbox = mock(ListingNotificationOutboxRepository.class);
     private final ListingRepository listings = mock(ListingRepository.class);
     private final ListingStatusHistoryRepository history = mock(ListingStatusHistoryRepository.class);
     private final ViewingAppointmentService appointments = mock(ViewingAppointmentService.class);
     private final ListingStatusService service = new ListingStatusService(
             listings, history, appointments, 30);
+
+    @org.junit.jupiter.api.BeforeEach
+    void notifications() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "notifications",
+                new ListingNotificationWriter(outbox, "test.notifications"));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "PENDING_REVIEW,PUBLISHED,LISTING_APPROVED", "VIOLATION,PUBLISHED,LISTING_APPROVED",
+            "PENDING_REVIEW,REJECTED,LISTING_REJECTED", "PUBLISHED,EXPIRED,LISTING_EXPIRED",
+            "PUBLISHED,RENTED_EXTERNALLY,LISTING_STATUS_CHANGED",
+            "DRAFT,PENDING_REVIEW,LISTING_STATUS_CHANGED", "REJECTED,PENDING_REVIEW,LISTING_STATUS_CHANGED",
+            "EXPIRED,PENDING_REVIEW,LISTING_STATUS_CHANGED", "HIDDEN,PENDING_REVIEW,LISTING_STATUS_CHANGED",
+            "RENTED_EXTERNALLY,PENDING_REVIEW,LISTING_STATUS_CHANGED", "VIOLATION,PENDING_REVIEW,LISTING_STATUS_CHANGED",
+            "DRAFT,HIDDEN,LISTING_STATUS_CHANGED", "PENDING_REVIEW,HIDDEN,LISTING_STATUS_CHANGED",
+            "PUBLISHED,HIDDEN,LISTING_STATUS_CHANGED", "REJECTED,HIDDEN,LISTING_STATUS_CHANGED",
+            "EXPIRED,HIDDEN,LISTING_STATUS_CHANGED", "RENTED_EXTERNALLY,HIDDEN,LISTING_STATUS_CHANGED",
+            "VIOLATION,HIDDEN,LISTING_STATUS_CHANGED",
+            "DRAFT,VIOLATION,LISTING_STATUS_CHANGED", "PENDING_REVIEW,VIOLATION,LISTING_STATUS_CHANGED",
+            "PUBLISHED,VIOLATION,LISTING_STATUS_CHANGED", "RESERVED,VIOLATION,LISTING_STATUS_CHANGED",
+            "RENTED,VIOLATION,LISTING_STATUS_CHANGED", "RENTED_EXTERNALLY,VIOLATION,LISTING_STATUS_CHANGED",
+            "EXPIRED,VIOLATION,LISTING_STATUS_CHANGED", "REJECTED,VIOLATION,LISTING_STATUS_CHANGED",
+            "HIDDEN,VIOLATION,LISTING_STATUS_CHANGED"})
+    void adminDecisionsNotifyThePersistedOwner(ListingStatus from, ListingStatus to, String eventType) {
+        Listing listing = listing(from);
+        when(listings.findByIdForUpdate(listing.getId())).thenReturn(Optional.of(listing));
+        service.changeByAdmin("reviewer", listing.getId(), to, "  reason  ");
+        var row = ArgumentCaptor.forClass(ListingNotificationOutbox.class);
+        verify(outbox).save(row.capture());
+        var event = tools.jackson.databind.json.JsonMapper.builder().build().readTree(row.getValue().getPayload());
+        assertEquals(eventType, event.get("eventType").asText());
+        assertEquals("owner-1", event.get("recipients").get(0).asText());
+        assertEquals("listing-1", event.get("data").get("listingId").asText());
+        assertEquals(eventType.equals("LISTING_STATUS_CHANGED"), event.get("data").has("status"));
+        if (eventType.equals("LISTING_STATUS_CHANGED")) assertEquals(to.name(), event.get("data").get("status").asText());
+        assertFalse(event.get("data").has("reason"));
+        assertFalse(event.get("data").has("editId"));
+        assertEquals(to, listing.getStatus());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(ListingStatus.class)
+    void repeatedAdminStatusDecisionsNeverNotify(ListingStatus status) {
+        when(listings.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing(status)));
+        assertThrows(AppException.class, () -> service.changeByAdmin("admin", "listing-1", status, "reason"));
+        verifyNoInteractions(outbox);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = ListingStatus.class, names = {"REJECTED", "HIDDEN", "VIOLATION"})
+    void moderationWithoutAReasonNeverNotifies(ListingStatus target) {
+        when(listings.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing(ListingStatus.PENDING_REVIEW)));
+        assertThrows(AppException.class, () -> service.changeByAdmin("admin", "listing-1", target, "  "));
+        verifyNoInteractions(outbox);
+    }
+
+    @Test
+    void violationDiscardsPendingEditWithoutAnEditRejectionEvent() {
+        Listing listing = listing(ListingStatus.PENDING_REVIEW);
+        listing.setPendingEditId("pending-edit"); listing.setPendingEditPayload("unreviewed");
+        listing.setReviewOperationalStatus(ListingStatus.RENTED); listing.setReviewOriginStatus(ListingStatus.RESERVED);
+        when(listings.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
+        service.changeByAdmin("admin", "listing-1", ListingStatus.VIOLATION, "reason");
+        assertNull(listing.getPendingEditId()); assertNull(listing.getReviewOperationalStatus());
+        var row = ArgumentCaptor.forClass(ListingNotificationOutbox.class);
+        verify(outbox).save(row.capture());
+        assertTrue(row.getValue().getPayload().contains("LISTING_STATUS_CHANGED"));
+        assertFalse(row.getValue().getPayload().contains("LISTING_EDIT_REJECTED"));
+    }
+
+    @Test
+    void ownerActionsAndInternalRentalTransitionsDoNotCreateListingNotifications() {
+        Listing listing = publishedListingWithWindow(Duration.ofDays(3));
+        when(listings.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
+        service.changeByOwner("owner-1", "listing-1", ListingStatus.HIDDEN, null);
+        service.changeByOwner("owner-1", "listing-1", ListingStatus.PUBLISHED, null);
+        service.markReserved(listing, "owner-1");
+        service.releaseReserved(listing, "tenant", null);
+        service.markReserved(listing, "owner-1");
+        service.markRentedByContract("listing-1", "tenant");
+        service.releaseRentedAfterTermination("listing-1", "owner-1");
+        service.applySubmission(listing(ListingStatus.DRAFT), ListingSubmissionAction.SUBMIT_FOR_REVIEW, "owner-1", ListingStatusActorType.USER);
+        verifyNoInteractions(outbox);
+    }
+
+    @Test
+    void selfAdminDecisionChangesStateWithoutNotifyingTheActor() {
+        Listing listing = listing(ListingStatus.PENDING_REVIEW);
+        when(listings.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
+        service.changeByAdmin("owner-1", "listing-1", ListingStatus.PUBLISHED, null);
+        assertEquals(ListingStatus.PUBLISHED, listing.getStatus());
+        verifyNoInteractions(outbox);
+    }
 
     @Test
     void submittingDraftMovesItToPendingReviewAndWritesHistory() {
