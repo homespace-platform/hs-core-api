@@ -17,7 +17,7 @@ Implement the smallest correct backend change while preserving architecture, sec
 4. Implement the focused change.
 5. Preserve validation, authorization and error contracts.
 6. Follow docs/ai/verification.md.
-7. Inspect the final diff.
+7. Inspect the final diff once, after the last edit.
 
 ## Execution Rules
 
@@ -26,7 +26,8 @@ Implement the smallest correct backend change while preserving architecture, sec
 - Add regression tests for meaningful bug fixes.
 - Do not run all modules by default.
 - Do not launch unrelated infrastructure.
-- Do not repeatedly execute equivalent commands.
+- Do not repeatedly execute equivalent commands. Never rerun a passing test whose inputs are unchanged; after a failure, diagnose, then rerun only the affected test.
+- Do not dispatch subagents, and do not start a review skill after implementation unless requested.
 - Do not refactor unrelated code.
 
 ## Output

@@ -104,6 +104,10 @@ Do not automatically invoke focused-code-review or contract-risk-review after no
 
 ## Command Discipline
 
+- Use a single agent. Do not dispatch subagents or workers for routine implementation or bug fixes in one module.
+- A local backend fix does not trigger a platform-wide or cross-module review; check dependent modules only when a public contract changes.
+- Do not repeat `git status` / `git diff` without intervening edits. One final diff review, and `git diff --check` once after the last edit.
+- Never rerun a successful test whose inputs have not changed. After a failure, diagnose first, then rerun only the affected test.
 - Avoid repeated successful test commands.
 - Avoid unrelated repository scans.
 - Do not retry failed commands unchanged without diagnosis.
