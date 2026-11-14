@@ -5,6 +5,8 @@ import com.hs.common.time.BillingTime;
 import com.hs.contract.dto.billing.*;
 import com.hs.contract.model.*;
 import com.hs.contract.model.constant.*;
+import com.hs.contract.notification.RenewalNotificationWriter;
+import com.hs.contract.notification.AgreementSigningNotificationWriter;
 import com.hs.contract.repository.*;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.repository.RentalRequestRepository;
@@ -49,11 +51,18 @@ class ContractLifecycleServiceTest {
     Map<String,ContractClosure> closureData=new HashMap<>();
     Map<String,PaymentRequest> paymentData=new HashMap<>();
     List<MonthlyInvoice> bills=new ArrayList<>();
+    final com.hs.contract.notification.InvoiceOutboxProbe outbox=new com.hs.contract.notification.InvoiceOutboxProbe();
+    RenewalNotificationWriter renewalNotices=mock(RenewalNotificationWriter.class);
+    AgreementSigningNotificationWriter signingNotices=mock(AgreementSigningNotificationWriter.class);
+    com.hs.contract.notification.TerminationNotificationWriter terminationNotices=mock(com.hs.contract.notification.TerminationNotificationWriter.class);
     @BeforeEach void setup() {
         service=new ContractLifecycleService(contracts,revisions,renewals,closures,rentals,invoices,deposits,paymentRepo,payments,
-                signatures,documents,listings,parking,new ObjectMapper().findAndRegisterModules(),time,mock(PlatformTransactionManager.class),storageObjects);
+                signatures,documents,listings,parking,new ObjectMapper().findAndRegisterModules(),time,mock(PlatformTransactionManager.class),storageObjects,outbox.writer);
         org.springframework.test.util.ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
         org.springframework.test.util.ReflectionTestUtils.setField(service,"depositLedger",new com.hs.payment.service.DepositLedgerService(deposits,paymentRepo,new ObjectMapper()));
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"renewalNotices",renewalNotices);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"signingNotices",signingNotices);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"terminationNotices",terminationNotices);
         root=Contract.builder().id("root").contractNumber("HD-DEMO").rentalRequestId("rental").listingId("listing")
                 .landlordId("owner").tenantId("tenant").status(ContractStatus.ACTIVE).currentRevisionId("original")
                 .templateId("template").templateVersionId("template-v1").signedAt(Instant.parse("2026-10-12T03:00:00Z"))
@@ -96,6 +105,35 @@ class ContractLifecycleServiceTest {
         clock("2026-12-13T10:00:00");
     }
     void clock(String local) { var now=LocalDateTime.parse(local).atZone(BillingTime.ZONE);when(time.now()).thenReturn(now.toInstant());when(time.today()).thenReturn(now.toLocalDate()); }
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void confirmedPaymentCancelsLegacyOrUnilateralNoticeOnce(boolean unilateral) throws Exception {
+        root.setTerminationProposedAt(time.now());root.setTerminationProposalInvoiceId("bill");
+        if(unilateral)root.setUnilateralTerminationSnapshot(new ObjectMapper().findAndRegisterModules().writeValueAsString(List.of(
+                UnilateralTerminationNotice.builder().id("notice").invoiceId("bill").version(1)
+                        .status(UnilateralTerminationNotice.Status.REVIEW_REQUESTED).build())));
+        bills.add(MonthlyInvoice.builder().id("bill").contractId("root").status(MonthlyInvoiceStatus.OVERDUE)
+                .paymentRequestId("payment").build());
+        paymentData.put("payment",PaymentRequest.builder().status(PaymentStatus.CONFIRMED).confirmedAt(time.now()).build());
+        service.get("root","tenant");service.get("root","tenant");
+        assertEquals(time.now(),root.getTerminationCancelledAt());assertEquals(MonthlyInvoiceStatus.PAID,bills.getFirst().getStatus());
+        verify(terminationNotices).tenant(root,unilateral?com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_NOTICE_CANCELLED
+                :com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_WITHDRAWN);
+        verifyNoMoreInteractions(terminationNotices);
+        if(unilateral){var notice=new ObjectMapper().readTree(root.getUnilateralTerminationSnapshot()).get(0);
+            assertEquals("CANCELLED_PAID",notice.get("status").asText());assertEquals(2,notice.get("version").asInt());}
+    }
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"DECLINED","CANCELLED","COMPLETED","ABSENT","OTHER_INVOICE"})
+    void confirmedPaymentDoesNotCancelAnInactiveOrDifferentProposal(String state) {
+        root.setTerminationProposalInvoiceId("OTHER_INVOICE".equals(state)?"other":"bill");
+        if(!"ABSENT".equals(state))root.setTerminationProposedAt(time.now());
+        if("DECLINED".equals(state))root.setTerminationDeclinedAt(time.now());
+        if("CANCELLED".equals(state))root.setTerminationCancelledAt(time.now());
+        if("COMPLETED".equals(state))root.setTerminationCompletedAt(time.now());
+        root.setMutualTerminationWorkflowId("new-workflow");
+        bills.add(MonthlyInvoice.builder().id("bill").contractId("root").status(MonthlyInvoiceStatus.OVERDUE).paymentRequestId("payment").build());
+        paymentData.put("payment",PaymentRequest.builder().status(PaymentStatus.CONFIRMED).confirmedAt(time.now()).build());
+        service.get("root","tenant");verifyNoInteractions(terminationNotices);
+    }
     ContractRenewal request() { service.requestRenewal("root","tenant",new RenewalPayload(3,"Tôi muốn tiếp tục thuê nhà."));return requests.get(0); }
     Contract approve() { var r=request();service.decideRenewal("root",r.getId(),"owner",true);return contractData.get(r.getAgreementContractId()); }
     void signed(Contract child) {
@@ -119,6 +157,7 @@ class ContractLifecycleServiceTest {
         clock("2026-12-13T00:00:00");assertTrue(service.get("root","tenant").canRequestRenewal());
         assertThrows(AppException.class,()->service.requestRenewal("root","owner",new RenewalPayload(3,"Nội dung hợp lệ.")));
         request();assertThrows(AppException.class,()->request());
+        verify(renewalNotices,times(1)).other(root,"tenant",RenewalNotificationWriter.Event.RENEWAL_REQUESTED);
     }
     @Test void missingLedgerIsUnknownAndDoesNotAdvertiseSettlementOfZeroDeposit(){
         finalBills();when(deposits.findByRentalRequestId("rental")).thenReturn(Optional.empty());
@@ -131,6 +170,8 @@ class ContractLifecycleServiceTest {
         assertTrue(revisionData.get(child.getCurrentRevisionId()).getLeaseSnapshot().contains("12/01/2027"));
         verify(payments,never()).createContractSettlement(anyString(),anyString(),anyString(),anyString(),anyString(),any(),any(),anyBoolean(),anyString());
         verify(parking).holdForRenewal(eq("root"),eq(child.getId()),eq(LocalDate.of(2027,1,12)),eq(LocalDate.of(2027,4,12)),any());
+        verify(renewalNotices).other(root,"owner",RenewalNotificationWriter.Event.RENEWAL_APPROVED);
+        verify(signingNotices).reviewReady(child);
     }
     @Test void twelveMonthLeaseOpensThirtyDaysBeforeActualEndAndClosesBeforeFinalMeterDay() {
         rental.setMoveInDate(LocalDate.of(2026,10,13)); rental.setLeaseMonths(12);
@@ -171,11 +212,13 @@ class ContractLifecycleServiceTest {
     }
     @Test void rejectedAndExpiredRequestsCannotBeApprovedAndDoNotExtendLease() {
         var r=request(); service.decideRenewal("root",r.getId(),"owner",false);assertEquals("REJECTED",r.getStatus());
+        verify(renewalNotices).other(root,"owner",RenewalNotificationWriter.Event.RENEWAL_REJECTED);
         assertThrows(AppException.class,()->service.decideRenewal("root",r.getId(),"owner",true));
         assertNull(root.getEffectiveLeaseMonths());
     }
     @Test void pendingRequestExpiresAfter48Hours() {
         var r=request();clock("2026-12-15T10:00:00");service.get("root","tenant");assertEquals("EXPIRED",r.getStatus());
+        verify(renewalNotices,times(1)).both(root,RenewalNotificationWriter.Event.RENEWAL_EXPIRED);
         assertThrows(AppException.class,()->service.decideRenewal("root",r.getId(),"owner",true));
     }
     @Test void unsignedAgreementExpiresBeforeFinalMeterDayAndReleasesOnlyRenewalParking() {
@@ -186,6 +229,8 @@ class ContractLifecycleServiceTest {
     }
     @Test void naturalExpiryDoesNotReleasePropertyOrRefundWithoutBilateralHandover() {
         clock("2027-01-12T00:00:00");var view=service.get("root","owner");assertEquals(ContractStatus.EXPIRED,root.getStatus());
+        service.get("root","tenant");
+        verify(terminationNotices,times(1)).both(root,com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_EXPIRED);
         assertEquals("WAITING_HANDOVER",view.closure().getStatus());verifyNoInteractions(listings);verify(parking,never()).releaseReservationsForContract(anyString());
         assertEquals(DepositStatus.HELD,deposit.getStatus());
     }
@@ -384,6 +429,7 @@ class ContractLifecycleServiceTest {
         root.setStatus(ContractStatus.TERMINATED);
         service.cancelPendingRenewalsForClosedParent(root);
         assertEquals("EXPIRED",requests.get(0).getStatus());assertEquals(ContractStatus.CANCELLED,child.getStatus());
+        verify(renewalNotices,times(1)).both(root,RenewalNotificationWriter.Event.RENEWAL_EXPIRED);
         verify(parking).releaseRenewalHold(child.getId());
     }
     @Test void lifecycleSchedulerUsesStableIdPagesWhenStatusesChange() {
@@ -426,7 +472,9 @@ class ContractLifecycleServiceTest {
         assertFalse(bill.getLineItemsSnapshot().contains("RENT"));
         assertEquals(new BigDecimal("20000000"),deposit.getHeldAmount());
         assertThrows(AppException.class,()->service.proposeClosure("root","owner",proposal(ZERO)));
+        assertEquals(List.of("INVOICE_ISSUED:tenant:"+bill.getId()),outbox.keys()); // actual insert: one tenant notice, no landlord notice
         service.issueFinalCosts("root","owner",payload);assertEquals(4,bills.size());
+        assertEquals(1,outbox.keys().size()); // same requestId replays silently
         var p=paymentData.get(bill.getPaymentRequestId());p.setStatus(PaymentStatus.TRANSFER_REPORTED);
         assertFalse(service.get("root","tenant").billing().allPaid());
         p.setStatus(PaymentStatus.CONFIRMED);p.setConfirmedAt(time.now());service.get("root","owner");
@@ -438,6 +486,7 @@ class ContractLifecycleServiceTest {
         propose();int version=closureData.get("root").getProposalVersion();
         assertThrows(AppException.class,()->service.issueFinalCosts("root","tenant",new FinalCostsPayload(UUID.randomUUID().toString(),new BigDecimal("1670"),null,List.of())));
         assertThrows(AppException.class,()->service.issueFinalCosts("root","owner",new FinalCostsPayload(UUID.randomUUID().toString(),new BigDecimal("1659"),null,List.of())));
+        assertEquals(List.of(),outbox.keys()); // denied actor and lower meters wrote nothing
         service.issueFinalCosts("root","owner",new FinalCostsPayload(UUID.randomUUID().toString(),new BigDecimal("1670"),null,List.of()));
         assertEquals("WAITING_HANDOVER",closureData.get("root").getStatus());assertTrue(closureData.get("root").getProposalVersion()>version);
         assertThrows(AppException.class,()->service.acceptClosure("root","tenant",new AcceptClosurePayload(version,true,true)));

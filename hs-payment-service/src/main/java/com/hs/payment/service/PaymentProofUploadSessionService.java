@@ -66,6 +66,9 @@ public class PaymentProofUploadSessionService {
     private final PaymentEventRepository paymentEventRepository;
     private final StorageService storageService;
     private final com.hs.common.time.BillingTime billingTime;
+    private final com.hs.payment.notification.PaymentNotificationWriter notifications;
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
 
     @Value("${homespace.payment.confirmation-window-hours:24}")
     private long confirmationWindowHours = 24;
@@ -273,8 +276,12 @@ public class PaymentProofUploadSessionService {
             PaymentRequest candidate = paymentRequestRepository.findById(session.getPaymentRequestId()).orElseThrow();
             onboardingGuard.validate(candidate);
         }
-        PaymentRequest payment = paymentRequestRepository.findByIdForUpdate(session.getPaymentRequestId())
+        // Same pattern as PaymentRequestService.lockTransferAction: take the managed row, then refresh-with-lock. A
+        // repository query lock throws on a stale managed @Version instance (guard read above or an earlier load);
+        // refresh locks the row and replaces state and version before the replay/status/evidence logic runs.
+        PaymentRequest payment = paymentRequestRepository.findById(session.getPaymentRequestId())
                 .orElseThrow(() -> new AppException(PaymentErrorCode.PAYMENT_REQUEST_NOT_FOUND, "Không tìm thấy yêu cầu thanh toán."));
+        entityManager.refresh(payment, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
 
         if (payment.getStatus() == PaymentStatus.CONFIRMED) {
             throw new AppException(PaymentErrorCode.PAYMENT_ALREADY_CONFIRMED, "Yêu cầu thanh toán đã được xác nhận.");
@@ -377,6 +384,7 @@ public class PaymentProofUploadSessionService {
                 .createdAt(now)
                 .build();
         paymentEventRepository.save(event);
+        notifications.enqueue(payment, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_TRANSFER_REPORTED, payment.getPayeeId());
 
         log.info("Mobile upload & transfer report complete: session [{}] payment [{}] storageId [{}]",
                 savedSession.getId(), payment.getId(), uploaded.id());

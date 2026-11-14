@@ -8,10 +8,13 @@ import com.hs.payment.dto.EthPaymentDtos;
 import com.hs.payment.membership.MembershipCheckoutService;
 import com.hs.payment.membership.MembershipOrder;
 import com.hs.payment.membership.MembershipOrderRepository;
+import com.hs.payment.membership.notification.MembershipNotificationWriter;
 import com.hs.payment.model.EthPaymentQuote;
 import com.hs.payment.model.EthWalletChallenge;
 import com.hs.payment.repository.EthPaymentQuoteRepository;
 import com.hs.payment.repository.EthWalletChallengeRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -37,6 +40,8 @@ public class EthPaymentService {
     private final EthVndPriceService prices;
     private final EthPaymentChainClient chain;
     private final EthPaymentSignatures signatures;
+    private final MembershipNotificationWriter notifications;
+    @PersistenceContext private EntityManager em;
 
     @Value("${homespace.eth-payment.recipient-address:}") private String recipientAddress;
 
@@ -154,6 +159,11 @@ public class EthPaymentService {
                 .orElseThrow(() -> new AppException(ListingErrorCode.MEMBERSHIP_ORDER_NOT_FOUND));
         quote = quotes.findByIdForUpdate(request.paymentId())
                 .orElseThrow(() -> new AppException(PaymentErrorCode.ETH_PAYMENT_INVALID));
+        // Order and quote were loaded unlocked before chain verification; reload both under the locks.
+        if (em != null) {
+            em.refresh(order);
+            em.refresh(quote);
+        }
         if (quote.getConfirmedAt() != null) {
             if (txHash.equals(quote.getTransactionHash())) return MembershipCheckoutService.OrderView.from(order);
             throw new AppException(PaymentErrorCode.ETH_PAYMENT_INVALID);
@@ -162,6 +172,7 @@ public class EthPaymentService {
                 || order.getAmountVnd() != quote.getAmountVnd().intValueExact())
             throw new AppException(PaymentErrorCode.ETH_PAYMENT_INVALID);
         Instant now = Instant.now();
+        MembershipOrder.Status before = order.getStatus();
         order.setStatus(order.getStatus() == MembershipOrder.Status.PENDING
                 && memberships.activateAt(ownerId, order.getTier(), order.isUpgrade(), minedAt)
                 ? MembershipOrder.Status.PAID : MembershipOrder.Status.REVIEW);
@@ -171,6 +182,7 @@ public class EthPaymentService {
         quote.setConfirmedAt(now);
         orders.save(order);
         quotes.save(quote);
+        notifications.enqueueTransition(order, before); // after verified receipt and locked order/quote persistence
         return MembershipCheckoutService.OrderView.from(order);
     }
 

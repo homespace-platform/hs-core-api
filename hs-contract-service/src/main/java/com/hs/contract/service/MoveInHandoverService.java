@@ -3,8 +3,11 @@ package com.hs.contract.service;
 import com.hs.contract.dto.billing.*;
 import com.hs.contract.dto.complaint.*;
 import com.hs.contract.model.constant.ContractStatus;
+import com.hs.contract.notification.MoveInHandoverNotificationWriter;
+import com.hs.contract.notification.MoveInHandoverNotificationWriter.Event;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.*;
 
@@ -13,6 +16,7 @@ import java.util.*;
 public class MoveInHandoverService {
     private final RentalWorkflowSupport support;
     private final ComplaintCaseService complaints;
+    private final MoveInHandoverNotificationWriter notices;
 
     @Transactional public RentalWorkflowView get(String rental,String actor){return view(support.lock(rental,actor,"MOVE_IN"));}
     @Transactional public RentalWorkflowView propose(String rental,String actor,RentalWorkflowPayloads.Handover p){
@@ -24,21 +28,29 @@ public class MoveInHandoverService {
         for(var item:p.inventory())if(item==null||item.name()==null||item.name().isBlank()||item.name().length()>150||item.quantity()<0||item.quantity()>10000||item.condition()==null||item.condition().isBlank()||item.condition().length()>500)throw support.invalid("Cần ghi rõ tên, số lượng và hiện trạng từng tài sản.");
         for(var meter:Arrays.asList(p.electricity(),p.water()))if(meter!=null&&(meter.signum()<0||meter.stripTrailingZeros().scale()>3||meter.precision()-meter.scale()>12))throw support.invalid("Chỉ số công tơ phải không âm, tối đa 3 chữ số thập phân.");
         // Capture readings only. Never overwrite signed snapshots, issued invoices or the billing baseline.
-        support.propose(s,p,p.reason(),support.evidence(s,p.evidenceIds()),null);return view(s);
+        support.propose(s,p,p.reason(),support.evidence(s,p.evidenceIds()),null);
+        notices.enqueueOther(s.contract(),actor,Event.MOVE_IN_HANDOVER_PROPOSED);return view(s);
     }
-    @Transactional public RentalWorkflowView act(String rental,String actor,String action,RentalWorkflowPayloads.Action p){
+    @Transactional public RentalWorkflowView act(String rental,String actor,String action,RentalWorkflowPayloads.Action p){return apply(rental,actor,action,p,false);}
+    /** Trusted in-process entry for WorkflowDocumentCommitter only: both SmartCA signatures are verified, so completion tells both parties once and no intermediate confirmation is sent. */
+    @Transactional(propagation=Propagation.MANDATORY) public RentalWorkflowView confirmFromVerifiedSignatures(String rental,String actor,RentalWorkflowPayloads.Action p){return apply(rental,actor,"CONFIRM",p,true);}
+    private RentalWorkflowView apply(String rental,String actor,String action,RentalWorkflowPayloads.Action p,boolean verifiedSignatures){
         var s=support.lock(rental,actor,"MOVE_IN");support.version(s,p.expectedRevision());eligible(s);var w=s.record();String reason=support.text(p.reason());
+        boolean alreadyDisputed="DISPUTED".equals(w.getStatus());Event event=null;boolean both=false;
         if("CONFIRM".equals(action)){
             support.acknowledge(p);
             if(!"PROPOSED".equals(w.getStatus())||!Objects.equals(w.getSourceRevisionId(),s.contract().getCurrentRevisionId()))throw support.invalid("Cần xem đúng phiên bản biên bản và hợp đồng hiện tại.");
             if(support.owner(s)){if(w.getOwnerConfirmedAt()!=null)throw support.invalid("Bạn đã xác nhận bản này.");w.setOwnerConfirmedAt(support.time.now());}
             else {if(w.getTenantConfirmedAt()!=null)throw support.invalid("Bạn đã xác nhận bản này.");w.setTenantConfirmedAt(support.time.now());}
-            if(w.getOwnerConfirmedAt()!=null&&w.getTenantConfirmedAt()!=null)w.setStatus("COMPLETED");
+            if(w.getOwnerConfirmedAt()!=null&&w.getTenantConfirmedAt()!=null){w.setStatus("COMPLETED");event=Event.MOVE_IN_HANDOVER_COMPLETED;both=verifiedSignatures;}
+            else if(!verifiedSignatures)event=Event.MOVE_IN_HANDOVER_CONFIRMED;
         }else if("REPORT_ISSUE".equals(action)){
             if(w.getRevision()==0){w.setContractId(s.contract().getId());w.setSourceRevisionId(s.contract().getCurrentRevisionId());support.save(s,"REPORT_REQUESTED",reason,List.of());}
-            var c=complaints.openFromWorkflow(rental,actor,"MOVE_IN",w.getRevision(),reason);w.setComplaintId(c.id());w.setStatus("DISPUTED");
+            var c=complaints.openFromWorkflow(rental,actor,"MOVE_IN",w.getRevision(),reason);w.setComplaintId(c.id());w.setStatus("DISPUTED");if(!alreadyDisputed)event=Event.MOVE_IN_HANDOVER_DISPUTED;
         }else throw support.invalid("Thao tác không hợp lệ.");
-        support.save(s,action,reason,List.of());return view(s);
+        support.save(s,action,reason,List.of());
+        if(both)notices.enqueueBoth(s.contract(),event);else if(event!=null)notices.enqueueOther(s.contract(),actor,event);
+        return view(s);
     }
     private void eligible(RentalWorkflowSupport.Source s){if(!Set.of(ContractStatus.ACTIVE,ContractStatus.EXPIRED).contains(s.contract().getStatus())||s.contract().getSignedAt()==null)throw support.invalid("Chỉ lập/xác nhận nhận nhà khi HĐ thuê đã ký đủ; hồ sơ kết thúc chỉ được tra cứu.");}
     private RentalWorkflowView view(RentalWorkflowSupport.Source s){

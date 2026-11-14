@@ -68,13 +68,11 @@ public interface SignatureRequestRepository extends JpaRepository<SignatureReque
            "AND r.processingStartedAt < :before AND r.processingAttempts < :maxAttempts")
     int recoverStaleEmbedding(@Param("before") Instant before, @Param("maxAttempts") int maxAttempts);
 
-    @Modifying
-    @Transactional
-    @Query("UPDATE SignatureRequest r SET r.status = com.hs.contract.model.constant.SignatureRequestStatus.FAILED, " +
-           "r.failureCode = 'EMBEDDING_STUCK', r.failureMessage = 'Cần đối soát chữ ký với VNPT trước khi xử lý tiếp' " +
+    /** Candidates only: each is re-checked and failed under its own row lock (see failStaleEmbedding in the service). */
+    @Query("SELECT r.id FROM SignatureRequest r " +
            "WHERE r.status = com.hs.contract.model.constant.SignatureRequestStatus.EMBEDDING " +
-           "AND r.processingStartedAt < :before AND r.processingAttempts >= :maxAttempts")
-    int failStaleEmbedding(@Param("before") Instant before, @Param("maxAttempts") int maxAttempts);
+           "AND r.processingStartedAt < :before AND r.processingAttempts >= :maxAttempts ORDER BY r.createdAt ASC")
+    List<String> findStaleExhaustedEmbeddingIds(@Param("before") Instant before, @Param("maxAttempts") int maxAttempts);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT r FROM SignatureRequest r WHERE r.id = :id")

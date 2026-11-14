@@ -65,6 +65,7 @@ import org.springframework.transaction.support.TransactionTemplate;
     })
 @Import({
   PaymentRequestService.class,
+  com.hs.payment.notification.PaymentNotificationWriter.class,
   PaymentReceiptService.class,
   PaymentReceiptPdfWorker.class,
   PaymentReceiptStorageAccess.class,
@@ -78,6 +79,7 @@ class PaymentReceiptPostgresTest {
       basePackageClasses = {
         PaymentReceiptRepository.class,
         PaymentRequestRepository.class,
+        com.hs.payment.notification.PaymentNotificationOutboxRepository.class,
         ContractRepository.class,
         RentalRequestRepository.class,
         StorageObjectRepository.class,

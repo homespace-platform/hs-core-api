@@ -49,6 +49,8 @@ public class ContractAmendmentService {
     @org.springframework.beans.factory.annotation.Autowired private com.hs.payment.repository.DepositRecordRepository deposits;
     @org.springframework.beans.factory.annotation.Autowired private com.hs.payment.repository.PaymentRequestRepository paymentRecords;
     @org.springframework.beans.factory.annotation.Autowired private ContractListingSync listingSync;
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.contract.notification.AmendmentNotificationWriter notices;
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
     @Value("${homespace.amendment.response-hours:48}") private long responseHours = 48;
     @Value("${homespace.amendment.signing-hours:48}") private long signingHours = 48;
     @Value("${homespace.signature.mode:INTERNAL}") private String signatureMode = "INTERNAL";
@@ -124,6 +126,7 @@ public class ContractAmendmentService {
                 .listingSyncSnapshot(source == null ? null : builder.write(source))
                 .comparisonSnapshot(builder.write(result.comparison())).evidenceSnapshot(builder.write(evidence))
                 .submittedAt(time.now()).respondBy(min(time.now().plus(Duration.ofHours(responseHours)), cutoff)).signBy(cutoff).build());
+        notices.other(c, actor, com.hs.contract.notification.AmendmentNotificationWriter.Event.AMENDMENT_RESPONSE_NEEDED);
         if (drafts != null) drafts.deleteById(id);
         return response(c);
     }
@@ -147,6 +150,7 @@ public class ContractAmendmentService {
                 .proposerId(actor).recipientId(c.getLandlordId()).status("TENANT_REQUESTED").effectiveOn(time.today())
                 .changesSnapshot("{}").comparisonSnapshot("[]").evidenceSnapshot(builder.write(evidence)).reason(message)
                 .submittedAt(time.now()).respondBy(min(time.now().plus(Duration.ofHours(responseHours)),end(c).atStartOfDay(BillingTime.ZONE).toInstant())).build());
+        notices.other(c, actor, com.hs.contract.notification.AmendmentNotificationWriter.Event.AMENDMENT_RESPONSE_NEEDED);
         return response(c);
     }
 
@@ -162,7 +166,9 @@ public class ContractAmendmentService {
             case "REJECT" -> { a.setStatus("TENANT_REJECTED"); a.setResponseNote(text(p.note(),10,2000)); }
             default -> throw invalid("Chọn chấp thuận trao đổi hoặc từ chối.");
         }
-        a.setDecidedAt(time.now()); amendments.save(a); return response(c);
+        a.setDecidedAt(time.now()); amendments.save(a);
+        notices.other(c, actor, com.hs.contract.notification.AmendmentNotificationWriter.Event.AMENDMENT_DECIDED);
+        return response(c);
     }
 
     @Transactional public AmendmentPayload getDraft(String id, String actor) {
@@ -208,7 +214,9 @@ public class ContractAmendmentService {
         if ("WITHDRAW".equals(p.action())) {
             if (!actor.equals(a.getProposerId()) || !Set.of("REQUESTED", "CHANGES_REQUESTED", "APPROVED").contains(a.getStatus())) throw forbidden();
             cancelAgreement(a);
-            a.setStatus("WITHDRAWN"); a.setDecidedAt(time.now()); amendments.save(a); return response(c);
+            a.setStatus("WITHDRAWN"); a.setDecidedAt(time.now()); amendments.save(a);
+            notices.other(c, actor, com.hs.contract.notification.AmendmentNotificationWriter.Event.AMENDMENT_WITHDRAWN);
+            return response(c);
         }
         if (!actor.equals(a.getRecipientId())) throw forbidden();
         if ("APPROVE".equals(p.action()) && "APPROVED".equals(a.getStatus())) return response(c);
@@ -258,7 +266,10 @@ public class ContractAmendmentService {
             }
             default -> throw invalid("Hành động không được hỗ trợ.");
         }
-        a.setDecidedAt(time.now()); amendments.save(a); return response(c);
+        a.setDecidedAt(time.now()); amendments.save(a);
+        if ("APPROVE".equals(p.action())) signingNotices.reviewReady(contracts.findById(a.getAgreementContractId()).orElseThrow(this::forbidden));
+        else notices.other(c, actor, com.hs.contract.notification.AmendmentNotificationWriter.Event.AMENDMENT_DECIDED);
+        return response(c);
     }
 
     /** Called before initiating AND before committing a verified signature. */
@@ -322,17 +333,20 @@ public class ContractAmendmentService {
                     && (c.getStatus() != ContractStatus.ACTIVE || !time.now().isBefore(a.getRespondBy()) || !time.today().isBefore(end(c)))) {
                 a.setStatus("TENANT_EXPIRED"); a.setResponseNote("Đã đóng vì không được xử lý trong thời hạn; điều khoản hợp đồng giữ nguyên.");
                 a.setDecidedAt(time.now()); amendments.save(a);
+                notices.both(c, com.hs.contract.notification.AmendmentNotificationWriter.Event.AMENDMENT_EXPIRED);
             }
             if (Set.of("REQUESTED", "CHANGES_REQUESTED", "APPROVED").contains(a.getStatus())
                     && (c.getStatus() != ContractStatus.ACTIVE || !time.now().isBefore("APPROVED".equals(a.getStatus()) ? a.getSignBy() : a.getRespondBy()) || !time.today().isBefore(end(c)))) {
                 a.setStatus("EXPIRED"); a.setDecidedAt(time.now()); amendments.save(a);
                 cancelAgreement(a);
+                notices.both(c, com.hs.contract.notification.AmendmentNotificationWriter.Event.AMENDMENT_EXPIRED);
             }
             if ("SCHEDULED".equals(a.getStatus()) && !time.today().isBefore(a.getEffectiveOn())) {
                 createDepositDelta(c,a);
                 appliedNow=true;
                 a.setStatus("APPLIED"); Instant starts = a.getEffectiveOn().atStartOfDay(BillingTime.ZONE).toInstant();
                 a.setAppliedAt(starts.isBefore(a.getSignedAt()) ? a.getSignedAt() : starts); amendments.save(a);
+                notices.both(c, com.hs.contract.notification.AmendmentNotificationWriter.Event.AMENDMENT_APPLIED);
                 log.info("CONTRACT_AMENDMENT_APPLIED contract={} amendment={} effective={}", c.getId(), a.getId(), a.getEffectiveOn());
             }
         }

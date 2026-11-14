@@ -52,4 +52,10 @@ public interface SmartCaSignatureService {
      * Xử lý webhook từ VNPT (chỉ dùng khi webhookEnabled=true).
      */
     void handleWebhook(String tranCode);
+
+    /**
+     * Fails EMBEDDING requests whose attempts are exhausted and whose worker went silent before {@code before}
+     * (code EMBEDDING_STUCK), one locked transaction per row. Returns how many rows actually transitioned.
+     */
+    int failStaleEmbedding(java.time.Instant before, int maxAttempts);
 }

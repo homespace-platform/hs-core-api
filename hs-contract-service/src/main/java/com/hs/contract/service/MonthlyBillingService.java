@@ -6,6 +6,8 @@ import com.hs.common.advice.entity.AppException;
 import com.hs.common.time.BillingTime;
 import com.hs.contract.advice.ContractErrorCode;
 import com.hs.contract.dto.billing.*;
+import com.hs.contract.notification.InvoiceNotificationWriter;
+import com.hs.contract.notification.InvoiceNotificationWriter.Event;
 import com.hs.contract.model.*;
 import com.hs.contract.model.constant.ContractStatus;
 import com.hs.contract.repository.*;
@@ -49,6 +51,8 @@ public class MonthlyBillingService {
     private ContractTermsResolver terms;
     @org.springframework.beans.factory.annotation.Autowired
     private ContractAmendmentService amendments;
+    private static final Set<OverdueAction.Type> RECORDED_BY_LANDLORD = EnumSet.of(OverdueAction.Type.PAYMENT_REQUEST,
+            OverdueAction.Type.EXTENSION_PROPOSAL, OverdueAction.Type.MUTUAL_TERMINATION_PROPOSAL, OverdueAction.Type.LEGAL_REVIEW);
     private static final DateTimeFormatter BILLING_DATE = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private final ContractRepository contracts;
     private final ContractRevisionRepository revisions;
@@ -61,6 +65,8 @@ public class MonthlyBillingService {
     private final ListingStatusService listingStatusService;
     private final DepositRecordRepository deposits;
     private final ParkingReservationService parkingReservations;
+    private final InvoiceNotificationWriter notifications;
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.contract.notification.TerminationNotificationWriter terminationNotices;
     @Value("${homespace.billing.extension-response-hours:48}")
     private int extensionResponseHours = 48;
 
@@ -80,6 +86,7 @@ public class MonthlyBillingService {
                 tenantId, invoice.getDueAt(), fee(invoice), null, null, null));
         invoice.setExtensionRequestsSnapshot(write(history));
         invoices.save(invoice);
+        notifications.enqueueLandlord(contract, invoice, Event.INVOICE_EXTENSION_REQUESTED);
         return response(invoice);
     }
 
@@ -98,6 +105,7 @@ public class MonthlyBillingService {
         if (approve) approveExtension(invoice, pending, landlordId);
         else {
             replaceExtension(invoice, pending.decide(PaymentExtension.Status.REJECTED, time.now(), landlordId, null));
+            notifications.enqueueTenant(contract, invoice, Event.INVOICE_EXTENSION_REJECTED);
             reconcile(invoice); // Catch up from original deadline; never add the full fee twice.
         }
         invoices.save(invoice);
@@ -148,6 +156,7 @@ public class MonthlyBillingService {
         invoice.setResolutionMode("PAYMENT_EXTENSION");
         invoice.setPaymentReminderLoggedAt(null); invoice.setOverdueActionLoggedAt(null);
         log.info("BILLING_EXTENSION_APPROVED invoice={} newDue={} frozenFee={}", invoice.getId(), newDue, fee(invoice));
+        notifyTenant(invoice, Event.INVOICE_EXTENSION_APPROVED);
     }
 
     private void validateExtension(PaymentExtensionPayload payload) {
@@ -187,6 +196,7 @@ public class MonthlyBillingService {
         terminationEvent(invoice, OverdueAction.Type.UNILATERAL_TERMINATION_NOTICE, landlordId,
                 "Chủ nhà thông báo đơn phương chấm dứt: " + notice.reason()
                 + ". Người thuê có 24 giờ để khiếu nại xin cộng nợ hoặc dời hạn. Không cần xác nhận đồng ý.");
+        terminationNotices.tenant(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_NOTICE_ISSUED);
         return response(invoice);
     }
 
@@ -212,6 +222,7 @@ public class MonthlyBillingService {
         terminationEvent(invoice, OverdueAction.Type.TERMINATION_REVIEW_REQUESTED, tenantId,
                 "Người thuê khiếu nại xin " + (payload.option() == UnilateralTerminationNotice.Option.ROLLOVER ? "cộng nợ kỳ sau" : "dời hạn " + payload.days() + " ngày")
                 + ": " + payload.reason().trim() + ". Tạm dừng tự chấm dứt, chờ chủ nhà quyết định.");
+        terminationNotices.landlord(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_REVIEW_REQUESTED);
         return response(invoice);
     }
 
@@ -240,6 +251,7 @@ public class MonthlyBillingService {
             else extendPaymentDirectly(invoiceId, landlordId, new PaymentExtensionPayload(notice.requestedDays(), notice.requestReason()));
             terminationEvent(invoice, OverdueAction.Type.TERMINATION_REVIEW_DECIDED, landlordId,
                     "Chủ nhà đồng ý khiếu nại, rút quyết định đơn phương và áp dụng " + notice.requestedOption() + ": " + payload.reason().trim());
+            terminationNotices.tenant(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_REVIEW_APPROVED);
         }
         return response(invoice);
     }
@@ -257,6 +269,7 @@ public class MonthlyBillingService {
                 .decidedAt(time.now()).decisionReason("Chủ nhà rút quyết định đơn phương").build());
         contract.setTerminationCancelledAt(time.now()); contracts.save(contract); invoice.setResolutionMode(null);
         terminationEvent(invoice, OverdueAction.Type.TERMINATION_REVIEW_DECIDED, landlordId, "Chủ nhà rút quyết định đơn phương chấm dứt.");
+        terminationNotices.tenant(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_NOTICE_CANCELLED);
         return response(invoice);
     }
 
@@ -276,6 +289,7 @@ public class MonthlyBillingService {
         finalizeTermination(contract, deposit, landlordId, "Đơn phương chấm dứt theo quy tắc HomeSpace; chủ nhà đã nhận lại phòng và tài sản", true);
         replaceUnilateral(contract, notice.toBuilder().version(notice.version() + 1).handoverAt(time.now()).build());
         terminationEvent(invoice, OverdueAction.Type.TERMINATION_HANDOVER, landlordId, "Chủ nhà đã nhận lại phòng/chìa khóa/tài sản; hoàn tất xử lý cọc và mở lại tin đăng.");
+        terminationNotices.tenant(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_RETURN_COMPLETED);
         return response(invoice);
     }
 
@@ -325,6 +339,7 @@ public class MonthlyBillingService {
                     .decidedAt(time.now()).decisionReason("Đã xác nhận thanh toán hóa đơn").build());
             contract.setTerminationCancelledAt(time.now()); contracts.save(contract); invoice.setResolutionMode(null);
             terminationEvent(invoice, OverdueAction.Type.TERMINATION_REVIEW_DECIDED, "SYSTEM", "Rút quyết định đơn phương vì hóa đơn đã được xác nhận thanh toán.");
+            terminationNotices.tenant(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_NOTICE_CANCELLED);
         } else if (notice.status() == UnilateralTerminationNotice.Status.NOTICE && !time.now().isBefore(notice.respondBy())
                 && billable(contract) && unsettledAndUnreported(invoice.getId())) {
             finishUnilateral(contract, invoice, notice, "SYSTEM", "Hết 24 giờ, người thuê không gửi khiếu nại xin đổi phương án.");
@@ -338,6 +353,7 @@ public class MonthlyBillingService {
         for (var draft : invoices.findByContractIdOrderByPeriodIndexDesc(contract.getId()))
             if (draft.getStatus() == MonthlyInvoiceStatus.DRAFT) { draft.setStatus(MonthlyInvoiceStatus.CANCELLED); invoices.save(draft); }
         terminationEvent(invoice, OverdueAction.Type.TERMINATION_ENDED, actor, reason + " Hợp đồng đã chấm dứt; công nợ còn nguyên, chờ xác nhận bàn giao.");
+        terminationNotices.both(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_ENDED);
         if (lifecycle != null) lifecycle.cancelPendingRenewalsForClosedParent(contract);
     }
     private void requireLegacyTermination(Contract contract, String invoiceId) {
@@ -387,6 +403,14 @@ public class MonthlyBillingService {
                 r.decide(PaymentExtension.Status.REJECTED, time.now(), actorId, null)));
         reconcile(invoice);
     }
+    // The contract row is already locked and managed in this transaction; the writer re-validates parties.
+    private Contract lockedContract(MonthlyInvoice invoice) {
+        return contracts.findById(invoice.getContractId()).orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+    }
+    private void notifyTenant(MonthlyInvoice invoice, Event type) { notifications.enqueueTenant(lockedContract(invoice), invoice, type); }
+    private void notifyLandlord(MonthlyInvoice invoice, Event type) { notifications.enqueueLandlord(lockedContract(invoice), invoice, type); }
+    private void notifyBoth(MonthlyInvoice invoice, Event type) { notifications.enqueueBoth(lockedContract(invoice), invoice, type); }
+
     /** Lock order shared with scheduler: contract -> invoice -> payment. */
     private MonthlyInvoice lockInvoice(String invoiceId) {
         String contractId = invoices.findContractIdByInvoiceId(invoiceId)
@@ -459,7 +483,9 @@ public class MonthlyBillingService {
         invoice.setOverdueActionsSnapshot(write(history));
         log.info("BILLING_OVERDUE_ACTION_RECORDED contract={} invoice={} action={} type={}",
                 contract.getId(), invoiceId, action.id(), action.type());
-        return response(invoices.save(invoice));
+        invoices.save(invoice);
+        notifications.enqueueTenant(contract, invoice, Event.INVOICE_OVERDUE_ACTION_RECORDED);
+        return response(invoice);
     }
 
     /** Tenant acknowledgement is evidence of viewing, not acceptance of a new signed agreement. */
@@ -482,7 +508,11 @@ public class MonthlyBillingService {
         invoice.setOverdueActionsSnapshot(write(history));
         log.info("BILLING_OVERDUE_ACTION_ACKNOWLEDGED contract={} invoice={} action={}",
                 contract.getId(), invoiceId, actionId);
-        return response(invoices.save(invoice));
+        invoices.save(invoice);
+        // Termination/system entries share this list; their notices belong to Phase 6.
+        if (RECORDED_BY_LANDLORD.contains(action.type()))
+            notifications.enqueueLandlord(contract, invoice, Event.INVOICE_OVERDUE_ACTION_ACKNOWLEDGED);
+        return response(invoice);
     }
 
     /** Freeze the currently accrued balance and carry it exactly once when the next bill is issued. */
@@ -517,7 +547,9 @@ public class MonthlyBillingService {
         invoice.setResolutionMode("ROLLOVER");
         log.warn("BILLING_DEFERRED landlord={} tenant={} contract={} invoice={} amount={}",
                 landlordId, contract.getTenantId(), contract.getId(), invoiceId, invoice.getTotalAmount());
-        return response(invoices.save(invoice));
+        invoices.save(invoice);
+        notifications.enqueueTenant(contract, invoice, Event.INVOICE_DEFERRED);
+        return response(invoice);
     }
 
     /** Proposal alone has no legal or inventory effect. */
@@ -554,6 +586,7 @@ public class MonthlyBillingService {
         contracts.save(contract);
         log.warn("BILLING_TERMINATION_PROPOSED landlord={} tenant={} contract={} invoice={}",
                 landlordId, contract.getTenantId(), contract.getId(), invoiceId);
+        terminationNotices.tenant(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_RESPONSE_NEEDED);
         return response(invoice);
     }
 
@@ -585,6 +618,7 @@ public class MonthlyBillingService {
         contracts.save(contract);
         log.warn("BILLING_TERMINATION_ACCEPTED landlord={} tenant={} contract={} invoice={}",
                 contract.getLandlordId(), tenantId, contract.getId(), invoiceId);
+        terminationNotices.landlord(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_AGREED);
         return response(invoice);
     }
 
@@ -606,6 +640,7 @@ public class MonthlyBillingService {
         contracts.save(contract);
         log.warn("BILLING_TERMINATION_DECLINED tenant={} contract={} invoice={}",
                 tenantId, contract.getId(), invoiceId);
+        terminationNotices.landlord(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_DECLINED);
         return response(invoice);
     }
 
@@ -629,6 +664,7 @@ public class MonthlyBillingService {
         contracts.save(contract);
         log.warn("BILLING_TERMINATION_WITHDRAWN landlord={} contract={} invoice={}",
                 landlordId, contract.getId(), invoiceId);
+        terminationNotices.tenant(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_WITHDRAWN);
         return response(invoice);
     }
 
@@ -710,6 +746,7 @@ public class MonthlyBillingService {
 
     private void finalizeTermination(Contract contract, DepositRecord deposit,
                                      String landlordId, String reason, boolean forced) {
+        boolean ending = contract.getStatus() == ContractStatus.ACTIVE;
         if(payments.getContractPaymentRequests(contract.getId(),contract.getLandlordId()).stream().anyMatch(p->p.type()==PaymentType.DEPOSIT_ADJUSTMENT && p.status()!=PaymentStatus.CONFIRMED))
             throw new AppException(ContractErrorCode.TERMINATION_DEPOSIT_NOT_READY);
         listingStatusService.releaseRentedAfterTermination(contract.getListingId(), landlordId);
@@ -731,6 +768,7 @@ public class MonthlyBillingService {
         if (forced && contract.getTerminationForcedAt() == null) contract.setTerminationForcedAt(time.now());
         contracts.save(contract);
         if(lifecycle!=null) lifecycle.cancelPendingRenewalsForClosedParent(contract);
+        if (ending) terminationNotices.both(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_ENDED);
     }
 
     private boolean signedLandlordTerminationClause(Contract contract) {
@@ -952,6 +990,8 @@ public class MonthlyBillingService {
             carryFrom.setStatus(MonthlyInvoiceStatus.ROLLED_OVER);
             carryFrom.setRolledToInvoiceId(invoice.getId());
             invoices.save(carryFrom);
+            // About the OLD invoice (its QR is cancelled); the new invoice gets its own ISSUED below.
+            notifications.enqueueTenant(contract, carryFrom, Event.INVOICE_ROLLED_OVER);
             log.info("BILLING_BALANCE_ROLLED contract={} from={} to={} amount={}",
                     contract.getId(), carryFrom.getId(), invoice.getId(), carryFrom.getTotalAmount());
         }
@@ -964,12 +1004,14 @@ public class MonthlyBillingService {
                     contract.getLandlordId(), total, invoice.getLineItemsSnapshot(), invoice.getDueAt());
             invoice.setPaymentRequestId(payment.getId());
             invoice.setStatus(MonthlyInvoiceStatus.UNPAID);
+            notifications.enqueueTenant(contract, invoice, Event.INVOICE_ISSUED); // zero-total PAID branch stays silent
         }
         invoices.save(invoice);
         if (automatic) {
-            reconcile(invoice);
-            autoDeferIdleInvoice(invoice);
-            processMilestones(contract, invoice);
+            // ISSUED already tells the tenant; do not announce this invoice's overdue, fee or action window again.
+            reconcile(invoice, false);
+            autoDeferIdleInvoice(invoice, false);
+            processMilestones(contract, invoice, false);
         }
         return response(invoice);
     }
@@ -990,17 +1032,18 @@ public class MonthlyBillingService {
             if (end.minusDays(1).isAfter(time.today())) break;
             int period = index;
             if (invoices.findByContractIdAndPeriodIndex(contractId, period).isEmpty()) {
-                invoices.saveAndFlush(MonthlyInvoice.builder()
+                MonthlyInvoice draft = invoices.saveAndFlush(MonthlyInvoice.builder()
                         .contractId(contractId).periodIndex(period).periodStart(start.plusMonths(period))
                         .periodEndExclusive(end).status(MonthlyInvoiceStatus.DRAFT)
                         .totalAmount(BigDecimal.ZERO).build());
+                notifications.enqueueLandlord(contract, draft, Event.INVOICE_DRAFT_READY);
             }
         }
         for (MonthlyInvoice invoice : invoices.findByContractIdOrderByPeriodIndexDesc(contractId)) {
             MonthlyInvoice locked = lockInvoice(invoice.getId());
             reconcile(locked);
             autoDeferIdleInvoice(locked);
-            processMilestones(contract, locked);
+            processMilestones(contract, locked, true);
         }
     }
 
@@ -1025,7 +1068,10 @@ public class MonthlyBillingService {
         }
     }
 
-    private void reconcile(MonthlyInvoice invoice) {
+    private void reconcile(MonthlyInvoice invoice) { reconcile(invoice, true); }
+
+    /** @param announce false only for the invoice issued in this very transaction (its ISSUED notice covers current state). */
+    private void reconcile(MonthlyInvoice invoice, boolean announce) {
         Contract noticeContract = contracts.findById(invoice.getContractId()).orElse(null);
         var notice = unilateralFor(noticeContract, invoice.getId());
         if (notice != null && notice.pending()) {
@@ -1038,14 +1084,20 @@ public class MonthlyBillingService {
         // Also needed when reconciling the previous bill during next-period issue.
         payments.lockMonthlyPayment(invoice.getId());
         Optional<PaymentRequest> payment = payments.findByInvoiceId(invoice.getId());
-        pendingExtension(invoice).ifPresent(request -> {
+        boolean tenantInformed = false; // one tenant notice per reconcile: expiry wins over overdue and fee notices
+        PaymentExtension request = pendingExtension(invoice).orElse(null);
+        if (request != null) {
             boolean settled = payment.map(p -> p.getStatus() == PaymentStatus.CONFIRMED).orElse(false);
             if (settled || !time.now().isBefore(request.respondBy())) {
                 replaceExtension(invoice, request.decide(settled ? PaymentExtension.Status.CLOSED : PaymentExtension.Status.EXPIRED,
                         time.now(), "SYSTEM", null));
                 invoices.save(invoice);
+                if (!settled) { // a paid request closes silently: the receipt notice already told the payer
+                    notifyTenant(invoice, Event.INVOICE_EXTENSION_EXPIRED);
+                    tenantInformed = true;
+                }
             }
-        });
+        }
         if ("PAYMENT_EXTENSION".equals(invoice.getResolutionMode()) && !extensionActive(invoice)) {
             invoice.setResolutionMode(null); invoices.save(invoice);
         }
@@ -1059,6 +1111,7 @@ public class MonthlyBillingService {
                     && activeTerminationProposal(contract)) {
                 contract.setTerminationCancelledAt(time.now());
                 contracts.save(contract);
+                terminationNotices.tenant(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_WITHDRAWN);
                 log.info("BILLING_TERMINATION_CANCELLED_BY_PAYMENT contract={} invoice={}",
                         contract.getId(), invoice.getId());
             }
@@ -1067,17 +1120,27 @@ public class MonthlyBillingService {
                 && contracts.findById(invoice.getContractId())
                     .map(this::billable).orElse(false)
                 && invoice.getDueAt() != null && invoice.getDueAt().isBefore(time.now())) {
-            if (invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE) {
+            boolean becameOverdue = invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE;
+            if (becameOverdue) {
                 invoice.setStatus(MonthlyInvoiceStatus.OVERDUE);
                 invoices.save(invoice);
             }
             payments.markMonthlyOverdue(invoice.getId(), time.now());
-            accrueLateFee(invoice, payment.get());
+            boolean feeIncreased = accrueLateFee(invoice, payment.get());
+            if (announce && becameOverdue) {
+                if (tenantInformed) notifyLandlord(invoice, Event.INVOICE_OVERDUE);
+                else notifyBoth(invoice, Event.INVOICE_OVERDUE);
+                tenantInformed = true;
+            }
+            if (announce && feeIncreased && !tenantInformed) notifyTenant(invoice, Event.INVOICE_AMOUNT_UPDATED);
         }
     }
 
     /** Same contract/invoice/payment locks as manual decisions; no consent is invented. */
-    private void autoDeferIdleInvoice(MonthlyInvoice invoice) {
+    private void autoDeferIdleInvoice(MonthlyInvoice invoice) { autoDeferIdleInvoice(invoice, true); }
+
+    /** @param announceTenant false only for the invoice issued in this very transaction: its ISSUED notice is the tenant's single message. */
+    private void autoDeferIdleInvoice(MonthlyInvoice invoice, boolean announceTenant) {
         if (invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE
                 || invoice.getDueAt() == null || time.now().isBefore(MonthlyBillingSchedule.autoRolloverAt(invoice.getDueAt()))
                 || invoice.getDeferredAt() != null || pendingExtension(invoice).isPresent()) return;
@@ -1099,6 +1162,8 @@ public class MonthlyBillingService {
                 null, time.now(), "SYSTEM", null, null));
         invoice.setOverdueActionsSnapshot(write(history));
         invoices.save(invoice);
+        if (announceTenant) notifyBoth(invoice, Event.INVOICE_DEFERRED);
+        else notifyLandlord(invoice, Event.INVOICE_DEFERRED); // the owner was not told about the issue, so still learns the decision
         log.info("BILLING_AUTO_DEFERRED contract={} invoice={} amount={} fee={}",
                 invoice.getContractId(), invoice.getId(), invoice.getTotalAmount(), fee(invoice));
     }
@@ -1148,7 +1213,7 @@ public class MonthlyBillingService {
                     && !Boolean.TRUE.equals(c.get("includedInRent"))) || invoice.getWaterEnd() != null);
     }
 
-    private void processMilestones(Contract contract, MonthlyInvoice invoice) {
+    private void processMilestones(Contract contract, MonthlyInvoice invoice, boolean announce) {
         Instant now = time.now();
         boolean changed = false;
         if (invoice.getStatus() == MonthlyInvoiceStatus.DRAFT) {
@@ -1187,19 +1252,24 @@ public class MonthlyBillingService {
             changed = true;
             log.warn("BILLING_OVERDUE_ACTION_REQUIRED landlord={} tenant={} contract={} invoice={} amount={}",
                     contract.getLandlordId(), contract.getTenantId(), contract.getId(), invoice.getId(), invoice.getTotalAmount());
+            // Marker and log are unchanged; only a landlord who still has a decision to make is told.
+            if (announce && invoice.getDeferredAt() == null && !activeTerminationProposal(contract)
+                    && !extensionActive(invoice) && pendingExtension(invoice).isEmpty())
+                notifications.enqueueLandlord(contract, invoice, Event.INVOICE_OVERDUE_ACTION_REQUIRED);
         }
         if (changed) invoices.save(invoice);
     }
 
-    private void accrueLateFee(MonthlyInvoice invoice, PaymentRequest payment) {
-        if (invoice.getDeferredAt() != null || invoice.isLateFeeExempt() || pendingExtension(invoice).isPresent()) return;
+    /** @return true only when the payment total (and QR) actually increased. */
+    private boolean accrueLateFee(MonthlyInvoice invoice, PaymentRequest payment) {
+        if (invoice.getDeferredAt() != null || invoice.isLateFeeExempt() || pendingExtension(invoice).isPresent()) return false;
         if (!List.of(PaymentStatus.AWAITING_TRANSFER, PaymentStatus.OVERDUE,
-                PaymentStatus.REJECTED).contains(payment.getStatus())) return;
+                PaymentStatus.REJECTED).contains(payment.getStatus())) return false;
         Contract contract = contracts.findById(invoice.getContractId()).orElse(null);
-        if (contract == null) return;
-        if (contract.getTerminationAcceptedAt() != null && contract.getTerminationCompletedAt() == null) return;
+        if (contract == null) return false;
+        if (contract.getTerminationAcceptedAt() != null && contract.getTerminationCompletedAt() == null) return false;
         ContractRevision revision = costRevision(contract, invoice);
-        if (revision == null) return;
+        if (revision == null) return false;
         Map<String, Object> policies = read(revision.getPoliciesSnapshot(), new TypeReference<Map<String, Object>>() {});
         LatePaymentPolicy policy = LatePaymentPolicy.from(policies);
         PaymentExtension approved=extensions(invoice).stream().filter(r->r.status()==PaymentExtension.Status.APPROVED)
@@ -1207,7 +1277,7 @@ public class MonthlyBillingService {
         InvoiceLine calculated;
         if(approved!=null) {
             // Missing metadata belongs to an older decision; never retroactively introduce a fee.
-            if(!Boolean.TRUE.equals(approved.lateFeeResumesAfterDue()) || !Objects.equals(approved.newDueAt(),invoice.getDueAt()))return;
+            if(!Boolean.TRUE.equals(approved.lateFeeResumesAfterDue()) || !Objects.equals(approved.newDueAt(),invoice.getDueAt()))return false;
             calculated=resumedExtensionFee(policy,approved,time.now());
         }else {
             Instant feeDueAt=invoice.getOriginalDueAt()==null?invoice.getDueAt():invoice.getOriginalDueAt();
@@ -1218,7 +1288,7 @@ public class MonthlyBillingService {
         }
         BigDecimal accrued=calculated.amount();
         BigDecimal previous = invoice.getLateFeeAmount() == null ? BigDecimal.ZERO : invoice.getLateFeeAmount();
-        if (accrued.compareTo(previous) <= 0) return;
+        if (accrued.compareTo(previous) <= 0) return false;
         BigDecimal base = invoice.getBaseAmount() == null
                 ? invoice.getTotalAmount().subtract(previous) : invoice.getBaseAmount();
         List<InvoiceLine> lines = new ArrayList<>(readList(invoice.getLineItemsSnapshot(),
@@ -1235,7 +1305,9 @@ public class MonthlyBillingService {
             invoices.save(invoice);
             log.info("BILLING_LATE_FEE_UPDATED contract={} invoice={} previous={} fee={} total={}",
                     contract.getId(), invoice.getId(), previous, accrued, newTotal);
+            return true;
         }
+        return false;
     }
 
     /** Add only newly overdue days to the reviewed amount; the invoice-wide day/money cap never resets. */

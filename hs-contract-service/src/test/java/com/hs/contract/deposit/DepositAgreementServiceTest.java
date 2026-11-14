@@ -43,6 +43,7 @@ class DepositAgreementServiceTest {
     @Spy ContractFieldCatalog catalog = new ContractFieldCatalog();
     @Spy ObjectMapper mapper = new ObjectMapper();
     @Mock BillingTime time;
+    @Mock com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
     @InjectMocks DepositAgreementService service;
     final Instant now = Instant.parse("2026-10-24T03:00:00Z");
     RentalRequest rental;

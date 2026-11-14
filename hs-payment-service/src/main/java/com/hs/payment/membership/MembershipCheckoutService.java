@@ -4,9 +4,12 @@ import com.hs.common.advice.entity.AppException;
 import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.membership.MembershipService;
 import com.hs.listing.membership.MembershipTier;
+import com.hs.payment.membership.notification.MembershipNotificationWriter;
 import com.hs.payment.repository.EthPaymentQuoteRepository;
 import com.hs.payment.service.EthPaymentChainClient;
 import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +33,8 @@ public class MembershipCheckoutService {
     private final SepaySigner sepaySigner;
     private final EthPaymentQuoteRepository ethQuotes;
     private final EthPaymentChainClient ethChain;
+    private final MembershipNotificationWriter notifications;
+    @PersistenceContext private EntityManager em;
     @Value("${homespace.membership.sepay.merchant-id}") private String sepayMerchantId;
     @Value("${homespace.membership.sepay.checkout-url}") private String sepayCheckoutUrl;
     @Value("${homespace.membership.sepay.return-url}") private String sepayReturnUrl;
@@ -110,12 +115,21 @@ public class MembershipCheckoutService {
         memberships.lockOwner(ownerId);
         MembershipOrder o = orders.lockById(id)
                 .orElseThrow(() -> new AppException(ListingErrorCode.MEMBERSHIP_ORDER_NOT_FOUND));
+        refresh(o);
         if (!o.getOwnerId().equals(ownerId)) throw new AppException(ListingErrorCode.LISTING_FORBIDDEN);
         if (o.getStatus() == MembershipOrder.Status.PENDING) {
             requireEthQuoteCleared(o);
             o.setStatus(MembershipOrder.Status.CANCELLED);
         }
         return OrderView.from(o);
+    }
+
+    /**
+     * The unlocked preview read leaves the order in the first-level cache, so lockById returns that stale instance.
+     * Reload it under the lock so a concurrent winner's PAID/REVIEW/CANCELLED state is seen. Null in direct unit fixtures.
+     */
+    private void refresh(Object entity) {
+        if (em != null) em.refresh(entity);
     }
 
     private void requireEthQuoteCleared(MembershipOrder order) {
@@ -156,6 +170,7 @@ public class MembershipCheckoutService {
         if (preview == null || preview.getProvider() != MembershipOrder.Provider.SEPAY) return false;
         memberships.lockOwner(preview.getOwnerId());
         MembershipOrder o = orders.lockById(id).orElse(null);
+        if (o != null) refresh(o);
         if (o == null || o.getProvider() != MembershipOrder.Provider.SEPAY
                 || orderAmount.compareTo(BigDecimal.valueOf(o.getAmountVnd())) != 0
                 || transactionAmount.compareTo(BigDecimal.valueOf(o.getAmountVnd())) != 0) return false;
@@ -163,10 +178,13 @@ public class MembershipCheckoutService {
             if (!transactionId.equals(o.getTransactionNo())) {
                 log.warn("SePay order {} received a second payment transaction: existing={}, incoming={}",
                         id, o.getTransactionNo(), transactionId);
+                MembershipOrder.Status previous = o.getStatus();
                 o.setStatus(MembershipOrder.Status.REVIEW);
+                notifications.enqueueTransition(o, previous); // silent when it was already REVIEW
             }
             return true;
         }
+        MembershipOrder.Status before = o.getStatus();
         Instant now = Instant.now();
         if (o.getStatus() != MembershipOrder.Status.PENDING || !o.getExpiresAt().isAfter(now)) {
             o.setStatus(MembershipOrder.Status.REVIEW);
@@ -177,6 +195,7 @@ public class MembershipCheckoutService {
         }
         o.setTransactionNo(transactionId);
         o.setPaidAt(now);
+        notifications.enqueueTransition(o, before);
         return true;
     }
 

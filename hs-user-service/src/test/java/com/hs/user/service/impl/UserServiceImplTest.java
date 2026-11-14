@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import com.hs.user.model.User;
 import com.hs.user.model.constant.KycProvider;
 import com.hs.user.model.constant.KycStatus;
+import com.hs.user.notification.AccountNotificationWriter;
 import com.hs.user.repository.AddressRepository;
 import com.hs.user.repository.KycVerificationRepository;
 import com.hs.user.repository.RoleRepository;
@@ -49,7 +50,8 @@ class UserServiceImplTest {
                 mock(AddressRepository.class),
                 verifications,
                 mock(KeycloakUserService.class),
-                mock(CurrentUserUtils.class));
+                mock(CurrentUserUtils.class),
+                mock(AccountNotificationWriter.class));
         var profile = service.getPublicUserProfile("user-1");
         Set<String> fields = Arrays.stream(profile.getClass().getRecordComponents())
                 .map(component -> component.getName())

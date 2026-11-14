@@ -25,6 +25,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -38,6 +39,7 @@ class SmartCaPollingOutcomeTest {
     @Mock SmartCaClient smartCaClient;
     @Mock SmartCaProperties properties;
     @Mock PlatformTransactionManager transactionManager;
+    @Mock com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
     @InjectMocks SmartCaSignatureServiceImpl service;
     SignatureRequest request;
 
@@ -67,6 +69,8 @@ class SmartCaPollingOutcomeTest {
         assertNotNull(request.getFailedAt()); assertNull(request.getProviderSignatureValue());
         assertEquals(role == SignerRole.LANDLORD ? ContractStatus.DRAFT : ContractStatus.TENANT_SIGNATURE_PENDING, contract.getStatus());
         assertNull(contract.getSignedAt()); verify(requestRepository).save(request);
+        if ("FAILED".equals(outcome)) verify(signingNotices).needsReview(request, contract);
+        else verifyNoInteractions(signingNotices);
     }
 
     @Test void successfulProviderSignatureStillMovesToEmbedding() {
@@ -84,12 +88,15 @@ class SmartCaPollingOutcomeTest {
         transactions(); request.setStatus(SignatureRequestStatus.valueOf(state)); request.setExpiresAt(Instant.now().minusSeconds(1));
         when(requestRepository.findById("request")).thenReturn(Optional.of(request));
         when(requestRepository.findByIdForUpdate("request")).thenReturn(Optional.of(request));
+        var contract = Contract.builder().id("contract").landlordId("landlord").tenantId("tenant").build();
+        when(contractRepository.findById("contract")).thenReturn(Optional.of(contract));
         when(smartCaClient.getSignatureStatus("transaction", "doc"))
                 .thenThrow(new AppException(ContractErrorCode.SIGNATURE_PROVIDER_UNAVAILABLE));
         service.processPendingRequest("request");
         assertEquals(SignatureRequestStatus.FAILED, request.getStatus());
         assertEquals("PROVIDER_STATE_UNKNOWN", request.getFailureCode());
-        assertNotNull(request.getFailedAt()); verifyNoInteractions(contractRepository);
+        assertNotNull(request.getFailedAt());
+        verify(signingNotices).needsReview(request, contract);
     }
 
     @Test void transientPollErrorBeforeDeadlineKeepsTheExistingRequest() {
@@ -113,6 +120,39 @@ class SmartCaPollingOutcomeTest {
         service.processPendingRequest("request");
         assertEquals(SignatureRequestStatus.PROVIDER_SIGNED, signed.getStatus());
         verify(requestRepository, never()).save(any());
+    }
+
+    @Test void terminalEmbeddingFailureNotifiesOnceAndCannotResurrectAnotherOutcome() {
+        transactions();
+        request.setStatus(SignatureRequestStatus.EMBEDDING);
+        request.setProcessingAttempts(3);
+        var contract = Contract.builder().id("contract").landlordId("landlord").tenantId("tenant").build();
+        when(requestRepository.findByIdForUpdate("request")).thenReturn(Optional.of(request));
+        when(contractRepository.findById("contract")).thenReturn(Optional.of(contract));
+        ReflectionTestUtils.invokeMethod(service, "markEmbeddingFailed", "request", "EMBED_FAILED", "failed");
+        assertEquals(SignatureRequestStatus.FAILED, request.getStatus());
+        verify(signingNotices).needsReview(request, contract);
+        ReflectionTestUtils.invokeMethod(service, "markEmbeddingFailed", "request", "EMBED_FAILED", "failed");
+        verify(signingNotices, times(1)).needsReview(request, contract);
+        request.setStatus(SignatureRequestStatus.CANCELLED);
+        ReflectionTestUtils.invokeMethod(service, "markEmbeddingFailed", "request", "EMBED_FAILED", "failed");
+        assertEquals(SignatureRequestStatus.CANCELLED, request.getStatus());
+    }
+
+    @Test void staleExhaustionRechecksTheLockedRowBeforeFailingOnce() {
+        transactions();
+        Instant before = Instant.now();
+        request.setStatus(SignatureRequestStatus.EMBEDDING);
+        request.setProcessingStartedAt(before.minusSeconds(1));
+        request.setProcessingAttempts(3);
+        var contract = Contract.builder().id("contract").landlordId("landlord").tenantId("tenant").build();
+        when(requestRepository.findStaleExhaustedEmbeddingIds(before, 3)).thenReturn(List.of("request"));
+        when(requestRepository.findByIdForUpdate("request")).thenReturn(Optional.of(request));
+        when(contractRepository.findById("contract")).thenReturn(Optional.of(contract));
+        assertEquals(1, service.failStaleEmbedding(before, 3));
+        assertEquals("EMBEDDING_STUCK", request.getFailureCode());
+        assertEquals(0, service.failStaleEmbedding(before, 3));
+        verify(signingNotices, times(1)).needsReview(request, contract);
     }
 
     @Test void directInitiationCannotBypassTheUnknownProviderStateRetryGuard() {

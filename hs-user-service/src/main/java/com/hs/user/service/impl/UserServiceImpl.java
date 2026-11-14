@@ -35,6 +35,7 @@ import com.hs.user.model.Role;
 import com.hs.user.model.User;
 import com.hs.user.model.constant.KycProvider;
 import com.hs.user.model.constant.KycStatus;
+import com.hs.user.notification.AccountNotificationWriter;
 import com.hs.user.repository.AddressRepository;
 import com.hs.user.repository.KycVerificationRepository;
 import com.hs.user.repository.RoleRepository;
@@ -62,6 +63,7 @@ public class UserServiceImpl implements UserService {
         KycVerificationRepository kycVerificationRepository;
         KeycloakUserService keycloakUserService;
         CurrentUserUtils currentUserUtils;
+        AccountNotificationWriter accountNotifications;
 
         @Override
         public AdminCreateUserResponse createUser(AdminCreateUserRequest request) {
@@ -70,7 +72,7 @@ public class UserServiceImpl implements UserService {
 
         @Override
         public UserResponse updateUser(String userId, AdminUpdateUserRequest request) {
-                User user = userRepository.findById(userId)
+                User user = userRepository.findByIdForUpdate(userId)
                                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
 
                 validateUniqueAccountFields(user, request.username(), request.email(), request.phone());
@@ -107,9 +109,13 @@ public class UserServiceImpl implements UserService {
                         user.setGender(request.gender());
                 }
 
-                applyRoleChange(user, request.roleId());
+                boolean roleChanged = applyRoleChange(user, request.roleId());
 
                 userRepository.save(user);
+                if (roleChanged) {
+                        accountNotifications.enqueue(user, currentUserUtils.getCurrentUserId(),
+                                        AccountNotificationWriter.Event.ACCOUNT_ROLE_CHANGED);
+                }
                 log.info("Admin updated user {}", userId);
                 return toUserResponse(user);
         }
@@ -314,13 +320,15 @@ public class UserServiceImpl implements UserService {
 
         @Override
     public void updateUserStatus(String userId, boolean enabled) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
 
         if (!enabled && userId.equals(currentUserUtils.getCurrentUserId())) {
             throw new AppException(UserErrorCode.USER_CANNOT_DISABLE_SELF);
         }
 
+        // Baseline is read under the row lock, so a repeated or concurrent same-value call sees no transition.
+        boolean statusChanged = Boolean.TRUE.equals(user.getActive()) != enabled;
         user.setActive(enabled);
         userRepository.save(user);
 
@@ -329,6 +337,13 @@ public class UserServiceImpl implements UserService {
                 UpdateKeycloakUserRequest.builder()
                         .enabled(enabled)
                         .build());
+
+        // Only after the synchronous Keycloak update succeeded; any failure above rolls everything back.
+        if (statusChanged) {
+                accountNotifications.enqueue(user, currentUserUtils.getCurrentUserId(),
+                                enabled ? AccountNotificationWriter.Event.ACCOUNT_ENABLED
+                                                : AccountNotificationWriter.Event.ACCOUNT_DISABLED);
+        }
 
         log.info("Requested user {} status update to enabled={}", userId, enabled);
     }
@@ -374,9 +389,10 @@ public class UserServiceImpl implements UserService {
                 }
         }
 
-        private void applyRoleChange(User user, String roleId) {
+        /** Returns true only when the persisted role assignment actually changes (compared by role id). */
+        private boolean applyRoleChange(User user, String roleId) {
                 if (!hasText(roleId)) {
-                        return;
+                        return false;
                 }
                 if (user.getId().equals(currentUserUtils.getCurrentUserId())) {
                         throw new AppException(UserErrorCode.USER_CANNOT_UPDATE_OWN_ROLE);
@@ -387,10 +403,11 @@ public class UserServiceImpl implements UserService {
                                 .orElseThrow(() -> new AppException(UserErrorCode.ROLE_NOT_EXISTED));
 
                 if (user.getRole() != null && role.getId().equals(user.getRole().getId())) {
-                        return;
+                        return false;
                 }
 
                 user.setRole(role);
+                return true;
         }
 
         private boolean hasText(String value) {

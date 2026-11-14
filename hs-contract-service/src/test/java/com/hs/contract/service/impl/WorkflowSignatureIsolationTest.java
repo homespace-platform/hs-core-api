@@ -35,6 +35,7 @@ class WorkflowSignatureIsolationTest {
     @Mock ContractDocumentProofEnqueuer documentProofEnqueuer;
     @Mock com.hs.contract.service.ContractLifecycleService lifecycle;
     @Mock jakarta.persistence.EntityManager entityManager;
+    @Mock com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
     @InjectMocks SmartCaSignatureServiceImpl service;
 
     @Test void finalWorkflowSignatureUsesOnlyTheDedicatedWorkflowCommitter() throws Exception {
@@ -45,15 +46,17 @@ class WorkflowSignatureIsolationTest {
         verify(rentals,never()).save(any());
         verify(documents).save(argThat(d->d.getPurpose()==DocumentPurpose.SIGNED_FINAL && "workflow".equals(d.getContractId())
                 && "DC-1_da_ky_hai_ben.pdf".equals(d.getFileName())));
+        verifyNoInteractions(signingNotices); // The committer chooses completed-handover vs signed-PDF notice.
     }
     @Test void firstWorkflowSignatureOnlyOpensTheSecondSignerWindow() throws Exception {
         var c=run(SignerRole.LANDLORD,ContractStatus.LANDLORD_SIGNATURE_PENDING);
         assertEquals(ContractStatus.TENANT_SIGNATURE_PENDING,c.getStatus());assertNull(c.getSignedAt());
         verify(lifecycle,never()).applyRenewalAfterSignatures(any());verifyNoInteractions(depositAgreements);
         verifyNoInteractions(onboarding,payments,listingStatus,parking);
+        verify(signingNotices).signingTurn(c);
     }
     @Test void lateProviderResultForReplacedSourceNeverWritesOrActivatesAWorkflow() {
-        sourceStale=true;assertThrows(com.hs.common.advice.entity.AppException.class,()->run(SignerRole.TENANT,ContractStatus.TENANT_SIGNATURE_PENDING));verify(documents,never()).save(any());verify(lifecycle,never()).applyRenewalAfterSignatures(any());verifyNoInteractions(onboarding,payments,listingStatus,parking);
+        sourceStale=true;assertThrows(com.hs.common.advice.entity.AppException.class,()->run(SignerRole.TENANT,ContractStatus.TENANT_SIGNATURE_PENDING));verify(documents,never()).save(any());verify(lifecycle,never()).applyRenewalAfterSignatures(any());verifyNoInteractions(onboarding,payments,listingStatus,parking,signingNotices);
     }
     private Contract run(SignerRole role,ContractStatus status) throws Exception {
         ReflectionTestUtils.setField(service,"depositAgreements",depositAgreements);

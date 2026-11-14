@@ -27,6 +27,7 @@ public class MutualTerminationService {
     private final ComplaintCaseService complaints;
     @org.springframework.beans.factory.annotation.Autowired private ContractLifecycleService lifecycle;
     @org.springframework.beans.factory.annotation.Autowired private FinalRentCalculator rentCalculator;
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.contract.notification.TerminationNotificationWriter terminationNotices;
 
     @Transactional public FinalRentCalculation calculate(String rental,String actor,LocalDate end,String policy){var s=support.lock(rental,actor,"EARLY_EXIT");eligible(s);return rentCalculator.calculate(s,end,policy);}
 
@@ -37,9 +38,17 @@ public class MutualTerminationService {
         // A counter proposal replaces the reviewed version and clears every old acknowledgement.
         s.record().setCalculationJson(support.json(rentCalculator.calculate(s,p.endExclusive(),p.finalRentPolicy())));
         support.propose(s,p,p.reason(),support.evidence(s,p.evidenceIds()),null);
-        s.contract().setMutualTerminationWorkflowId(s.record().getId());support.contracts.save(s.contract());return view(s);
+        s.contract().setMutualTerminationWorkflowId(s.record().getId());support.contracts.save(s.contract());
+        terminationNotices.other(s.contract(),actor,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_RESPONSE_NEEDED);
+        return view(s);
     }
     @Transactional public RentalWorkflowView act(String rental,String actor,String action,RentalWorkflowPayloads.Action p){
+        return act(rental,actor,action,p,false);
+    }
+    @Transactional RentalWorkflowView actSigned(String rental,String actor,RentalWorkflowPayloads.Action p){
+        return act(rental,actor,"ACCEPT",p,true);
+    }
+    private RentalWorkflowView act(String rental,String actor,String action,RentalWorkflowPayloads.Action p,boolean signed){
         var s=support.lock(rental,actor,"EARLY_EXIT");support.version(s,p.expectedRevision());var w=s.record();String reason=support.text(p.reason());
         switch(action){
             case "ACCEPT" -> {
@@ -53,11 +62,15 @@ public class MutualTerminationService {
                 for(var refund:proposal.rentRefunds())payments.createAgreedRentRefundObligation(support.payments.findById(refund.paymentId()).orElseThrow(),refund.amount());
                 for(var bill:invoices.findByContractIdOrderByPeriodIndexDesc(s.contract().getId()))
                     if(!bill.isFinalCostSupplement()&&bill.getPeriodIndex()==s.contract().getAgreedEarlyBillingMonths()-1&&bill.getStatus()==MonthlyInvoiceStatus.DRAFT){bill.setPeriodEndExclusive(proposal.endExclusive());invoices.save(bill);}
+                if(!signed)terminationNotices.other(s.contract(),actor,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_AGREED);
             }
             case "REJECT", "WITHDRAW" -> {
                 if(!"PROPOSED".equals(w.getStatus()))throw support.invalid("Đề nghị không còn chờ phản hồi.");
                 if("REJECT".equals(action))support.otherProposer(s);else if(!actor.equals(w.getProposedBy()))throw support.missing();
                 w.setStatus("REJECT".equals(action)?"REJECTED":"WITHDRAWN");s.contract().setMutualTerminationWorkflowId(null);support.contracts.save(s.contract());
+                terminationNotices.other(s.contract(),actor,"REJECT".equals(action)
+                    ?com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_DECLINED
+                    :com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_WITHDRAWN);
             }
             case "CONFIRM_RETURN" -> {
                 support.acknowledge(p);
@@ -73,7 +86,11 @@ public class MutualTerminationService {
             }
             default -> throw support.invalid("Thao tác không hợp lệ.");
         }
-        support.save(s,action,reason,List.of());return view(s);
+        support.save(s,action,reason,List.of());
+        if("CONFIRM_RETURN".equals(action))terminationNotices.other(s.contract(),actor,"RETURNED".equals(w.getStatus())
+                ?com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_RETURN_COMPLETED
+                :com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_RETURN_CONFIRMED);
+        return view(s);
     }
     private void eligible(RentalWorkflowSupport.Source s){
         var c=s.contract();if(c.getStatus()!=ContractStatus.ACTIVE||c.getSignedAt()==null||c.getAgreedEarlyEndExclusive()!=null)throw support.invalid("Chỉ đề nghị khi HĐ thuê đang hiệu lực và chưa chốt ngày kết thúc sớm.");

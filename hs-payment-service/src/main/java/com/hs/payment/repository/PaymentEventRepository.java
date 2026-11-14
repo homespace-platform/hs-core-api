@@ -1,6 +1,7 @@
 package com.hs.payment.repository;
 
 import com.hs.payment.model.PaymentEvent;
+import com.hs.payment.model.constant.PaymentEventType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -10,4 +11,5 @@ import java.util.List;
 public interface PaymentEventRepository extends JpaRepository<PaymentEvent, String> {
 
     List<PaymentEvent> findByPaymentRequestIdOrderByCreatedAtAsc(String paymentRequestId);
+    boolean existsByPaymentRequestIdAndEventType(String paymentRequestId, PaymentEventType eventType);
 }

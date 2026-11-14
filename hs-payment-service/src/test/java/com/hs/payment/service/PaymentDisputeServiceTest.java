@@ -39,8 +39,10 @@ class PaymentDisputeServiceTest {
     final StorageObjectRepository storage=mock(StorageObjectRepository.class);
     final BillingTime time=mock(BillingTime.class);
     final com.hs.listing.notification.RentalRequestNotificationOutboxRepository outbox=mock(com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class);
+    final com.hs.payment.notification.PaymentNotificationOutboxRepository paymentOutbox=mock(com.hs.payment.notification.PaymentNotificationOutboxRepository.class);
     final PaymentDisputeService service=new PaymentDisputeService(cases,events,payments,evidence,paymentEvents,deposits,rentals,storage,new ObjectMapper(),time,
-        new com.hs.listing.notification.RentalRequestNotificationWriter(outbox,"test.rental.notifications"));
+        new com.hs.listing.notification.RentalRequestNotificationWriter(outbox,"test.rental.notifications"),
+        new com.hs.payment.notification.PaymentNotificationWriter(paymentOutbox,"test.payment.notifications"));
     final List<DisputeCase> rows=new ArrayList<>();
     final List<DisputeCaseEvent> history=new ArrayList<>();
     final List<PaymentEvidence> files=new ArrayList<>();
@@ -241,5 +243,44 @@ class PaymentDisputeServiceTest {
         service.adminAct(c.getId(),"admin","DECIDE",action(c,DisputeResolution.REOPEN_TRANSFER));
         assertEquals(now.plusSeconds(86400),rental.getHoldExpiresAt());
         assertEquals(List.of("RENTAL_HOLD_EXTENDED:OWNER:owner","RENTAL_HOLD_EXTENDED:RENTER:tenant"),notices());
+    }
+
+    List<String> paymentNotices(){
+        var saved=org.mockito.ArgumentCaptor.forClass(com.hs.payment.notification.PaymentNotificationOutbox.class);
+        verify(paymentOutbox,atLeast(0)).save(saved.capture());var json=tools.jackson.databind.json.JsonMapper.builder().build();
+        return saved.getAllValues().stream().map(row->{var e=json.readTree(row.getPayload());
+            assertEquals(1,e.get("recipients").size());assertEquals(1,e.get("data").size());
+            assertEquals("payment",e.get("data").get("paymentId").asText());
+            return e.get("eventType").asText()+":"+e.get("recipients").get(0).asText();}).toList();
+    }
+    @Test void evidenceProposalDeclineAndEscalationNotifyOnlyCounterpartyWhileNotesAndDuplicateEvidenceStaySilent(){
+        var c=open();assertEquals(List.of(),paymentNotices());
+        act(c,"tenant","COMMENT",null);assertEquals(List.of(),paymentNotices());
+        proof("tenant");proof("tenant");
+        act(c,"owner","PROPOSE",DisputeResolution.REOPEN_TRANSFER);act(c,"tenant","DECLINE",null);
+        act(c,"tenant","ESCALATE",null);
+        assertEquals(List.of("PAYMENT_DISPUTE_EVIDENCE_ADDED:owner","PAYMENT_DISPUTE_PROPOSED:tenant",
+            "PAYMENT_DISPUTE_PROPOSAL_DECLINED:owner","PAYMENT_DISPUTE_ESCALATED:owner"),paymentNotices());
+        admin("admin");service.adminAct(c.getId(),"admin","CLAIM",action(c,null));
+        assertEquals(4,paymentNotices().size());service.adminAct(c.getId(),"admin","DECIDE",action(c,DisputeResolution.REVIEW_TRANSFER));
+        assertEquals(List.of("PAYMENT_DISPUTE_REVIEW_TRANSFER:tenant","PAYMENT_DISPUTE_REVIEW_TRANSFER:owner"),paymentNotices().subList(4,6));
+        assertNull(p.getConfirmedAt());
+    }
+    @ParameterizedTest @ValueSource(booleans={true,false})
+    void reopenNoticeIsSuppressedOnlyWhenTheSameActionActuallyQueuesHoldExtension(boolean changed){
+        var rental=onboardingRental();if(!changed)rental.setHoldExpiresAt(now.plusSeconds(86400));
+        var c=open();act(c,"tenant","PROPOSE",DisputeResolution.REOPEN_TRANSFER);
+        clearInvocations(paymentOutbox,outbox);var accepted=action(c,null);service.act(c.getId(),"owner","ACCEPT",accepted);
+        assertEquals(changed?List.of():List.of("PAYMENT_DISPUTE_REOPENED:tenant"),paymentNotices());
+        assertEquals(changed?List.of("RENTAL_HOLD_EXTENDED:RENTER:tenant"):List.of(),notices());
+        code(7026,()->service.act(c.getId(),"owner","ACCEPT",accepted));
+        assertEquals(changed?0:1,paymentNotices().size());
+    }
+    @Test void reversedRefundProposalAndAcceptedReviewReachTheActualOtherParty(){
+        p.setType(PaymentType.INITIAL_PAYMENT_REFUND);p.setDirection(PaymentDirection.LANDLORD_TO_TENANT);
+        p.setPayerId("owner");p.setPayeeId("tenant");var c=open();proof("owner");
+        act(c,"owner","PROPOSE",DisputeResolution.REVIEW_TRANSFER);act(c,"tenant","ACCEPT",null);
+        assertEquals(List.of("PAYMENT_DISPUTE_EVIDENCE_ADDED:tenant","PAYMENT_DISPUTE_PROPOSED:tenant",
+            "PAYMENT_DISPUTE_REVIEW_TRANSFER:owner"),paymentNotices());assertNull(p.getConfirmedAt());
     }
 }

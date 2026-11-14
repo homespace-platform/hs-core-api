@@ -44,7 +44,8 @@ class DepositRepositoryPostgresTest {
                 org.mockito.Mockito.mock(com.hs.payment.repository.PaymentRequestRepository.class),
                 org.mockito.Mockito.mock(com.hs.payment.repository.PaymentLineItemRepository.class),
                 org.mockito.Mockito.mock(com.hs.contract.service.engine.ContractDataBuilder.class),
-                new com.hs.contract.service.engine.ContractFieldCatalog(),new com.fasterxml.jackson.databind.ObjectMapper(),time);
+                new com.hs.contract.service.engine.ContractFieldCatalog(),new com.fasterxml.jackson.databind.ObjectMapper(),time,
+                org.mockito.Mockito.mock(com.hs.contract.notification.AgreementSigningNotificationWriter.class));
         }
     }
     @Autowired ContractRepository contracts;

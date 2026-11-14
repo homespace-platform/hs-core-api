@@ -6,6 +6,8 @@ import com.hs.common.time.BillingTime;
 import com.hs.contract.dto.amendment.*;
 import com.hs.contract.model.*;
 import com.hs.contract.model.constant.*;
+import com.hs.contract.notification.AmendmentNotificationWriter;
+import com.hs.contract.notification.AgreementSigningNotificationWriter;
 import com.hs.contract.repository.*;
 import com.hs.contract.service.engine.ContractAmendmentRenderer;
 import com.hs.listing.model.RentalRequest;
@@ -47,6 +49,8 @@ class ContractAmendmentServiceTest {
     List<ContractAmendment> proposals = new ArrayList<>();
     List<MonthlyInvoice> bills = new ArrayList<>();
     ContractAmendmentDraftRepository drafts = mock(ContractAmendmentDraftRepository.class);
+    AmendmentNotificationWriter notices = mock(AmendmentNotificationWriter.class);
+    AgreementSigningNotificationWriter signingNotices = mock(AgreementSigningNotificationWriter.class);
     Map<String,ContractAmendmentDraft> draftStore = new HashMap<>();
 
     @BeforeEach void setup() {
@@ -81,6 +85,8 @@ class ContractAmendmentServiceTest {
         ReflectionTestUtils.setField(service,"signatureMode","SMARTCA");
         ReflectionTestUtils.setField(service,"drafts",drafts);
         ReflectionTestUtils.setField(service,"listingSync",listingSync);
+        ReflectionTestUtils.setField(service,"notices",notices);
+        ReflectionTestUtils.setField(service,"signingNotices",signingNotices);
         when(drafts.findById(anyString())).thenAnswer(i -> Optional.ofNullable(draftStore.get(i.getArgument(0))));
         when(drafts.save(any())).thenAnswer(i -> { ContractAmendmentDraft d = i.getArgument(0); draftStore.put(d.getContractId(),d); return d; });
     }
@@ -220,6 +226,7 @@ class ContractAmendmentServiceTest {
     @Test void duplicatePostReusesProposalButRejectsChangedBody() {
         var p = payload(Map.of("rentAmount","12000000"));
         service.propose("root","owner",p); service.propose("root","owner",p); assertEquals(1,proposals.size());
+        verify(notices,times(1)).other(root,"owner",AmendmentNotificationWriter.Event.AMENDMENT_RESPONSE_NEEDED);
         assertThrows(AppException.class,() -> service.propose("root","owner",new AmendmentPayload(p.requestId(),p.baseRevisionId(),null,p.effectiveOn(),p.reason(),Map.of("rentAmount","11000000"),List.of())));
     }
     @Test void concurrentSecondProposalIsBlocked() { request("owner"); assertThrows(AppException.class,() -> request("owner")); assertEquals(1,proposals.size()); }
@@ -239,6 +246,7 @@ class ContractAmendmentServiceTest {
     }
     @Test void responseExpiryDoesNotAcceptOrCreateSigningDocument() {
         var a = request("owner"); at("2026-10-16T03:00:00Z"); service.get("root","owner");
+        verify(notices,times(1)).both(root,AmendmentNotificationWriter.Event.AMENDMENT_EXPIRED);
         assertEquals("EXPIRED",a.getStatus()); assertNull(a.getAgreementContractId()); assertEquals("original",root.getCurrentRevisionId());
         assertThrows(AppException.class,() -> service.decide("root",a.getId(),"owner",new AmendmentDecision("APPROVE",null)));
     }
@@ -257,6 +265,7 @@ class ContractAmendmentServiceTest {
         assertEquals("SCHEDULED",a.getStatus()); assertEquals("original",resolver.at(root,LocalDate.of(2026,10,14)).getId());
         assertEquals(child.getCurrentRevisionId(),resolver.at(root,LocalDate.of(2026,11,14)).getId());
         at("2026-11-14T03:00:00Z"); service.get("root","tenant"); assertEquals("APPLIED",a.getStatus());
+        verify(notices,times(1)).both(root,AmendmentNotificationWriter.Event.AMENDMENT_APPLIED);
         assertEquals("original",root.getCurrentRevisionId()); assertTrue(service.get("root","tenant").canPropose());
     }
     @Test void issuedInvoiceAndStaleBaseBlockApprovalAndSignatures() {
@@ -535,7 +544,9 @@ class ContractAmendmentServiceTest {
     }
     @Test void proposerCanWithdrawUnsignedAgreementButNotFullySignedAppendix() {
         var a = request("owner"); var child = approve(a);
+        verify(signingNotices).reviewReady(child);
         service.decide("root",a.getId(),"owner",new AmendmentDecision("WITHDRAW",null));
+        verify(notices).other(root,"owner",AmendmentNotificationWriter.Event.AMENDMENT_WITHDRAWN);
         assertEquals("WITHDRAWN",a.getStatus()); assertEquals(ContractStatus.CANCELLED,child.getStatus());
         var next = request("owner"); var signedChild = approve(next); signaturesReady(signedChild); service.signed(signedChild);
         assertThrows(AppException.class,() -> service.decide("root",next.getId(),"owner",new AmendmentDecision("WITHDRAW",null)));
@@ -547,12 +558,14 @@ class ContractAmendmentServiceTest {
         assertThrows(AppException.class,() -> service.preview("root","tenant",payload(Map.of("rentAmount","1000000"))));
         assertThrows(AppException.class,() -> service.requestNegotiation("root","owner",wish()));
         service.requestNegotiation("root","tenant",wish()); var a = proposals.get(0);
+        verify(notices).other(root,"tenant",AmendmentNotificationWriter.Event.AMENDMENT_RESPONSE_NEEDED);
         assertEquals("TENANT_REQUESTED",a.getStatus()); assertEquals("{}",a.getChangesSnapshot());
         assertNull(a.getAgreementContractId()); assertEquals("original",root.getCurrentRevisionId());
     }
     @Test void acceptedWishNeedsConcreteLandlordProposalAndTenantApprovalAgain() {
         var wish = wish(); service.requestNegotiation("root","tenant",wish);
         service.decideNegotiation("root",wish.requestId(),"owner",new AmendmentDecision("ACCEPT",null));
+        verify(notices).other(root,"owner",AmendmentNotificationWriter.Event.AMENDMENT_DECIDED);
         var request = proposals.get(0); assertEquals("TENANT_ACCEPTED",request.getStatus()); assertNull(request.getAgreementContractId());
         var p = payload(Map.of("rentAmount","12000000"));
         var linked = new AmendmentPayload(p.requestId(),p.baseRevisionId(),null,p.effectiveOn(),p.reason(),p.changes(),List.of(),wish.requestId());
@@ -566,6 +579,7 @@ class ContractAmendmentServiceTest {
     @Test void unansweredWishExpiresWithoutPretendingLandlordRejectedOrApprovingAnything() {
         var p = wish(); service.requestNegotiation("root","tenant",p); at("2026-10-16T03:00:00Z");
         service.get("root","owner"); var a = proposals.get(0); assertEquals("TENANT_EXPIRED",a.getStatus());
+        verify(notices,times(1)).both(root,AmendmentNotificationWriter.Event.AMENDMENT_EXPIRED);
         assertNull(a.getAgreementContractId()); assertTrue(service.get("root","tenant").canPropose());
         assertThrows(AppException.class,() -> service.decideNegotiation("root",p.requestId(),"owner",new AmendmentDecision("ACCEPT",null)));
     }

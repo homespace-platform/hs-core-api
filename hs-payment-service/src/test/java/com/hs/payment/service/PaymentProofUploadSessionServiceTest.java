@@ -54,6 +54,10 @@ class PaymentProofUploadSessionServiceTest {
     private StorageService storageService;
     @Mock
     private com.hs.common.time.BillingTime billingTime;
+    @Mock
+    private com.hs.payment.notification.PaymentNotificationWriter notifications;
+    @Mock
+    private jakarta.persistence.EntityManager entityManager;
 
     @InjectMocks
     private PaymentProofUploadSessionService sessionService;
@@ -62,6 +66,8 @@ class PaymentProofUploadSessionServiceTest {
 
     @BeforeEach
     void setUp() {
+        // Constructor injection leaves the non-final @PersistenceContext field unset; the lock refresh needs it.
+        org.springframework.test.util.ReflectionTestUtils.setField(sessionService, "entityManager", entityManager);
         paymentRequest = PaymentRequest.builder()
                 .id("pay-123")
                 .payerId("tenant-1")
@@ -178,7 +184,7 @@ class PaymentProofUploadSessionServiceTest {
                 .build();
 
         when(uploadSessionRepository.findByTokenHash(anyString())).thenReturn(Optional.of(session));
-        when(paymentRequestRepository.findByIdForUpdate("pay-123")).thenReturn(Optional.of(paymentRequest));
+        when(paymentRequestRepository.findById("pay-123")).thenReturn(Optional.of(paymentRequest));
 
         byte[] fakeBytes = "content".getBytes(StandardCharsets.UTF_8);
 
@@ -221,7 +227,7 @@ class PaymentProofUploadSessionServiceTest {
 
         when(uploadSessionRepository.findByTokenHash(anyString())).thenReturn(Optional.of(session));
         when(uploadSessionRepository.save(any(PaymentProofUploadSession.class))).thenAnswer(i -> i.getArgument(0));
-        when(paymentRequestRepository.findByIdForUpdate("pay-123")).thenReturn(Optional.of(paymentRequest));
+        when(paymentRequestRepository.findById("pay-123")).thenReturn(Optional.of(paymentRequest));
         when(paymentRequestRepository.save(any(PaymentRequest.class))).thenAnswer(i -> i.getArgument(0));
         when(paymentEvidenceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
         when(paymentEventRepository.save(any())).thenAnswer(i -> i.getArgument(0));
@@ -275,6 +281,7 @@ class PaymentProofUploadSessionServiceTest {
         verify(paymentRequestRepository).save(paymentRequest);
         verify(paymentEvidenceRepository).save(any());
         verify(paymentEventRepository).save(any());
+        verify(notifications).enqueue(paymentRequest,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_TRANSFER_REPORTED,"landlord-1");
     }
 
     @Test
@@ -305,6 +312,20 @@ class PaymentProofUploadSessionServiceTest {
         assertEquals(UploadSessionStatus.CONSUMED, result.getStatus());
         verify(storageService, never()).uploadDirect(any(), any(), any(), any(), any(), any(), any());
         verify(paymentEvidenceRepository, never()).save(any());
+        verifyNoInteractions(notifications);
+    }
+
+    @Test void paymentLockRefreshObservesConcurrentReportedWinnerBeforeUploadingAnything(){
+        var session=PaymentProofUploadSession.builder().id("stale-session").paymentRequestId("pay-123").tenantUserId("tenant-1")
+            .status(UploadSessionStatus.CREATED).expiresAt(Instant.now().plusSeconds(300)).build();
+        when(uploadSessionRepository.findByTokenHash(anyString())).thenReturn(Optional.of(session));
+        when(paymentRequestRepository.findById("pay-123")).thenReturn(Optional.of(paymentRequest));
+        when(uploadSessionRepository.save(any())).thenAnswer(i->i.getArgument(0));
+        doAnswer(i->{paymentRequest.setStatus(PaymentStatus.TRANSFER_REPORTED);return null;})
+            .when(entityManager).refresh(paymentRequest,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+        sessionService.handleMobileUpload("token",new byte[]{1},"proof.png","image/png",1L);
+        assertEquals(UploadSessionStatus.CONSUMED,session.getStatus());
+        verifyNoInteractions(storageService,paymentEvidenceRepository,paymentEventRepository,notifications);
     }
 
     @Test
@@ -320,7 +341,7 @@ class PaymentProofUploadSessionServiceTest {
                 .build();
 
         when(uploadSessionRepository.findByTokenHash(anyString())).thenReturn(Optional.of(session));
-        when(paymentRequestRepository.findByIdForUpdate("pay-123")).thenReturn(Optional.of(paymentRequest));
+        when(paymentRequestRepository.findById("pay-123")).thenReturn(Optional.of(paymentRequest));
         when(uploadSessionRepository.save(any(PaymentProofUploadSession.class))).thenAnswer(i -> i.getArgument(0));
 
         when(storageService.uploadDirect(any(), any(), any(), any(), any(), any(), any(), any()))

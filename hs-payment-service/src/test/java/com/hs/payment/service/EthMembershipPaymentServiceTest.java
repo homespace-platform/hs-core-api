@@ -25,8 +25,10 @@ class EthMembershipPaymentServiceTest {
     private final EthVndPriceService prices = mock(EthVndPriceService.class);
     private final EthPaymentChainClient chain = mock(EthPaymentChainClient.class);
     private final EthPaymentSignatures signatures = mock(EthPaymentSignatures.class);
+    private final com.hs.payment.membership.notification.MembershipNotificationWriter notifications =
+            mock(com.hs.payment.membership.notification.MembershipNotificationWriter.class);
     private final EthPaymentService service = new EthPaymentService(orders, memberships, challenges, quotes,
-            prices, chain, signatures);
+            prices, chain, signatures, notifications);
 
     @Test
     void verifiedEthPaymentActivatesMembershipOnceAndStoresFullHashInQuote() {

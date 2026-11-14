@@ -51,10 +51,10 @@ import static org.mockito.ArgumentMatchers.*;
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.datasource.url=${HS_LIFECYCLE_TEST_PG_URL}","spring.datasource.username=postgres",
     "spring.datasource.password=hs_phase03_test","spring.jpa.hibernate.ddl-auto=create-drop","spring.profiles.active=test"})
-@Import({com.hs.listing.notification.RentalRequestNotificationWriter.class,ContractLifecycleService.class,MonthlyBillingService.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class})
+@Import({com.hs.contract.notification.MoveInHandoverNotificationWriter.class,com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,com.hs.contract.notification.InvoiceNotificationWriter.class,com.hs.listing.notification.RentalRequestNotificationWriter.class,com.hs.payment.notification.PaymentNotificationWriter.class,ContractLifecycleService.class,MonthlyBillingService.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class})
 class ContractLifecyclePhase03PostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs")
-    @EnableJpaRepositories(basePackageClasses={com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class})
+    @EnableJpaRepositories(basePackageClasses={com.hs.contract.notification.ContractNotificationOutboxRepository.class,com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,com.hs.payment.notification.PaymentNotificationOutboxRepository.class,ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class})
     @EnableJpaAuditing static class Config {
         @Bean ObjectMapper mapper(){return new ObjectMapper().findAndRegisterModules();}
         @Bean MutableTime time(Environment env){return new MutableTime(env);}

@@ -28,6 +28,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -48,6 +49,7 @@ public class PaymentRequestService {
     private final StorageObjectRepository storageObjectRepository;
     private final PaymentProofUploadSessionService proofUploadSessionService;
     private final BillingTime billingTime;
+    private final com.hs.payment.notification.PaymentNotificationWriter notifications;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private com.hs.payment.receipt.PaymentReceiptService receiptService;
 
@@ -104,14 +106,14 @@ public class PaymentRequestService {
     public PaymentRequest createDeposit(com.hs.listing.model.RentalRequest r, Instant due) {
         return createOnboarding(r.getId(),r.getListing().getId(),r.getRenterId(),r.getOwnerId(),
             BigDecimal.ZERO,r.getDepositAmount(),r.getCostBreakdownSnapshot(),r.getExcludedChargesSnapshot(),due,
-            PaymentType.RESERVATION_DEPOSIT,null);
+            PaymentType.RESERVATION_DEPOSIT,null,false);
     }
 
     @Transactional
     public PaymentRequest createFirstRent(com.hs.listing.model.RentalRequest r, Instant opens, Instant due) {
         return createOnboarding(r.getId(),r.getListing().getId(),r.getRenterId(),r.getOwnerId(),
             r.getEffectiveMonthlyRent()!=null?r.getEffectiveMonthlyRent():r.getMonthlyRentPrice(),BigDecimal.ZERO,
-            r.getCostBreakdownSnapshot(),r.getExcludedChargesSnapshot(),due,PaymentType.INITIAL,opens);
+            r.getCostBreakdownSnapshot(),r.getExcludedChargesSnapshot(),due,PaymentType.INITIAL,opens,true);
     }
 
     @Transactional
@@ -127,12 +129,12 @@ public class PaymentRequestService {
             Instant holdExpiresAt
     ) {
         return createOnboarding(rentalRequestId,listingId,payerId,payeeId,monthlyRent,depositAmount,
-                breakdownSnapshot,excludedChargesSnapshot,holdExpiresAt,PaymentType.INITIAL,null);
+                breakdownSnapshot,excludedChargesSnapshot,holdExpiresAt,PaymentType.INITIAL,null,false);
     }
 
     private PaymentRequest createOnboarding(String rentalRequestId,String listingId,String payerId,String payeeId,
             BigDecimal monthlyRent,BigDecimal depositAmount,String breakdownSnapshot,String excludedChargesSnapshot,
-            Instant holdExpiresAt,PaymentType type,Instant opensAt) {
+            Instant holdExpiresAt,PaymentType type,Instant opensAt,boolean notifyPayerOnCreate) {
         Optional<PaymentRequest> existing = paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,type);
         if (existing.isPresent()) {
             return existing.get();
@@ -241,6 +243,9 @@ public class PaymentRequestService {
         recordEvent(saved.getId(), PaymentEventType.CREATED, null, saved.getStatus(),
                 payeeId, "LANDLORD", totalAmount.signum()==0?"Ghi nhận miễn thanh toán; không phát sinh chuyển khoản":"Tạo yêu cầu thanh toán "+type.name(), null);
 
+        // Only the delayed first-rent call site: accept-time rows are announced by the rental notice, waivers are silent.
+        if (notifyPayerOnCreate && totalAmount.signum() > 0)
+            notifications.enqueue(saved, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED, saved.getPayerId());
         log.info("Created {} PaymentRequest [{}] ref=[{}] for rentalRequest [{}]",
                 type, saved.getId(), ref, rentalRequestId);
         return saved;
@@ -270,6 +275,7 @@ public class PaymentRequestService {
         paymentLineItemRepository.save(PaymentLineItem.builder().paymentRequestId(payment.getId()).type(type.name()).displayName(description)
                 .quantity(1).unitPrice(amount).amount(amount).calculationDescription("Quyết toán được cả hai bên xác nhận").sortOrder(0).build());
         recordEvent(payment.getId(),PaymentEventType.CREATED,null,PaymentStatus.AWAITING_TRANSFER,"SYSTEM","SYSTEM",description,null);
+        notifications.enqueue(payment,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED,payment.getPayerId());
         return payment;
     }
 
@@ -301,7 +307,20 @@ public class PaymentRequestService {
         paymentLineItemRepository.save(PaymentLineItem.builder().paymentRequestId(payment.getId()).type("DEPOSIT_ADJUSTMENT").displayName(description)
                 .quantity(1).unitPrice(delta.abs()).amount(delta.abs()).calculationDescription("Phần chênh lệch cọc; không thu lại toàn bộ cọc").sortOrder(0).build());
         recordEvent(payment.getId(),PaymentEventType.CREATED,null,PaymentStatus.AWAITING_TRANSFER,"SYSTEM","SYSTEM",description,null);
+        notifications.enqueue(payment,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED,payment.getPayerId());
         return payment;
+    }
+
+    /** Caller holds the owning root and then the payment lock, and has verified their stored party/rental linkage. */
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void syncContractObligationDeadline(PaymentRequest p,Instant now) {
+        if(p.getContractId()==null || !Set.of(PaymentType.DEPOSIT_ADJUSTMENT,PaymentType.INITIAL_PAYMENT_REFUND).contains(p.getType())
+                || p.getDueAt()==null || !now.isAfter(p.getDueAt())
+                || p.getStatus()!=PaymentStatus.AWAITING_TRANSFER && p.getStatus()!=PaymentStatus.REJECTED) return;
+        boolean alreadyOverdue=paymentEventRepository.existsByPaymentRequestIdAndEventType(p.getId(),PaymentEventType.OVERDUE);
+        PaymentStatus before=p.getStatus();p.setStatus(PaymentStatus.OVERDUE);paymentRequestRepository.save(p);
+        recordEvent(p.getId(),PaymentEventType.OVERDUE,before,PaymentStatus.OVERDUE,"SYSTEM","SYSTEM","Khoản nghĩa vụ theo hợp đồng đã quá hạn; cần đối soát trạng thái hiện tại",null);
+        if(!alreadyOverdue)notifications.enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_OBLIGATION_OVERDUE,p.getPayerId());
     }
 
     @Transactional public void syncContractSettlementDeadline(String id,Instant now) {
@@ -537,6 +556,7 @@ public class PaymentRequestService {
             d.setStatus(DepositStatus.REFUND_REPORTED); depositRecordRepository.save(d);
         });
 
+        notifications.enqueue(saved, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_TRANSFER_REPORTED, saved.getPayeeId());
         log.info("Payer [{}] reported transfer for PaymentRequest [{}] with proof [{}]",
                 actorId, paymentRequestId, proofStorageId);
         return toResponse(saved, actorId);
@@ -602,6 +622,8 @@ public class PaymentRequestService {
         if (receiptEvents != null && saved.getType() == PaymentType.INITIAL_PAYMENT_REFUND && saved.getRentalRequestId() != null) {
             receiptEvents.publishEvent(new com.hs.payment.event.InitialRefundConfirmed(saved.getRentalRequestId(), actorId));
         }
+        // Last, after receipt capture and every same-transaction listener: a failure above rolls the whole confirmation back.
+        notifications.enqueue(saved, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_CONFIRMED, saved.getPayerId());
         return toResponse(saved, actorId);
     }
 
@@ -644,6 +666,7 @@ public class PaymentRequestService {
             d.setStatus(DepositStatus.REFUND_DUE); depositRecordRepository.save(d);
         });
 
+        notifications.enqueue(saved, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_REJECTED, saved.getPayerId());
         log.info("Payee [{}] REJECTED receipt for PaymentRequest [{}]: {}", actorId, paymentRequestId, request.reason());
         return toResponse(saved, actorId);
     }
@@ -677,6 +700,8 @@ public class PaymentRequestService {
         if(refundRecord!=null){refundRecord.setStatus(DepositStatus.DISPUTED);depositRecordRepository.save(refundRecord);}
         if(receiptEvents!=null)receiptEvents.publishEvent(new com.hs.payment.event.PaymentDisputed(saved.getId(),actorId,
                 request.reason().trim(),oldStatus,previousDepositStatus));
+        // After the synchronous PaymentDisputed listener registered (or reused) the case in this transaction.
+        notifications.enqueueOthers(saved, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_DISPUTE_OPENED, actorId);
 
         log.info("Actor [{}] [{}] opened DISPUTE on PaymentRequest [{}]", actorId, role, paymentRequestId);
         return toResponse(saved, actorId);
@@ -873,6 +898,7 @@ public class PaymentRequestService {
         recordEvent(savedRefund.getId(), PaymentEventType.REFUND_OBLIGATION_CREATED, null,
                 PaymentStatus.AWAITING_TRANSFER, "SYSTEM", "SYSTEM",
                 agreedReason!=null?agreedReason:rentOnly?"Hoàn tiền thuê đã nhận; cọc được xử lý riêng theo thông báo vi phạm":"Hai bên đồng ý hủy hồ sơ trước khi ký; chủ nhà cần hoàn khoản thực nhận và người thuê xác nhận nhận đủ", null);
+        if(agreedReason!=null)notifications.enqueue(savedRefund,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED,savedRefund.getPayerId());
     }
 
     private PaymentRequest newInitialRefund(PaymentRequest initialPayment, BigDecimal amount, String key, String sourcesSnapshot) {

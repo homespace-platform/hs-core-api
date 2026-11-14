@@ -35,6 +35,81 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class PaymentRequestServiceTest {
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
+    void phase6eSettlementCreationNotifiesOnlyStoredPayerOnce(boolean refund) {
+        String payer=refund?"landlord-1":"tenant-1",payee=refund?"tenant-1":"landlord-1";
+        if(refund)when(bankAccountService.getDefaultRefundAccount(payee)).thenReturn(tenantAccount);
+        else when(bankAccountService.getDefaultIncomingAccount(payee)).thenReturn(landlordAccount);
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSSETTLE");
+        when(paymentRequestRepository.save(any())).thenAnswer(call->{PaymentRequest p=call.getArgument(0);p.setId("settlement");return p;});
+        var p=paymentRequestService.createContractSettlement("root","rental","listing",payer,payee,BigDecimal.TEN,Instant.now(),refund,"Settlement");
+        when(paymentRequestRepository.findByContractIdAndType("root",p.getType())).thenReturn(Optional.of(p));
+        assertSame(p,paymentRequestService.createContractSettlement("root","rental","listing",payer,payee,BigDecimal.TEN,p.getDueAt(),refund,"Settlement"));
+        verify(notifications).enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED,payer);
+        verifyNoMoreInteractions(notifications);verify(paymentRequestRepository).save(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"10","-10"})
+    void phase6eDepositDeltaCreationNotifiesBothDirectionsWithoutReplay(String amount) {
+        BigDecimal delta=new BigDecimal(amount);boolean refund=delta.signum()<0;
+        if(refund)when(bankAccountService.getDefaultRefundAccount("tenant-1")).thenReturn(tenantAccount);
+        else when(bankAccountService.getDefaultIncomingAccount("landlord-1")).thenReturn(landlordAccount);
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSDELTA");
+        when(paymentRequestRepository.save(any())).thenAnswer(call->{PaymentRequest p=call.getArgument(0);p.setId("delta");return p;});
+        var p=paymentRequestService.createDepositAdjustment("amendment","root","rental","listing","landlord-1","tenant-1",delta,Instant.now());
+        when(paymentRequestRepository.findByInvoiceId("amendment")).thenReturn(Optional.of(p));
+        assertSame(p,paymentRequestService.createDepositAdjustment("amendment","root","rental","listing","landlord-1","tenant-1",delta,p.getDueAt()));
+        verify(notifications).enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED,refund?"landlord-1":"tenant-1");
+        verifyNoMoreInteractions(notifications);verify(paymentRequestRepository).save(any());
+        assertThrows(IllegalArgumentException.class,()->paymentRequestService.createDepositAdjustment("zero","root","rental","listing","landlord-1","tenant-1",BigDecimal.ZERO,Instant.now()));
+    }
+
+    @Test void phase6eAgreedRentRefundCreationIsScopedAndReplaySilent() {
+        var source=PaymentRequest.builder().id("source").contractId("root").rentalRequestId("rental").listingId("listing")
+                .payerId("tenant").payeeId("owner").type(PaymentType.MONTHLY_RENT).status(PaymentStatus.CONFIRMED).totalAmount(BigDecimal.TEN).build();
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-01T00:00:00Z"));
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSREFUND");
+        when(paymentRequestRepository.save(any())).thenAnswer(call->{PaymentRequest p=call.getArgument(0);p.setId("refund");return p;});
+        paymentRequestService.createAgreedRentRefundObligation(source,BigDecimal.ONE);
+        var captured=org.mockito.ArgumentCaptor.forClass(PaymentRequest.class);verify(paymentRequestRepository).save(captured.capture());var refund=captured.getValue();
+        assertEquals("owner",refund.getPayerId());assertEquals("tenant",refund.getPayeeId());assertEquals("REFUND:source",refund.getOnboardingKey());
+        when(paymentRequestRepository.findByOnboardingKey("CANCEL_REFUND:rental")).thenReturn(Optional.empty());
+        when(paymentRequestRepository.findByOnboardingKey("REFUND:source")).thenReturn(Optional.of(refund));
+        paymentRequestService.createAgreedRentRefundObligation(source,BigDecimal.ONE);
+        paymentRequestService.createAgreedRentRefundObligation(source,BigDecimal.ZERO);
+        verify(notifications).enqueue(refund,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED,"owner");
+        verifyNoMoreInteractions(notifications);verify(paymentRequestRepository).save(any());verifyNoInteractions(depositRecordRepository);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.EnumSource(value=PaymentType.class,names={"DEPOSIT_ADJUSTMENT","INITIAL_PAYMENT_REFUND"})
+    void phase6eDeadlineUsesStrictBoundaryAndDurableAuditAcrossRejectedCycles(PaymentType type) {
+        var now=Instant.parse("2026-11-01T00:00:00Z");
+        var p=PaymentRequest.builder().id("obligation").contractId("root").payerId("payer").payeeId("payee").type(type).status(PaymentStatus.AWAITING_TRANSFER).dueAt(now).build();
+        paymentRequestService.syncContractObligationDeadline(p,now);verifyNoInteractions(notifications,paymentEventRepository);
+        paymentRequestService.syncContractObligationDeadline(p,now.plusSeconds(1));assertEquals(PaymentStatus.OVERDUE,p.getStatus());
+        paymentRequestService.syncContractObligationDeadline(p,now.plusSeconds(2));
+        when(paymentEventRepository.existsByPaymentRequestIdAndEventType("obligation",com.hs.payment.model.constant.PaymentEventType.OVERDUE)).thenReturn(true);
+        p.setStatus(PaymentStatus.REJECTED);paymentRequestService.syncContractObligationDeadline(p,now.plusSeconds(3));
+        assertEquals(PaymentStatus.OVERDUE,p.getStatus());verify(paymentEventRepository,times(2)).save(any());
+        verify(notifications).enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_OBLIGATION_OVERDUE,"payer");verifyNoMoreInteractions(notifications);
+    }
+
+    @Test void phase6eCancellationRentRefundKeepsItsExistingNotificationOwner() {
+        var source=PaymentRequest.builder().id("source").contractId("root").rentalRequestId("rental")
+                .payerId("tenant").payeeId("owner").type(PaymentType.INITIAL).status(PaymentStatus.CONFIRMED).totalAmount(BigDecimal.TEN).build();
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-01T00:00:00Z"));
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSCANCELRENT");
+        when(paymentRequestRepository.save(any())).thenAnswer(call->{PaymentRequest p=call.getArgument(0);p.setId("refund");return p;});
+        paymentRequestService.createRentRefundObligation(source,BigDecimal.ONE);
+        verify(paymentRequestRepository).save(any());verifyNoInteractions(notifications);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","DISPUTED","CONFIRMED","CANCELLED","EXPIRED","OVERDUE"})
+    void phase6eDeadlineLeavesProofDisputesAndTerminalStatesUntouched(PaymentStatus status) {
+        var now=Instant.now();var p=PaymentRequest.builder().id("obligation").contractId("root").type(PaymentType.DEPOSIT_ADJUSTMENT).status(status).dueAt(now.minusSeconds(1)).build();
+        paymentRequestService.syncContractObligationDeadline(p,now);assertEquals(status,p.getStatus());verifyNoInteractions(notifications,paymentEventRepository);
+        verify(paymentRequestRepository,never()).save(any());
+    }
 
     @Mock
     private PaymentRequestRepository paymentRequestRepository;
@@ -59,6 +134,7 @@ class PaymentRequestServiceTest {
     @Mock
     private BillingTime billingTime;
     @Mock private org.springframework.context.ApplicationEventPublisher receiptEvents;
+    @Mock private com.hs.payment.notification.PaymentNotificationWriter notifications;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -210,6 +286,7 @@ class PaymentRequestServiceTest {
         when(paymentRequestRepository.findByOnboardingKey("REFUND:source")).thenReturn(Optional.of(refund));
         paymentRequestService.createRentRefundObligation(source,new BigDecimal("5000000"));verify(paymentRequestRepository,times(1)).save(any());
         assertThrows(IllegalArgumentException.class,()->paymentRequestService.createRentRefundObligation(source,new BigDecimal("16000000")));
+        verifyNoInteractions(notifications);
     }
 
     @Test void depositDeltaCreatesOnlyDifferenceAndReusesSameObligation() {
@@ -663,6 +740,7 @@ class PaymentRequestServiceTest {
         paymentRequestService.confirmReceipt("receipt","owner");
         verify(receiptEvents,times(2)).publishEvent(new com.hs.payment.event.OnboardingReceiptConfirmed("rental"));
         verify(paymentRequestRepository,times(1)).save(any());
+        verify(notifications).enqueue(payment,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_CONFIRMED,"tenant");
     }
 
     @Test
@@ -685,5 +763,27 @@ class PaymentRequestServiceTest {
 
         assertEquals(PaymentStatus.REJECTED, payment.getStatus());
         verify(paymentEventRepository).save(any());
+        verify(notifications).enqueue(payment,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_REJECTED,"tenant-1");
+    }
+    @Test void refundReportReplayRejectAndDisputeFollowStoredPartiesAndNeverAnnounceDeniedActions(){
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-14T00:00:00Z"));
+        var p=PaymentRequest.builder().id("refund-notice").type(PaymentType.INITIAL_PAYMENT_REFUND)
+            .direction(com.hs.payment.model.constant.PaymentDirection.LANDLORD_TO_TENANT).payerId("owner").payeeId("tenant")
+            .status(PaymentStatus.AWAITING_TRANSFER).totalAmount(new BigDecimal("100")).build();
+        when(paymentRequestRepository.findById(p.getId())).thenReturn(Optional.of(p));
+        when(paymentRequestRepository.save(any())).thenAnswer(i->i.getArgument(0));
+        when(paymentProofUploadSessionService.consumeSession("session",p.getId(),"owner")).thenReturn("proof");
+        var request=ReportTransferRequest.builder().expectedAmount(p.getTotalAmount()).evidenceUploadSessionId("session").build();
+        assertThrows(AppException.class,()->paymentRequestService.reportTransfer(p.getId(),"tenant",request));verifyNoInteractions(notifications);
+        paymentRequestService.reportTransfer(p.getId(),"owner",request);paymentRequestService.reportTransfer(p.getId(),"owner",request);
+        verify(notifications).enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_TRANSFER_REPORTED,"tenant");
+        paymentRequestService.rejectReceipt(p.getId(),"tenant",new RejectReceiptRequest("Chưa nhận được tiền hoàn"));
+        verify(notifications).enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_REJECTED,"owner");
+        paymentRequestService.reportTransfer(p.getId(),"owner",request);
+        paymentRequestService.dispute(p.getId(),"owner",new com.hs.payment.dto.DisputePaymentRequest("Cần đối soát chứng từ hoàn tiền"));
+        verify(notifications,times(2)).enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_TRANSFER_REPORTED,"tenant");
+        verify(notifications).enqueueOthers(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_DISPUTE_OPENED,"owner");
+        assertThrows(AppException.class,()->paymentRequestService.dispute(p.getId(),"owner",new com.hs.payment.dto.DisputePaymentRequest("Cần đối soát chứng từ hoàn tiền")));
+        verifyNoMoreInteractions(notifications);
     }
 }

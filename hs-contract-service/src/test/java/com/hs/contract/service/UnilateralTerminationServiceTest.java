@@ -34,13 +34,16 @@ class UnilateralTerminationServiceTest {
     final ListingStatusService listings=mock(ListingStatusService.class);
     final DepositRecordRepository deposits=mock(DepositRecordRepository.class);
     final ParkingReservationService parking=mock(ParkingReservationService.class);
+    final com.hs.contract.notification.InvoiceOutboxProbe outbox=new com.hs.contract.notification.InvoiceOutboxProbe();
+    final com.hs.contract.notification.TerminationNotificationWriter terminationNotices=mock(com.hs.contract.notification.TerminationNotificationWriter.class);
     final org.springframework.transaction.PlatformTransactionManager tx=mock(org.springframework.transaction.PlatformTransactionManager.class);
     MonthlyBillingService service;
     Contract contract; MonthlyInvoice invoice; ContractRevision revision; PaymentRequest payment; DepositRecord deposit;
     void clock(String local) { var t=LocalDateTime.parse(local).atZone(BillingTime.ZONE);when(time.now()).thenReturn(t.toInstant());when(time.today()).thenReturn(t.toLocalDate()); }
     @BeforeEach void setup() {
         service=new MonthlyBillingService(contracts,revisions,rentals,invoices,payments,new ObjectMapper().findAndRegisterModules(),time,
-            tx,listings,deposits,parking);
+            tx,listings,deposits,parking,outbox.writer);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"terminationNotices",terminationNotices);
         when(tx.getTransaction(any())).thenAnswer(call->new org.springframework.transaction.support.SimpleTransactionStatus());
         contract=Contract.builder().id("contract").rentalRequestId("rental").listingId("listing").landlordId("owner").tenantId("tenant")
             .currentRevisionId("revision").status(ContractStatus.ACTIVE).build();
@@ -69,6 +72,7 @@ class UnilateralTerminationServiceTest {
     }
     @Test void noticeStartsExactly24HoursWithoutInventingTenantConsentOrReleasingTheRoom() {
         var n=issue();assertEquals(Instant.parse("2026-11-12T03:00:00Z"),n.respondBy());assertEquals(1,n.version());
+        verify(terminationNotices).tenant(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_NOTICE_ISSUED);
         assertEquals(UnilateralTerminationNotice.Status.NOTICE,n.status());assertNull(contract.getTerminationAcceptedAt());
         assertEquals(ContractStatus.ACTIVE,contract.getStatus());assertTrue(current().canRequestTerminationReview());
         assertEquals(new BigDecimal("500000"),invoice.getLateFeeAmount());assertEquals(new BigDecimal("1500000"),invoice.getTotalAmount());
@@ -81,6 +85,7 @@ class UnilateralTerminationServiceTest {
         assertEquals(UnilateralTerminationNotice.Status.ENDED,ended.unilateralTermination().status());assertNull(contract.getTerminationAcceptedAt());
         assertNull(ended.unilateralTermination().handoverAt());assertTrue(ended.canCompleteTerminationHandover());
         int events=ended.overdueActions().size();clock("2026-11-14T10:00:00");assertEquals(events,current().overdueActions().size());
+        verify(terminationNotices,times(1)).both(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_ENDED);
         assertEquals(new BigDecimal("1500000"),invoice.getTotalAmount());verifyNoInteractions(listings,parking);
     }
     @Test void exactlyAtDeadlineTenantCannotCreateAnObjectionOrResetTheClock() {
@@ -90,10 +95,12 @@ class UnilateralTerminationServiceTest {
     @ParameterizedTest @EnumSource(UnilateralTerminationNotice.Option.class)
     void timelyReviewPausesAutomaticEndAndApprovalReplacesItWithExactlyTheRequestedOption(UnilateralTerminationNotice.Option option) {
         var n=review(issue(),option);assertEquals(2,n.version());
+        verify(terminationNotices).landlord(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_REVIEW_REQUESTED);
         clock("2026-11-13T10:00:00");assertEquals(ContractStatus.ACTIVE,contract.getStatus());assertEquals(UnilateralTerminationNotice.Status.REVIEW_REQUESTED,current().unilateralTermination().status());
         assertThrows(AppException.class,()->service.extendPaymentDirectly("invoice","owner",new PaymentExtensionPayload(5,"Không được áp dụng đồng thời")));
         var result=service.decideTerminationReview("invoice",n.id(),"owner",new UnilateralTerminationPayloads.Decision(n.version(),true,"Đồng ý phương án người thuê đã xin"));
         assertEquals(UnilateralTerminationNotice.Status.REPLACED,result.unilateralTermination().status());assertNotNull(contract.getTerminationCancelledAt());
+        verify(terminationNotices).tenant(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_REVIEW_APPROVED);
         assertEquals(ContractStatus.ACTIVE,contract.getStatus());assertNull(contract.getTerminationAcceptedAt());
         if(option==UnilateralTerminationNotice.Option.ROLLOVER){assertNotNull(result.deferredAt());assertEquals("ROLLOVER",result.activeResolution());assertTrue(result.paymentExtensions().isEmpty());}
         else {assertEquals("PAYMENT_EXTENSION",result.activeResolution());assertEquals(Instant.parse("2026-11-18T03:00:00Z"),result.dueAt());assertNull(result.deferredAt());}
@@ -161,6 +168,8 @@ class UnilateralTerminationServiceTest {
         assertEquals(endedAt,contract.getTerminationCompletedAt());assertEquals(DepositStatus.HELD,deposit.getStatus());assertNull(deposit.getRetainedAt());assertEquals(0,deposit.getRetainedAmount().signum());
         assertNotNull(current().unilateralTermination().handoverAt());verify(listings,times(1)).releaseRentedAfterTermination("listing","owner");verify(parking,times(1)).releaseReservationsForContract("contract");
         assertThrows(AppException.class,()->service.completeUnilateralHandover("invoice",noticeId,"owner",new UnilateralTerminationPayloads.Handover(version,true,true)));
+        verify(terminationNotices).tenant(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_RETURN_COMPLETED);
+        verify(terminationNotices,times(1)).both(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_ENDED);
     }
     @Test void receivedDepositIsRetainedOnlyWhenActualHandoverIsConfirmed() {
         var amount=new BigDecimal("20000000");deposit.setOriginalAmount(amount);deposit.setHeldAmount(amount);deposit.setRefundableAmount(amount);
@@ -204,5 +213,24 @@ class UnilateralTerminationServiceTest {
         var requested=review(n,UnilateralTerminationNotice.Option.PAYMENT_EXTENSION);clock("2026-11-11T09:59:59");
         assertThrows(AppException.class,()->service.decideTerminationReview("invoice",n.id(),"owner",new UnilateralTerminationPayloads.Decision(requested.version(),false,"Không ghi quyết định trước thời điểm khiếu nại")));
         assertEquals(ContractStatus.ACTIVE,contract.getStatus());assertNull(contract.getTerminationCompletedAt());
+    }
+    static String k(String type,String who){return "INVOICE_"+type+":"+who+":invoice";}
+    @Test void noticeReviewWithdrawalAndAutomaticEndAddNoTerminationNoticesOnlyTheFeeIncreaseTheyTrigger() {
+        var n=review(issue(),UnilateralTerminationNotice.Option.PAYMENT_EXTENSION);
+        service.withdrawUnilateralTermination("invoice",n.id(),"owner",new UnilateralTerminationPayloads.Version(n.version()));
+        issue();clock("2026-11-12T10:00:00");current();current();
+        assertEquals(ContractStatus.TERMINATED,contract.getStatus());
+        assertEquals(List.of(k("AMOUNT_UPDATED","tenant")),outbox.keys()); // Phase 6 owns notice/review/withdraw/end
+    }
+    @Test void rejectedReviewEndsContractWithoutAnyTerminationNotice() {
+        var n=review(issue(),UnilateralTerminationNotice.Option.ROLLOVER);clock("2026-11-11T11:00:00");
+        service.decideTerminationReview("invoice",n.id(),"owner",new UnilateralTerminationPayloads.Decision(n.version(),false,"Không đồng ý cho thanh toán trễ nữa"));
+        assertEquals(List.of(k("AMOUNT_UPDATED","tenant")),outbox.keys());
+    }
+    @ParameterizedTest @EnumSource(UnilateralTerminationNotice.Option.class)
+    void approvedReviewEmitsOnlyTheFinancialChildOutcomeAndNeverTheTerminationDecisionItself(UnilateralTerminationNotice.Option option) {
+        var n=review(issue(),option);clock("2026-11-13T10:00:00");outbox.clear();
+        service.decideTerminationReview("invoice",n.id(),"owner",new UnilateralTerminationPayloads.Decision(n.version(),true,"Đồng ý phương án người thuê đã xin"));
+        assertEquals(List.of(k(option==UnilateralTerminationNotice.Option.ROLLOVER?"DEFERRED":"EXTENSION_APPROVED","tenant")),outbox.keys());
     }
 }

@@ -94,6 +94,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     private final ListingStatusService listingStatusService;
     private final ParkingReservationService parkingReservationService;
     private final PaymentRequestRepository paymentRequestRepository;
+    private final com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
 
     @Value("${homespace.signature.mode:INTERNAL}")
     private String signatureMode;
@@ -377,6 +378,33 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         processPendingRequest(reqOpt.get().getId());
     }
 
+    @Override
+    public int failStaleEmbedding(Instant before, int maxAttempts) {
+        int failed = 0;
+        for (String id : requestRepository.findStaleExhaustedEmbeddingIds(before, maxAttempts)) {
+            try {
+                // One short transaction per row: lock, re-check, same fields as the former bulk update, notify once.
+                Boolean transitioned = new TransactionTemplate(transactionManager).execute(tx ->
+                        requestRepository.findByIdForUpdate(id)
+                                .filter(req -> req.getStatus() == SignatureRequestStatus.EMBEDDING
+                                        && req.getProcessingStartedAt() != null && req.getProcessingStartedAt().isBefore(before)
+                                        && req.getProcessingAttempts() >= maxAttempts)
+                                .map(req -> {
+                                    req.setStatus(SignatureRequestStatus.FAILED);
+                                    req.setFailureCode("EMBEDDING_STUCK");
+                                    req.setFailureMessage("Cần đối soát chữ ký với VNPT trước khi xử lý tiếp");
+                                    requestRepository.save(req);
+                                    notifyNeedsReview(req);
+                                    return true;
+                                }).orElse(false));
+                if (Boolean.TRUE.equals(transitioned)) failed++;
+            } catch (Exception e) {
+                log.error("failStaleEmbedding: request {} could not be failed: {}", id, e.getMessage());
+            }
+        }
+        return failed;
+    }
+
     // =========================================================================
     // Private — signing phases
     // =========================================================================
@@ -623,6 +651,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
 
             // Revert contract status
             revertContractStatus(req);
+            // Only a provider FAILED needs the signer's attention; the signer already knows about REJECTED/EXPIRED.
+            if (req.getStatus() == SignatureRequestStatus.FAILED) notifyNeedsReview(req);
         } else {
             if (req.getStatus() == SignatureRequestStatus.CREATED) {
                 req.setStatus(SignatureRequestStatus.PENDING_USER_CONFIRMATION);
@@ -657,6 +687,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 req.setFailureCode("PROVIDER_STATE_UNKNOWN");
                 req.setFailureMessage("Không xác định được kết quả ký tại VNPT; cần đối soát trước khi gửi lại.");
                 // Chưa biết VNPT đã ký hay chưa: giữ trạng thái hợp đồng, không mở một lần ký mới.
+                notifyNeedsReview(req);
             }
             requestRepository.save(req);
         }));
@@ -800,6 +831,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 contract.setLandlordConfirmedAt(Instant.now());
                 if(com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))depositAgreements.landlordSigned(contract);
                 else if(contract.getParentContractId()==null && onboarding!=null)onboarding.landlordSigned(contract);
+                signingNotices.signingTurn(contract);
                 log.info("Contract {} landlord signed — now TENANT_SIGNATURE_PENDING", ctx.contractId());
             } else {
                 if (contract.getStatus() != ContractStatus.TENANT_SIGNATURE_PENDING
@@ -818,6 +850,10 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
 
         if (ctx.signerRole() == SignerRole.TENANT) {
             documentProofEnqueuer.enqueue(contract, signedDoc, documentHash);
+            // Workflow documents (move-in / early exit) announce completion from WorkflowDocumentCommitter / 6D.
+            if (com.hs.contract.deposit.DepositAgreementService.isDeposit(contract)) signingNotices.fullySigned(contract);
+            else if (contract.getParentContractId() == null) signingNotices.leaseActivated(contract);
+            else if (!com.hs.contract.service.WorkflowDocumentService.applies(contract)) signingNotices.fullySigned(contract);
         }
 
         log.info("Request {} SIGNED: signedDocId={}", requestId, signedDoc.getId());
@@ -855,13 +891,15 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
 
     private void markEmbeddingFailed(String requestId, String code, String message) {
         new TransactionTemplate(transactionManager).executeWithoutResult(tx ->
-            requestRepository.findById(requestId).ifPresent(req -> {
-            if (req.getStatus() == SignatureRequestStatus.CANCELLED || req.getStatus() == SignatureRequestStatus.SIGNED) return;
+            requestRepository.findByIdForUpdate(requestId).ifPresent(req -> {
+            // Only the worker's current EMBEDDING claim may transition; a late failure must not undo another outcome.
+            if (req.getStatus() != SignatureRequestStatus.EMBEDDING) return;
             if (req.getProcessingAttempts() >= MAX_EMBEDDING_ATTEMPTS) {
                 req.setStatus(SignatureRequestStatus.FAILED);
                 req.setFailedAt(Instant.now());
                 req.setFailureCode(code);
                 req.setFailureMessage(message);
+                notifyNeedsReview(req);
                 // VNPT has already signed. Keep contract pending for manual reconciliation;
                 // never return to DRAFT and create a second provider transaction.
             } else {
@@ -881,6 +919,16 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
             contractRepository.save(contract);
         }
         // Nếu tenant bị fail, hợp đồng vẫn ở TENANT_SIGNATURE_PENDING (tenant có thể retry)
+    }
+
+    /** Joins the transaction that moved the request to FAILED; a signer/party mismatch sends nothing. */
+    private void notifyNeedsReview(SignatureRequest req) {
+        Contract envelope = contractRepository.findById(req.getContractId()).orElse(null);
+        if (envelope == null) {
+            log.warn("SIGNATURE_NEEDS_REVIEW_ENVELOPE_MISSING request={}", req.getId());
+            return;
+        }
+        signingNotices.needsReview(req, envelope);
     }
 
     private void cancelRequest(String requestId) {

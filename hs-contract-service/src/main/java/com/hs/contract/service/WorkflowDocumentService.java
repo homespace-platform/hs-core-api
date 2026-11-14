@@ -29,6 +29,7 @@ public class WorkflowDocumentService {
     private final StorageService storage;
     private final com.hs.contract.pdf.PdfSignatureEngine pdfEngine;
     private final ApplicationEventPublisher events;
+    private final com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
     @Value("${homespace.signature.mode:INTERNAL}") private String signatureMode="INTERNAL";
     public record View(String signingContractId,long sourceRevision,String status,Instant preparedAt,Instant signedAt,boolean current){}
     public static boolean applies(Contract c){return KIND.equals(c.getAgreementKind())&&c.getParentContractId()!=null;}
@@ -44,7 +45,10 @@ public class WorkflowDocumentService {
         var rev=new ContractRevision();BeanUtils.copyProperties(src,rev,"id","contract","revisionNumber","createdAt","updatedAt");rev.setContract(c);rev.setRevisionNumber(1);rev.setSpecialTerms("Văn bản riêng gắn hồ sơ "+s.record().getId()+"; hash "+hash(s.record()));rev.setRevisionNote("Bản chụp bất biến của biên bản/thỏa thuận; không sửa HĐ gốc");rev=support.revisions.saveAndFlush(rev);c.setCurrentRevisionId(rev.getId());support.contracts.saveAndFlush(c);
         var file=storage.uploadDirect(pdf,c.getContractNumber()+".pdf","application/pdf",StoragePurpose.CONTRACT_DOCUMENT,"CONTRACT",c.getId(),StorageVisibility.PRIVATE,actor);
         documents.saveAndFlush(ContractDocument.builder().contractId(c.getId()).revisionId(rev.getId()).templateVersionId(c.getTemplateVersionId()).documentType(ContractDocumentType.PDF).purpose(DocumentPurpose.OFFICIAL).storageObjectId(file.id()).fileName(c.getContractNumber()+".pdf").fileSize((long)pdf.length).renderFingerprint(ContractPreviewIdentity.fingerprint(rev,signatureMode)).status(DocumentGenerationStatus.READY).generatedAt(support.time.now()).build());
-        var record=new WorkflowSigningDocument();record.setWorkflowId(s.record().getId());record.setContentHash(hash(s.record()));record.setSigningContractId(c.getId());record.setSourceRevision(s.record().getRevision());record.setSourceSnapshotJson(support.json(Map.of("proposal",support.map(s.record().getPayloadJson()),"calculation",support.map(s.record().getCalculationJson()))));record.setPreparedAt(support.time.now());records.saveAndFlush(record);return view(record,s.record());
+        var record=new WorkflowSigningDocument();record.setWorkflowId(s.record().getId());record.setContentHash(hash(s.record()));record.setSigningContractId(c.getId());record.setSourceRevision(s.record().getRevision());record.setSourceSnapshotJson(support.json(Map.of("proposal",support.map(s.record().getPayloadJson()),"calculation",support.map(s.record().getCalculationJson()))));record.setPreparedAt(support.time.now());records.saveAndFlush(record);
+        // Only a genuinely new move-in document prepared by the tenant is the landlord's review cue; owner prepare and replays stay silent.
+        if(actor.equals(c.getTenantId())&&!actor.equals(c.getLandlordId()))signingNotices.reviewReady(c);
+        return view(record,s.record());
     }
     private View view(WorkflowSigningDocument d,RentalWorkflowRecord source){var c=support.contracts.findById(d.getSigningContractId()).orElseThrow(support::missing);return new View(c.getId(),d.getSourceRevision(),c.getStatus().name(),d.getPreparedAt(),d.getSignedAt(),d.getContentHash().equals(hash(source)));}
     private void eligible(RentalWorkflowRecord w,Contract root){

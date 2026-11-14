@@ -432,6 +432,8 @@ class ContractServiceImplTest {
         assertEquals(DocumentPurpose.OFFICIAL, document.getPurpose());
         verify(documentRepository).saveAll(List.of(document));
         verify(contractRepository).save(contract);
+        verify((com.hs.contract.notification.AgreementSigningNotificationWriter) org.springframework.test.util.ReflectionTestUtils.getField(service,"signingNotices"))
+                .signingTurn(contract);
     }
 
     @Test
@@ -592,6 +594,8 @@ class ContractServiceImplTest {
         verify(listingStatusService).markRentedByContract("listing-1", "tenant-1");
         verify(rentalRequestRepository).save(rentalRequest);
         verify(contractRepository).save(contract);
+        verify((com.hs.contract.notification.MoveInHandoverNotificationWriter) org.springframework.test.util.ReflectionTestUtils.getField(service,"handoverNotices"))
+                .enqueueLandlord(contract, com.hs.contract.notification.MoveInHandoverNotificationWriter.Event.MOVE_IN_HANDOVER_READY);
     }
 
     @Test
@@ -1254,6 +1258,8 @@ class ContractServiceImplTest {
         when(integrity.prepareUpdate(any(),any(),any())).thenAnswer(i -> i.getArgument(2));
         org.springframework.test.util.ReflectionTestUtils.setField(service,"draftIntegrity",integrity);
         org.springframework.test.util.ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"signingNotices",mock(com.hs.contract.notification.AgreementSigningNotificationWriter.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"handoverNotices",mock(com.hs.contract.notification.MoveInHandoverNotificationWriter.class));
         return service;
     }
 }

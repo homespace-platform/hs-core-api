@@ -42,6 +42,7 @@ public class PaymentDisputeService {
     private final ObjectMapper mapper;
     private final BillingTime time;
     private final RentalRequestNotificationWriter notifications;
+    private final com.hs.payment.notification.PaymentNotificationWriter paymentNotifications;
     @PersistenceContext private EntityManager em;
     @Value("${rental.first-rent-window-hours:24}") private long reopenHours=24;
     @Value("${homespace.payment.confirmation-window-hours:24}") private long confirmationHours=24;
@@ -102,8 +103,10 @@ public class PaymentDisputeService {
         if(!"COMMENT".equals(action) && request.evidenceStorageId()!=null)
             throw invalid("Chứng cứ được gửi qua phần phản hồi; không ghép với quyết định.");
         var metadata=new LinkedHashMap<String,Object>();
+        // The event is decided inside the switch but written only after every fallible step (audit row, revision) succeeded.
+        com.hs.payment.notification.PaymentNotificationWriter.Event notice=null;
         switch(action) {
-            case "COMMENT" -> attachEvidence(c,p,actor,request.evidenceStorageId(),reason);
+            case "COMMENT" -> {if(attachEvidence(c,p,actor,request.evidenceStorageId(),reason))notice=com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_DISPUTE_EVIDENCE_ADDED;}
             case "PROPOSE" -> {
                 requireBilateral(c);requireResolution(request.resolution());
                 if(c.getProposedBy()!=null)throw notAllowed("Hãy phản hồi đề xuất hiện tại trước khi gửi đề xuất mới.");
@@ -111,25 +114,29 @@ public class PaymentDisputeService {
                 c.setProposalId(UUID.randomUUID().toString());c.setProposedBy(actor);
                 c.setProposedResolution(request.resolution());c.setProposalReason(reason);
                 metadata.put("proposalId",c.getProposalId());metadata.put("resolution",request.resolution().name());
+                notice=com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_DISPUTE_PROPOSED;
             }
             case "ACCEPT" -> {
                 requireBilateral(c);requireOtherProposer(c,actor);
                 metadata.put("proposalId",c.getProposalId());metadata.put("proposer",c.getProposedBy());
                 metadata.put("resolution",c.getProposedResolution().name());
-                route(c,p,c.getProposedResolution(),actor,reason,false);
+                notice=route(c,p,c.getProposedResolution(),actor,reason,false);
             }
             case "DECLINE" -> {
                 requireBilateral(c);requireOtherProposer(c,actor);
                 metadata.put("proposalId",c.getProposalId());metadata.put("resolution",c.getProposedResolution().name());
                 clearProposal(c);
+                notice=com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_DISPUTE_PROPOSAL_DECLINED;
             }
             case "ESCALATE" -> {
                 requireBilateral(c);c.setStatus(DisputeCaseStatus.ESCALATED);
                 metadata.put("proposalId",Objects.toString(c.getProposalId(),""));clearProposal(c);
+                notice=com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_DISPUTE_ESCALATED;
             }
             default -> throw invalid("Thao tác đối soát không được hỗ trợ.");
         }
         finish(c,p,actor,false,action,reason,request.evidenceStorageId(),metadata);
+        if(notice!=null)paymentNotifications.enqueueOthers(p,notice,actor);
         return view(c,p,actor,false,true);
     }
 
@@ -159,17 +166,20 @@ public class PaymentDisputeService {
         if(c.getStatus()!=DisputeCaseStatus.ESCALATED)throw notAllowed("Chỉ xử lý hồ sơ đã chuyển quản trị viên.");
         if(request.evidenceStorageId()!=null)throw invalid("Quyết định quản trị viên không phải chứng từ chuyển tiền.");
         var metadata=new LinkedHashMap<String,Object>();
+        com.hs.payment.notification.PaymentNotificationWriter.Event notice=null;
         switch(action) {
             case "CLAIM" -> {metadata.put("previousAssignee",Objects.toString(c.getAssignedTo(),""));c.setAssignedTo(actor);}
             case "DECIDE" -> {
                 if(!actor.equals(c.getAssignedTo()))throw notAllowed("Hãy tiếp nhận hồ sơ trước khi ra quyết định.");
                 requireResolution(request.resolution());
                 metadata.put("resolution",request.resolution().name());
-                route(c,p,request.resolution(),actor,reason,true);
+                notice=route(c,p,request.resolution(),actor,reason,true);
             }
             default -> throw invalid("Thao tác quản trị viên không được hỗ trợ.");
         }
         finish(c,p,actor,true,action,reason,null,metadata);
+        // The admin is not a stored party, so this reaches both parties.
+        if(notice!=null)paymentNotifications.enqueueOthers(p,notice,actor);
         return view(c,p,actor,true,true);
     }
 
@@ -211,7 +221,8 @@ public class PaymentDisputeService {
         }
     }
 
-    private void route(DisputeCase c,PaymentRequest p,DisputeResolution resolution,String actor,String reason,boolean administrator) {
+    /** Returns the payment notice for this route, or null when RENTAL_HOLD_EXTENDED already informs the same recipients. */
+    private com.hs.payment.notification.PaymentNotificationWriter.Event route(DisputeCase c,PaymentRequest p,DisputeResolution resolution,String actor,String reason,boolean administrator) {
         validateRoute(c,p,resolution);
         PaymentStatus next;
         com.hs.listing.model.RentalRequest extendedHold=null;
@@ -245,18 +256,23 @@ public class PaymentDisputeService {
                         "previousStatus",Objects.toString(c.getPreviousPaymentStatus(),"UNKNOWN"),"receiptConfirmed",false))).build());
         // Only a real deadline change; the acting admin (or party) is not notified about their own action.
         if(extendedHold!=null)notifications.enqueueOthers(extendedHold,actor,Event.RENTAL_HOLD_EXTENDED);
+        if(resolution==DisputeResolution.REVIEW_TRANSFER)return com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_DISPUTE_REVIEW_TRANSFER;
+        return extendedHold!=null?null:com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_DISPUTE_REOPENED;
     }
 
-    private void attachEvidence(DisputeCase c,PaymentRequest p,String actor,String storageId,String reason) {
-        if(storageId==null||storageId.isBlank())return;
+    /** True only when a genuinely new evidence row was stored; plain notes and reused storage objects return false. */
+    private boolean attachEvidence(DisputeCase c,PaymentRequest p,String actor,String storageId,String reason) {
+        if(storageId==null||storageId.isBlank())return false;
         var file=storage.findById(storageId).orElseThrow(()->new AppException(PaymentErrorCode.PAYMENT_PROOF_INVALID));
         if(!Boolean.TRUE.equals(file.getActive())||!actor.equals(file.getOwnerId())||file.getStatus()!=StorageStatus.READY
                 ||file.getPurpose()!=StoragePurpose.PAYMENT_PROOF||file.getVisibility()!=StorageVisibility.PRIVATE
                 ||!"PAYMENT_REQUEST".equals(file.getReferenceType())||!p.getId().equals(file.getReferenceId()))
             throw new AppException(PaymentErrorCode.PAYMENT_PROOF_INVALID);
         boolean exists=evidence.findByPaymentRequestIdOrderByCreatedAtDesc(p.getId()).stream().anyMatch(e->storageId.equals(e.getStorageObjectId()));
-        if(!exists)evidence.save(PaymentEvidence.builder().paymentRequestId(p.getId()).uploadedBy(actor).storageObjectId(storageId)
+        if(exists)return false;
+        evidence.save(PaymentEvidence.builder().paymentRequestId(p.getId()).uploadedBy(actor).storageObjectId(storageId)
                 .note(reason).build());
+        return true;
     }
     private Set<String> evidenceIds(DisputeCase c,List<DisputeCaseEvent> audit) {
         try {

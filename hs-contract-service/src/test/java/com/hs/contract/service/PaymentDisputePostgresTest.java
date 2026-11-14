@@ -56,10 +56,10 @@ import static org.mockito.ArgumentMatchers.*;
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.datasource.url=${HS_DISPUTE_TEST_PG_URL}","spring.datasource.username=postgres",
     "spring.datasource.password=hs_phase02_test","spring.jpa.hibernate.ddl-auto=create-drop","spring.profiles.active=test"})
-@Import({com.hs.listing.notification.RentalRequestNotificationWriter.class,PaymentRequestService.class,PaymentDisputeService.class})
+@Import({com.hs.listing.notification.RentalRequestNotificationWriter.class,com.hs.payment.notification.PaymentNotificationWriter.class,PaymentRequestService.class,PaymentDisputeService.class})
 class PaymentDisputePostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs")
-    @EnableJpaRepositories(basePackageClasses={com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,PaymentRequestRepository.class,RentalRequestRepository.class,ContractRepository.class,StorageObjectRepository.class})
+    @EnableJpaRepositories(basePackageClasses={com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,com.hs.payment.notification.PaymentNotificationOutboxRepository.class,PaymentRequestRepository.class,RentalRequestRepository.class,ContractRepository.class,StorageObjectRepository.class})
     @EnableJpaAuditing static class Config {
         @Bean ObjectMapper mapper(){return new ObjectMapper().findAndRegisterModules();}
         @Bean BillingTime time(Environment env){return new BillingTime("2026-11-03T10:00:00",env);}

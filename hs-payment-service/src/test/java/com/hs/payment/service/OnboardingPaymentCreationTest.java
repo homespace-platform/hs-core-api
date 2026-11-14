@@ -27,7 +27,7 @@ class OnboardingPaymentCreationTest {
     @Mock DepositRecordRepository depositRecordRepository; @Mock BankAccountService bankAccountService;
     @Mock VietQrProvider vietQrProvider; @Mock TransferReferenceGenerator transferReferenceGenerator;
     @Mock StorageObjectRepository storageObjectRepository; @Mock PaymentProofUploadSessionService proofUploadSessionService;
-    @Mock BillingTime billingTime; @Spy ObjectMapper objectMapper=new ObjectMapper(); @InjectMocks PaymentRequestService service;
+    @Mock BillingTime billingTime; @Mock com.hs.payment.notification.PaymentNotificationWriter notifications; @Spy ObjectMapper objectMapper=new ObjectMapper(); @InjectMocks PaymentRequestService service;
     RentalRequest rental; Instant now=Instant.parse("2026-10-21T03:00:00Z");
     @BeforeEach void setup() {
         org.springframework.test.util.ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
@@ -50,6 +50,7 @@ class OnboardingPaymentCreationTest {
         when(paymentRequestRepository.findByRentalRequestIdAndType("rental",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.of(PaymentRequest.builder().id("deposit").build()));
         var p=service.createFirstRent(rental,now,now.plusSeconds(86400));assertEquals(new BigDecimal("5000000"),p.getTotalAmount());
         verifyNoInteractions(depositRecordRepository);
+        verify(notifications).enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED,"tenant");
     }
     @Test void zeroDepositIsConfirmedExemptionWithoutZeroQr() {
         rental.setDepositAmount(BigDecimal.ZERO);var p=service.createDeposit(rental,now.plusSeconds(3600));
@@ -60,5 +61,12 @@ class OnboardingPaymentCreationTest {
         var existing=PaymentRequest.builder().id("existing").build();
         when(paymentRequestRepository.findByRentalRequestIdAndType("rental",PaymentType.INITIAL)).thenReturn(Optional.of(existing));
         assertSame(existing,service.createFirstRent(rental,now,now.plusSeconds(86400)));verifyNoInteractions(vietQrProvider,depositRecordRepository);
+        verifyNoInteractions(notifications);
+    }
+    @Test void firstRentWaiverAndAcceptanceTimeCreationDoNotAnnounceNewMoneyDue(){
+        service.createInitialPayment("rental","listing","tenant","owner",new BigDecimal("5000000"),BigDecimal.ZERO,null,null,now.plusSeconds(3600));
+        verifyNoInteractions(notifications);
+        rental.setMonthlyRentPrice(BigDecimal.ZERO);var p=service.createFirstRent(rental,now,now.plusSeconds(86400));
+        assertEquals(PaymentStatus.CONFIRMED,p.getStatus());verifyNoInteractions(notifications);
     }
 }

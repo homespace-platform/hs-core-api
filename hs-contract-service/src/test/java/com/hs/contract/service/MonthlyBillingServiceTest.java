@@ -14,6 +14,7 @@ import com.hs.contract.dto.billing.PaymentExtension;
 import com.hs.contract.dto.billing.AcceptTerminationRequest;
 import com.hs.contract.dto.billing.CompleteTerminationRequest;
 import com.hs.contract.dto.billing.ForceTerminationRequest;
+import com.hs.contract.notification.InvoiceOutboxProbe;
 import com.hs.contract.model.Contract;
 import com.hs.contract.model.ContractRevision;
 import com.hs.contract.model.MonthlyInvoice;
@@ -66,6 +67,8 @@ class MonthlyBillingServiceTest {
     private final ListingStatusService listingStatusService = mock(ListingStatusService.class);
     private final DepositRecordRepository deposits = mock(DepositRecordRepository.class);
     private final ParkingReservationService parkingReservations = mock(ParkingReservationService.class);
+    private final com.hs.contract.notification.InvoiceOutboxProbe outbox = new com.hs.contract.notification.InvoiceOutboxProbe();
+    private final com.hs.contract.notification.TerminationNotificationWriter terminationNotices = mock(com.hs.contract.notification.TerminationNotificationWriter.class);
     private MonthlyBillingService service;
     private MonthlyInvoice invoice;
 
@@ -73,7 +76,8 @@ class MonthlyBillingServiceTest {
     void setUp() {
         service = new MonthlyBillingService(contracts, revisions, rentals, invoices,
                 payments, new ObjectMapper().findAndRegisterModules(), time, tx,
-                listingStatusService, deposits, parkingReservations);
+                listingStatusService, deposits, parkingReservations, outbox.writer);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"terminationNotices",terminationNotices);
         when(time.now()).thenReturn(Instant.parse("2026-11-01T03:00:00Z"));
         when(time.today()).thenReturn(LocalDate.of(2026, 11, 1));
         Contract contract = Contract.builder().id("contract").landlordId("landlord")
@@ -97,6 +101,12 @@ class MonthlyBillingServiceTest {
         when(rentals.findById("rental")).thenReturn(Optional.of(RentalRequest.builder()
                 .moveInDate(LocalDate.of(2026, 10, 1)).leaseMonths(12).build()));
         when(invoices.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        // JPA assigns the id on insert; the draft-ready notice needs it.
+        when(invoices.saveAndFlush(any())).thenAnswer(invocation -> {
+            MonthlyInvoice item = invocation.getArgument(0);
+            if (item != null && item.getId() == null) item.setId("draft-" + item.getPeriodIndex());
+            return item;
+        });
         PaymentRequest initial = PaymentRequest.builder().id("initial").status(PaymentStatus.CONFIRMED).build();
         when(payments.findByRentalRequestIdAndType("rental", PaymentType.INITIAL))
                 .thenReturn(Optional.of(initial));
@@ -504,6 +514,7 @@ class MonthlyBillingServiceTest {
         List<MonthlyInvoice> created = new ArrayList<>();
         when(invoices.saveAndFlush(any())).thenAnswer(invocation -> {
             MonthlyInvoice item = invocation.getArgument(0);
+            item.setId("draft-" + item.getPeriodIndex());
             created.add(item);
             return item;
         });
@@ -675,6 +686,7 @@ class MonthlyBillingServiceTest {
         when(deposits.findByRentalRequestId("rental")).thenReturn(Optional.of(deposit));
 
         service.proposeMutualTermination("invoice", "landlord");
+        verify(terminationNotices).tenant(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_RESPONSE_NEEDED);
         assertEquals(ContractStatus.ACTIVE, contract.getStatus());
         verifyNoInteractions(listingStatusService);
         assertThrows(AppException.class, () -> service.completeMutualTermination("invoice", "landlord",
@@ -682,9 +694,12 @@ class MonthlyBillingServiceTest {
         assertThrows(AppException.class, () -> service.acceptMutualTermination("invoice", "tenant",
                 new AcceptTerminationRequest(true, false, true)));
         service.acceptMutualTermination("invoice", "tenant", new AcceptTerminationRequest(true, true, true));
+        verify(terminationNotices).landlord(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_AGREED);
         assertThrows(AppException.class, () -> service.completeMutualTermination("invoice", "landlord",
                 new CompleteTerminationRequest(true, false)));
         service.completeMutualTermination("invoice", "landlord", new CompleteTerminationRequest(true, true));
+        verify(terminationNotices).both(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_ENDED);
+        verify(terminationNotices,never()).tenant(any(),eq(com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_RETURN_COMPLETED));
 
         assertEquals(ContractStatus.TERMINATED, contract.getStatus());
         assertEquals(DepositStatus.RETAINED_BY_LANDLORD, deposit.getStatus());
@@ -842,6 +857,7 @@ class MonthlyBillingServiceTest {
 
         assertEquals(MonthlyInvoiceStatus.PAID, invoice.getStatus());
         assertNotNull(contract.getTerminationCancelledAt());
+        verify(terminationNotices).tenant(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_WITHDRAWN);
         verifyNoInteractions(listingStatusService);
     }
 
@@ -1568,5 +1584,241 @@ class MonthlyBillingServiceTest {
         assertEquals(new BigDecimal("150"), invoice.getElectricityEnd()); assertFalse(invoice.isElectricityAutoFilled());
         assertEquals(new BigDecimal("10"), invoice.getWaterEnd()); assertTrue(invoice.isWaterAutoFilled());
         verify(payments,times(1)).createMonthlyPayment(anyString(),anyString(),anyString(),anyString(),anyString(),anyString(),any(),anyString(),any());
+    }
+
+    // ---- Phase 4 invoice notifications: one actual transition -> one persisted outbox row per recipient ----
+    private static String k(String type, String who, String invoiceId) { return "INVOICE_" + type + ":" + who + ":" + invoiceId; }
+    private void noFees() { revisions.findById("revision").orElseThrow().setPoliciesSnapshot("{\"latePaymentFeeMode\":\"NONE\"}"); }
+    private void overdueDemo(String now) { // OVERDUE invoice, fees off, payment awaiting transfer (isolates the decision under test)
+        demoIssued(); noFees(); invoice.setStatus(MonthlyInvoiceStatus.OVERDUE); demoTime(now);
+    }
+
+    @Test void manualIssueNotifiesOnlyTheStoredTenantWithExactMinimalEnvelopeAndReplayIsSilent() throws Exception {
+        var request = new IssueMonthlyInvoiceRequest(new BigDecimal("150"), new BigDecimal("12"), List.of());
+        assertThrows(AppException.class, () -> service.issue("invoice", "tenant", request));
+        assertEquals(List.of(), outbox.keys());
+        service.issue("invoice", "landlord", request);
+        assertThrows(AppException.class, () -> service.issue("invoice", "landlord", request));
+        assertEquals(List.of(k("ISSUED", "tenant", "invoice")), outbox.keys());
+        var row = outbox.sent().getFirst();
+        var names = new ArrayList<String>(); row.envelope().fieldNames().forEachRemaining(names::add);
+        assertEquals(List.of("eventId", "eventType", "version", "occurredAt", "recipients", "data"), names);
+        var data = new ArrayList<String>(); row.envelope().get("data").fieldNames().forEachRemaining(data::add);
+        assertEquals(List.of("contractId", "invoiceId"), data);
+        assertEquals(1, row.envelope().get("version").asInt());
+        assertEquals(1, row.envelope().get("recipients").size());
+        assertEquals("contract", row.contractId());
+        assertEquals(java.util.UUID.fromString(row.eventId()).toString(), row.eventId());
+        assertFalse(row.envelope().get("data").toString().matches("(?s).*(\\d{6,}|landlord|Điện).*"));
+        assertEquals("invoice", outbox.rows().getFirst().getAggregateId());
+    }
+
+    @Test void zeroTotalIssueBecomesPaidWithoutPaymentOrNotice() {
+        when(rentals.findById("rental")).thenReturn(Optional.of(RentalRequest.builder()
+                .moveInDate(LocalDate.of(2026, 10, 1)).leaseMonths(1).build()));
+        var result = service.issue("invoice", "landlord", new IssueMonthlyInvoiceRequest(new BigDecimal("100"), new BigDecimal("10"), List.of()));
+        assertEquals(MonthlyInvoiceStatus.PAID, result.status());
+        verify(payments, never()).createMonthlyPayment(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), any(), anyString(), any());
+        assertEquals(List.of(), outbox.keys());
+    }
+
+    @Test void prepareAndFirstRentRowAreSilentAndLandlordDraftsAreNotAnnouncedToTenant() {
+        demoTime("2026-10-31T10:00:00");
+        service.prepare("invoice", "landlord", new IssueMonthlyInvoiceRequest(new BigDecimal("150"), new BigDecimal("12"), List.of()));
+        assertEquals(List.of(), outbox.keys());
+        Contract contract = contracts.findById("contract").orElseThrow();
+        when(contracts.findByIdForUpdate("contract")).thenReturn(Optional.of(contract));
+        when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(invoice));
+        demoTime("2026-11-02T10:00:00");
+        service.list("contract", "tenant");
+        when(invoices.findByContractIdAndPeriodIndex("contract", 0)).thenReturn(Optional.of(invoice)); // now persisted
+        service.list("contract", "landlord");
+        assertEquals(List.of(k("DRAFT_READY", "landlord", "draft-0")), outbox.keys());
+        assertTrue(outbox.sent().stream().noneMatch(e -> e.invoiceId().startsWith("first-rent")));
+    }
+
+    @Test void rolloverIssueAnnouncesOldInvoiceRolledOverAndNewInvoiceIssuedAsDistinctOutcomes() {
+        MonthlyInvoice previous = MonthlyInvoice.builder().id("previous").contractId("contract")
+                .periodIndex(0).status(MonthlyInvoiceStatus.OVERDUE)
+                .electricityEnd(new BigDecimal("150")).waterEnd(new BigDecimal("12"))
+                .totalAmount(new BigDecimal("3865000")).deferredAt(Instant.parse("2026-11-10T00:00:00Z")).build();
+        invoice.setPeriodIndex(1); invoice.setPeriodStart(LocalDate.of(2026, 11, 1)); invoice.setPeriodEndExclusive(LocalDate.of(2026, 12, 1));
+        when(time.today()).thenReturn(LocalDate.of(2026, 12, 1)); when(time.now()).thenReturn(Instant.parse("2026-12-01T03:00:00Z"));
+        when(invoices.findByContractIdAndPeriodIndex("contract", 0)).thenReturn(Optional.of(previous));
+        when(payments.findByInvoiceId("previous")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.OVERDUE).build()));
+        service.issue("invoice", "landlord", new IssueMonthlyInvoiceRequest(new BigDecimal("160"), new BigDecimal("13"), List.of()));
+        assertEquals(List.of(k("ROLLED_OVER", "tenant", "previous"), k("ISSUED", "tenant", "invoice")), outbox.keys());
+        assertEquals(2, outbox.sent().stream().map(InvoiceOutboxProbe.Sent::eventId).distinct().count());
+    }
+
+    @Test void catchUpAnnouncesEveryDraftAndIssueOnceAndSuppressesTheIssuedInvoicesOwnOverdueFeeAndActionNotices() {
+        var history = skippedMonthsDemo("FIXED_PER_DAY", ContractStatus.ACTIVE);
+        demoTime("2026-12-30T00:01:00"); service.scheduledSync();
+        assertEquals(List.of(k("DRAFT_READY", "landlord", "bill-0"), k("DRAFT_READY", "landlord", "bill-1"),
+                k("ISSUED", "tenant", "bill-0"), k("DEFERRED", "landlord", "bill-0"), // issue tx: tenant only gets ISSUED, owner learns the decision
+                k("ROLLED_OVER", "tenant", "bill-0"), k("ISSUED", "tenant", "bill-1"),
+                k("DEFERRED", "landlord", "bill-1")), outbox.keys());
+        assertNotNull(history.get(0).getDeferredAt()); assertNotNull(history.get(1).getDeferredAt()); // business mutation unchanged
+        assertEquals(MonthlyInvoiceStatus.ROLLED_OVER, history.get(0).getStatus());
+        assertEquals(MonthlyInvoiceStatus.OVERDUE, history.get(1).getStatus()); // current state is visible on the landing page
+        verify(payments, atLeastOnce()).increaseMonthlyPayment(eq("bill-1"), any(), anyString()); // fee really accrued: only the notice is suppressed
+        var before = outbox.keys().size(); service.scheduledSync(); service.scheduledSync();
+        assertEquals(before, outbox.keys().size());
+    }
+
+    @Test void lazyReadsAnnounceRealOverdueBothPartiesOnceThenFeeIncreasesAndActionWindowOnce() {
+        octoberThreeMonthDemo(); // UNPAID, due 2026-11-16 23:59:59 local, fee 100k/day
+        demoTime("2026-11-17T10:00:00");
+        service.list("contract", "tenant"); service.list("contract", "landlord");
+        assertEquals(List.of(k("OVERDUE", "landlord", "invoice"), k("OVERDUE", "tenant", "invoice")), outbox.keys()); // AMOUNT_UPDATED folded into OVERDUE
+        demoTime("2026-11-18T10:00:00"); service.list("contract", "tenant"); service.list("contract", "landlord");
+        assertEquals(k("AMOUNT_UPDATED", "tenant", "invoice"), outbox.keys().getLast());
+        assertEquals(3, outbox.keys().size());
+        demoTime("2026-11-22T00:01:00"); service.list("contract", "landlord"); service.list("contract", "tenant");
+        var after = outbox.keys();
+        assertEquals(1, after.stream().filter(x -> x.equals(k("OVERDUE_ACTION_REQUIRED", "landlord", "invoice"))).count());
+        assertEquals(1, after.stream().filter(x -> x.startsWith("INVOICE_OVERDUE:")).count() / 2);
+        var size = after.size(); service.list("contract", "tenant"); assertEquals(size, outbox.keys().size());
+    }
+
+    @Test void overdueIsSilentWhilePaymentIsReportedOrDisputedAndFeeNoticeNeedsARealQrIncrease() {
+        octoberThreeMonthDemo(); demoTime("2026-11-17T10:00:00");
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.TRANSFER_REPORTED).build()));
+        service.list("contract", "tenant");
+        assertEquals(MonthlyInvoiceStatus.UNPAID, invoice.getStatus()); assertEquals(List.of(), outbox.keys());
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.DISPUTED).build()));
+        service.list("contract", "tenant"); assertEquals(List.of(), outbox.keys());
+        invoice.setStatus(MonthlyInvoiceStatus.OVERDUE);
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.OVERDUE).build()));
+        when(payments.increaseMonthlyPayment(anyString(), any(), anyString())).thenReturn(false); // blocked / capped: no persisted change
+        service.list("contract", "tenant");
+        verify(payments, atLeastOnce()).increaseMonthlyPayment(anyString(), any(), anyString());
+        assertEquals(List.of(), outbox.keys());
+        assertEquals(new BigDecimal("1000000"), invoice.getTotalAmount());
+    }
+
+    @Test void extensionRequestApprovalAndRejectionAreSingleRecipientAndDeniedPathsWriteNothing() {
+        overdueDemo("2027-01-19T10:00:00");
+        assertThrows(AppException.class, () -> service.requestPaymentExtension("invoice", "landlord", extension(7)));
+        var request = service.requestPaymentExtension("invoice", "tenant", extension(7)).paymentExtensions().getFirst();
+        assertThrows(AppException.class, () -> service.decidePaymentExtension("invoice", request.id(), "tenant", true));
+        assertThrows(AppException.class, () -> service.decidePaymentExtension("invoice", "stale", "landlord", true));
+        assertEquals(List.of(k("EXTENSION_REQUESTED", "landlord", "invoice")), outbox.keys());
+        service.decidePaymentExtension("invoice", request.id(), "landlord", true);
+        assertThrows(AppException.class, () -> service.decidePaymentExtension("invoice", request.id(), "landlord", true));
+        assertEquals(List.of(k("EXTENSION_REQUESTED", "landlord", "invoice"), k("EXTENSION_APPROVED", "tenant", "invoice")), outbox.keys());
+    }
+
+    @Test void explicitRejectNotifiesTenantAndInternalSupersedingRejectionStaysSilent() {
+        overdueDemo("2027-01-19T10:00:00");
+        var request = service.requestPaymentExtension("invoice", "tenant", extension(7)).paymentExtensions().getFirst();
+        service.decidePaymentExtension("invoice", request.id(), "landlord", false);
+        assertEquals(List.of(k("EXTENSION_REQUESTED", "landlord", "invoice"), k("EXTENSION_REJECTED", "tenant", "invoice")), outbox.keys());
+        outbox.clear(); // a second invoice state: pending request superseded by a manual deferral
+        invoice.setExtensionRequestsSnapshot("[]"); invoice.setDeferredAt(null); invoice.setResolutionMode(null);
+        demoTime("2027-01-21T10:00:00");
+        service.requestPaymentExtension("invoice", "tenant", extension(7)); demoTime("2027-01-22T00:00:00");
+        service.deferToNextPeriod("invoice", "landlord");
+        assertEquals(List.of(k("EXTENSION_REQUESTED", "landlord", "invoice"), k("DEFERRED", "tenant", "invoice")), outbox.keys());
+    }
+
+    @Test void directExtensionNotifiesTenantOnceWithOrWithoutAPendingRequest() {
+        overdueDemo("2027-01-22T00:00:00");
+        service.extendPaymentDirectly("invoice", "landlord", extension(7));
+        assertEquals(List.of(k("EXTENSION_APPROVED", "tenant", "invoice")), outbox.keys());
+        outbox.clear(); invoice.setExtensionRequestsSnapshot("[]"); invoice.setStatus(MonthlyInvoiceStatus.OVERDUE);
+        invoice.setDueAt(Instant.parse("2027-01-16T16:59:59Z")); invoice.setResolutionMode(null); demoTime("2027-01-23T00:00:00");
+        service.requestPaymentExtension("invoice", "tenant", extension(7));
+        service.extendPaymentDirectly("invoice", "landlord", extension(7));
+        assertEquals(List.of(k("EXTENSION_REQUESTED", "landlord", "invoice"), k("EXTENSION_APPROVED", "tenant", "invoice")), outbox.keys());
+        assertThrows(AppException.class, () -> service.extendPaymentDirectly("invoice", "landlord", extension(7)));
+        assertEquals(2, outbox.keys().size());
+    }
+
+    @Test void expiredRequestNotifiesTenantOnceAndWinsOverTheSameReconcilesFeeNoticeWhileLandlordStillGetsOverdue() {
+        demoIssued(); demoTime("2027-01-15T10:00:00"); // UNPAID, due 2027-01-16 23:59:59 local, fees 100k/day
+        service.requestPaymentExtension("invoice", "tenant", extension(7));
+        demoTime("2027-01-17T11:00:00"); service.list("contract", "tenant"); service.list("contract", "landlord");
+        assertEquals(List.of(k("EXTENSION_REQUESTED", "landlord", "invoice"), k("EXTENSION_EXPIRED", "tenant", "invoice"),
+                k("OVERDUE", "landlord", "invoice")), outbox.keys());
+        verify(payments, atLeastOnce()).increaseMonthlyPayment(eq("invoice"), any(), anyString());
+    }
+
+    @Test void paidClosedRequestIsSilentBecauseTheReceiptNoticeAlreadyInformedThePayer() {
+        demoIssued(); demoTime("2027-01-19T10:00:00");
+        service.requestPaymentExtension("invoice", "tenant", extension(7));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder()
+                .status(PaymentStatus.CONFIRMED).confirmedAt(Instant.parse("2027-01-19T03:00:00Z")).build()));
+        service.list("contract", "tenant"); service.list("contract", "tenant");
+        assertEquals(List.of(k("OVERDUE", "landlord", "invoice"), k("OVERDUE", "tenant", "invoice"), k("EXTENSION_REQUESTED", "landlord", "invoice")), outbox.keys());
+    }
+
+    @Test void everyLandlordOverdueActionIsADistinctNoticeAndOnlyTheFirstRealAcknowledgementNotifies() {
+        invoice.setStatus(MonthlyInvoiceStatus.OVERDUE); invoice.setDueAt(Instant.parse("2026-11-05T16:59:59Z"));
+        when(time.now()).thenReturn(Instant.parse("2026-11-10T17:01:00Z")); when(time.today()).thenReturn(LocalDate.of(2026, 11, 10));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.OVERDUE).build()));
+        var note = new CreateOverdueActionRequest(OverdueAction.Type.PAYMENT_REQUEST, "Đề nghị kiểm tra và thanh toán khoản nợ.", null);
+        assertThrows(AppException.class, () -> service.recordOverdueAction("invoice", "tenant", note));
+        service.recordOverdueAction("invoice", "landlord", note);
+        var recorded = service.recordOverdueAction("invoice", "landlord", note); // same note twice: no new dedupe, two actions, two notices
+        assertEquals(List.of(k("OVERDUE_ACTION_RECORDED", "tenant", "invoice"), k("OVERDUE_ACTION_RECORDED", "tenant", "invoice")), outbox.keys());
+        assertEquals(2, outbox.sent().stream().map(InvoiceOutboxProbe.Sent::eventId).distinct().count());
+        String id = recorded.overdueActions().getFirst().id();
+        assertThrows(AppException.class, () -> service.acknowledgeOverdueAction("invoice", id, "landlord", new AcknowledgeOverdueActionRequest("x")));
+        assertThrows(AppException.class, () -> service.acknowledgeOverdueAction("invoice", "unknown", "tenant", new AcknowledgeOverdueActionRequest("x")));
+        service.acknowledgeOverdueAction("invoice", id, "tenant", new AcknowledgeOverdueActionRequest("Tôi đã xem."));
+        assertThrows(AppException.class, () -> service.acknowledgeOverdueAction("invoice", id, "tenant", new AcknowledgeOverdueActionRequest("Lần hai")));
+        assertEquals(k("OVERDUE_ACTION_ACKNOWLEDGED", "landlord", "invoice"), outbox.keys().getLast());
+        assertEquals(3, outbox.keys().size());
+    }
+
+    @Test void overdueActionUnderHeldMoneyOrBeforeTheWindowWritesNothingAndTerminationEntriesAreNotAcknowledgedHere() {
+        invoice.setStatus(MonthlyInvoiceStatus.OVERDUE); invoice.setDueAt(Instant.parse("2026-11-05T16:59:59Z"));
+        when(time.now()).thenReturn(Instant.parse("2026-11-10T17:01:00Z"));
+        var note = new CreateOverdueActionRequest(OverdueAction.Type.PAYMENT_REQUEST, "Đề nghị kiểm tra và thanh toán khoản nợ.", null);
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.DISPUTED).build()));
+        assertThrows(AppException.class, () -> service.recordOverdueAction("invoice", "landlord", note));
+        when(time.now()).thenReturn(Instant.parse("2026-11-09T00:00:00Z"));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.OVERDUE).build()));
+        assertThrows(AppException.class, () -> service.recordOverdueAction("invoice", "landlord", note));
+        invoice.setOverdueActionsSnapshot("[{\"id\":\"term\",\"type\":\"UNILATERAL_TERMINATION_NOTICE\",\"note\":\"Phase 6\",\"createdAt\":\"2026-11-10T00:00:00Z\",\"createdBy\":\"landlord\"}]");
+        service.acknowledgeOverdueAction("invoice", "term", "tenant", new AcknowledgeOverdueActionRequest("Đã xem"));
+        assertEquals(List.of(), outbox.keys());
+    }
+
+    @Test void manualDeferralNotifiesTenantOnceAndReplayReturnsWithoutAnotherNotice() {
+        invoice.setStatus(MonthlyInvoiceStatus.OVERDUE); invoice.setDueAt(Instant.parse("2026-11-05T16:59:59Z")); invoice.setTotalAmount(new BigDecimal("3865000"));
+        when(time.now()).thenReturn(Instant.parse("2026-11-13T17:01:00Z"));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.OVERDUE).build()));
+        assertThrows(AppException.class, () -> service.deferToNextPeriod("invoice", "tenant"));
+        service.deferToNextPeriod("invoice", "landlord"); service.deferToNextPeriod("invoice", "landlord");
+        assertEquals(List.of(k("DEFERRED", "tenant", "invoice")), outbox.keys());
+    }
+
+    @Test void firstAutomaticRolloverDecisionNotifiesBothPartiesOnceAndRepeatSyncIsSilent() {
+        octoberThreeMonthDemo(); noFees(); invoice.setStatus(MonthlyInvoiceStatus.OVERDUE);
+        demoTime("2026-11-26T23:59:59"); service.list("contract", "landlord");
+        assertFalse(outbox.keys().contains(k("DEFERRED", "tenant", "invoice")));
+        demoTime("2026-11-27T00:00:00"); service.list("contract", "landlord"); service.list("contract", "tenant");
+        assertEquals(List.of(k("OVERDUE_ACTION_REQUIRED", "landlord", "invoice"), k("DEFERRED", "landlord", "invoice"), k("DEFERRED", "tenant", "invoice")),
+                outbox.keys());
+    }
+
+    @Test void actionRequiredIsMarkerDrivenOnceAndSuppressedWhenNoDecisionIsNeeded() {
+        overdueDemo("2027-01-23T00:01:00"); invoice.setDueAt(Instant.parse("2027-01-16T16:59:59Z"));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.TRANSFER_REPORTED).build()));
+        service.list("contract", "landlord");
+        assertNull(invoice.getOverdueActionLoggedAt()); assertEquals(List.of(), outbox.keys()); // held money: existing marker rules unchanged
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.OVERDUE).build()));
+        invoice.setDeferredAt(Instant.parse("2027-01-22T00:00:00Z"));
+        service.list("contract", "landlord");
+        assertNotNull(invoice.getOverdueActionLoggedAt()); assertEquals(List.of(), outbox.keys()); // deferred: marker kept, no notice
+        invoice.setDeferredAt(null); invoice.setOverdueActionLoggedAt(null);
+        contracts.findById("contract").orElseThrow().setTerminationProposedAt(Instant.parse("2027-01-22T00:00:00Z"));
+        service.list("contract", "landlord");
+        assertNotNull(invoice.getOverdueActionLoggedAt()); assertEquals(List.of(), outbox.keys()); // active termination decision
+        contracts.findById("contract").orElseThrow().setTerminationProposedAt(null); invoice.setOverdueActionLoggedAt(null);
+        service.list("contract", "landlord"); service.list("contract", "landlord");
+        assertEquals(List.of(k("OVERDUE_ACTION_REQUIRED", "landlord", "invoice")), outbox.keys());
     }
 }

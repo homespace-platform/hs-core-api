@@ -46,6 +46,9 @@ public class ContractLifecycleService {
     private ContractAmendmentService amendments;
     @org.springframework.beans.factory.annotation.Autowired
     private ContractTermsResolver terms;
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.contract.notification.RenewalNotificationWriter renewalNotices;
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.contract.notification.TerminationNotificationWriter terminationNotices;
     private final ContractRepository contracts;
     private final ContractRevisionRepository revisions;
     private final ContractRenewalRepository renewals;
@@ -63,6 +66,7 @@ public class ContractLifecycleService {
     private final BillingTime time;
     private final PlatformTransactionManager transactionManager;
     private final StorageObjectRepository storageObjects;
+    private final com.hs.contract.notification.InvoiceNotificationWriter invoiceNotifications;
     @Value("${homespace.closure.response-hours:48}")
     private long closureResponseHours = 48;
     private static final Set<String> PENDING_RENEWALS=Set.of("REQUESTED","APPROVED");
@@ -80,6 +84,7 @@ public class ContractLifecycleService {
         renewals.save(ContractRenewal.builder().contractId(id).months(payload.months()).status("REQUESTED")
                 .startsOn(end).endExclusive(rental(c).getMoveInDate().plusMonths(months(c)+payload.months())).requestedAt(time.now())
                 .respondBy(min(time.now().plus(Duration.ofHours(48)),signBy)).signBy(signBy).note(payload.note().trim()).build());
+        renewalNotices.other(c, actor, com.hs.contract.notification.RenewalNotificationWriter.Event.RENEWAL_REQUESTED);
         return response(c,actor);
     }
     @Transactional public ContractLifecycleResponse decideRenewal(String id,String renewalId,String actor,boolean approve) {
@@ -117,7 +122,11 @@ public class ContractLifecycleService {
             parking.holdForRenewal(c.getId(),agreement.getId(),r.getStartsOn(),r.getEndExclusive(),r.getSignBy());
             r.setAgreementContractId(agreement.getId()); r.setStatus("APPROVED");
         }
-        renewals.save(r); return response(c,actor);
+        renewals.save(r);
+        renewalNotices.other(c, actor, approve ? com.hs.contract.notification.RenewalNotificationWriter.Event.RENEWAL_APPROVED
+                : com.hs.contract.notification.RenewalNotificationWriter.Event.RENEWAL_REJECTED);
+        if (approve) signingNotices.reviewReady(contracts.findById(r.getAgreementContractId()).orElseThrow(this::notAllowed));
+        return response(c,actor);
     }
 
     /** Called only by verified SmartCA embedding, not a public 'mark signed' endpoint. */
@@ -186,6 +195,7 @@ public class ContractLifecycleService {
         responseDeadline(close);
         appendClosureEvent(close,"PROPOSED",actor,close.getNote(),List.of());
         closures.save(close); deposit.setStatus(DepositStatus.SETTLEMENT_PENDING); deposits.save(deposit);
+        if(caseId==null)terminationNotices.tenant(c,com.hs.contract.notification.TerminationNotificationWriter.Event.SETTLEMENT_RESPONSE_NEEDED);
         return response(c,actor);
     }
     /** Admin creates only a revised proposal. Both parties must consent before any obligation is created. */
@@ -268,6 +278,7 @@ public class ContractLifecycleService {
                 PaymentRequest balance=payments.createContractSettlement(id,c.getRentalRequestId(),c.getListingId(),c.getTenantId(),c.getLandlordId(),
                         close.getBalanceAmount(),close.getRefundDueAt(),false,"Khoản quyết toán còn thiếu của hợp đồng "+c.getContractNumber());
                 close.setBalancePaymentId(balance.getId()); close.setStatus("BALANCE_PENDING");
+                terminationNotices.landlord(c,com.hs.contract.notification.TerminationNotificationWriter.Event.SETTLEMENT_AGREED);
             } else close(c,close);
         }
         deposits.save(deposit); closures.save(close);
@@ -285,6 +296,7 @@ public class ContractLifecycleService {
         appendClosureEvent(close,"DISPUTED",actor,p.reason().trim(),evidence);
         closures.save(close); DepositRecord d=deposit(c); d.setStatus(DepositStatus.DISPUTED); deposits.save(d);
         if(complaintEvents!=null)complaintEvents.publishEvent(new com.hs.contract.event.ClosureDisputed(id,actor,p.reason().trim()));
+        terminationNotices.landlord(c,com.hs.contract.notification.TerminationNotificationWriter.Event.SETTLEMENT_DISPUTED);
         return response(c,actor);
     }
 
@@ -331,12 +343,16 @@ public class ContractLifecycleService {
                 .lineItemsSnapshot(write(lines)).totalAmount(total).baseAmount(total).lateFeeAmount(ZERO).build());
         PaymentRequest payment=payments.createMonthlyPayment(bill.getId(),id,c.getRentalRequestId(),c.getListingId(),c.getTenantId(),c.getLandlordId(),total,bill.getLineItemsSnapshot(),due);
         bill.setPaymentRequestId(payment.getId()); invoices.save(bill);
+        // Insert is the only path here (a repeated requestId returned above), so this is one tenant notice per supplement.
+        invoiceNotifications.enqueueTenant(c,bill,com.hs.contract.notification.InvoiceNotificationWriter.Event.INVOICE_ISSUED);
         // A changed cost ledger invalidates a proposal already read by the tenant.
         preserveLegacyProposal(close);
         appendClosureEvent(close,"COSTS_ADDED",actor,"Phát hành hóa đơn bổ sung; cần thanh toán và lập lại đề xuất cọc.",List.of());
+        boolean invalidated=Set.of("PROPOSED","DISPUTED").contains(close.getStatus());
         close.setStatus("WAITING_HANDOVER"); close.setRespondBy(null); close.setResponseOverdueAt(null);
         close.setProposalVersion(close.getProposalVersion()+1); closures.save(close);
         DepositRecord d=deposit(c); d.setStatus(DepositStatus.HELD); deposits.save(d);
+        if(invalidated&&close.getComplaintCaseId()==null)terminationNotices.tenant(c,com.hs.contract.notification.TerminationNotificationWriter.Event.SETTLEMENT_PROPOSAL_INVALIDATED);
         return response(c,actor);
     }
 
@@ -349,6 +365,30 @@ public class ContractLifecycleService {
             for(String id:ids) try { new TransactionTemplate(transactionManager).executeWithoutResult(tx-> {
                 Contract c=contracts.findByIdForUpdate(id).orElse(null); if(c!=null) syncLocked(c);
             }); } catch(RuntimeException e) { log.error("LEASE_LIFECYCLE_SYNC_FAILED contract={}",id,e); }
+            afterId=ids.get(ids.size()-1);
+        }
+        syncObligationDeadlines();
+    }
+    private void syncObligationDeadlines() {
+        Instant now=time.now();String afterId=null;
+        while(true) {
+            var ids=paymentRepository.findDueContractObligationIdsAfter(Set.of(PaymentType.DEPOSIT_ADJUSTMENT,PaymentType.INITIAL_PAYMENT_REFUND),
+                    Set.of(PaymentStatus.AWAITING_TRANSFER,PaymentStatus.REJECTED),now,afterId,PageRequest.of(0,100));
+            if(ids.isEmpty())break;
+            for(String id:ids)try {new TransactionTemplate(transactionManager).executeWithoutResult(tx->{
+                var payment=paymentRepository.findById(id).orElse(null);if(payment==null||payment.getContractId()==null)return;
+                var root=contracts.findByIdForUpdate(payment.getContractId()).orElse(null);if(root==null)return;
+                entityManager.refresh(root,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+                entityManager.refresh(payment,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+                if(root.getParentContractId()!=null||com.hs.contract.deposit.DepositAgreementService.isDeposit(root)
+                        ||root.getRentalRequestId()==null||payment.getDirection()==null
+                        ||!Objects.equals(root.getId(),payment.getContractId())||!Objects.equals(root.getRentalRequestId(),payment.getRentalRequestId()))return;
+                boolean refund=payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT;
+                if(!Objects.equals(payment.getPayerId(),refund?root.getLandlordId():root.getTenantId())
+                        ||!Objects.equals(payment.getPayeeId(),refund?root.getTenantId():root.getLandlordId()))return;
+                if(payment.getType()==PaymentType.INITIAL_PAYMENT_REFUND&&(root.getAgreedEarlyEndExclusive()==null||!refund))return;
+                payments.syncContractObligationDeadline(payment,now);
+            });}catch(RuntimeException e){log.error("LEASE_OBLIGATION_SYNC_FAILED payment={}",id,e);}
             afterId=ids.get(ids.size()-1);
         }
     }
@@ -369,8 +409,23 @@ public class ContractLifecycleService {
                         } catch(Exception ex) { throw invalid(); }
                     }
                     invoices.save(b);
-                    if(Objects.equals(b.getId(),c.getTerminationProposalInvoiceId()) && terminationActive(c)) {
+                    if(Objects.equals(b.getId(),c.getTerminationProposalInvoiceId()) && c.getTerminationProposedAt()!=null
+                            && c.getTerminationCancelledAt()==null && c.getTerminationDeclinedAt()==null && c.getTerminationCompletedAt()==null) {
+                        List<UnilateralTerminationNotice> notices;
+                        try {
+                            notices=c.getUnilateralTerminationSnapshot()==null||c.getUnilateralTerminationSnapshot().isBlank()
+                                    ?List.of():mapper.readValue(c.getUnilateralTerminationSnapshot(),new TypeReference<>(){});
+                        } catch(Exception ex) { throw invalid(); }
+                        var notice=notices.stream().filter(n->b.getId().equals(n.invoiceId())).reduce((a,z)->z).orElse(null);
+                        boolean unilateral=notice!=null&&notice.pending();
+                        if(unilateral) {
+                            var cancelled=notice.toBuilder().version(notice.version()+1).status(UnilateralTerminationNotice.Status.CANCELLED_PAID)
+                                    .decidedAt(now).decisionReason("Đã xác nhận thanh toán hóa đơn").build();
+                            c.setUnilateralTerminationSnapshot(write(notices.stream().map(n->n.id().equals(notice.id())?cancelled:n).toList()));
+                        }
                         c.setTerminationCancelledAt(now); contracts.save(c);
+                        terminationNotices.tenant(c,unilateral?com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_NOTICE_CANCELLED
+                                :com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_WITHDRAWN);
                     }
                 });
             }
@@ -383,11 +438,13 @@ public class ContractLifecycleService {
                     if(a.getStatus()!=ContractStatus.ACTIVE) { a.setStatus(ContractStatus.CANCELLED); contracts.save(a); }
                 });
                 if(r.getAgreementContractId()!=null) parking.releaseRenewalHold(r.getAgreementContractId());
+                renewalNotices.both(c, com.hs.contract.notification.RenewalNotificationWriter.Event.RENEWAL_EXPIRED);
             }
         }
         if(c.getStatus()==ContractStatus.ACTIVE && !time.today().isBefore(end(c))) {
             c.setStatus(ContractStatus.EXPIRED); contracts.save(c);
             if(closures.findById(c.getId()).isEmpty()) closures.save(ContractClosure.builder().contractId(c.getId()).status("WAITING_HANDOVER").build());
+            terminationNotices.both(c, com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_EXPIRED);
             log.info("LEASE_EXPIRED contract={} end={}",c.getId(),end(c));
         }
         closures.findById(c.getId()).ifPresent(s->{
@@ -396,6 +453,8 @@ public class ContractLifecycleService {
                 preserveLegacyProposal(s); s.setResponseOverdueAt(now);
                 appendClosureEvent(s,"RESPONSE_OVERDUE","SYSTEM","Quá hạn phản hồi; cần hai bên đối soát. Không tự đồng ý hoặc tạo QR.",List.of());
                 closures.save(s);
+                if(s.getComplaintCaseId()==null)terminationNotices.party(c,"PROPOSED".equals(s.getStatus())?c.getTenantId():c.getLandlordId(),
+                        com.hs.contract.notification.TerminationNotificationWriter.Event.SETTLEMENT_RESPONSE_OVERDUE);
             }
             String paymentId=s.getRefundPaymentId()!=null?s.getRefundPaymentId():s.getBalancePaymentId();
             if(paymentId==null || s.getClosedAt()!=null) return;
@@ -406,6 +465,7 @@ public class ContractLifecycleService {
                 preserveLegacyProposal(s);
                 appendClosureEvent(s,"PAYMENT_OVERDUE","SYSTEM","Khoản quyết toán quá hạn; nghĩa vụ thanh toán vẫn còn, cần đối soát.",List.of());
                 s.setOverdueLoggedAt(now); closures.save(s); log.warn("LEASE_SETTLEMENT_OVERDUE contract={} payment={}",c.getId(),paymentId);
+                terminationNotices.party(c,payment.getPayerId(),com.hs.contract.notification.TerminationNotificationWriter.Event.SETTLEMENT_PAYMENT_OVERDUE);
             }
         });
     }
@@ -413,6 +473,7 @@ public class ContractLifecycleService {
         preserveLegacyProposal(s);
         appendClosureEvent(s,"CLOSED","SYSTEM","Đã hoàn tất nghĩa vụ quyết toán.",List.of());
         s.setStatus("CLOSED"); s.setClosedAt(time.now()); c.setStatus(ContractStatus.CLOSED); contracts.save(c);
+        terminationNotices.both(c,com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_CLOSED);
     }
     private ContractLifecycleResponse response(Contract c,String actor) {
         ContractClosure close=closures.findById(c.getId()).orElse(null);

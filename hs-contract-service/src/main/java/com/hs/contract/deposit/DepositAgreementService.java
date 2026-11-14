@@ -41,6 +41,7 @@ public class DepositAgreementService {
     private final ContractFieldCatalog catalog;
     private final ObjectMapper mapper;
     private final BillingTime time;
+    private final com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
     @org.springframework.beans.factory.annotation.Autowired(required=false) private RentalWorkflowRecordRepository workflowRecords;
     @Value("${rental.deposit-signing-hours:48}") private long signingHours=48;
     @Value("${homespace.payment.contract-due-hours:48}") private long leaseSigningHours=48;
@@ -235,6 +236,7 @@ public class DepositAgreementService {
         var c=find(rentalId).orElseThrow();c=contracts.findByIdForUpdate(c.getId()).orElseThrow();
         if(c.getStatus()!=ContractStatus.TENANT_SIGNATURE_PENDING)throw invalid("Không có bước ký cọc cần mở lại.");
         c.setTenantSigningDueAt(time.now().plus(Duration.ofHours(signingHours)));contracts.save(c);
+        signingNotices.signingTurn(c);
         audit(rentalId,actor,"DEPOSIT_SIGNING_REOPENED","Chủ nhà mở lại hạn khách ký hợp đồng cọc; không thay đổi xác nhận tiền.");
     }
     private void audit(String rentalId,String actor,String action,String note) {

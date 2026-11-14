@@ -12,6 +12,9 @@ import org.springframework.stereotype.Repository;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
+import com.hs.payment.model.constant.PaymentStatus;
+import org.springframework.data.domain.Pageable;
 
 @Repository
 public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, String> {
@@ -42,6 +45,12 @@ public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, 
     Optional<PaymentRequest> findByInvoiceId(String invoiceId);
     Optional<PaymentRequest> findByContractIdAndType(String contractId, PaymentType type);
     List<PaymentRequest> findAllByContractIdAndType(String contractId, PaymentType type);
+
+    @Query("SELECT p.id FROM PaymentRequest p WHERE p.contractId IS NOT NULL AND p.type IN :types "
+            + "AND p.status IN :statuses AND p.dueAt < :now AND (:afterId IS NULL OR p.id > :afterId) ORDER BY p.id")
+    List<String> findDueContractObligationIdsAfter(@Param("types") Collection<PaymentType> types,
+            @Param("statuses") Collection<PaymentStatus> statuses, @Param("now") Instant now,
+            @Param("afterId") String afterId, Pageable page);
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM PaymentRequest p WHERE p.invoiceId = :invoiceId")
     Optional<PaymentRequest> findByInvoiceIdForUpdate(@Param("invoiceId") String invoiceId);

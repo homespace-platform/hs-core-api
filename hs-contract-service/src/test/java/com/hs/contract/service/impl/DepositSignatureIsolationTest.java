@@ -33,6 +33,7 @@ class DepositSignatureIsolationTest {
     @Mock DepositAgreementService depositAgreements;
     @Mock ContractDocumentProofEnqueuer documentProofEnqueuer;
     @Mock jakarta.persistence.EntityManager entityManager;
+    @Mock com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
     @InjectMocks SmartCaSignatureServiceImpl service;
 
     @Test void finalTenantSignatureCompletesDepositWithoutActivatingLeaseOrListing() throws Exception {
@@ -46,6 +47,8 @@ class DepositSignatureIsolationTest {
                 && "DC-1_da_ky_hai_ben.pdf".equals(d.getFileName())));
         verify(documentProofEnqueuer).enqueue(eq(c), argThat(d -> d.getPurpose() == DocumentPurpose.SIGNED_FINAL),
                 eq("0x" + "a".repeat(64)));
+        verify(signingNotices).fullySigned(c);
+        verify(signingNotices, never()).leaseActivated(any());
     }
     @Test void landlordSignatureOpensOnlyTheDepositTenantWindow() throws Exception {
         var c=run(SignerRole.LANDLORD,ContractStatus.LANDLORD_SIGNATURE_PENDING);
@@ -53,6 +56,7 @@ class DepositSignatureIsolationTest {
         verify(depositAgreements).landlordSigned(c);verify(depositAgreements,never()).bothSigned(any());
         verifyNoInteractions(onboarding,payments,listingStatus,parking);
         verifyNoInteractions(documentProofEnqueuer);
+        verify(signingNotices).signingTurn(c);
     }
     @Test void finalSignatureWithoutPinnedVersionCannotPersistOrCompleteDeposit() {
         signedVersion = "null";
@@ -62,6 +66,7 @@ class DepositSignatureIsolationTest {
         verify(documents, never()).save(any());
         verify(depositAgreements, never()).bothSigned(any());
         verifyNoInteractions(documentProofEnqueuer);
+        verifyNoInteractions(signingNotices);
     }
     private Contract run(SignerRole role,ContractStatus status) throws Exception {
         return run(role, status, true);

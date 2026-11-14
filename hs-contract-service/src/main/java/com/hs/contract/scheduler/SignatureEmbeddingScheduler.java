@@ -32,7 +32,7 @@ public class SignatureEmbeddingScheduler {
     public void embedPendingSignatures() {
         var staleBefore = java.time.Instant.now().minus(java.time.Duration.ofMinutes(2));
         requestRepository.recoverStaleEmbedding(staleBefore, MAX_ATTEMPTS);
-        requestRepository.failStaleEmbedding(staleBefore, MAX_ATTEMPTS);
+        signatureService.failStaleEmbedding(staleBefore, MAX_ATTEMPTS);
         List<SignatureRequest> pending = requestRepository.findPendingEmbeddingRequests(MAX_ATTEMPTS);
         if (pending.isEmpty()) return;
 

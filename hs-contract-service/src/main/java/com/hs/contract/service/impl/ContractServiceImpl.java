@@ -89,6 +89,8 @@ public class ContractServiceImpl implements ContractService {
     @Autowired private com.hs.contract.service.ContractDraftResidents draftResidents;
     @Autowired(required=false) private com.hs.contract.service.RentalOnboardingService onboarding;
     @Autowired private com.hs.contract.deposit.DepositAgreementService depositAgreements;
+    @Autowired private com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
+    @Autowired private com.hs.contract.notification.MoveInHandoverNotificationWriter handoverNotices;
     private static final String SIGNING_CITY = "Thành phố Hồ Chí Minh";
 
     private final ContractRepository contractRepository;
@@ -302,6 +304,8 @@ public class ContractServiceImpl implements ContractService {
 
         contract.setCurrentRevisionId(revision.getId());
         contract = contractRepository.save(contract);
+        // Only the system-created draft cues the landlord; a landlord who created it manually already knows.
+        if (currentUserId == null) signingNotices.reviewReady(contract);
 
         log.info("Created Contract id={}, contractNumber={}, revision 1", contract.getId(), contractNumber);
         return toContractResponse(contract);
@@ -888,7 +892,15 @@ public class ContractServiceImpl implements ContractService {
         if(!rentalId.equals(contract.getRentalRequestId()) || !com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         if(contract.getStatus()!=ContractStatus.DRAFT)return null;
         depositAgreements.validateSigning(contract);
-        return renderPreview(contract,true);
+        var revision=requireCurrentRevision(contract);
+        boolean hadPdf=currentPreview(contractId,revision,ContractPreviewIdentity.fingerprint(revision,signatureMode))
+                .filter(doc->doc.getDocumentType()==ContractDocumentType.PDF).isPresent();
+        var rendered=renderPreview(contract,true);
+        // First PDF only (replays find it); the landlord is told unless the landlord rendered it, a stranger never triggers it.
+        var context=com.hs.common.context.UserContextHolder.get();
+        String actor=context==null?null:context.userId();
+        if(!hadPdf&&(actor==null||actor.equals(contract.getTenantId())&&!actor.equals(contract.getLandlordId())))signingNotices.reviewReady(contract);
+        return rendered;
     }
 
     private ContractDocumentResponse renderPreview(Contract contract, boolean requirePdf) {
@@ -1089,6 +1101,8 @@ public class ContractServiceImpl implements ContractService {
         contract.setStatus(ContractStatus.PENDING_REVIEW);
         contract.setLandlordConfirmedAt(Instant.now());
         contract = contractRepository.save(contract);
+        // INTERNAL mode: neutral turn notice for the root lease only; a child here is a pre-existing dead end and stays silent.
+        if (contract.getParentContractId() == null) signingNotices.signingTurn(contract);
         log.info("Sent contract id={} revision={} to tenant id={}", contractId, revision.getRevisionNumber(), contract.getTenantId());
         return toContractResponse(contract);
     }
@@ -1187,6 +1201,8 @@ public class ContractServiceImpl implements ContractService {
         if (parkingReservationService != null) {
             parkingReservationService.activateReservationsForRequest(rentalRequest.getId(), contract.getId());
         }
+        // The tenant is the synchronous actor: only the landlord gets the move-in prompt.
+        handoverNotices.enqueueLandlord(contract, com.hs.contract.notification.MoveInHandoverNotificationWriter.Event.MOVE_IN_HANDOVER_READY);
 
         log.info("Contract id={} signed by tenant id={}; listing id={} is now rented",
                 contractId, contract.getTenantId(), contract.getListingId());

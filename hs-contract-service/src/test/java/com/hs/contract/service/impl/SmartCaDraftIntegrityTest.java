@@ -32,6 +32,7 @@ class SmartCaDraftIntegrityTest {
     @Mock EntityManager entityManager;
     @Mock ListingStatusService listingStatus;
     @Mock ContractDocumentProofEnqueuer documentProofEnqueuer;
+    @Mock com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
     @InjectMocks SmartCaSignatureServiceImpl service;
 
     @BeforeEach void wireFieldDependencies() {

@@ -20,8 +20,10 @@ class MembershipCheckoutServiceTest {
     private final MembershipService memberships = mock(MembershipService.class);
     private final com.hs.payment.repository.EthPaymentQuoteRepository ethQuotes = mock(com.hs.payment.repository.EthPaymentQuoteRepository.class);
     private final com.hs.payment.service.EthPaymentChainClient ethChain = mock(com.hs.payment.service.EthPaymentChainClient.class);
+    private final com.hs.payment.membership.notification.MembershipNotificationWriter notifications =
+            mock(com.hs.payment.membership.notification.MembershipNotificationWriter.class);
     private final MembershipCheckoutService service = new MembershipCheckoutService(orders, memberships,
-            new SepaySigner("test-sepay-secret"), ethQuotes, ethChain);
+            new SepaySigner("test-sepay-secret"), ethQuotes, ethChain, notifications);
 
     @Test
     void ethCheckoutNeedsNoSepayConfigurationAndKeepsOrderPending() {
@@ -94,7 +96,8 @@ class MembershipCheckoutServiceTest {
         assertEquals(error.getCode(), assertThrows(AppException.class,
                 () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY)).getCode());
 
-        var withoutSigningSecret = new MembershipCheckoutService(orders, memberships, new SepaySigner(""), ethQuotes, ethChain);
+        var withoutSigningSecret = new MembershipCheckoutService(orders, memberships, new SepaySigner(""), ethQuotes, ethChain,
+                notifications);
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayMerchantId", "MERCHANT_TEST");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayCheckoutUrl", "https://pay-sandbox.sepay.vn/v1/checkout/init");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayReturnUrl", "https://example.test/dashboard/membership/return");
