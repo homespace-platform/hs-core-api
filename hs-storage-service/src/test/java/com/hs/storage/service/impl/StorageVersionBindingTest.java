@@ -229,6 +229,68 @@ class StorageVersionBindingTest {
         verify(s3, never()).deleteObject(any(DeleteObjectRequest.class));
     }
 
+    @Test void copyOfLegacyContractKeepsSourceLocationAndStaysPrivateInNewPrivateKey() {
+        StorageObject source = object(StorageStatus.READY, "source-version");
+        source.setBucketName("legacy-bucket");
+        source.setVisibility(StorageVisibility.PUBLIC); // legacy/spoofed value must not leak into the copy
+        when(s3.copyObject(any(CopyObjectRequest.class)))
+                .thenReturn(CopyObjectResponse.builder().versionId("destination-version").build());
+        var copy = service.copyObject("file", "another-owner", "CONTRACT", "c2", StoragePurpose.CONTRACT_DOCUMENT);
+        var request = ArgumentCaptor.forClass(CopyObjectRequest.class);
+        verify(s3).copyObject(request.capture());
+        assertEquals("legacy-bucket", request.getValue().sourceBucket());
+        assertEquals("contract_document/owner/file.pdf", request.getValue().sourceKey());
+        assertEquals("source-version", request.getValue().sourceVersionId());
+        assertEquals("bucket", request.getValue().destinationBucket());
+        assertTrue(request.getValue().destinationKey().startsWith("private/contract_document/another-owner/"));
+        assertEquals("destination-version", copy.s3VersionId());
+        assertEquals(StorageVisibility.PRIVATE, copy.visibility());
+        assertEquals("source-version", source.getS3VersionId());
+        assertEquals("contract_document/owner/file.pdf", source.getObjectKey());
+    }
+
+    @Test void directUploadOfContractUsesPrivateLayoutEvenIfPublicIsSupplied() {
+        when(s3.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                .thenReturn(PutObjectResponse.builder().versionId("v1").build());
+        var result = service.uploadDirect(pdf, "signed.pdf", "application/pdf", StoragePurpose.CONTRACT_DOCUMENT,
+                "CONTRACT", "contract", StorageVisibility.PUBLIC);
+        assertEquals(StorageVisibility.PRIVATE, result.visibility());
+        var saved = ArgumentCaptor.forClass(StorageObject.class);
+        verify(repository).save(saved.capture());
+        assertTrue(saved.getValue().getObjectKey().startsWith("private/contract_document/owner/"));
+    }
+
+    @Test void legacyPersistedBucketKeyAndVersionAreUsedAsIsForPublicUrlAndReads() {
+        StorageObject legacy = object(StorageStatus.READY, "legacy-version");
+        legacy.setBucketName("legacy-bucket");
+        legacy.setObjectKey("listing_image/owner/file.jpg");
+        legacy.setPurpose(StoragePurpose.LISTING_IMAGE);
+        legacy.setVisibility(StorageVisibility.PUBLIC);
+        assertEquals("https://legacy-bucket.s3.ap-southeast-1.amazonaws.com/listing_image/owner/file.jpg",
+                service.getOwnedPublicUrl("file", StoragePurpose.LISTING_IMAGE));
+        when(s3.getObjectAsBytes(any(GetObjectRequest.class)))
+                .thenReturn(ResponseBytes.fromByteArray(GetObjectResponse.builder().build(), pdf));
+        service.downloadDirect("file");
+        var read = ArgumentCaptor.forClass(GetObjectRequest.class);
+        verify(s3).getObjectAsBytes(read.capture());
+        assertEquals("legacy-bucket", read.getValue().bucket());
+        assertEquals("listing_image/owner/file.jpg", read.getValue().key());
+        assertEquals("legacy-version", read.getValue().versionId());
+        verify(repository, never()).save(any());
+    }
+
+    @Test void signedFinalCheckerStillBlocksPublicUrlForLegacyAndNewPrivateKeys() {
+        StorageObject object = object(StorageStatus.READY, "fixed-version");
+        object.setVisibility(StorageVisibility.PUBLIC);
+        StorageAccessChecker checker = mock(StorageAccessChecker.class);
+        when(checker.requiresVerifiedAccess(object)).thenReturn(true);
+        service.setAccessCheckers(List.of(checker));
+        assertThrows(AppException.class, () -> service.getOwnedPublicUrl("file", StoragePurpose.CONTRACT_DOCUMENT));
+        object.setObjectKey("private/contract_document/owner/file.pdf");
+        assertThrows(AppException.class, () -> service.createViewUrl("file"));
+        verifyNoInteractions(presigner);
+    }
+
     private StorageObject object(StorageStatus status, String version) {
         StorageObject object = StorageObject.builder().id("file").ownerId("owner").originalName("signed.pdf")
                 .bucketName("bucket").objectKey("contract_document/owner/file.pdf").s3VersionId(version)

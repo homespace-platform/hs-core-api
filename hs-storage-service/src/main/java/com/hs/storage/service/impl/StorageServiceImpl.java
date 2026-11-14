@@ -21,6 +21,7 @@ import com.hs.storage.service.StorageService;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -59,6 +60,11 @@ public class StorageServiceImpl implements StorageService {
             "application/msword",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
 
+    // Only these purposes get the public/ key prefix (bucket policy exposes public/*); everything else is private/.
+    private static final Set<StoragePurpose> PUBLIC_PURPOSES = EnumSet.of(
+            StoragePurpose.USER_AVATAR, StoragePurpose.LISTING_IMAGE, StoragePurpose.LISTING_VIDEO,
+            StoragePurpose.BRANCH_COVER_IMAGE, StoragePurpose.NEWS_IMAGE);
+
     private final StorageObjectRepository repository;
     private final StorageProperties properties;
     private final S3Client s3Client;
@@ -84,9 +90,7 @@ public class StorageServiceImpl implements StorageService {
         String storageId = UUID.randomUUID().toString();
         String extension = extractExtension(request.fileName());
         String objectKey = buildObjectKey(effectivePurpose, ownerId, storageId, extension);
-        StorageVisibility visibility = request.visibility() == null
-                ? StorageVisibility.PRIVATE
-                : request.visibility();
+        StorageVisibility visibility = resolveVisibility(effectivePurpose, request.visibility());
 
         StorageObject object = StorageObject.builder()
                 .id(storageId)
@@ -346,7 +350,7 @@ public class StorageServiceImpl implements StorageService {
                 .referenceType(normalizeReferenceType(referenceType))
                 .referenceId(normalizeNullable(referenceId))
                 .purpose(purpose)
-                .visibility(visibility != null ? visibility : StorageVisibility.PRIVATE)
+                .visibility(resolveVisibility(purpose, visibility))
                 .status(StorageStatus.READY)
                 .build();
 
@@ -477,7 +481,7 @@ public class StorageServiceImpl implements StorageService {
                 .referenceType(normalizeReferenceType(newReferenceType))
                 .referenceId(normalizeNullable(newReferenceId))
                 .purpose(targetPurpose)
-                .visibility(source.getVisibility() != null ? source.getVisibility() : StorageVisibility.PRIVATE)
+                .visibility(resolveVisibility(targetPurpose, source.getVisibility()))
                 .status(StorageStatus.READY)
                 .build();
         copied.setActive(true);
@@ -701,8 +705,18 @@ public class StorageServiceImpl implements StorageService {
         }
     }
 
+    /** Visibility is decided by purpose, never trusted from the caller; chat keeps its existing AUTHENTICATED mode. */
+    private StorageVisibility resolveVisibility(StoragePurpose purpose, StorageVisibility requested) {
+        if (PUBLIC_PURPOSES.contains(purpose)) return StorageVisibility.PUBLIC;
+        if (purpose == StoragePurpose.CHAT_ATTACHMENT && requested == StorageVisibility.AUTHENTICATED) {
+            return StorageVisibility.AUTHENTICATED;
+        }
+        return StorageVisibility.PRIVATE;
+    }
+
     private String buildObjectKey(StoragePurpose purpose, String ownerId, String id, String extension) {
-        return purpose.name().toLowerCase(Locale.ROOT) + "/" + ownerId + "/" + id
+        String scope = PUBLIC_PURPOSES.contains(purpose) ? "public" : "private";
+        return scope + "/" + purpose.name().toLowerCase(Locale.ROOT) + "/" + ownerId + "/" + id
                 + (extension.isEmpty() ? "" : "." + extension);
     }
 

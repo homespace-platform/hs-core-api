@@ -14,6 +14,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -345,7 +347,8 @@ class StorageServiceImplTest {
                 .id("src-123")
                 .originalName("photo.jpg")
                 .objectKey("listing_image/owner-1/src-123.jpg")
-                .bucketName("test-bucket")
+                .bucketName("legacy-bucket")
+                .s3VersionId("legacy-version")
                 .contentType("image/jpeg")
                 .sizeBytes(1024L)
                 .extension("jpg")
@@ -375,11 +378,18 @@ class StorageServiceImplTest {
 
         ArgumentCaptor<CopyObjectRequest> copyCaptor = ArgumentCaptor.forClass(CopyObjectRequest.class);
         verify(s3Client).copyObject(copyCaptor.capture());
-        assertEquals("test-bucket", copyCaptor.getValue().sourceBucket());
+        assertEquals("legacy-bucket", copyCaptor.getValue().sourceBucket());
         assertEquals("listing_image/owner-1/src-123.jpg", copyCaptor.getValue().sourceKey());
+        assertEquals("legacy-version", copyCaptor.getValue().sourceVersionId());
         assertEquals("test-bucket", copyCaptor.getValue().destinationBucket());
-        assertTrue(copyCaptor.getValue().destinationKey().startsWith("listing_image/owner-2/"));
+        assertTrue(copyCaptor.getValue().destinationKey().startsWith("public/listing_image/owner-2/"));
         assertTrue(copyCaptor.getValue().destinationKey().endsWith(".jpg"));
+        assertEquals("copied-version", response.s3VersionId());
+        assertEquals(StorageVisibility.PUBLIC, response.visibility());
+        // Source record keeps its persisted legacy location; it is never relabeled or re-keyed.
+        assertEquals("listing_image/owner-1/src-123.jpg", source.getObjectKey());
+        assertEquals("legacy-bucket", source.getBucketName());
+        assertEquals("legacy-version", source.getS3VersionId());
     }
 
     @Test
@@ -458,5 +468,89 @@ class StorageServiceImplTest {
 
         verify(s3Client).copyObject(any(CopyObjectRequest.class));
         verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "USER_AVATAR,image/jpeg,a.jpg", "LISTING_IMAGE,image/png,a.png", "LISTING_VIDEO,video/mp4,a.mp4",
+            "BRANCH_COVER_IMAGE,image/webp,a.webp", "NEWS_IMAGE,image/jpeg,a.jpg"})
+    void createUpload_publicPurposesUsePublicKeyAndVisibilityEvenWhenPrivateRequested(
+            StoragePurpose purpose, String contentType, String fileName) throws Exception {
+        var saved = createUploadAndCapture(fileName, contentType, purpose, StorageVisibility.PRIVATE, null, null);
+        assertEquals(StorageVisibility.PUBLIC, saved.getVisibility());
+        assertTrue(saved.getObjectKey().startsWith(
+                "public/" + purpose.name().toLowerCase(java.util.Locale.ROOT) + "/test-user-id/" + saved.getId()));
+        assertTrue(saved.getObjectKey().endsWith("." + fileName.substring(2)));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "CONTRACT_DOCUMENT,PUBLIC", "CONTRACT_DOCUMENT,AUTHENTICATED", "SIGNATURE_PREPARED_DOCUMENT,PUBLIC",
+            "SIGNATURE_PREPARED_DOCUMENT,AUTHENTICATED", "IDENTITY_DOCUMENT,PUBLIC", "IDENTITY_DOCUMENT,AUTHENTICATED",
+            "PAYMENT_PROOF,PUBLIC", "PAYMENT_PROOF,AUTHENTICATED", "GENERAL,PUBLIC", "GENERAL,AUTHENTICATED",
+            "CHAT_ATTACHMENT,PUBLIC"})
+    void createUpload_sensitiveOrGenericPurposesCannotBecomePublicOrAuthenticatedBySuppliedVisibility(
+            StoragePurpose purpose, StorageVisibility requested) throws Exception {
+        var saved = createUploadAndCapture("a.pdf", "application/pdf", purpose, requested, null, null);
+        assertEquals(StorageVisibility.PRIVATE, saved.getVisibility());
+        assertTrue(saved.getObjectKey().startsWith(
+                "private/" + purpose.name().toLowerCase(java.util.Locale.ROOT) + "/test-user-id/"));
+    }
+
+    @Test
+    void createUpload_chatAttachmentKeepsAuthenticatedApiBehaviorWithPrivateKey() throws Exception {
+        var saved = createUploadAndCapture("a.pdf", "application/pdf", StoragePurpose.CHAT_ATTACHMENT,
+                StorageVisibility.AUTHENTICATED, null, null);
+        assertEquals(StorageVisibility.AUTHENTICATED, saved.getVisibility());
+        assertTrue(saved.getObjectKey().startsWith("private/chat_attachment/test-user-id/"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "LISTING,image/jpeg,a.jpg,LISTING_IMAGE", "LISTING,video/webm,a.webm,LISTING_VIDEO",
+            "BRANCH,image/png,a.png,BRANCH_COVER_IMAGE", "PROPERTY_BRANCH,image/webp,a.webp,BRANCH_COVER_IMAGE"})
+    void createUpload_generalWithListingOrBranchReferenceResolvesPurposeBeforeClassification(
+            String referenceType, String contentType, String fileName, StoragePurpose expected) throws Exception {
+        var saved = createUploadAndCapture(
+                fileName, contentType, StoragePurpose.GENERAL, StorageVisibility.PUBLIC, referenceType, "ref-1");
+        assertEquals(expected, saved.getPurpose());
+        assertEquals(StorageVisibility.PUBLIC, saved.getVisibility());
+        assertTrue(saved.getObjectKey().startsWith("public/" + expected.name().toLowerCase(java.util.Locale.ROOT) + "/"));
+    }
+
+    @Test
+    void uploadDirect_usesPurposeLayoutAndIgnoresSuppliedVisibility() {
+        when(repository.save(any(StorageObject.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        byte[] jpeg = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 0x10, 'J', 'F', 'I', 'F'};
+
+        var avatar = storageService.uploadDirect(jpeg, "me.jpg", "image/jpeg", StoragePurpose.USER_AVATAR,
+                null, null, StorageVisibility.PRIVATE, "user-9");
+        assertEquals(StorageVisibility.PUBLIC, avatar.visibility());
+        var proof = storageService.uploadDirect(jpeg, "p.jpg", "image/jpeg", StoragePurpose.PAYMENT_PROOF,
+                "PAYMENT_REQUEST", "r1", StorageVisibility.PUBLIC, "user-9");
+        assertEquals(StorageVisibility.PRIVATE, proof.visibility());
+
+        var objects = ArgumentCaptor.forClass(StorageObject.class);
+        verify(repository, times(2)).save(objects.capture());
+        assertTrue(objects.getAllValues().get(0).getObjectKey().startsWith("public/user_avatar/user-9/"));
+        assertTrue(objects.getAllValues().get(1).getObjectKey().startsWith("private/payment_proof/user-9/"));
+        var puts = ArgumentCaptor.forClass(software.amazon.awssdk.services.s3.model.PutObjectRequest.class);
+        verify(s3Client, times(2)).putObject(puts.capture(), any(software.amazon.awssdk.core.sync.RequestBody.class));
+        assertEquals(objects.getAllValues().get(0).getObjectKey(), puts.getAllValues().get(0).key());
+        assertEquals(objects.getAllValues().get(1).getObjectKey(), puts.getAllValues().get(1).key());
+    }
+
+    private StorageObject createUploadAndCapture(String fileName, String contentType, StoragePurpose purpose,
+            StorageVisibility visibility, String referenceType, String referenceId) throws Exception {
+        var presigned = mock(PresignedPutObjectRequest.class);
+        when(presigner.presignPutObject(any(PutObjectPresignRequest.class))).thenReturn(presigned);
+        when(presigned.url()).thenReturn(URI.create("https://example.com/upload").toURL());
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        var response = storageService.createUpload(new CreateUploadRequest(
+                fileName, contentType, 1024L, purpose, visibility, referenceType, referenceId));
+        var captor = ArgumentCaptor.forClass(StorageObject.class);
+        verify(repository).save(captor.capture());
+        assertEquals(captor.getValue().getObjectKey(), response.objectKey());
+        return captor.getValue();
     }
 }
