@@ -850,7 +850,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
 
         if (ctx.signerRole() == SignerRole.TENANT) {
             documentProofEnqueuer.enqueue(contract, signedDoc, documentHash);
-            // Workflow documents (move-in / early exit) announce completion from WorkflowDocumentCommitter / 6D.
+            // Workflow documents (early exit) announce completion from WorkflowDocumentCommitter / 6D.
             if (com.hs.contract.deposit.DepositAgreementService.isDeposit(contract)) signingNotices.fullySigned(contract);
             else if (contract.getParentContractId() == null) signingNotices.leaseActivated(contract);
             else if (!com.hs.contract.service.WorkflowDocumentService.applies(contract)) signingNotices.fullySigned(contract);

@@ -35,7 +35,7 @@ Bàn giao lượt hoàn thiện: [Báo cáo](CONTRACT_LIFECYCLE_GAPS_COMPLETION_
 | 04 | Hoàn thiện khiếu nại người thuê → chủ nhà → admin — G01 | P1 | 02, 03 | Hồ sơ vụ việc, chứng cứ, chuyển cấp và quyết định có lịch sử |
 | 05 | Thông báo/nhắc hạn — **bỏ qua theo yêu cầu chủ dự án** | Hoãn | Không phải phụ thuộc của 06–08 | Không triển khai trong lượt này |
 | 06 | Xử lý cọc đã nhận nhưng không hoàn tất ký/nhận nhà | P1 | 01–04; bỏ phụ thuộc 05 theo yêu cầu | Có lối kết thúc an toàn, không giữ phòng vô thời hạn |
-| 07 | Biên bản nhận nhà và trạng thái nghĩa vụ HĐ cọc — G04 | P2 | 01, 03–06 | Bằng chứng bàn giao; phân biệt đã ký và đã nhận nhà |
+| 07 | ~~Biên bản nhận nhà~~ (đã gỡ) và trạng thái nghĩa vụ HĐ cọc — G04 | P2 | 01, 03–06 | Bằng chứng bàn giao; phân biệt đã ký và đã nhận nhà |
 | 08 | Chấm dứt sớm theo thỏa thuận, không cần có nợ — G03 | P2 | 02–07 | Kết thúc thuê, bàn giao và quyết toán đúng thỏa thuận |
 | 09 | Nghiệm thu toàn luồng trên DB riêng và giao diện | Bắt buộc | 01–08 | Báo cáo test, các luồng không còn điểm kẹt đã biết |
 
@@ -164,6 +164,8 @@ Chủ dự án chưa muốn triển khai. Các ô dưới giữ nguyên để th
 **Nghiệm thu:** mọi nhánh cọc đã nhận có người chịu trách nhiệm và đường xử lý tiếp; hệ thống không tự tịch thu tiền hoặc tự xác nhận đã hoàn.
 
 ## 07 — Bàn giao nhận nhà và kết thúc nghĩa vụ giữ chỗ
+
+> 2026-11-14: tính năng biên bản nhận nhà (MOVE_IN) đã gỡ hoàn toàn; các mục dưới là lịch sử. HĐ cọc chuyển sang "đã chuyển vào HĐ thuê" ngay khi HĐ thuê ký đủ.
 
 - [x] R01: chuyển đúng phiên bản biên bản và chứng cứ đã gắn sang hồ sơ khiếu nại bàn giao.
 - [x] Có biên bản nhận nhà đầu kỳ liên kết HĐ thuê/revision: ngày thực tế, người giao/nhận, chìa khóa, tài sản, tình trạng, ảnh và chỉ số công tơ.

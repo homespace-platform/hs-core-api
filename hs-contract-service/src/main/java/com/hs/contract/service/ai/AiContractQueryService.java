@@ -304,11 +304,11 @@ public class AiContractQueryService {
         out.put("termination", obj("state", terminationState(c), "proposedAt", c.getTerminationProposedAt(),
                 "acceptedAt", c.getTerminationAcceptedAt(), "declinedAt", c.getTerminationDeclinedAt(),
                 "cancelledAt", c.getTerminationCancelledAt(), "completedAt", c.getTerminationCompletedAt(),"agreedEndExclusive",c.getAgreedEarlyEndExclusive()));
-        out.put("workflows",workflowRecords==null?List.of():workflowRecords.findByRentalRequestId(c.getRentalRequestId()).stream().limit(3).map(w->{
+        out.put("workflows",workflowRecords==null?List.of():workflowRecords.findByRentalRequestId(c.getRentalRequestId()).stream().filter(w->!"MOVE_IN".equals(w.getKind())).limit(3).map(w->{
             var proposal=map(w.getPayloadJson());if(proposal==null)proposal=new LinkedHashMap<>();else proposal=new LinkedHashMap<>(proposal);proposal.remove("evidenceIds");proposal.remove("expectedRevision");
             return obj("kind",w.getKind(),"status",w.getStatus(),"revision",w.getRevision(),"proposal",proposal,"respondBy",w.getRespondBy(),"ownerConfirmedAt",w.getOwnerConfirmedAt(),"tenantConfirmedAt",w.getTenantConfirmedAt(),"complaintId",w.getComplaintId(),"calculation",map(w.getCalculationJson()),"documents",workflowDocuments==null?List.of():workflowDocuments.findByWorkflowIdOrderByPreparedAtDesc(w.getId()).stream().limit(5).map(d->obj("sourceRevision",d.getSourceRevision(),"signedAt",d.getSignedAt(),"preparedAt",d.getPreparedAt(),"current",d.getContentHash().equals(com.hs.contract.service.WorkflowDocumentService.hash(w)))).toList());
         }).toList());
-        out.put("workflowGuidance","Chữ ký HĐ thuê không thay biên bản nhận nhà. Sau khiếu nại cần hai bên đồng ý tiếp tục. Văn bản riêng dùng lượt ký riêng; không tự xác nhận tiền. Quyết toán hoàn tất theo closure/receipt, không suy ra từ RETURNED.");
+        out.put("workflowGuidance","Sau khiếu nại cần hai bên đồng ý tiếp tục. Văn bản riêng dùng lượt ký riêng; không tự xác nhận tiền. Quyết toán hoàn tất theo closure/receipt, không suy ra từ RETURNED.");
         ContractClosure close = closures.findById(c.getId()).orElse(null);
         out.put("closure", close == null ? null : closureView(close));
         return out;

@@ -96,7 +96,7 @@ public class ComplaintCaseService {
         if(workflows==null)throw forbidden("Chưa có nguồn biên bản/thỏa thuận.");
         var source=workflows.findById(rentalId+":"+kind).orElseThrow(this::missing);
         if(!rentalId.equals(source.getRentalRequestId())||source.getRevision()!=revision)throw new AppException(ContractErrorCode.COMPLAINT_STALE);
-        ComplaintCategory category=switch(kind){case "MOVE_IN"->ComplaintCategory.HANDOVER;case "CANCELLATION","EARLY_EXIT"->ComplaintCategory.TERMINATION;default->throw invalid("Nguồn khiếu nại không hợp lệ.");};
+        ComplaintCategory category=switch(kind){case "CANCELLATION","EARLY_EXIT"->ComplaintCategory.TERMINATION;default->throw invalid("Nguồn khiếu nại không hợp lệ.");};
         List<com.hs.contract.dto.billing.RentalWorkflowView.Event> history;
         Map<String,Object> proposal;
         try{history=mapper.readValue(Objects.toString(source.getHistoryJson(),"[]"),new TypeReference<>(){});proposal=mapper.readValue(Objects.toString(source.getPayloadJson(),"{}"),new TypeReference<>(){});}

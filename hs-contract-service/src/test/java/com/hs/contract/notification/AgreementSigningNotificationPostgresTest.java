@@ -43,7 +43,6 @@ class AgreementSigningNotificationPostgresTest {
     @MockitoBean ContractRepository contracts;
     @MockitoBean WorkflowSigningDocumentRepository documents;
     @MockitoBean RentalWorkflowRecordRepository workflows;
-    @MockitoBean MoveInHandoverNotificationWriter handover;
     @Autowired AgreementSigningNotificationWriter writer;
     @Autowired AmendmentNotificationWriter amendmentWriter;
     @Autowired RenewalNotificationWriter renewalWriter;

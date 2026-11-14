@@ -90,7 +90,6 @@ public class ContractServiceImpl implements ContractService {
     @Autowired(required=false) private com.hs.contract.service.RentalOnboardingService onboarding;
     @Autowired private com.hs.contract.deposit.DepositAgreementService depositAgreements;
     @Autowired private com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
-    @Autowired private com.hs.contract.notification.MoveInHandoverNotificationWriter handoverNotices;
     private static final String SIGNING_CITY = "Thành phố Hồ Chí Minh";
 
     private final ContractRepository contractRepository;
@@ -1201,8 +1200,6 @@ public class ContractServiceImpl implements ContractService {
         if (parkingReservationService != null) {
             parkingReservationService.activateReservationsForRequest(rentalRequest.getId(), contract.getId());
         }
-        // The tenant is the synchronous actor: only the landlord gets the move-in prompt.
-        handoverNotices.enqueueLandlord(contract, com.hs.contract.notification.MoveInHandoverNotificationWriter.Event.MOVE_IN_HANDOVER_READY);
 
         log.info("Contract id={} signed by tenant id={}; listing id={} is now rented",
                 contractId, contract.getTenantId(), contract.getListingId());

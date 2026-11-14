@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory)][uri]$BaseUrl,
     [Parameter(Mandatory)][string]$SandboxHost,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9-]{36}$')][string]$RentalId,
-    [Parameter(Mandatory)][ValidateSet('move-in','early-exit')][string]$Kind,
+    [Parameter(Mandatory)][ValidateSet('early-exit')][string]$Kind,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9-]{36}$')][string]$SigningContractId,
     [Parameter(Mandatory)][ValidateSet('Owner','Tenant')][string]$Role,
     [switch]$Initiate,

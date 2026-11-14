@@ -13,15 +13,6 @@ public final class RentalWorkflowPayloads {
     public record Cancellation(@NotNull @PositiveOrZero Long expectedRevision,
         @NotBlank @Size(min=10,max=1000) String reason,
         @Size(max=5) List<@NotBlank String> evidenceIds) {}
-    public record Item(@NotBlank @Size(max=150) String name,@Min(0) @Max(10000) int quantity,
-        @NotBlank @Size(max=500) String condition) {}
-    public record Handover(@NotNull @PositiveOrZero Long expectedRevision,@NotNull Instant handedOverAt,
-        @Min(0) @Max(1000) int keys,@NotBlank @Size(min=10,max=1000) String condition,
-        @NotBlank @Size(min=10,max=1000) String reason,
-        @DecimalMin("0") @Digits(integer=12,fraction=3) BigDecimal electricity,
-        @DecimalMin("0") @Digits(integer=12,fraction=3) BigDecimal water,
-        @NotNull @Size(max=100) List<@Valid Item> inventory,
-        @Size(max=5) List<@NotBlank String> evidenceIds) {}
     public record RentRefund(@NotBlank String paymentId,@NotNull @DecimalMin("0.01") @Digits(integer=10,fraction=2) BigDecimal amount) {}
     public record Termination(@NotNull @PositiveOrZero Long expectedRevision,@NotNull LocalDate endExclusive,
         @NotBlank @Size(min=10,max=1000) String reason,@NotBlank @Size(min=10,max=1000) String handoverTerms,

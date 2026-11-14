@@ -56,7 +56,7 @@ import static org.mockito.ArgumentMatchers.*;
 @org.junit.jupiter.api.condition.EnabledIf("databaseIsAllowed")
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.profiles.active=test"})
-@Import({com.hs.contract.notification.InvoiceNotificationWriter.class,com.hs.contract.notification.MoveInHandoverNotificationWriter.class,com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,com.hs.listing.notification.RentalRequestNotificationWriter.class,com.hs.payment.notification.PaymentNotificationWriter.class,ContractLifecycleService.class,MonthlyBillingService.class,FinalRentCalculator.class,WorkflowDocumentService.class,WorkflowDocumentCommitter.class,WorkflowDocumentRetentionChecker.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class,ComplaintCaseService.class,ComplaintEvidenceAccessChecker.class,RentalWorkflowSupport.class,PreTenancyResolutionService.class,RentalOnboardingService.class,MoveInHandoverService.class,MutualTerminationService.class,RentalWorkflowEvidenceAccessChecker.class})
+@Import({com.hs.contract.notification.InvoiceNotificationWriter.class,com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,com.hs.listing.notification.RentalRequestNotificationWriter.class,com.hs.payment.notification.PaymentNotificationWriter.class,ContractLifecycleService.class,MonthlyBillingService.class,FinalRentCalculator.class,WorkflowDocumentService.class,WorkflowDocumentCommitter.class,WorkflowDocumentRetentionChecker.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class,ComplaintCaseService.class,ComplaintEvidenceAccessChecker.class,RentalWorkflowSupport.class,PreTenancyResolutionService.class,RentalOnboardingService.class,MutualTerminationService.class,RentalWorkflowEvidenceAccessChecker.class})
 class RentalWorkflowPostgresTest {
     static final String LEGACY_URL="jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/hs_workflow_test";
     static final String DEDICATED_URL="jdbc:postgresql://[^/]+/core_(rental_notification|notification_rollout)_test_[A-Za-z0-9]+";
@@ -154,7 +154,6 @@ class RentalWorkflowPostgresTest {
     }
 
     @Autowired PreTenancyResolutionService cancellation;
-    @Autowired MoveInHandoverService handover;
     @Autowired MutualTerminationService termination;
     @Autowired RentalWorkflowSupport support;
     @Autowired RentalWorkflowEvidenceAccessChecker workflowAccess;
@@ -181,8 +180,8 @@ class RentalWorkflowPostgresTest {
     @BeforeEach void signedFixture() throws Exception {when(workflowRenderer.render(any(),any(),any())).thenReturn("test PDF supplied by converter mock".getBytes(java.nio.charset.StandardCharsets.UTF_8));when(pdfEngine.addSignaturePage(any())).thenAnswer(c->c.getArgument(0));when(storageService.uploadDirect(any(byte[].class),anyString(),anyString(),any(),anyString(),anyString(),any(),anyString())).thenAnswer(c->{String file=UUID.randomUUID().toString();storage.saveAndFlush(StorageObject.builder().id(file).ownerId(c.getArgument(7)).originalName(c.getArgument(1)).objectKey("workflow/"+file).bucketName("test").contentType(c.getArgument(2)).sizeBytes((long)((byte[])c.getArgument(0)).length).referenceType(c.getArgument(4)).referenceId(c.getArgument(5)).purpose(c.getArgument(3)).visibility(c.getArgument(6)).status(StorageStatus.READY).build());var dto=mock(com.hs.storage.dto.response.StorageObjectResponse.class);when(dto.id()).thenReturn(file);return dto;});tx(()->{var c=contracts.findById(id).orElseThrow();c.setSignedAt(time.now().minusSeconds(30L*86400));contracts.save(c);
         var last=invoices.findByContractIdAndPeriodIndex(id,2).orElseThrow();last.setStatus(MonthlyInvoiceStatus.DRAFT);invoices.save(last);});}
     RentalWorkflowPayloads.Action action(long revision){return new RentalWorkflowPayloads.Action(revision,"Đã đối chiếu nội dung và xác nhận thực tế",true,true);}
-    RentalWorkflowPayloads.Termination early(long revision){return new RentalWorkflowPayloads.Termination(revision,LocalDate.of(2026,12,20),"Hai bên thỏa thuận kết thúc sớm", "Bàn giao phòng, chìa khóa và tài sản tại chỗ", "FULL_STARTED_PERIOD",List.of(),List.of());}
-    RentalWorkflowPayloads.Handover move(long revision){return new RentalWorkflowPayloads.Handover(revision,time.now(),2,"Phòng đúng hiện trạng đã đối chiếu", "Biên bản nhận nhà thực tế đầu kỳ",BigDecimal.TEN,BigDecimal.ONE,List.of(new RentalWorkflowPayloads.Item("Chìa khóa",2,"Hoạt động tốt")),List.of());}
+    RentalWorkflowPayloads.Termination early(long revision){return early(revision,LocalDate.of(2026,12,20));}
+    RentalWorkflowPayloads.Termination early(long revision,LocalDate end){return new RentalWorkflowPayloads.Termination(revision,end,"Hai bên thỏa thuận kết thúc sớm", "Bàn giao phòng, chìa khóa và tài sản tại chỗ", "FULL_STARTED_PERIOD",List.of(),List.of());}
     void beforeLease(){tx(()->{var r=rentals.findById(rentalId).orElseThrow();r.setStatus(RentalRequestStatus.ACCEPTED);rentals.save(r);var c=contracts.findById(id).orElseThrow();c.setStatus(ContractStatus.DRAFT);c.setSignedAt(null);contracts.save(c);var l=properties.findById(listingId).orElseThrow();l.setStatus(ListingStatus.RESERVED);properties.save(l);});}
 
     RentalWorkflowView proposeCancel(){beforeLease();return cancellation.propose(rentalId,"owner",new RentalWorkflowPayloads.Cancellation(0L,"Không hoàn tất ký, đề nghị hoàn toàn bộ tiền",List.of()));}
@@ -562,23 +561,6 @@ class RentalWorkflowPostgresTest {
         assertEquals(RentalRequestStatus.ACCEPTED,rentals.findById(rentalId).orElseThrow().getStatus());
         assertEquals(DepositStatus.REFUND_DUE,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());
     }
-    @Test void twoPartyMoveInConfirmationAndCorrectionDoNotRewriteSignedMeters(){
-        var original=revisions.findById(contracts.findById(id).orElseThrow().getCurrentRevisionId()).orElseThrow().getInitialMetersSnapshot();
-        var p=handover.propose(rentalId,"owner",move(0));var one=handover.act(rentalId,"tenant","CONFIRM",action(p.revision()));assertEquals("PROPOSED",one.status());assertNotNull(one.tenantConfirmedAt());assertNull(one.ownerConfirmedAt());
-        assertThrows(AppException.class,()->handover.act(rentalId,"owner","CONFIRM",action(p.revision())));
-        var done=handover.act(rentalId,"owner","CONFIRM",action(one.revision()));assertEquals("COMPLETED",done.status());assertEquals("TRANSFERRED_TO_LEASE",done.depositObligation());
-        var revised=handover.propose(rentalId,"owner",move(done.revision()));assertNull(revised.ownerConfirmedAt());assertNull(revised.tenantConfirmedAt());assertEquals(4,revised.history().size());
-        assertEquals(original,revisions.findById(contracts.findById(id).orElseThrow().getCurrentRevisionId()).orElseThrow().getInitialMetersSnapshot());verify(parking,never()).releaseReservationsForContract(anyString());
-    }
-    @Test void handoverCannotBeInventedInFutureOrBeforeLeaseOrByTenant(){
-        assertThrows(AppException.class,()->handover.propose(rentalId,"tenant",move(0)));
-        var p=move(0);assertThrows(AppException.class,()->handover.propose(rentalId,"owner",new RentalWorkflowPayloads.Handover(0L,time.now().plusSeconds(1),2,p.condition(),p.reason(),p.electricity(),p.water(),p.inventory(),List.of())));
-        assertThrows(AppException.class,()->handover.propose(rentalId,"owner",new RentalWorkflowPayloads.Handover(0L,Instant.parse("2025-01-01T00:00:00Z"),2,p.condition(),p.reason(),p.electricity(),p.water(),p.inventory(),List.of())));
-        assertEquals("EMPTY",handover.get(rentalId,"tenant").status());
-    }
-    @Test void handoverRefusalCreatesCaseWithoutChangingLeaseOrFinancials(){var p=handover.propose(rentalId,"owner",move(0));var issue=handover.act(rentalId,"tenant","REPORT_ISSUE",action(p.revision()));assertEquals("DISPUTED",issue.status());assertNotNull(issue.complaintId());assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());assertEquals(DepositStatus.HELD,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());}
-    @Test void unsignedLeaseCannotHaveCompletedMoveIn(){beforeLease();assertThrows(AppException.class,()->handover.propose(rentalId,"owner",move(0)));}
-    @Test void revisedLeaseSourceNeedsNewHandoverReview(){var p=handover.propose(rentalId,"owner",move(0));tx(()->{var c=contracts.findById(id).orElseThrow();c.setCurrentRevisionId("changed-revision");contracts.save(c);});assertThrows(AppException.class,()->handover.act(rentalId,"tenant","CONFIRM",action(p.revision())));}
     @Test void earlyExitDoesNotRequireDebtAndWaitsForTwoPhysicalReturnsAndExistingSettlement(){
         var p=termination.propose(rentalId,"tenant",early(0));assertNull(contracts.findById(id).orElseThrow().getAgreedEarlyEndExclusive());
         assertEquals(List.of("TERMINATION_RESPONSE_NEEDED:owner"),terminationEvents());
@@ -614,22 +596,6 @@ class RentalWorkflowPostgresTest {
         assertEquals(PaymentStatus.CONFIRMED,paymentRepo.findById(source[0]).orElseThrow().getStatus());
     }
     @Test void foreignOrDepositPaymentCannotBeUsedAsRentRefundSource(){String deposit=deposits.findByRentalRequestId(rentalId).orElseThrow().getInitialPaymentRequestId();var input=early(0);assertThrows(AppException.class,()->termination.propose(rentalId,"tenant",new RentalWorkflowPayloads.Termination(0L,input.endExclusive(),input.reason(),input.handoverTerms(),input.finalRentPolicy(),List.of(new RentalWorkflowPayloads.RentRefund(deposit,BigDecimal.ONE)),List.of())));}
-    @Test void parallelHandoverConfirmationCannotApplySameReviewedRevisionTwice() throws Exception {
-        var p=handover.propose(rentalId,"owner",move(0));var pool=Executors.newFixedThreadPool(2);var go=new CountDownLatch(1);var start=new CountDownLatch(2);
-        try{var calls=new ArrayList<Future<Boolean>>();for(String actor:List.of("owner","tenant"))calls.add(pool.submit(()->{start.countDown();go.await();try{handover.act(rentalId,actor,"CONFIRM",action(p.revision()));return true;}catch(AppException e){return false;}}));assertTrue(start.await(5,TimeUnit.SECONDS));go.countDown();int wins=0;for(var f:calls)if(f.get(15,TimeUnit.SECONDS))wins++;assertEquals(1,wins);assertEquals(2,handover.get(rentalId,"owner").revision());}finally{pool.shutdownNow();}
-    }
-    @Test void moveInEvidenceIsPrivateBoundToHistoryAndCannotBeDeletedAfterCorrection(){
-        String[] file={null};tx(()->file[0]=storage.saveAndFlush(StorageObject.builder().id(UUID.randomUUID().toString()).ownerId("owner").originalName("handover.png").contentType("image/png").sizeBytes(100L).bucketName("test").objectKey("test/"+UUID.randomUUID()).purpose(StoragePurpose.GENERAL).visibility(StorageVisibility.PRIVATE).status(StorageStatus.READY).referenceType("RENTAL_COMPLAINT_EVIDENCE").referenceId(rentalId).build()).getId());
-        var f=storage.findById(file[0]).orElseThrow();assertFalse(workflowAccess.canAccess("tenant",f));
-        var p=move(0);var withEvidence=new RentalWorkflowPayloads.Handover(0L,p.handedOverAt(),p.keys(),p.condition(),p.reason(),p.electricity(),p.water(),p.inventory(),List.of(file[0]));var v=handover.propose(rentalId,"owner",withEvidence);
-        assertTrue(workflowAccess.canAccess("tenant",f));assertFalse(workflowAccess.canAccess("stranger",f));assertTrue(workflowAccess.preventsDeletion(f));
-        handover.propose(rentalId,"owner",move(v.revision()));assertTrue(workflowAccess.canAccess("tenant",f));assertTrue(workflowAccess.preventsDeletion(f));
-        tx(()->{var w=workflows.findById(rentalId+":MOVE_IN").orElseThrow();w.setHistoryJson("broken audit");workflows.save(w);});assertFalse(workflowAccess.canAccess("tenant",f));assertTrue(workflowAccess.preventsDeletion(f));
-    }
-    @Test void evidenceFromOtherRentalOrOtherUploaderCannotEnterHandover(){
-        String[] file={null};tx(()->file[0]=storage.saveAndFlush(StorageObject.builder().id(UUID.randomUUID().toString()).ownerId("tenant").originalName("handover.png").contentType("image/png").sizeBytes(100L).bucketName("test").objectKey("test/"+UUID.randomUUID()).purpose(StoragePurpose.GENERAL).visibility(StorageVisibility.PRIVATE).status(StorageStatus.READY).referenceType("RENTAL_COMPLAINT_EVIDENCE").referenceId(rentalId).build()).getId());
-        var p=move(0);assertThrows(AppException.class,()->handover.propose(rentalId,"owner",new RentalWorkflowPayloads.Handover(0L,p.handedOverAt(),p.keys(),p.condition(),p.reason(),p.electricity(),p.water(),p.inventory(),List.of(file[0]))));
-    }
     @Test void confirmedRefundClosesPreTenancyMoneyObligationWithoutAnotherRelease(){var p=proposeCancel();var done=cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision()));String refund=done.refundPayments().getFirst().id();tx(()->{var cash=paymentRepo.findById(refund).orElseThrow();cash.setStatus(PaymentStatus.TRANSFER_REPORTED);paymentRepo.save(cash);});payments.confirmReceipt(refund,"tenant");assertEquals("REFUNDED",cancellation.get(rentalId,"owner").depositObligation());verify(parking,times(1)).releaseReservationsForRequest(rentalId);}
     @Test void anotherReservationIsNeverReleasedByOldCancellation(){var p=proposeCancel();tx(()->rentals.saveAndFlush(RentalRequest.builder().id(UUID.randomUUID().toString()).listing(properties.findById(listingId).orElseThrow()).ownerId("owner").renterId("other").renterName("Other").renterPhone("0900000000").status(RentalRequestStatus.ACCEPTED).moveInDate(LocalDate.of(2026,12,14)).leaseMonths(1).monthlyRentPrice(BigDecimal.TEN).build()));assertThrows(AppException.class,()->cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision())));verify(listings,never()).releaseReserved(any(),anyString(),anyString());}
     @Test void auditPersistenceFailureRollsBackSigningPauseAndNewRecord(){beforeLease();doThrow(new IllegalStateException("Audit write failed")).when(workflows).saveAndFlush(any());assertThrows(IllegalStateException.class,()->cancellation.propose(rentalId,"owner",new RentalWorkflowPayloads.Cancellation(0L,"Hoàn lại tiền trước khi tiếp tục ký",List.of())));assertNull(rentals.findById(rentalId).orElseThrow().getResolutionWorkflowId());assertTrue(workflows.findById(rentalId+":CANCELLATION").isEmpty());}
@@ -665,11 +631,10 @@ class RentalWorkflowPostgresTest {
     ComplaintAction complaintAction(ComplaintView c){return new ComplaintAction(c.revision(),"Đã kiểm tra căn cứ và phản hồi hồ sơ",null,null,null,null);}
     void admin(){UserContextHolder.set(new UserContext("admin",null));SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("admin","n/a",List.of(new SimpleGrantedAuthority("ADMIN"))));}
     @AfterEach void clearActors(){UserContextHolder.clear();SecurityContextHolder.clearContext();}
-    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"MOVE_IN","CANCELLATION","EARLY_EXIT"})
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"CANCELLATION","EARLY_EXIT"})
     void sourceEvidenceFromOtherPartyReachesAdminAndDoesNotDrift(String kind){
         String file=evidence("owner"),unused=evidence("tenant");RentalWorkflowView w;
-        if("MOVE_IN".equals(kind)){var p=move(0);w=handover.propose(rentalId,"owner",new RentalWorkflowPayloads.Handover(0L,p.handedOverAt(),p.keys(),p.condition(),p.reason(),p.electricity(),p.water(),p.inventory(),List.of(file)));w=handover.act(rentalId,"tenant","REPORT_ISSUE",action(w.revision()));}
-        else if("CANCELLATION".equals(kind)){beforeLease();w=cancellation.propose(rentalId,"owner",new RentalWorkflowPayloads.Cancellation(0L,"Đề nghị đối chiếu hồ sơ trước thuê",List.of(file)));w=cancellation.act(rentalId,"tenant","ESCALATE",action(w.revision()));}
+        if("CANCELLATION".equals(kind)){beforeLease();w=cancellation.propose(rentalId,"owner",new RentalWorkflowPayloads.Cancellation(0L,"Đề nghị đối chiếu hồ sơ trước thuê",List.of(file)));w=cancellation.act(rentalId,"tenant","ESCALATE",action(w.revision()));}
         else{var p=early(0);w=termination.propose(rentalId,"owner",new RentalWorkflowPayloads.Termination(0L,p.endExclusive(),p.reason(),p.handoverTerms(),p.finalRentPolicy(),p.rentRefunds(),List.of(file)));w=termination.act(rentalId,"tenant","REPORT_ISSUE",action(w.revision()));}
         var c=complaints.get(w.complaintId(),"tenant");assertEquals(1,c.sources().size());assertEquals(kind,c.sources().getFirst().kind());assertTrue(c.evidenceIds().contains(file));assertFalse(c.evidenceIds().contains(unused));assertTrue(access.canAccess("tenant",storage.findById(file).orElseThrow()));assertFalse(access.canAccess("owner",storage.findById(unused).orElseThrow()));
         complaints.act(c.id(),"owner","COMMENT",complaintAction(c));c=complaints.get(c.id(),"tenant");c=complaints.act(c.id(),"tenant","ESCALATE",complaintAction(c));admin();var read=complaints.adminGet(c.id(),"admin");assertTrue(read.sources().getFirst().evidenceIds().contains(file));long captured=read.sources().getFirst().revision();
@@ -683,10 +648,9 @@ class RentalWorkflowPostgresTest {
     String prepaidRent(){String[] result={null};tx(()->{var cash=paymentRepo.saveAndFlush(PaymentRequest.builder().contractId(id).rentalRequestId(rentalId).listingId(listingId).payerId("tenant").payeeId("owner").type(PaymentType.MONTHLY_RENT).direction(PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("5000000")).confirmedAt(time.now()).transferReference("HS"+UUID.randomUUID().toString().substring(0,12)).build());lines.saveAndFlush(PaymentLineItem.builder().paymentRequestId(cash.getId()).type("RENT").displayName("Tiền thuê kỳ cuối đã nhận").amount(new BigDecimal("5000000")).unitPrice(new BigDecimal("5000000")).quantity(1).build());var bill=invoices.findByContractIdAndPeriodIndex(id,1).orElseThrow();bill.setPaymentRequestId(cash.getId());bill.setRentPeriodStart(LocalDate.of(2026,12,12));bill.setRentPeriodEndExclusive(LocalDate.of(2027,1,12));invoices.save(bill);result[0]=cash.getId();});return result[0];}
     @Test void dailyProrationRequiresEnoughRealRefundAndDoesNotEditReceipt(){String source=prepaidRent();var quote=termination.calculate(rentalId,"tenant",LocalDate.of(2026,12,20),"DAILY_PRORATED");assertEquals(8,quote.usedDays());assertEquals(31,quote.periodDays());assertEquals(new BigDecimal("1290323"),quote.agreedFinalRent());assertEquals(0,new BigDecimal("3709677").compareTo(quote.requiredRefund()));var old=early(0);assertThrows(AppException.class,()->termination.propose(rentalId,"tenant",new RentalWorkflowPayloads.Termination(0L,old.endExclusive(),old.reason(),old.handoverTerms(),"DAILY_PRORATED",List.of(),List.of())));var p=termination.propose(rentalId,"tenant",new RentalWorkflowPayloads.Termination(0L,old.endExclusive(),old.reason(),old.handoverTerms(),"DAILY_PRORATED",List.of(new RentalWorkflowPayloads.RentRefund(source,quote.requiredRefund())),List.of()));assertEquals(quote.requiredRefund(),p.rentCalculation().requiredRefund());var done=termination.act(rentalId,"owner","ACCEPT",action(p.revision()));assertEquals(0,quote.requiredRefund().compareTo(done.refundPayments().getFirst().totalAmount()));assertEquals(new BigDecimal("5000000.00"),paymentRepo.findById(source).orElseThrow().getTotalAmount());assertEquals("RENT_REFUND_PENDING",done.depositObligation());}
     @Test void dailyProrationDoesNotRefundUnreceivedOrUnidentifiedRent(){assertThrows(AppException.class,()->termination.calculate(rentalId,"tenant",LocalDate.of(2026,12,20),"DAILY_PRORATED"));assertTrue(paymentRepo.findByRentalRequestIdAndTypeIn(rentalId,List.of(PaymentType.INITIAL_PAYMENT_REFUND)).isEmpty());}
-    @Test void documentIsSeparateVersionedAndOldPdfCannotSignNewProposal(){var w=handover.propose(rentalId,"owner",move(0));var doc=workflowDocuments.prepare(rentalId,"move-in","tenant",w.revision());assertTrue(doc.current());var envelope=contracts.findById(doc.signingContractId()).orElseThrow();assertEquals("WORKFLOW",envelope.getAgreementKind());assertEquals(id,envelope.getParentContractId());assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());assertEquals(doc.signingContractId(),workflowDocuments.prepare(rentalId,"move-in","owner",w.revision()).signingContractId());service.validateAgreementSigning(envelope);handover.propose(rentalId,"owner",move(w.revision()));assertThrows(AppException.class,()->service.validateAgreementSigning(envelope));assertFalse(workflowDocuments.list(rentalId,"move-in","tenant").getFirst().current());verify(parking,never()).activateRenewalHold(anyString(),anyString());}
+    @Test void documentIsSeparateVersionedAndOldPdfCannotSignNewProposal(){var w=termination.propose(rentalId,"tenant",early(0));var doc=workflowDocuments.prepare(rentalId,"early-exit","tenant",w.revision());assertTrue(doc.current());var envelope=contracts.findById(doc.signingContractId()).orElseThrow();assertEquals("WORKFLOW",envelope.getAgreementKind());assertEquals(id,envelope.getParentContractId());assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());assertEquals(doc.signingContractId(),workflowDocuments.prepare(rentalId,"early-exit","owner",w.revision()).signingContractId());service.validateAgreementSigning(envelope);termination.propose(rentalId,"owner",early(w.revision(),LocalDate.of(2026,12,19)));assertThrows(AppException.class,()->service.validateAgreementSigning(envelope));assertFalse(workflowDocuments.list(rentalId,"early-exit","tenant").getFirst().current());verify(parking,never()).activateRenewalHold(anyString(),anyString());}
     void verifiedDocument(Contract envelope){tx(()->{for(var role:SignerRole.values())signatures.saveAndFlush(SignatureRequest.builder().contractId(envelope.getId()).revisionId(envelope.getCurrentRevisionId()).sourceDocumentId("source").docId(UUID.randomUUID().toString()).signerRole(role).signerUserId(role==SignerRole.LANDLORD?"owner":"tenant").status(SignatureRequestStatus.SIGNED).build());documents.saveAndFlush(ContractDocument.builder().contractId(envelope.getId()).revisionId(envelope.getCurrentRevisionId()).templateVersionId("template-v1").documentType(ContractDocumentType.PDF).purpose(DocumentPurpose.SIGNED_FINAL).status(DocumentGenerationStatus.READY).storageObjectId("signed-final").build());});}
-    @Test void verifiedSeparateHandoverSignaturesConfirmOnlyHandoverAndPreserveLedger(){var w=handover.propose(rentalId,"owner",move(0));var doc=workflowDocuments.prepare(rentalId,"move-in","owner",w.revision());var c=contracts.findById(doc.signingContractId()).orElseThrow();assertThrows(AppException.class,()->workflowDocuments.bothSigned(c));verifiedDocument(c);workflowDocuments.bothSigned(c);assertEquals("COMPLETED",handover.get(rentalId,"tenant").status());assertNotNull(workflowDocumentRecords.findBySigningContractId(c.getId()).orElseThrow().getSignedAt());assertEquals(DepositStatus.HELD,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());workflowDocuments.bothSigned(c);verify(parking,never()).activateRenewalHold(anyString(),anyString());}
-    @Test void verifiedTerminationDocumentAppliesAgreementOnceAndNeverMarksMoneyReceived(){var w=termination.propose(rentalId,"tenant",early(0));var doc=workflowDocuments.prepare(rentalId,"early-exit","owner",w.revision());var c=contracts.findById(doc.signingContractId()).orElseThrow();verifiedDocument(c);workflowDocuments.bothSigned(c);assertEquals("AGREED",termination.get(rentalId,"tenant").status());assertEquals(LocalDate.of(2026,12,20),contracts.findById(id).orElseThrow().getAgreedEarlyEndExclusive());assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());assertEquals(DepositStatus.HELD,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());workflowDocuments.bothSigned(c);assertEquals(List.of("TERMINATION_RESPONSE_NEEDED:owner"),terminationEvents());assertEquals(2,handoverOutbox.findAll().stream().map(r->NOTICE_JSON.readTree(r.getPayload())).filter(e->"AGREEMENT_FULLY_SIGNED".equals(e.get("eventType").asText())&&c.getId().equals(e.get("data").get("agreementId").asText())).count());}
+    @Test void verifiedTerminationDocumentAppliesAgreementOnceAndNeverMarksMoneyReceived(){var w=termination.propose(rentalId,"tenant",early(0));var doc=workflowDocuments.prepare(rentalId,"early-exit","owner",w.revision());var c=contracts.findById(doc.signingContractId()).orElseThrow();verifiedDocument(c);workflowDocuments.bothSigned(c);assertEquals("AGREED",termination.get(rentalId,"tenant").status());assertEquals(LocalDate.of(2026,12,20),contracts.findById(id).orElseThrow().getAgreedEarlyEndExclusive());assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());assertEquals(DepositStatus.HELD,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());workflowDocuments.bothSigned(c);assertEquals(List.of("TERMINATION_RESPONSE_NEEDED:owner"),terminationEvents());assertEquals(2,noticeOutbox.findAll().stream().map(r->NOTICE_JSON.readTree(r.getPayload())).filter(e->"AGREEMENT_FULLY_SIGNED".equals(e.get("eventType").asText())&&c.getId().equals(e.get("data").get("agreementId").asText())).count());}
     @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"AGREED","RETURNED"})
     void verifiedTerminationDocumentNotifiesWhenAgreementWasAlreadyAccepted(String status){
         var proposed=termination.propose(rentalId,"tenant",early(0));
@@ -699,10 +663,10 @@ class RentalWorkflowPostgresTest {
         var current=termination.get(rentalId,"tenant");
         var doc=workflowDocuments.prepare(rentalId,"early-exit","owner",current.revision());
         var envelope=contracts.findById(doc.signingContractId()).orElseThrow();verifiedDocument(envelope);
-        handoverOutbox.deleteAll();
+        noticeOutbox.deleteAll();
         workflowDocuments.bothSigned(envelope);workflowDocuments.bothSigned(envelope);
         assertEquals(status,termination.get(rentalId,"tenant").status());assertTrue(terminationEvents().isEmpty());
-        assertEquals(List.of("owner","tenant"),handoverOutbox.findAll().stream().sorted(Comparator.comparing(com.hs.contract.notification.ContractNotificationOutbox::getId)).map(row->{
+        assertEquals(List.of("owner","tenant"),noticeOutbox.findAll().stream().sorted(Comparator.comparing(com.hs.contract.notification.ContractNotificationOutbox::getId)).map(row->{
             var event=NOTICE_JSON.readTree(row.getPayload());assertEquals(envelope.getId(),row.getAggregateId());
             assertEquals("AGREEMENT_FULLY_SIGNED",event.get("eventType").asText());
             assertEquals(envelope.getId(),event.get("data").get("agreementId").asText());
@@ -713,13 +677,13 @@ class RentalWorkflowPostgresTest {
     @Test void verifiedTerminationAgreementAndSigningNoticesRollbackTogether(){
         var proposed=termination.propose(rentalId,"tenant",early(0));
         var doc=workflowDocuments.prepare(rentalId,"early-exit","owner",proposed.revision());
-        var envelope=contracts.findById(doc.signingContractId()).orElseThrow();verifiedDocument(envelope);handoverOutbox.deleteAll();
+        var envelope=contracts.findById(doc.signingContractId()).orElseThrow();verifiedDocument(envelope);noticeOutbox.deleteAll();
         assertThrows(IllegalStateException.class,()->tx(()->{workflowDocuments.bothSigned(envelope);throw new IllegalStateException("rollback after signed notices");}));
         assertEquals("PROPOSED",termination.get(rentalId,"tenant").status());
         assertNull(contracts.findById(id).orElseThrow().getAgreedEarlyEndExclusive());
-        assertNull(workflowDocumentRecords.findBySigningContractId(envelope.getId()).orElseThrow().getSignedAt());assertEquals(0,handoverOutbox.count());
+        assertNull(workflowDocumentRecords.findBySigningContractId(envelope.getId()).orElseThrow().getSignedAt());assertEquals(0,noticeOutbox.count());
         workflowDocuments.bothSigned(envelope);workflowDocuments.bothSigned(envelope);
-        assertEquals("AGREED",termination.get(rentalId,"tenant").status());assertEquals(2,handoverOutbox.count());assertTrue(terminationEvents().isEmpty());
+        assertEquals("AGREED",termination.get(rentalId,"tenant").status());assertEquals(2,noticeOutbox.count());assertTrue(terminationEvents().isEmpty());
     }
     @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
     void lifecyclePaymentCancellationIsAtomicAndBillingReplayIsSilent(boolean unilateral){
@@ -744,188 +708,46 @@ class RentalWorkflowPostgresTest {
         if(unilateral)assertEquals("CANCELLED_PAID",NOTICE_JSON.readTree(contracts.findById(id).orElseThrow().getUnilateralTerminationSnapshot()).get(0).get("status").asText());
     }
     @Test void preparedPdfIsCapturedIntoComplaintAndBoundToTheSameSource(){
-        var w=handover.propose(rentalId,"owner",move(0));var doc=workflowDocuments.prepare(rentalId,"move-in","owner",w.revision());
-        var dispute=handover.act(rentalId,"tenant","REPORT_ISSUE",action(w.revision()));var c=complaints.get(dispute.complaintId(),"tenant");
+        var w=termination.propose(rentalId,"owner",early(0));var doc=workflowDocuments.prepare(rentalId,"early-exit","owner",w.revision());
+        var dispute=termination.act(rentalId,"tenant","REPORT_ISSUE",action(w.revision()));var c=complaints.get(dispute.complaintId(),"tenant");
         var captured=c.sources().getFirst();assertEquals(1,captured.documents().size());assertEquals(doc.signingContractId(),captured.documents().getFirst().signingContractId());
         assertTrue(c.evidenceIds().contains(captured.documents().getFirst().storageObjectId()));assertNotNull(captured.contentHash());
         assertTrue(documentRetention.preventsDeletion(storage.findById(captured.documents().getFirst().storageObjectId()).orElseThrow()));
         complaints.act(c.id(),"owner","COMMENT",complaintAction(c));c=complaints.get(c.id(),"tenant");c=complaints.act(c.id(),"tenant","ESCALATE",complaintAction(c));admin();assertEquals(captured.documents(),complaints.adminGet(c.id(),"admin").sources().getFirst().documents());
     }
     @Test void wrongPartyOrChangedRootRevisionCannotSendOrApplyOldPdf(){
-        var w=handover.propose(rentalId,"owner",move(0));var doc=workflowDocuments.prepare(rentalId,"move-in","owner",w.revision());var envelope=contracts.findById(doc.signingContractId()).orElseThrow();
+        var w=termination.propose(rentalId,"owner",early(0));var doc=workflowDocuments.prepare(rentalId,"early-exit","owner",w.revision());var envelope=contracts.findById(doc.signingContractId()).orElseThrow();
         envelope.setTenantId("stranger");assertThrows(AppException.class,()->service.validateAgreementSigning(envelope));envelope.setTenantId("tenant");
         tx(()->{var c=contracts.findById(id).orElseThrow();var rev=new ContractRevision();org.springframework.beans.BeanUtils.copyProperties(revisions.findById(c.getCurrentRevisionId()).orElseThrow(),rev,"id","createdAt","updatedAt");rev.setRevisionNumber(2);rev=revisions.saveAndFlush(rev);c.setCurrentRevisionId(rev.getId());contracts.save(c);});
-        assertThrows(AppException.class,()->workflowDocuments.prepare(rentalId,"move-in","owner",w.revision()));assertThrows(AppException.class,()->workflowDocuments.bothSigned(envelope));
-        assertEquals("PROPOSED",handover.get(rentalId,"owner").status());
+        assertThrows(AppException.class,()->workflowDocuments.prepare(rentalId,"early-exit","owner",w.revision()));assertThrows(AppException.class,()->workflowDocuments.bothSigned(envelope));
+        assertEquals("PROPOSED",termination.get(rentalId,"owner").status());
     }
     @Test void renderingFailureDoesNotCreateAnEnvelopeOrChangeSource(){
-        var w=handover.propose(rentalId,"owner",move(0));when(workflowRenderer.render(any(),any(),any())).thenThrow(new IllegalStateException("Converter unavailable"));
-        assertThrows(IllegalStateException.class,()->workflowDocuments.prepare(rentalId,"move-in","tenant",w.revision()));
-        assertTrue(workflowDocumentRecords.findByWorkflowIdOrderByPreparedAtDesc(rentalId+":MOVE_IN").isEmpty());assertEquals(w.revision(),handover.get(rentalId,"tenant").revision());
+        var w=termination.propose(rentalId,"owner",early(0));when(workflowRenderer.render(any(),any(),any())).thenThrow(new IllegalStateException("Converter unavailable"));
+        assertThrows(IllegalStateException.class,()->workflowDocuments.prepare(rentalId,"early-exit","tenant",w.revision()));
+        assertTrue(workflowDocumentRecords.findByWorkflowIdOrderByPreparedAtDesc(rentalId+":EARLY_EXIT").isEmpty());assertEquals(w.revision(),termination.get(rentalId,"tenant").revision());
     }
 
-    // ---- Phase 5: move-in handover notices (outbox rows are asserted on the real PostgreSQL schema) ----
-    @MockitoSpyBean com.hs.contract.notification.MoveInHandoverNotificationWriter handoverWriter;
-    @Autowired com.hs.contract.notification.ContractNotificationOutboxRepository handoverOutbox;
-    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
-    final java.util.concurrent.atomic.AtomicBoolean failAfterHandoverNotice=new java.util.concurrent.atomic.AtomicBoolean();
-    static final tools.jackson.databind.json.JsonMapper NOTICE_JSON=tools.jackson.databind.json.JsonMapper.builder().build();
-    @BeforeEach void armHandoverWriter(){
-        assertEquals(selectedDatabaseName(),jdbc.queryForObject("select current_database()",String.class),"connected database must be the one named by the allowlisted URL");
-        failAfterHandoverNotice.set(false);
-        var target=org.springframework.test.util.AopTestUtils.<com.hs.contract.notification.MoveInHandoverNotificationWriter>getUltimateTargetObject(handoverWriter);
-        doAnswer(call->{call.callRealMethod();if(failAfterHandoverNotice.get())throw new IllegalStateException("test after enqueue");return null;}).when(target).enqueueOther(any(),any(),any());
-        doAnswer(call->{call.callRealMethod();if(failAfterHandoverNotice.get())throw new IllegalStateException("test after enqueue");return null;}).when(target).enqueueBoth(any(),any());
+    @Test void removedMoveInKindIsRejectedForNewDocumentsAndComplaintSources(){
+        tx(()->{var w=new RentalWorkflowRecord();w.setId(rentalId+":MOVE_IN");w.setRentalRequestId(rentalId);w.setKind("MOVE_IN");w.setStatus("PROPOSED");w.setRevision(1);w.setContractId(id);workflows.save(w);});
+        assertThrows(AppException.class,()->workflowDocuments.prepare(rentalId,"move-in","owner",1L));
+        assertThrows(AppException.class,()->workflowDocuments.list(rentalId,"MOVE_IN","owner"));
+        assertThrows(AppException.class,()->complaints.openFromWorkflow(rentalId,"tenant","MOVE_IN",1,"Phản đối biên bản cũ đã bị gỡ"));
     }
-    /** This lease's handover notices as TYPE:recipient in enqueue (FIFO) order. */
-    List<String> noticeEvents(){
-        return handoverOutbox.findAll().stream().sorted(Comparator.comparing(com.hs.contract.notification.ContractNotificationOutbox::getId)).map(r->{
-            var e=NOTICE_JSON.readTree(r.getPayload());
-            if(!e.get("eventType").asText().startsWith("MOVE_IN_HANDOVER_")||!id.equals(e.get("data").get("contractId").asText()))return null;
-            assertEquals(id,r.getAggregateId());assertNull(r.getSentAt());assertEquals(1,e.get("recipients").size());assertEquals(1,e.get("data").size());
-            return e.get("eventType").asText().substring("MOVE_IN_HANDOVER_".length())+":"+e.get("recipients").get(0).asText();
-        }).filter(Objects::nonNull).toList();
+    // ---- Notice outbox rows are asserted on the real PostgreSQL schema ----
+    @Autowired com.hs.contract.notification.ContractNotificationOutboxRepository noticeOutbox;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+    static final tools.jackson.databind.json.JsonMapper NOTICE_JSON=tools.jackson.databind.json.JsonMapper.builder().build();
+    @BeforeEach void connectedToTheAllowlistedDatabase(){
+        assertEquals(selectedDatabaseName(),jdbc.queryForObject("select current_database()",String.class),"connected database must be the one named by the allowlisted URL");
     }
     List<String> terminationEvents(){
-        return handoverOutbox.findAll().stream().sorted(Comparator.comparing(com.hs.contract.notification.ContractNotificationOutbox::getId)).map(r->{
+        return noticeOutbox.findAll().stream().sorted(Comparator.comparing(com.hs.contract.notification.ContractNotificationOutbox::getId)).map(r->{
             var e=NOTICE_JSON.readTree(r.getPayload());
             if(!id.equals(r.getAggregateId())||!e.get("eventType").asText().startsWith("TERMINATION_")&&!"LEASE_EXPIRED".equals(e.get("eventType").asText()))return null;
             assertEquals(id,e.get("data").get("contractId").asText());assertEquals(1,e.get("data").size());assertEquals(1,e.get("recipients").size());
             return e.get("eventType").asText()+":"+e.get("recipients").get(0).asText();
         }).filter(Objects::nonNull).toList();
-    }
-    RentalWorkflowView confirm(String who,RentalWorkflowView w){return handover.act(rentalId,who,"CONFIRM",action(w.revision()));}
-    RentalWorkflowView dispute(String who,RentalWorkflowView w){return handover.act(rentalId,who,"REPORT_ISSUE",action(w.revision()));}
-    RentalWorkflowView reproposal(RentalWorkflowView w){return handover.propose(rentalId,"owner",move(w.revision()));}
-    Contract signedEnvelope(RentalWorkflowView w){var doc=workflowDocuments.prepare(rentalId,"move-in","owner",w.revision());var c=contracts.findById(doc.signingContractId()).orElseThrow();verifiedDocument(c);return c;}
-
-    @Test void everyCommittedProposalNotifiesOnlyTheTenantIncludingReplacementOfProposedCompletedAndDisputed(){
-        var p=handover.propose(rentalId,"owner",move(0));
-        var tenantConfirmed=confirm("tenant",p);
-        var replaced=reproposal(tenantConfirmed);assertNull(replaced.tenantConfirmedAt());assertNull(replaced.ownerConfirmedAt());
-        var done=confirm("tenant",confirm("owner",replaced));assertEquals("COMPLETED",done.status());
-        var reopened=reproposal(done);assertEquals("PROPOSED",reopened.status());
-        var disputed=dispute("tenant",reopened);assertEquals("DISPUTED",disputed.status());
-        var afterDispute=reproposal(disputed);assertEquals("PROPOSED",afterDispute.status());
-        assertEquals(List.of("PROPOSED:tenant","CONFIRMED:owner","PROPOSED:tenant","CONFIRMED:tenant","COMPLETED:owner","PROPOSED:tenant","DISPUTED:owner","PROPOSED:tenant"),noticeEvents());
-    }
-    @Test void tenantFirstConfirmationNotifiesLandlordAndLandlordCompletionNotifiesTenantOnly(){
-        var p=handover.propose(rentalId,"owner",move(0));var one=confirm("tenant",p);var done=confirm("owner",one);
-        assertEquals("COMPLETED",done.status());
-        assertEquals(List.of("PROPOSED:tenant","CONFIRMED:owner","COMPLETED:tenant"),noticeEvents());
-    }
-    @Test void landlordFirstConfirmationNotifiesTenantAndTenantCompletionNotifiesLandlordOnly(){
-        var p=handover.propose(rentalId,"owner",move(0));var one=confirm("owner",p);var done=confirm("tenant",one);
-        assertEquals("COMPLETED",done.status());
-        assertEquals(List.of("PROPOSED:tenant","CONFIRMED:tenant","COMPLETED:owner"),noticeEvents());
-    }
-    @Test void deniedStaleDuplicateInvalidReadOnlyAndPdfPrepareStaySilentAndNeverChangeTheRecord(){
-        var p=handover.propose(rentalId,"owner",move(0));
-        assertThrows(AppException.class,()->handover.propose(rentalId,"tenant",move(p.revision())));
-        assertThrows(AppException.class,()->handover.act(rentalId,"stranger","CONFIRM",action(p.revision())));
-        assertThrows(AppException.class,()->handover.act(rentalId,"stranger","REPORT_ISSUE",action(p.revision())));
-        assertThrows(AppException.class,()->handover.act(rentalId,"tenant","CONFIRM",action(p.revision()+5)));
-        assertThrows(AppException.class,()->handover.act(rentalId,"tenant","CONFIRM",new RentalWorkflowPayloads.Action(p.revision(),"Đã đối chiếu nội dung và xác nhận thực tế",false,true)));
-        assertThrows(AppException.class,()->handover.act(rentalId,"tenant","WITHDRAW",action(p.revision())));
-        assertThrows(AppException.class,()->handover.propose(rentalId,"owner",new RentalWorkflowPayloads.Handover(p.revision(),time.now().plusSeconds(60),2,"Phòng đúng hiện trạng đã đối chiếu","Biên bản nhận nhà thực tế đầu kỳ",BigDecimal.TEN,BigDecimal.ONE,List.of(),List.of())));
-        handover.get(rentalId,"tenant");handover.get(rentalId,"owner");workflowDocuments.prepare(rentalId,"move-in","tenant",p.revision());workflowDocuments.list(rentalId,"move-in","owner");
-        var one=confirm("tenant",p);
-        assertThrows(AppException.class,()->confirm("tenant",one));            // duplicate confirmation by the same party
-        assertThrows(AppException.class,()->handover.act(rentalId,"owner","CONFIRM",action(p.revision()))); // stale revision
-        assertEquals(List.of("PROPOSED:tenant","CONFIRMED:owner"),noticeEvents());
-        tx(()->{var c=contracts.findById(id).orElseThrow();c.setStatus(ContractStatus.CLOSED);contracts.save(c);});
-        assertThrows(AppException.class,()->confirm("owner",one));assertThrows(AppException.class,()->dispute("owner",one));assertThrows(AppException.class,()->reproposal(one));
-        assertEquals(List.of("PROPOSED:tenant","CONFIRMED:owner"),noticeEvents());
-        assertEquals(one.revision(),handover.get(rentalId,"owner").revision());
-    }
-    @Test void revisionZeroDisputeNotifiesTheOtherPartyOnceDespiteTwoSavesAndARepeatedDisputeIsSilentButStillRecorded(){
-        var first=dispute("tenant",handover.get(rentalId,"tenant"));
-        assertEquals("DISPUTED",first.status());assertEquals(2,first.revision());
-        assertEquals(List.of("DISPUTED:owner"),noticeEvents());
-        var repeat=dispute("tenant",first);
-        assertEquals("DISPUTED",repeat.status());assertEquals(first.revision()+1,repeat.revision());assertEquals(first.complaintId(),repeat.complaintId());
-        var byLandlord=dispute("owner",repeat);assertEquals(repeat.revision()+1,byLandlord.revision());
-        assertEquals(List.of("DISPUTED:owner"),noticeEvents());
-        var proposed=reproposal(byLandlord);
-        var again=dispute("owner",proposed);assertEquals("DISPUTED",again.status());
-        assertEquals(List.of("DISPUTED:owner","PROPOSED:tenant","DISPUTED:tenant"),noticeEvents());
-    }
-    @Test void disputeOfACompletedHandoverNotifiesTheOtherParty(){
-        var done=confirm("tenant",confirm("owner",handover.propose(rentalId,"owner",move(0))));
-        var disputed=dispute("owner",done);assertEquals("DISPUTED",disputed.status());
-        assertEquals(List.of("PROPOSED:tenant","CONFIRMED:tenant","COMPLETED:owner","DISPUTED:tenant"),noticeEvents());
-    }
-    @Test void failureAfterTheNoticeRollsBackTheRecordTheComplaintAndTheOutboxTogether(){
-        var p=handover.propose(rentalId,"owner",move(0));var one=confirm("tenant",p);
-        long outboxRows=handoverOutbox.count(),caseRows=cases.count();
-        failAfterHandoverNotice.set(true);
-        assertThrows(IllegalStateException.class,()->handover.propose(rentalId,"owner",move(one.revision())));
-        assertThrows(IllegalStateException.class,()->confirm("owner",one));           // completing confirmation
-        assertThrows(IllegalStateException.class,()->dispute("tenant",one));
-        failAfterHandoverNotice.set(false);
-        var current=handover.get(rentalId,"owner");
-        assertEquals(one.revision(),current.revision());assertEquals("PROPOSED",current.status());assertNotNull(current.tenantConfirmedAt());assertNull(current.ownerConfirmedAt());assertNull(current.complaintId());
-        assertEquals(outboxRows,handoverOutbox.count());assertEquals(caseRows,cases.count());
-        assertEquals(DepositStatus.HELD,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());
-        assertEquals("COMPLETED",confirm("owner",one).status());   // the same call succeeds once and notifies once
-        assertEquals(List.of("PROPOSED:tenant","CONFIRMED:owner","COMPLETED:tenant"),noticeEvents());
-    }
-    @Test void verifiedSignaturesWithNobodyConfirmedCompleteOnceForBothPartiesWithoutAnyIntermediateConfirmation(){
-        var p=handover.propose(rentalId,"owner",move(0));var envelope=signedEnvelope(p);
-        workflowDocuments.bothSigned(envelope);
-        assertEquals("COMPLETED",handover.get(rentalId,"tenant").status());
-        assertEquals(List.of("PROPOSED:tenant","COMPLETED:owner","COMPLETED:tenant"),noticeEvents());
-        workflowDocuments.bothSigned(envelope);workflowDocuments.bothSigned(envelope);   // embedding replay
-        assertEquals(3,noticeEvents().size());
-        assertEquals(DepositStatus.HELD,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());
-    }
-    @Test void verifiedSignaturesWithOnePartyAlreadyConfirmedCompleteForBothPartiesAndKeepOnlyTheHumanConfirmation(){
-        var p=handover.propose(rentalId,"owner",move(0));var envelope=signedEnvelope(p);var one=confirm("owner",p);
-        workflowDocuments.bothSigned(envelope);
-        assertEquals("COMPLETED",handover.get(rentalId,"owner").status());assertEquals(one.revision()+1,handover.get(rentalId,"owner").revision());
-        assertEquals(List.of("PROPOSED:tenant","CONFIRMED:tenant","COMPLETED:owner","COMPLETED:tenant"),noticeEvents());
-    }
-    @Test void verifiedSignaturesAfterBothPartiesAlreadyConfirmedCreateNoNewNotice(){
-        var p=handover.propose(rentalId,"owner",move(0));var envelope=signedEnvelope(p);var done=confirm("tenant",confirm("owner",p));
-        assertEquals("COMPLETED",done.status());
-        workflowDocuments.bothSigned(envelope);
-        assertEquals(done.revision(),handover.get(rentalId,"owner").revision());
-        assertEquals(List.of("PROPOSED:tenant","CONFIRMED:tenant","COMPLETED:owner"),noticeEvents());
-    }
-    @Test void failureInTheSignatureTransactionRollsBackHandoverSigningRecordAndNoticesAndTheRetryNotifiesOnce(){
-        var p=handover.propose(rentalId,"owner",move(0));var envelope=signedEnvelope(p);
-        failAfterHandoverNotice.set(true);
-        assertThrows(IllegalStateException.class,()->workflowDocuments.bothSigned(envelope));
-        failAfterHandoverNotice.set(false);
-        assertEquals("PROPOSED",handover.get(rentalId,"owner").status());assertEquals(p.revision(),handover.get(rentalId,"owner").revision());
-        assertNull(workflowDocumentRecords.findBySigningContractId(envelope.getId()).orElseThrow().getSignedAt());
-        assertEquals(List.of("PROPOSED:tenant"),noticeEvents());
-        workflowDocuments.bothSigned(envelope);
-        assertEquals(List.of("PROPOSED:tenant","COMPLETED:owner","COMPLETED:tenant"),noticeEvents());
-    }
-    @Test void concurrentConfirmationsKeepTheRevisionGuardAndNotifyExactlyOnce() throws Exception {
-        var p=handover.propose(rentalId,"owner",move(0));var pool=Executors.newFixedThreadPool(3);var go=new CountDownLatch(1);var start=new CountDownLatch(3);
-        try{
-            var calls=new ArrayList<Future<String>>();
-            for(String actor:List.of("owner","tenant","tenant"))calls.add(pool.submit(()->{start.countDown();go.await();try{handover.act(rentalId,actor,"CONFIRM",action(p.revision()));return actor;}catch(AppException e){return null;}}));
-            assertTrue(start.await(5,TimeUnit.SECONDS));go.countDown();
-            var winners=new ArrayList<String>();for(var f:calls){var w=f.get(20,TimeUnit.SECONDS);if(w!=null)winners.add(w);}
-            assertEquals(1,winners.size());assertEquals(2,handover.get(rentalId,"owner").revision());assertEquals("PROPOSED",handover.get(rentalId,"owner").status());
-            assertEquals(List.of("PROPOSED:tenant","CONFIRMED:"+("owner".equals(winners.getFirst())?"tenant":"owner")),noticeEvents());
-        }finally{pool.shutdownNow();}
-    }
-    @Test void concurrentCompletingAndDisputeAttemptsNotifyExactlyOncePerCommittedTransition() throws Exception {
-        var p=handover.propose(rentalId,"owner",move(0));var one=confirm("tenant",p);var pool=Executors.newFixedThreadPool(2);
-        try{
-            var go=new CountDownLatch(1);var start=new CountDownLatch(2);var calls=new ArrayList<Future<Boolean>>();
-            for(int i=0;i<2;i++)calls.add(pool.submit(()->{start.countDown();go.await();try{handover.act(rentalId,"owner","CONFIRM",action(one.revision()));return true;}catch(AppException e){return false;}}));
-            assertTrue(start.await(5,TimeUnit.SECONDS));go.countDown();int wins=0;for(var f:calls)if(f.get(20,TimeUnit.SECONDS))wins++;
-            assertEquals(1,wins);assertEquals(List.of("PROPOSED:tenant","CONFIRMED:owner","COMPLETED:tenant"),noticeEvents());
-            var done=handover.get(rentalId,"tenant");var go2=new CountDownLatch(1);var start2=new CountDownLatch(2);var disputes=new ArrayList<Future<Boolean>>();
-            for(String actor:List.of("owner","tenant"))disputes.add(pool.submit(()->{start2.countDown();go2.await();try{handover.act(rentalId,actor,"REPORT_ISSUE",action(done.revision()));return true;}catch(AppException e){return false;}}));
-            assertTrue(start2.await(5,TimeUnit.SECONDS));go2.countDown();wins=0;for(var f:disputes)if(f.get(20,TimeUnit.SECONDS))wins++;
-            assertEquals(1,wins);assertEquals("DISPUTED",handover.get(rentalId,"owner").status());assertEquals(4,noticeEvents().size());assertTrue(noticeEvents().getLast().startsWith("DISPUTED:"));
-        }finally{pool.shutdownNow();}
     }
     // Phase 6E uses the existing disposable-PostgreSQL workflow fixture and real transactional outboxes.
     @Autowired com.hs.payment.notification.PaymentNotificationOutboxRepository paymentNotices;
@@ -935,7 +757,7 @@ class RentalWorkflowPostgresTest {
     List<String> settlementEvents(){
         var types=java.util.EnumSet.range(com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_RETURN_CONFIRMED,
                 com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_CLOSED).stream().map(Enum::name).toList();
-        return handoverOutbox.findAll().stream().sorted(Comparator.comparing(com.hs.contract.notification.ContractNotificationOutbox::getId))
+        return noticeOutbox.findAll().stream().sorted(Comparator.comparing(com.hs.contract.notification.ContractNotificationOutbox::getId))
                 .filter(row->id.equals(row.getAggregateId())).map(row->{var e=NOTICE_JSON.readTree(row.getPayload());
                     return types.contains(e.get("eventType").asText())?e.get("eventType").asText()+":"+e.get("recipients").get(0).asText():null;
                 }).filter(Objects::nonNull).toList();
@@ -1037,7 +859,7 @@ class RentalWorkflowPostgresTest {
         assertThrows(AppException.class,()->service.issueFinalCosts(id,"owner",new FinalCostsPayload(payload.requestId(),null,null,List.of(new IssueMonthlyInvoiceRequest.ExtraCharge("Nội dung khác",BigDecimal.ONE)))));
         var s=closures.findById(id).orElseThrow();assertEquals(before+1,s.getProposalVersion());assertEquals("WAITING_HANDOVER",s.getStatus());assertNull(s.getRespondBy());
         assertEquals(status.equals("PROPOSED")||status.equals("DISPUTED")?1:0,settlementEvents().stream().filter(e->e.equals("SETTLEMENT_PROPOSAL_INVALIDATED:tenant")).count());
-        assertEquals(1,handoverOutbox.findAll().stream().map(row->NOTICE_JSON.readTree(row.getPayload()))
+        assertEquals(1,noticeOutbox.findAll().stream().map(row->NOTICE_JSON.readTree(row.getPayload()))
                 .filter(e->e.get("eventType").asText().equals("INVOICE_ISSUED")&&id.equals(e.get("data").get("contractId").asText())).count());
     }
     @Test void phase6eComplaintProposalApprovalAndDeadlineAreSilentButActualAcceptedRefundStillNotifies(){

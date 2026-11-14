@@ -1,4 +1,4 @@
-# Vận hành hồ sơ trước thuê, nhận nhà và kết thúc sớm
+# Vận hành hồ sơ trước thuê và kết thúc sớm
 
 Phạm vi ngày 03/11/2026. Không bao gồm hệ thống thông báo. Thao tác thực hiện trong hồ sơ yêu cầu thuê/hợp đồng; API và collection thử nằm tại `hs-infra/postman/HomeSpace - Rental workflows.postman_collection.json`.
 
@@ -13,12 +13,9 @@ Phạm vi ngày 03/11/2026. Không bao gồm hệ thống thông báo. Thao tác
 5. Sau khi đồng ý hủy, hồ sơ chờ hoàn tiền và phòng vẫn được giữ. Chủ nhà báo chuyển từng khoản hoàn. Khi người thuê xác nhận đã nhận đủ tất cả khoản hoàn, hệ thống mới hoàn tất hủy yêu cầu, hủy bản hợp đồng thuê chưa ký đủ và giải phóng lượt giữ phòng.
 6. Sau khi khiếu nại giải quyết mà hai bên vẫn muốn thuê: một bên chọn **Đề nghị tiếp tục thuê / ký**, bên kia chọn **Đồng ý tiếp tục thuê / ký**. Đóng case không tự đồng ý thuê. Không cần lập rồi rút đề nghị hủy để mở khóa. Hạn thanh toán đã quá hạn vẫn phải mở lại/đối soát qua luồng thanh toán hợp lệ; không ghi nhận tiền giả hay dời ngày thuê.
 
-### Biên bản nhận nhà
+### Nhận nhà
 
-1. Sau HĐ thuê ký đủ, chủ nhà mở **Biên bản nhận nhà**. Ghi ngày giờ thực tế, chìa khóa, hiện trạng, tài sản/số lượng/tình trạng, công tơ và chứng cứ.
-2. Hai bên kiểm tra và xác nhận bản đang xem. Một xác nhận chưa hoàn thành bàn giao. Sửa nội dung tạo bản mới và xóa xác nhận của bản trước, giữ lịch sử.
-3. Ngày nhận thực tế không tự thay ngày thuê/hóa đơn; công tơ biên bản là bằng chứng đối chiếu, không tự ghi đè công tơ đã dùng để ký/phát hành tiền.
-4. Nếu không bàn giao hoặc sai hiện trạng, chọn **Báo vấn đề / Mở khiếu nại**. Admin đọc được bản nguồn và chứng cứ của cả hai bên đã gắn thật. Upload chưa gắn không tự được chia sẻ.
+Không còn biên bản nhận nhà riêng. Ngày thuê, ngày nhận nhà sớm, thanh toán kỳ đầu/cọc và kích hoạt HĐ thuê giữ nguyên; HĐ thuê đã ký đủ là trạng thái hiện hành. Tranh chấp thực tế dùng khiếu nại nhóm Bàn giao. Biên bản cũ (nếu có) chỉ là chứng cứ lưu, không tạo/xác nhận/ký/áp dụng mới.
 
 ### Chấm dứt sớm theo thỏa thuận
 
@@ -33,7 +30,7 @@ Phạm vi ngày 03/11/2026. Không bao gồm hệ thống thông báo. Thao tác
 
 Mở **PDF & chữ ký SmartCA riêng** để tạo/mở PDF của đúng bản. Bản cũ vẫn tra cứu được; không được ký/áp dụng thay nội dung mới. HĐ thuê và HĐ cọc gốc giữ nguyên. Văn bản liên kết không sửa qua màn soạn HĐ gốc.
 
-Chủ nhà ký trước, người thuê ký sau. Chỉ khi backend kiểm chứng đủ hai chữ ký và PDF cuối thì văn bản riêng được ghi nhận. Biên bản nhận nhà xác nhận giao nhận thực tế theo nội dung văn bản; thỏa thuận chấm dứt chỉ ghi nhận thỏa thuận, các bước trả nhà và nhận tiền vẫn riêng. Khi thiếu kết nối/chứng thư, vẫn đọc PDF; không có nút ký giả thay SmartCA.
+Chủ nhà ký trước, người thuê ký sau. Chỉ khi backend kiểm chứng đủ hai chữ ký và PDF cuối thì văn bản riêng được ghi nhận. Thỏa thuận chấm dứt chỉ ghi nhận thỏa thuận, các bước trả nhà và nhận tiền vẫn riêng. Khi thiếu kết nối/chứng thư, vẫn đọc PDF; không có nút ký giả thay SmartCA.
 
 ## Admin HomeSpace
 

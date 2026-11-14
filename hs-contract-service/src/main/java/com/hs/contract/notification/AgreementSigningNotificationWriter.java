@@ -28,7 +28,7 @@ import com.hs.contract.repository.WorkflowSigningDocumentRepository;
 
 /**
  * Phase 6A: enqueues v1 agreement-signing notifications for the persisted parties of the EXACT signing envelope
- * (the contract row that owns the signature requests; a child for amendment, renewal and move-in documents).
+ * (the contract row that owns the signature requests; a child for amendment, renewal and early-exit documents).
  * Recipients are the stored landlord/tenant of that envelope, additionally asserted equal to the root lease parties for
  * children, never a request or actor value. Every envelope has one recipient and data exactly
  * {agreementId, agreementKind}; no text, date, amount, signature or failure code enters Kafka. Aggregate/Kafka key =
@@ -37,7 +37,7 @@ import com.hs.contract.repository.WorkflowSigningDocumentRepository;
 @Service
 public class AgreementSigningNotificationWriter {
     public enum Event { AGREEMENT_REVIEW_READY, AGREEMENT_SIGNING_TURN, AGREEMENT_FULLY_SIGNED, AGREEMENT_SIGNATURE_NEEDS_REVIEW }
-    public enum Kind { LEASE, DEPOSIT, AMENDMENT, RENEWAL, MOVE_IN, EARLY_EXIT }
+    public enum Kind { LEASE, DEPOSIT, AMENDMENT, RENEWAL, EARLY_EXIT }
 
     private static final Logger log = LoggerFactory.getLogger(AgreementSigningNotificationWriter.class);
     private static final DateTimeFormatter TIMESTAMP = new DateTimeFormatterBuilder().appendInstant(3).toFormatter();
@@ -46,22 +46,19 @@ public class AgreementSigningNotificationWriter {
     private final ContractRepository contracts;
     private final WorkflowSigningDocumentRepository workflowDocuments;
     private final RentalWorkflowRecordRepository workflowRecords;
-    private final MoveInHandoverNotificationWriter handover;
     private final String topic;
 
     public AgreementSigningNotificationWriter(ContractNotificationOutboxRepository outbox, ContractRepository contracts,
             WorkflowSigningDocumentRepository workflowDocuments, RentalWorkflowRecordRepository workflowRecords,
-            MoveInHandoverNotificationWriter handover,
             @Value("${notification.events-topic:homespace.notification.events.v1}") String topic) {
         this.outbox = outbox;
         this.contracts = contracts;
         this.workflowDocuments = workflowDocuments;
         this.workflowRecords = workflowRecords;
-        this.handover = handover;
         this.topic = topic;
     }
 
-    /** The landlord may now review the document (system draft, first deposit PDF, tenant-prepared move-in PDF). */
+    /** The landlord may now review the document (system draft, first deposit PDF, tenant-prepared early-exit PDF). */
     @Transactional(propagation = Propagation.MANDATORY)
     public void reviewReady(Contract envelope) {
         var kind = resolve(envelope);
@@ -89,14 +86,13 @@ public class AgreementSigningNotificationWriter {
     }
 
     /**
-     * Verified tenant signature activated the ROOT lease: the tenant gets FULLY_SIGNED and the landlord only the
-     * move-in handover prompt. A lease whose parties coincide gets the actionable prompt only (no self-role duplicate).
+     * Verified SmartCA tenant signature activated the ROOT lease: the generic FULLY_SIGNED notice goes to the
+     * landlord and the tenant; a lease whose parties coincide gets a single notice. Internal signing never calls this.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void leaseActivated(Contract root) {
         if (resolve(root) != Kind.LEASE) throw new IllegalStateException("Lease activation notice needs the root lease");
-        if (!root.getLandlordId().equals(root.getTenantId())) write(root, Event.AGREEMENT_FULLY_SIGNED, Kind.LEASE, root.getTenantId());
-        handover.enqueueLandlord(root, MoveInHandoverNotificationWriter.Event.MOVE_IN_HANDOVER_READY);
+        fullySigned(root);
     }
 
     /**
@@ -146,9 +142,9 @@ public class AgreementSigningNotificationWriter {
                     .orElseThrow(() -> new IllegalStateException("Workflow signing document missing"));
             var record = workflowRecords.findById(document.getWorkflowId())
                     .orElseThrow(() -> new IllegalStateException("Workflow record missing"));
-            if (!"MOVE_IN".equals(record.getKind()) && !"EARLY_EXIT".equals(record.getKind()))
+            if (!"EARLY_EXIT".equals(record.getKind()))
                 throw new IllegalStateException("Unsupported workflow kind");
-            kind = "MOVE_IN".equals(record.getKind()) ? Kind.MOVE_IN : Kind.EARLY_EXIT;
+            kind = Kind.EARLY_EXIT;
         } else if (stored == null) {
             kind = parentId == null ? Kind.LEASE : Kind.RENEWAL;
         } else {

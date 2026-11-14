@@ -77,7 +77,7 @@ import com.hs.storage.repository.StorageObjectRepository;
     "spring.datasource.password=${HS_TEST_PG_PASSWORD}", "spring.jpa.hibernate.ddl-auto=create-drop", "spring.jpa.open-in-view=false",
     "spring.datasource.hikari.connection-init-sql=SET lock_timeout TO '10s'", "spring.profiles.active=test"})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import({com.hs.contract.notification.MoveInHandoverNotificationWriter.class,com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,InvoiceNotificationWriter.class, com.hs.listing.notification.RentalRequestNotificationWriter.class,
+@Import({com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,InvoiceNotificationWriter.class, com.hs.listing.notification.RentalRequestNotificationWriter.class,
     com.hs.payment.notification.PaymentNotificationWriter.class, ContractLifecycleService.class, MonthlyBillingService.class,
     PaymentRequestService.class, DepositLedgerService.class, PaymentDisputeService.class})
 class MonthlyInvoiceNotificationPostgresTest {

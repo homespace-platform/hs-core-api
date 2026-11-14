@@ -49,7 +49,7 @@ Dữ liệu vào: PostgreSQL/container riêng với hồ sơ owner/tenant/tenant
 
 ## Phần bổ sung R01–R03 và tài liệu riêng
 
-- R01: 3 nguồn CANCELLATION/MOVE_IN/EARLY_EXIT → snapshot bất biến → case → admin; chứng cứ bên còn lại, upload chưa gắn/sai rental bị chặn; PDF nguồn gắn đúng hash và không cho xóa.
+- R01: 2 nguồn CANCELLATION/EARLY_EXIT (MOVE_IN đã gỡ) → snapshot bất biến → case → admin; chứng cứ bên còn lại, upload chưa gắn/sai rental bị chặn; PDF nguồn gắn đúng hash và không cho xóa.
 - R02: case đã giải quyết → REQUEST_RESUME → bên kia RESUME; đúng phiên bản, kiểm tra chữ ký/chuyển tiền chưa rõ và lượt giữ phòng; không cần đề nghị hủy giả. Có PG và browser test.
 - R03: RETURNED → hóa đơn cuối → closure → thực nhận hoàn/thu thêm → GET hiển thị COMPLETED. Có PG và browser test đến bước thực nhận.
 - PDF: nguồn bất biến, current/stale, hai lượt ký riêng, lỗi converter rollback, chữ ký muộn sai nguồn không áp dụng, retry không nhân đôi nghĩa vụ. Có unit/PG và render/PNG QA; SmartCA thật được người dùng hoãn đến khi có sandbox.

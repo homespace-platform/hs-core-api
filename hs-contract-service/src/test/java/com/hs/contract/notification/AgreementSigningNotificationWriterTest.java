@@ -30,9 +30,8 @@ class AgreementSigningNotificationWriterTest {
     private final ContractRepository contracts = mock(ContractRepository.class);
     private final WorkflowSigningDocumentRepository documents = mock(WorkflowSigningDocumentRepository.class);
     private final RentalWorkflowRecordRepository workflows = mock(RentalWorkflowRecordRepository.class);
-    private final MoveInHandoverNotificationWriter handover = mock(MoveInHandoverNotificationWriter.class);
     private final AgreementSigningNotificationWriter writer = new AgreementSigningNotificationWriter(
-            outbox, contracts, documents, workflows, handover, "homespace.notification.events.v1");
+            outbox, contracts, documents, workflows, "homespace.notification.events.v1");
     private final List<ContractNotificationOutbox> rows = new ArrayList<>();
     private final Contract root = contract("root", null, null);
 
@@ -63,7 +62,7 @@ class AgreementSigningNotificationWriterTest {
 
     @Test void allKindsUseTheExactSigningEnvelopeAndOneStoredRecipient() throws Exception {
         for (var contract : List.of(root, contract("deposit", null, "DEPOSIT"),
-                contract("amendment", "root", "AMENDMENT"), contract("renewal", "root", null), workflow("move-in", "MOVE_IN"), workflow("early-exit", "EARLY_EXIT"))) {
+                contract("amendment", "root", "AMENDMENT"), contract("renewal", "root", null), workflow("early-exit", "EARLY_EXIT"))) {
             writer.signingTurn(contract);
             JsonNode event = event(rows.size() - 1);
             assertEquals("AGREEMENT_SIGNING_TURN", event.get("eventType").asText());
@@ -72,7 +71,7 @@ class AgreementSigningNotificationWriterTest {
             assertEquals(1, event.get("recipients").size());
             assertEquals(contract.getId(), rows.getLast().getAggregateId());
         }
-        assertEquals(List.of("LEASE", "DEPOSIT", "AMENDMENT", "RENEWAL", "MOVE_IN", "EARLY_EXIT"),
+        assertEquals(List.of("LEASE", "DEPOSIT", "AMENDMENT", "RENEWAL", "EARLY_EXIT"),
                 rows.stream().map(row -> {
                     try { return JSON.readTree(row.getPayload()).get("data").get("agreementKind").asText(); }
                     catch (Exception e) { throw new AssertionError(e); }
@@ -88,9 +87,18 @@ class AgreementSigningNotificationWriterTest {
         assertEquals("tenant", event(1).get("recipients").get(0).asText());
         rows.clear();
         writer.leaseActivated(root);
+        assertEquals(2, rows.size());
+        assertEquals("AGREEMENT_FULLY_SIGNED", event(0).get("eventType").asText());
+        assertEquals("LEASE", event(0).get("data").get("agreementKind").asText());
+        assertEquals("landlord", event(0).get("recipients").get(0).asText());
+        assertEquals("tenant", event(1).get("recipients").get(0).asText());
+        rows.clear();
+        var samePerson = contract("self", null, null);
+        samePerson.setTenantId("landlord");
+        writer.leaseActivated(samePerson);
         assertEquals(1, rows.size());
-        assertEquals("tenant", event(0).get("recipients").get(0).asText());
-        verify(handover).enqueueLandlord(root, MoveInHandoverNotificationWriter.Event.MOVE_IN_HANDOVER_READY);
+        assertEquals("landlord", event(0).get("recipients").get(0).asText());
+        assertThrows(IllegalStateException.class, () -> writer.leaseActivated(contract("child", "root", null)));
     }
 
     @Test void failureNoticeGoesOnlyToTheVerifiedPersistedSigner() throws Exception {
@@ -118,6 +126,9 @@ class AgreementSigningNotificationWriterTest {
                 .signerUserId("tenant").build(), earlyExit);
         assertEquals(6, rows.size());
         assertEquals("EARLY_EXIT", event(2).get("data").get("agreementKind").asText());
+        // Legacy MOVE_IN envelopes are no longer a notifiable kind.
+        assertThrows(IllegalStateException.class, () -> writer.reviewReady(workflow("legacy-move-in", "MOVE_IN")));
+        assertEquals(6, rows.size());
     }
 
     @Test void javaEnvelopesForConsumerCrossCheck() throws Exception {
@@ -129,13 +140,12 @@ class AgreementSigningNotificationWriterTest {
         writer.needsReview(SignatureRequest.builder().id(UUID.randomUUID().toString())
                 .signerRole(SignerRole.TENANT).signerUserId("tenant").build(), lease);
         writer.reviewReady(contract(UUID.randomUUID().toString(), null, "DEPOSIT"));
-        writer.reviewReady(workflow(UUID.randomUUID().toString(), "MOVE_IN"));
         writer.reviewReady(contract(UUID.randomUUID().toString(), "root", "AMENDMENT"));
         writer.reviewReady(contract(UUID.randomUUID().toString(), "root", null));
         writer.reviewReady(workflow(UUID.randomUUID().toString(), "EARLY_EXIT"));
         for (var child : List.of(contract(UUID.randomUUID().toString(), "root", "AMENDMENT"),
                 contract(UUID.randomUUID().toString(), "root", null))) writer.signingTurn(child);
-        assertEquals(12, rows.size());
+        assertEquals(11, rows.size());
         String output = System.getenv("HS_AGREEMENT_FIXTURE_OUT");
         if (output != null && !output.isBlank())
             Files.write(Path.of(output), rows.stream().map(ContractNotificationOutbox::getPayload).toList());

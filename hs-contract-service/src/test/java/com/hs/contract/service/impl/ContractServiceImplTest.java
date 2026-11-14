@@ -594,8 +594,8 @@ class ContractServiceImplTest {
         verify(listingStatusService).markRentedByContract("listing-1", "tenant-1");
         verify(rentalRequestRepository).save(rentalRequest);
         verify(contractRepository).save(contract);
-        verify((com.hs.contract.notification.MoveInHandoverNotificationWriter) org.springframework.test.util.ReflectionTestUtils.getField(service,"handoverNotices"))
-                .enqueueLandlord(contract, com.hs.contract.notification.MoveInHandoverNotificationWriter.Event.MOVE_IN_HANDOVER_READY);
+        // INTERNAL signing is not a verified SmartCA completion: no FULLY_SIGNED notice.
+        verify((com.hs.contract.notification.AgreementSigningNotificationWriter) org.springframework.test.util.ReflectionTestUtils.getField(service,"signingNotices"),never()).leaseActivated(any());
     }
 
     @Test
@@ -1259,7 +1259,6 @@ class ContractServiceImplTest {
         org.springframework.test.util.ReflectionTestUtils.setField(service,"draftIntegrity",integrity);
         org.springframework.test.util.ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
         org.springframework.test.util.ReflectionTestUtils.setField(service,"signingNotices",mock(com.hs.contract.notification.AgreementSigningNotificationWriter.class));
-        org.springframework.test.util.ReflectionTestUtils.setField(service,"handoverNotices",mock(com.hs.contract.notification.MoveInHandoverNotificationWriter.class));
         return service;
     }
 }

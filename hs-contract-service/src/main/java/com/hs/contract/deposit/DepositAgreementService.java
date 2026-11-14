@@ -42,7 +42,6 @@ public class DepositAgreementService {
     private final ObjectMapper mapper;
     private final BillingTime time;
     private final com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
-    @org.springframework.beans.factory.annotation.Autowired(required=false) private RentalWorkflowRecordRepository workflowRecords;
     @Value("${rental.deposit-signing-hours:48}") private long signingHours=48;
     @Value("${homespace.payment.contract-due-hours:48}") private long leaseSigningHours=48;
     private static final TypeReference<Map<String,Object>> MAP=new TypeReference<>(){};
@@ -106,7 +105,7 @@ public class DepositAgreementService {
         var lease=contracts.findByRentalRequestId(rentalId).orElse(null);
         var ledger=ledgers.findByRentalRequestId(rentalId).orElse(null);
         String obligation=ledger!=null&&Set.of(DepositStatus.REFUND_DUE,DepositStatus.REFUNDED,DepositStatus.RETAINED_BY_LANDLORD,DepositStatus.DISPUTED).contains(ledger.getStatus())?ledger.getStatus().name()
-            :lease!=null&&lease.getSignedAt()!=null?(workflowRecords!=null&&workflowRecords.findById(rentalId+":MOVE_IN").filter(w->"COMPLETED".equals(w.getStatus())).isPresent()?"TRANSFERRED_TO_LEASE":"HANDOVER_PENDING")
+            :lease!=null&&lease.getSignedAt()!=null?"TRANSFERRED_TO_LEASE"
             :rental.getStatus()==RentalRequestStatus.ACCEPTED?"RESERVATION_PENDING":"ENDED";
         return new Overview(!exempt,
             !exempt&&amountKnown&&eligible&&!expired,blocked,found.map(Contract::getId).orElse(null),lease==null?null:lease.getId(),obligation);

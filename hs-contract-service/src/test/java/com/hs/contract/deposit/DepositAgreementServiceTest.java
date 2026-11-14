@@ -191,6 +191,10 @@ class DepositAgreementServiceTest {
         assertThrows(AppException.class,()->service.overview("rental","stranger"));
         verify(rentals,never()).save(any());verify(payments,never()).save(any());
     }
+    @Test void signedLeaseMovesDepositToLeaseWithoutAnyHandoverRecord() {
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(Contract.builder().id("lease").status(ContractStatus.ACTIVE).signedAt(java.time.Instant.now()).build()));
+        assertEquals("TRANSFERRED_TO_LEASE",service.overview("rental","tenant").obligation());
+    }
     @Test void expiredOrCancelledDepositOverviewStillIdentifiesTheDocumentWithoutOpeningSigning() {
         var envelope=Contract.builder().id("deposit-doc").agreementKind("DEPOSIT").status(ContractStatus.TENANT_SIGNATURE_PENDING)
             .tenantSigningDueAt(now.minusSeconds(1)).build();
