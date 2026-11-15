@@ -117,6 +117,21 @@ Khi có domain frontend, thêm đúng origin HTTPS vào danh sách; giữ các o
 
 Chọn **Next** → đặt tên `HomeSpaceStorageProductionS3Access` → **Create policy**. Không cấp `AmazonS3FullAccess` hoặc `s3:DeleteObjectVersion`.
 
+News Service dùng IAM policy riêng tên `HomeSpaceNewsProductionS3Access`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": "arn:aws:s3:::homespace-production-files/public/news/*"
+    }
+  ]
+}
+```
+
 ## 5. Tạo IAM user và Access Key
 
 1. **IAM → Users → Create user**.
@@ -127,6 +142,8 @@ Chọn **Next** → đặt tên `HomeSpaceStorageProductionS3Access` → **Creat
 6. Chọn use case **Local code** hoặc **Application running outside AWS** tương ứng, xác nhận, rồi **Next → Create access key**.
 7. Lưu **Access key ID** và **Secret access key** vào nơi quản lý bí mật; secret chỉ hiển thị đầy đủ một lần.
 8. Chọn **Done**, kiểm tra key **Active**. Không dùng key root hoặc đưa key vào frontend/Git.
+
+Tạo thêm IAM user `homespace-news-production` theo cùng các bước, nhưng chỉ gắn `HomeSpaceNewsProductionS3Access`; cấp access key riêng cho News Service.
 
 ## 6. Cấu hình Core
 
@@ -141,10 +158,13 @@ AWS_SECRET_ACCESS_KEY=<secret-access-key-o-buoc-5>
 
 Chạy Core với working directory `D:/Workspace/homespace/hs-core-api` để nạp đúng `.env`. Nếu chạy bằng IDE/service, đặt working directory hoặc cấp đủ biến môi trường cho tiến trình. Restart Core và tạo upload URL mới.
 
+Trong `D:/Workspace/homespace/hs-news-service/.env.dev` (hoặc `.env` nếu không dùng `.env.dev`), đặt `AWS_REGION=ap-southeast-1`, `AWS_S3_BUCKET=homespace-production-files` và access key của `homespace-news-production`. Chạy News Service từ thư mục đó. Ảnh mới được lưu dưới `public/news/*`.
+
 ## 7. Kiểm tra hoàn tất
 
-- Upload ảnh qua ứng dụng local port `3000` hoặc `5000`; complete thành công, DB có S3 Version ID cụ thể.
+- Upload file qua luồng Core; complete thành công, DB Core có S3 Version ID cụ thể.
 - Mở URL ảnh `https://homespace-production-files.s3.ap-southeast-1.amazonaws.com/public/...` trong cửa sổ ẩn danh: xem được.
+- Upload ảnh tin tức từ admin port `5000`, hoàn tất và mở URL `.../public/news/...` trong cửa sổ ẩn danh: xem được.
 - Mở raw URL của file có thật dưới `private/*`: **AccessDenied**. Người có quyền xem qua API/presigned URL: tải được đúng file/version.
 - Dùng file thử riêng: upload hai lần cùng key trong Console, bật **Show versions**, tải từng Version ID và đối chiếu hai nội dung.
 

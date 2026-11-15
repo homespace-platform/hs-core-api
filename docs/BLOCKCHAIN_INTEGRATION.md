@@ -82,11 +82,9 @@ Hai bảng mới:
 - `contract_document_proofs`: gắn proof vào `ContractDocument.id`, cố định revision/storage/hash/network/registry; lưu kết quả và thông tin để tiếp tục xử lý sau restart.
 - `blockchain_sender_leases`: khóa hàng đợi gửi dùng chung giữa các instance Core, tránh cùng lúc cấp nonce/gửi giao dịch khác nhau.
 
-Ở môi trường phát triển dùng `JPA_DDL_AUTO=update`, Hibernate tạo các bảng từ entity khi Core khởi động. Nếu môi trường dùng `validate`/`none`, cần áp dụng [SQL tạo bảng](sql/BLOCKCHAIN_PROOFS.sql) theo quy trình database của bạn trước. Không đổi sang `create`/`create-drop` trên database đang có dữ liệu.
+Sau khi bạn tạo lại CSDL, khởi động Core với `JPA_DDL_AUTO=update` để Hibernate tạo bảng, cột và ràng buộc theo entity hiện tại. Chờ Core bootstrap xong rồi chạy seed data theo quy trình hiện có; không cần file SQL vá schema riêng.
 
 Job được lưu bền vững, không phụ thuộc tab trình duyệt. Khi tắt tính năng, worker dừng và dữ liệu đã có vẫn được giữ. Khi bật lại, worker tiếp tục các job đang chờ; hợp đồng ký trong lúc tắt/chưa đủ cấu hình công khai không tự được ghi bù. Chưa có backfill hàng loạt hoặc proof cho gia hạn RENEWAL.
-
-Với database mới, khởi động Core bằng cấu hình `ddl-auto=update` để Hibernate tạo cột/entity mới rồi mới seed theo quy trình hiện có. Không cần reset lại DB để triển khai tính năng. Môi trường `validate/none` phải cập nhật schema tương ứng trước khi chạy; SQL proof cũ chỉ mô tả bảng blockchain, không thay thế toàn bộ schema storage/tài liệu.
 
 Các cột bổ sung: `storage_objects.s3_version_id`, `row_version` (default `0`); `contract_documents.signed_sha256`, `signed_s3_version_id`, `integrity_status`, `integrity_checked_at`, `integrity_message`. Hash/version lúc ký không được cập nhật lại qua luồng ứng dụng. Kết quả kiểm tra gần nhất lưu trên tài liệu; mỗi lần kiểm tra có audit log `CONTRACT_DOCUMENT_INTEGRITY`, không tạo bảng audit riêng. Seed cũ có thể bỏ qua các cột nullable/default này; không tự điền hash/version giả cho dữ liệu seed.
 
