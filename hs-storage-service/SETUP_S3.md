@@ -73,7 +73,9 @@ Chỉ mở `public/*`; không thêm public Allow toàn bucket hoặc Deny vô đ
       "http://localhost:3000",
       "http://localhost:5000",
       "http://127.0.0.1:3000",
-      "http://127.0.0.1:5000"
+      "http://127.0.0.1:5000",
+      "https://app.your-domain.com",
+      "https://admin.your-domain.com"
     ],
     "ExposeHeaders": ["ETag", "x-amz-checksum-sha256", "x-amz-version-id"],
     "MaxAgeSeconds": 3600
@@ -132,6 +134,23 @@ News Service dùng IAM policy riêng tên `HomeSpaceNewsProductionS3Access`:
 }
 ```
 
+Chat Service dùng IAM policy riêng tên `HomeSpaceChatProductionS3Access`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:GetObjectVersion"],
+      "Resource": "arn:aws:s3:::homespace-production-files/private/chat/*"
+    }
+  ]
+}
+```
+
+Không gắn policy Core/News hoặc policy toàn bucket cho Chat. Giữ `private/chat/*` ngoài public bucket policy.
+
 ## 5. Tạo IAM user và Access Key
 
 1. **IAM → Users → Create user**.
@@ -144,6 +163,8 @@ News Service dùng IAM policy riêng tên `HomeSpaceNewsProductionS3Access`:
 8. Chọn **Done**, kiểm tra key **Active**. Không dùng key root hoặc đưa key vào frontend/Git.
 
 Tạo thêm IAM user `homespace-news-production` theo cùng các bước, nhưng chỉ gắn `HomeSpaceNewsProductionS3Access`; cấp access key riêng cho News Service.
+
+Tạo IAM user `homespace-chat-production`, chỉ gắn `HomeSpaceChatProductionS3Access`; cấp access key riêng cho Chat Service.
 
 ## 6. Cấu hình Core
 
@@ -160,12 +181,26 @@ Chạy Core với working directory `D:/Workspace/homespace/hs-core-api` để n
 
 Trong `D:/Workspace/homespace/hs-news-service/.env.dev` (hoặc `.env` nếu không dùng `.env.dev`), đặt `AWS_REGION=ap-southeast-1`, `AWS_S3_BUCKET=homespace-production-files` và access key của `homespace-news-production`. Chạy News Service từ thư mục đó. Ảnh mới được lưu dưới `public/news/*`.
 
+Trong `D:/Workspace/homespace/hs-chat-service/.env.dev` (hoặc `.env`), đặt:
+
+```dotenv
+AWS_REGION=ap-southeast-1
+AWS_S3_BUCKET=homespace-production-files
+AWS_ACCESS_KEY_ID=<access-key-cua-homespace-chat-production>
+AWS_SECRET_ACCESS_KEY=<secret-key-cua-homespace-chat-production>
+```
+
+Restart Chat Service. File mới nằm trong `private/chat/*`; URL xem được cấp qua Gateway → Chat sau khi kiểm tra thành viên cuộc trò chuyện. Chat lưu Version ID khi complete và đọc đúng version đó. Không cần sửa CORS đã có port `3000`/`5000`.
+
 ## 7. Kiểm tra hoàn tất
 
 - Upload file qua luồng Core; complete thành công, DB Core có S3 Version ID cụ thể.
 - Mở URL ảnh `https://homespace-production-files.s3.ap-southeast-1.amazonaws.com/public/...` trong cửa sổ ẩn danh: xem được.
 - Upload ảnh tin tức từ admin port `5000`, hoàn tất và mở URL `.../public/news/...` trong cửa sổ ẩn danh: xem được.
+- Gửi ảnh/file chat bằng hai tài khoản thành viên: xem được; tài khoản ngoài cuộc trò chuyện không xin được URL. Raw URL `private/chat/*` phải bị AccessDenied.
 - Mở raw URL của file có thật dưới `private/*`: **AccessDenied**. Người có quyền xem qua API/presigned URL: tải được đúng file/version.
 - Dùng file thử riêng: upload hai lần cùng key trong Console, bật **Show versions**, tải từng Version ID và đối chiếu hai nội dung.
 
 Giữ **Versioning Enabled**; không bật Lifecycle xóa noncurrent versions của hợp đồng. Giữ nguyên `bucket + objectKey + s3VersionId` đã lưu của hợp đồng; không tự đổi sang latest hoặc xóa bucket đang còn được tham chiếu.
+
+Không xóa các version trong `private/chat/*` còn được tin nhắn tham chiếu.
