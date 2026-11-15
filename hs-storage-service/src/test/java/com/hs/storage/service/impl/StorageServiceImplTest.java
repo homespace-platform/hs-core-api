@@ -473,7 +473,7 @@ class StorageServiceImplTest {
     @ParameterizedTest
     @CsvSource({
             "USER_AVATAR,image/jpeg,a.jpg", "LISTING_IMAGE,image/png,a.png", "LISTING_VIDEO,video/mp4,a.mp4",
-            "BRANCH_COVER_IMAGE,image/webp,a.webp", "NEWS_IMAGE,image/jpeg,a.jpg"})
+            "BRANCH_COVER_IMAGE,image/webp,a.webp"})
     void createUpload_publicPurposesUsePublicKeyAndVisibilityEvenWhenPrivateRequested(
             StoragePurpose purpose, String contentType, String fileName) throws Exception {
         var saved = createUploadAndCapture(fileName, contentType, purpose, StorageVisibility.PRIVATE, null, null);

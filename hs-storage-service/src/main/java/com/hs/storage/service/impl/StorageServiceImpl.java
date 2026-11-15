@@ -63,7 +63,7 @@ public class StorageServiceImpl implements StorageService {
     // Only these purposes get the public/ key prefix (bucket policy exposes public/*); everything else is private/.
     private static final Set<StoragePurpose> PUBLIC_PURPOSES = EnumSet.of(
             StoragePurpose.USER_AVATAR, StoragePurpose.LISTING_IMAGE, StoragePurpose.LISTING_VIDEO,
-            StoragePurpose.BRANCH_COVER_IMAGE, StoragePurpose.NEWS_IMAGE);
+            StoragePurpose.BRANCH_COVER_IMAGE);
 
     private final StorageObjectRepository repository;
     private final StorageProperties properties;
@@ -628,10 +628,6 @@ public class StorageServiceImpl implements StorageService {
             case LISTING_VIDEO -> {
                 typeAllowed = VIDEO_TYPES.contains(contentType);
                 maxSize = 500 * MIB;
-            }
-            case NEWS_IMAGE -> {
-                typeAllowed = IMAGE_TYPES.contains(contentType);
-                maxSize = 25 * MIB;
             }
             case PAYMENT_PROOF -> {
                 typeAllowed = IMAGE_TYPES.contains(contentType) || contentType.equals("application/pdf");
