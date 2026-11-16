@@ -82,9 +82,10 @@ class VnptKycStoreTest {
         verify(steps,atLeastOnce()).existsByAttemptIdAndUploadHashAndStateAndKind("attempt","scan-hash","DONE","scan3d");
         verify(steps).saveAndFlush(call);
     }
-    @Test void coherentEvidenceClaimsLeadingZeroIdOnce() {
+    @Test void coherentEvidenceClaimsLeadingZeroIdOnce() throws Exception {
         when(steps.findByAttemptIdOrderByCreatedAtAsc("attempt")).thenReturn(evidence());when(claims.tryClaim("alice","001234567890")).thenReturn(true);
         assertEquals(KycStatus.VERIFIED,store.finalizeAttempt("alice","attempt"));assertNotNull(attempt.getVerifiedAt());
+        assertEquals("001234567890",mapper.readTree(attempt.getVerifiedDetails()).path("cccd").asText());
         var order=inOrder(claims,verifications);order.verify(claims).lockVerification("alice");order.verify(verifications).lockById("attempt");
         assertEquals(KycStatus.VERIFIED,store.finalizeAttempt("alice","attempt"));verify(claims,times(1)).tryClaim("alice","001234567890");
     }

@@ -14,7 +14,7 @@ import static org.mockito.Mockito.*;
 class KycProviderSelectionTest {
     UserRepository users=mock(UserRepository.class);
     KycVerificationRepository records=mock(KycVerificationRepository.class);
-    KycServiceImpl service=new KycServiceImpl(users,records);
+    KycServiceImpl service=new KycServiceImpl(users,records,new com.fasterxml.jackson.databind.ObjectMapper());
     @BeforeEach void actor(){User u=new User();u.setId("alice");when(users.existsById("alice")).thenReturn(true);when(users.findByIdForUpdate("alice")).thenReturn(Optional.of(u));}
     KycVerification vnpt(){return KycVerification.builder().id("attempt").userId("alice").provider(KycProvider.VNPT).providerSessionId("WEB-SDK_test_123").status(KycStatus.PENDING).expiresAt(Instant.now().plusSeconds(60)).build();}
     @Test void newUsersDefaultToVnpt(){
@@ -30,6 +30,15 @@ class KycProviderSelectionTest {
         var v=KycVerification.builder().id("legacy").userId("alice").provider(KycProvider.DIDIT).providerSessionId("legacy-session").sessionUrl("https://example.test").status(KycStatus.VERIFIED).verifiedAt(Instant.now()).build();
         when(records.findFirstByUserIdAndStatusOrderByVerifiedAtDesc("alice",KycStatus.VERIFIED)).thenReturn(Optional.of(v));
         assertEquals(KycStatus.VERIFIED,service.getCurrentStatus("alice").status());assertEquals(KycProvider.DIDIT,service.getCurrentStatus("alice").provider());assertNull(service.getCurrentStatus("alice").sessionUrl());
+        assertNull(service.getVerifiedDetails("alice"));
+    }
+    @Test void detailsAreReadOnlyForTheRequestedVerifiedUser(){
+        var v=KycVerification.builder().id("attempt").userId("alice").provider(KycProvider.VNPT).status(KycStatus.VERIFIED)
+                .verifiedDetails("{\"cccd\":\"001234567890\"}").build();
+        when(records.findFirstByUserIdAndStatusOrderByVerifiedAtDesc("alice",KycStatus.VERIFIED)).thenReturn(Optional.of(v));
+        assertEquals("001234567890",service.getVerifiedDetails("alice").cccd());
+        assertThrows(AppException.class,()->service.getVerifiedDetails("bob"));
+        verify(records,never()).findFirstByUserIdAndStatusOrderByVerifiedAtDesc("bob",KycStatus.VERIFIED);
     }
     @Test void cancelWorksForVnptWithoutAClientSuppliedUserId(){
         var v=vnpt();when(records.findByUserIdAndStatusInOrderByCreatedAtDesc(eq("alice"),any())).thenReturn(List.of(v));when(records.lockById("attempt")).thenReturn(Optional.of(v));when(records.findFirstByUserIdOrderByCreatedAtDesc("alice")).thenReturn(Optional.of(v));

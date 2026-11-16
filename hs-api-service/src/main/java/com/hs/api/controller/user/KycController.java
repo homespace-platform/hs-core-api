@@ -2,6 +2,7 @@ package com.hs.api.controller.user;
 
 import com.hs.common.dto.ApiResponse;
 import com.hs.user.dto.response.KycStatusResponse;
+import com.hs.user.dto.response.KycVerifiedDetailsResponse;
 import com.hs.user.service.KycService;
 import com.hs.user.utils.CurrentUserUtils;
 import lombok.AccessLevel;
@@ -26,6 +27,13 @@ public class KycController {
         String userId = currentUserUtils.getCurrentUserId();
         return ApiResponse.<KycStatusResponse>builder()
                 .result(kycService.getCurrentStatus(userId))
+                .build();
+    }
+
+    @GetMapping("/details")
+    public ApiResponse<KycVerifiedDetailsResponse> getMyVerifiedDetails() {
+        return ApiResponse.<KycVerifiedDetailsResponse>builder()
+                .result(kycService.getVerifiedDetails(currentUserUtils.getCurrentUserId()))
                 .build();
     }
 

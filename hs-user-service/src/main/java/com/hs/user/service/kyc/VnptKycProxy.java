@@ -101,7 +101,7 @@ public class VnptKycProxy {
     private JsonNode project(JsonNode result) {
         ObjectNode output=mapper.createObjectNode();output.put("message",result.path("message").asText());
         ObjectNode object=output.putObject("object");
-        for(String field:List.of("fake_liveness","fake_print_photo","face_swapping","type_id","back_type_id","match_front_back","hash","liveness","msg","msg_front","msg_back","id","expire_warning","warning","tampering","id_fake_warning","corner_warning","masked","card_type","checking_result_front","checking_result_back"))
+        for(String field:List.of("fake_liveness","fake_print_photo","face_swapping","type_id","back_type_id","match_front_back","hash","liveness","msg","msg_front","msg_back","id","expire_warning","warning","tampering","id_fake_warning","corner_warning","masked","card_type","checking_result_front","checking_result_back","name","birth_day","recent_location","gender","issue_date","valid_date","issue_place","id_probs","issue_date_prob","prob","is_eye_open","blur_face"))
             if(result.path("object").has(field))object.set(field,result.path("object").get(field));
         if(write(output).length()>16000)throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR);
         return output;

@@ -55,6 +55,8 @@ class VnptKycPostgresTest {
     @Autowired VnptKycStore store;
     @Autowired CccdClaimService claims;
     @Autowired AdminKycService adminKyc;
+    @Autowired KycServiceImpl kyc;
+    @Autowired jakarta.persistence.EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager manager;
     @BeforeEach void reset(){steps.deleteAllInBatch();verifications.deleteAllInBatch();users.deleteAllInBatch();jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_test_cccd ON users(cccd)");}
@@ -107,6 +109,18 @@ class VnptKycPostgresTest {
         }
         assertEquals(1,verifications.findAll().stream().filter(v->v.getStatus()==KycStatus.VERIFIED).count());
         assertEquals(1,jdbc.queryForObject("select count(*) from users where cccd = '001234567890'",Integer.class));
+    }
+
+    @Test void verifiedDetailsSurviveTemporaryEvidencePurge() throws Exception {
+        user("alice");String id=store.start("alice").sessionId();proof(id);
+        var ocr=steps.findByAttemptIdOrderByCreatedAtAsc(id).stream().filter(s->"ocr".equals(s.getKind())).findFirst().orElseThrow();
+        var response=(com.fasterxml.jackson.databind.node.ObjectNode)new ObjectMapper().readTree(ocr.getResultJson());
+        ((com.fasterxml.jackson.databind.node.ObjectNode)response.path("object")).put("name","NGUYEN VAN A");
+        ocr.setResultJson(response.toString());steps.saveAndFlush(ocr);
+        assertEquals(KycStatus.VERIFIED,store.finalizeAttempt("alice",id));
+        steps.deleteAllInBatch();entityManager.clear();
+        assertEquals("NGUYEN VAN A",kyc.getVerifiedDetails("alice").fullName());
+        assertEquals("001234567890",kyc.getVerifiedDetails("alice").cccd());
     }
 
     @Test void failedManualRecordRollsBackTheCitizenClaimAndPendingSessionChanges() {

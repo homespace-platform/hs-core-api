@@ -33,7 +33,7 @@ python scripts/setup-vnpt-sdk.py D:/approved-artifacts/web-sdk-version-3.2.1.0.z
 Script kiểm checksum ZIP và main bundle; chỉ lấy các asset nằm trong allowlist, không lấy `index.html` chứa credential mẫu. Asset được đặt trong `public/vendor/vnpt/` đã ignore Git. Môi trường build/deploy cần cấp artifact được phép phân phối và chạy bước này trước khi đóng gói. Khi đổi version phải review contract rồi cập nhật checksum/asset list.
 
 3. Restart Core API và Gateway. Web nhận code mới qua dev server; restart web nếu không có hot reload.
-4. Schema: bổ sung `expires_at` vào `kyc_verifications`, bảng `vnpt_kyc_steps`. Với DB cũ, migration Java cập nhật enum CHECK để nhận VNPT và giữ DIDIT; không cần drop dữ liệu hoặc file SQL rời. Cấu hình JPA cần cho phép tạo các field/table mới như quy trình dự án. Với môi trường quản lý schema thủ công phải review thay đổi trước khi deploy.
+4. Schema: bổ sung `expires_at` và `verified_details` (TEXT) vào `kyc_verifications`, bảng `vnpt_kyc_steps`. Với DB cũ, migration Java cập nhật enum CHECK để nhận VNPT và giữ DIDIT; không cần drop dữ liệu. Cấu hình JPA local dùng `update` để thêm cột; môi trường quản lý schema thủ công cần thêm cột trước khi deploy.
 5. Đăng nhập tài khoản chưa VERIFIED, mở Tài khoản và bảo mật → chọn VNPT eKYC → Xác minh ngay.
 
 Khi chạy `next dev`, màn hình VNPT có thêm lựa chọn tải ảnh giấy tờ lên để thử nghiệm (`PHOTO_AND_UPLOAD` theo bundle SDK 3.2.1.0; tài liệu gọi lựa chọn này là `BOTH`). Bản build production chỉ hiện chụp trực tiếp. Ảnh JPEG/PNG tối đa 1 MB theo giới hạn backend hiện tại.
@@ -41,6 +41,7 @@ Khi chạy `next dev`, màn hình VNPT có thêm lựa chọn tải ảnh giấy
 ## Luồng và giới hạn
 
 - `POST /api/v1/users/me/kyc/vnpt/session` tạo/tiếp tục attempt sở hữu bởi user từ Gateway.
+- `GET /api/v1/users/me/kyc/details` trả bản tóm tắt thông tin và kết quả kiểm tra VNPT của chính người đã xác minh. Chỉ lưu các trường hiển thị; không lưu ảnh/hash trong bản kết quả này. Hồ sơ VNPT cũ chưa có bản tóm tắt sẽ trả `null`.
 - SDK nằm trong iframe cùng origin. Cầu nối kiểm origin/source/nonce và chỉ chuyển các bước định sẵn sang axios/Gateway. SDK không nhận JWT hay credential VNPT; callback không gửi raw ảnh/kết quả vào React để tự chốt KYC.
 - `POST .../vnpt/sessions/{id}/sdk/upload` và các bước `card`, `ocr`, `ocr-front`, `face`, `compare`, `mask` trả envelope cần cho SDK. Credential upstream do Core chèn.
 - Route SDK tại Gateway dùng circuit riêng 50s; Core giới hạn upstream 45s, web 55s. JWT, identity propagation và rate limit được giữ.

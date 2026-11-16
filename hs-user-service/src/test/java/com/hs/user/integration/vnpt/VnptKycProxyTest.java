@@ -30,6 +30,17 @@ class VnptKycProxyTest {
         assertThrows(AppException.class,()->proxy.upload("alice","attempt",new byte[]{1,2,3},"image/jpeg"));
         assertThrows(AppException.class,()->proxy.upload("alice","attempt",new byte[1048577],"text"));verifyNoInteractions(client,store);
     }
+    @Test void personalAndValidationFieldsReachTheStoreWithoutUnapprovedPayload() throws Exception {
+        when(store.prepare(eq("alice"),eq("attempt"),any(),eq(List.of("front","back")))).thenAnswer(call -> {
+            VnptKycStep step=call.getArgument(2);step.setAttemptId("attempt");step.setState("RUNNING");return step;
+        });
+        when(client.json(eq("/ai/v1/web/ocr/id"),any())).thenReturn(mapper.readTree("{\"message\":\"IDG-00000000\",\"object\":{\"id\":\"001234567890\",\"name\":\"NGUYEN VAN A\",\"birth_day\":\"01/01/2000\",\"id_probs\":\"[0.98]\",\"issue_date_prob\":0.99,\"private\":\"discard\"}}"));
+        var response=proxy.process("alice","attempt","ocr",mapper.readTree("{\"img_front\":\"front\",\"img_back\":\"back\",\"type\":-1}"));
+        assertEquals("NGUYEN VAN A",response.path("object").path("name").asText());
+        assertEquals("01/01/2000",response.path("object").path("birth_day").asText());
+        assertFalse(response.path("object").has("private"));
+        verify(store).finish(eq("alice"),any(),contains("issue_date_prob"),isNull());
+    }
     @Test void sdk3dScanBlobIsUploadedWithoutTreatingItAsAnImage() throws Exception {
         byte[] scan="scan-result".getBytes(java.nio.charset.StandardCharsets.UTF_8);
         when(store.prepare(eq("alice"),eq("attempt"),any(),eq(List.of()))).thenAnswer(invocation->{

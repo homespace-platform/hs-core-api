@@ -115,14 +115,23 @@ public class VnptKycStore {
         if(all.stream().filter(s -> "upload".equals(s.getKind())).anyMatch(s -> !selected.contains(s.getUploadHash())))
             throw new AppException(UserErrorCode.KYC_ATTEMPT_INVALID);
         boolean passed=List.of(ocr,compare,face,mask,front,back).stream().allMatch(s -> VnptKycPolicy.passed(s.getKind(),result(s)));
+        String verifiedDetails = passed ? details(ocr, compare, face, mask, front, back) : null;
         if(!passed) {
             v.setStatus(KycStatus.REJECTED);v.setRejectionReason("Giấy tờ hoặc khuôn mặt chưa đáp ứng yêu cầu xác minh. Vui lòng thử lại.");
         }else if(!claims.tryClaim(userId,result(ocr).path("object").path("id").asText())) {
             v.setStatus(KycStatus.REJECTED);v.setRejectionReason("Số định danh đã được xác minh trên tài khoản khác.");
         }else {
             v.setStatus(KycStatus.VERIFIED);v.setVerifiedAt(Instant.now());v.setRejectionReason(null);
+            v.setVerifiedDetails(verifiedDetails);
         }
         verifications.save(v);return v.getStatus();
+    }
+    private String details(VnptKycStep ocr, VnptKycStep compare, VnptKycStep face,
+                           VnptKycStep mask, VnptKycStep front, VnptKycStep back) {
+        try {
+            return mapper.writeValueAsString(VnptKycDetails.from(result(ocr),result(compare),result(face),
+                    result(mask),result(front),result(back),mapper));
+        } catch (Exception ex) { throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR); }
     }
     private JsonNode result(VnptKycStep s) {
         try{return mapper.readTree(s.getResultJson());}catch(Exception ex){throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR);}

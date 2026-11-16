@@ -3,6 +3,8 @@ package com.hs.user.service.impl;
 import com.hs.common.advice.entity.AppException;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.response.KycStatusResponse;
+import com.hs.user.dto.response.KycVerifiedDetailsResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.user.model.KycVerification;
 import com.hs.user.model.constant.KycProvider;
 import com.hs.user.service.kyc.KycPolicy;
@@ -35,6 +37,19 @@ public class KycServiceImpl implements KycService {
 
     private final UserRepository userRepository;
     private final KycVerificationRepository kycVerificationRepository;
+    private final ObjectMapper mapper;
+
+    @Override
+    @Transactional(readOnly = true)
+    public KycVerifiedDetailsResponse getVerifiedDetails(String userId) {
+        requireUser(userId);
+        return kycVerificationRepository.findFirstByUserIdAndStatusOrderByVerifiedAtDesc(userId, KycStatus.VERIFIED)
+                .filter(v -> v.getProvider() == KycProvider.VNPT && v.getVerifiedDetails() != null)
+                .map(v -> {
+                    try { return mapper.readValue(v.getVerifiedDetails(), KycVerifiedDetailsResponse.class); }
+                    catch (Exception ex) { throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR); }
+                }).orElse(null);
+    }
 
     @Override
     @Transactional(readOnly = true)
