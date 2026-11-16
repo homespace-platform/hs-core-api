@@ -16,7 +16,7 @@ import static org.mockito.Mockito.*;
 
 class ContractOnboardingReceiptTest {
     PaymentRequestRepository payments=mock(PaymentRequestRepository.class);
-    ContractDataBuilder builder=new ContractDataBuilder(mock(UserRepository.class),mock(AddressRepository.class));
+    ContractDataBuilder builder=new ContractDataBuilder(mock(UserRepository.class),mock(com.hs.user.service.KycService.class));
     RentalRequest rental=RentalRequest.builder().id("rental").monthlyRentPrice(new BigDecimal("5000000")).depositAmount(new BigDecimal("10000000")).build();
     PaymentRequest deposit=PaymentRequest.builder().id("deposit").type(PaymentType.RESERVATION_DEPOSIT).status(PaymentStatus.CONFIRMED)
         .totalAmount(new BigDecimal("10000000")).transferReference("HSDEPOSIT").confirmedAt(Instant.parse("2026-10-21T03:00:00Z")).build();

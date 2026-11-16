@@ -38,7 +38,7 @@ class ContractAmenitiesFidelityTest {
                 .branch(PropertyBranch.builder().buildingAmenities(Set.of(branchOnly)).build()).build();
         var request = RentalRequest.builder().occupantCount(1).motorbikeCount(4).carCount(1)
                 .moveInDate(LocalDate.of(2026,10,15)).leaseMonths(3).build();
-        var builder = new ContractDataBuilder(mock(UserRepository.class),mock(AddressRepository.class),mapper);
+        var builder = new ContractDataBuilder(mock(UserRepository.class),mock(com.hs.user.service.KycService.class),mapper);
         var captured = ListingSnapshotDto.builder().category(category).amenities(ListingAmenitySnapshots.resolve(listing,listing.getBranch()))
                 .customAmenities(List.of(custom.getName())).build();
         for (boolean frozen:List.of(false,true)) {

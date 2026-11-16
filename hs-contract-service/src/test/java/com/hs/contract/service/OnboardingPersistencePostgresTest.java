@@ -336,7 +336,7 @@ class OnboardingPersistencePostgresTest {
     private void configureSourceBuilder() {
         // Capture realistic source terms now that export verifies the operational calendar and amounts.
         var realBuilder=new ContractDataBuilder(mock(com.hs.user.repository.UserRepository.class),
-            mock(com.hs.user.repository.AddressRepository.class),new ObjectMapper());
+            mock(com.hs.user.service.KycService.class),new ObjectMapper());
         sourceBuilder=realBuilder;
         org.springframework.test.util.ReflectionTestUtils.setField(realBuilder,"listingAddresses",mock(com.hs.listing.repository.ListingAddressRepository.class));
         org.springframework.test.util.ReflectionTestUtils.setField(realBuilder,"payments",payments);

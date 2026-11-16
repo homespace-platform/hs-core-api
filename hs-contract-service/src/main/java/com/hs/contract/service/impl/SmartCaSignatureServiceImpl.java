@@ -33,7 +33,6 @@ import com.hs.payment.model.PaymentRequest;
 import com.hs.payment.model.constant.PaymentStatus;
 import com.hs.payment.repository.PaymentRequestRepository;
 import com.hs.user.model.User;
-import com.hs.user.constant.RoleConstants;
 import com.hs.user.repository.UserRepository;
 import com.hs.user.repository.KycVerificationRepository;
 import com.hs.user.model.constant.KycProvider;
@@ -987,10 +986,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         if (user.getCccd() == null || user.getCccd().isBlank()) {
             throw new AppException(ContractErrorCode.SIGNATURE_IDENTITY_MISSING);
         }
-        // Bootstrap/admin accounts are exempt from eKYC, but still need a CCCD
-        // matching an active SmartCA certificate before a signature can be initiated.
-        if ((user.getRole() == null || !RoleConstants.ADMIN.equals(user.getRole().getName()))
-                && !(kycVerificationRepository.existsByUserIdAndProviderInAndStatus(userId, KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED))) {
+        if (!kycVerificationRepository.existsByUserIdAndProviderInAndStatus(userId, KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED)) {
             throw new AppException(ContractErrorCode.SIGNATURE_IDENTITY_MISSING);
         }
         return user;

@@ -58,8 +58,9 @@ public class User extends BaseEntity {
     @Column(length = 15, unique = true)
     String phone;
 
-    /** Citizen ID (CCCD) filled from verified KYC. Unique across users. */
-    @Column(name = "cccd", length = 20)
+    /** Read-only projection; the citizen ID is stored only in user_kyc_details. */
+    @org.hibernate.annotations.Formula("(select k.cccd from user_kyc_details k where k.user_id = id)")
+    @Setter(AccessLevel.NONE)
     String cccd;
 
     LocalDate dob;

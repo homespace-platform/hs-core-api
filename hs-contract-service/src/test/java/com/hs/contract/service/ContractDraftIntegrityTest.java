@@ -60,12 +60,12 @@ class ContractDraftIntegrityTest {
         policy.validateForDocument(c,original);
         verifyNoInteractions(builder);
     }
-    @Test void acceptsDocumentIdentityBankAndResidentEditsAndRestoresThemForRendering() throws Exception {
-        var party=Map.<String,Object>of("idNumber","075204022672","bankName","Ngân hàng Quân Đội",
+    @Test void acceptsContactBankAndResidentEditsWhileIdentityStaysFrozen() throws Exception {
+        var party=Map.<String,Object>of("bankName","Ngân hàng Quân Đội",
                 "bankAccountNumber","000123456","bankAccountHolder","NGUYEN VAN A");
         var expected=policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().draftContent(
                 new UpdateContractRevisionRequest.DraftContent(party,Map.of("occupantCount","3","motorbikeCount","2","carCount","0"),null,null,null)).build());
-        assertEquals("000123456",expected.getLandlord().get("bankAccountNumber"));assertEquals("075204022672",expected.getLandlord().get("idNumber"));
+        assertEquals("000123456",expected.getLandlord().get("bankAccountNumber"));assertEquals("001234", expected.getLandlord().get("idNumber"));
         assertEquals(3,expected.getTenant().get("occupantCount"));assertEquals(2,rental.getOccupantCount());
         for (var bad:List.of(Map.<String,Object>of("idNumber","12abc"),Map.<String,Object>of("bankAccountNumber","1e6")))
             assertThrows(AppException.class,()->policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().draftContent(
@@ -77,7 +77,7 @@ class ContractDraftIntegrityTest {
              {"name":"Xe máy","chargeType":"MOTORBIKE_PARKING","billingMethod":"PER_VEHICLE_MONTH","unitAmount":"50000","estimatedMonthlyAmount":"50000","includedInRent":false}]
             """);
         var updated=policy.prepareUpdate(c,original,UpdateContractRevisionRequest.builder().draftContent(
-                new UpdateContractRevisionRequest.DraftContent(Map.of("idNumber","075204022672","bankAccountNumber","000123456"),
+                new UpdateContractRevisionRequest.DraftContent(Map.of("bankAccountNumber","000123456"),
                         Map.of("occupantCount",3,"motorbikeCount",2),null,null,null)).build());
         rental.setOccupantCount(3);rental.setMotorbikeCount(2);
         updated.setCharges(new AmendmentTermsBuilder(mapper).draftCharges(updated.getCharges(),updated.getTenant(),updated.getProperty()));
@@ -186,8 +186,8 @@ class ContractDraftIntegrityTest {
                              {"featureName":"Cửa sổ","featureValue":"Có"}]}
                 """);
         var draft = new UpdateContractRevisionRequest.DraftContent(
-                Map.of("fullName", "Tên Bên A đã rà soát"),
-                Map.of("permanentAddress", "Địa chỉ Bên B đã rà soát"),
+                Map.of("phone", "0901234567"),
+                Map.of("email", "tenant@example.test"),
                 Map.of("fullAddress", "Địa chỉ tài sản đã rà soát", "areaText", "31.125 mét vuông", "features",
                         List.of(Map.of("featureName", "Diện tích phòng", "featureValue", "30 mét vuông"),
                                 Map.of("featureName", "Cửa sổ", "featureValue", "Cửa sổ phía sau"))),
@@ -199,9 +199,9 @@ class ContractDraftIntegrityTest {
         // An approved source is attached by the service, never parsed from the user patch.
         ContractDraftContent.apply(updated, new UpdateContractRevisionRequest.DraftContent(null, null, draft.property(),
                 draft.equipments(), draft.amenities()));
-        assertEquals("Tên Bên A đã rà soát", updated.getLandlord().get("fullName"));
+        assertEquals("0901234567", updated.getLandlord().get("phone"));
         assertEquals("001234", updated.getLandlord().get("idNumber"));
-        assertEquals("Địa chỉ Bên B đã rà soát", updated.getTenant().get("permanentAddress"));
+        assertEquals("tenant@example.test", updated.getTenant().get("email"));
         assertEquals("31.125", updated.getProperty().get("areaM2"));
         assertEquals(List.of(Map.of("featureName", "Diện tích phòng", "featureValue", "31.125 mét vuông"),
                 Map.of("featureName", "Cửa sổ", "featureValue", "Cửa sổ phía sau")), updated.getProperty().get("features"));
@@ -318,4 +318,15 @@ class ContractDraftIntegrityTest {
     }
     ContractRevision copy() throws Exception { return mapper.readValue(mapper.writeValueAsString(original),ContractRevision.class); }
     void assertCode(int code, org.junit.jupiter.api.function.Executable action) { assertEquals(code,assertThrows(AppException.class,action).getCode()); }
+    @Test void verifiedIdentityCannotBeOverriddenThroughDraftContent() {
+        var target = new java.util.LinkedHashMap<String,Object>();
+        for (String key : ContractDraftContent.IDENTITY_FIELDS) target.put(key, "verified-" + key);
+        var original = new java.util.LinkedHashMap<>(target);
+        for (String key : ContractDraftContent.IDENTITY_FIELDS) {
+            assertThrows(AppException.class, () -> ContractDraftContent.applyParty(target, Map.of(key, "self-entered")));
+            ContractDraftContent.applyParty(target, Map.of(key, original.get(key)));
+        }
+        assertEquals(original, target);
+    }
+
 }

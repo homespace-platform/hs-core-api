@@ -15,8 +15,8 @@ final class FreeFormAmendmentTerms {
     static final Set<String> KEYS = Set.of("freeForm", "fields", "rentAmount", "occupantCount", "motorbikeCount", "carCount",
             "charges", "equipments", "amenities", "featureRows", "policyRows", "specialTerms", "applyImmediately");
     private static final Map<String,Set<String>> FIELDS = Map.of(
-            "landlord", Set.of("fullName", "idNumber", "bankName", "bankAccountNumber", "bankAccountHolder", "permanentAddress", "phone", "email"),
-            "tenant", Set.of("fullName", "idNumber", "bankName", "bankAccountNumber", "bankAccountHolder", "permanentAddress", "phone", "email"),
+            "landlord", ContractDraftContent.PARTY_FIELDS,
+            "tenant", ContractDraftContent.PARTY_FIELDS,
             "property", Set.of("fullAddress", "areaText", "propertyType", "unitNumber", "floor", "rentalScope", "maxOccupants", "maxVehicles", "listingCode"),
             "lease", Set.of("startDateText", "endDateText", "durationMonths", "durationText", "handoverDateText"),
             "financial", Set.of("depositDescription", "depositAmountValue", "paymentCycle", "paymentMethod"),
@@ -34,6 +34,11 @@ final class FreeFormAmendmentTerms {
             if (!FIELDS.get(group.getKey()).containsAll(requested.keySet())) throw bad("Trường được bảo vệ: " + group.getKey());
             for(var entry:requested.entrySet()) {
                 String k=entry.getKey(); Object value=entry.getValue();
+                if (Set.of("landlord", "tenant").contains(group.getKey()) && ContractDraftContent.IDENTITY_FIELDS.contains(k)) {
+                    if (!Objects.equals(Objects.toString(value, ""), Objects.toString(target.get(k), "")))
+                        throw bad("Danh tính KYC trên hợp đồng không được chỉnh sửa thủ công qua phụ lục.");
+                    continue;
+                }
                 if (Set.of("maxOccupants","maxVehicles","durationMonths").contains(k))
                     value=integer(value,k.equals("durationMonths")?1:0,k.equals("durationMonths")?120:100);
                 else if(Set.of("latePaymentFeeAmount","depositAmountValue").contains(k)) value=money(value,true).toPlainString();

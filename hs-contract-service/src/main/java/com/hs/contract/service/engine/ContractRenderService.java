@@ -192,13 +192,13 @@ public class ContractRenderService {
      * Sinh data model giả lập (Dummy Data) dùng cho Admin xem trước mẫu Word
      */
     public Map<String, Object> buildDummyDataModel() {
-        Map<String, Object> landlord = Map.of(
+        Map<String, Object> landlord = new LinkedHashMap<>(Map.of(
                 "fullName", "Nguyễn Văn An (Chủ nhà)",
                 "idNumber", "079090001234",
                 "permanentAddress", "123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP.HCM",
                 "phone", "0901234567",
                 "email", "nguyenvanan.landlord@example.com"
-        );
+        ));
 
         Map<String, Object> tenant = new LinkedHashMap<>();
         tenant.put("fullName", "Trần Thị Bình (Người thuê)");
@@ -209,6 +209,12 @@ public class ContractRenderService {
         tenant.put("occupantCount", 2);
         tenant.put("motorbikeCount", 1);
         tenant.put("carCount", 0);
+
+        for (var party : List.of(landlord, tenant)) {
+            party.put("birthDate", "16/02/2004");party.put("gender", "Nam");
+            party.put("issueDate", "31/05/2021");party.put("expirationDate", "16/02/2029");
+            party.put("issuePlace", "Cục Cảnh sát quản lý hành chính về trật tự xã hội");
+        }
 
         Map<String, Object> property = new LinkedHashMap<>();
         property.put("listingCode", "HS-2026-DEMO");
@@ -297,6 +303,8 @@ public class ContractRenderService {
         landlord.put("idIssueDate", getStr(src, "idIssueDate", ""));
         landlord.put("idIssuePlace", getStr(src, "idIssuePlace", ""));
         landlord.put("permanentAddress", getStr(src, "permanentAddress", ""));
+        for (String key : List.of("birthDate", "gender", "issueDate", "expirationDate", "issuePlace"))
+            landlord.put(key, getStr(src, key, ""));
         landlord.put("phone", getStr(src, "phone", ""));
         landlord.put("email", getStr(src, "email", ""));
         landlord.put("bankName", getStr(src, "bankName", ""));
@@ -313,6 +321,8 @@ public class ContractRenderService {
         tenant.put("idIssueDate", getStr(src, "idIssueDate", ""));
         tenant.put("idIssuePlace", getStr(src, "idIssuePlace", ""));
         tenant.put("permanentAddress", getStr(src, "permanentAddress", ""));
+        for (String key : List.of("birthDate", "gender", "issueDate", "expirationDate", "issuePlace"))
+            tenant.put(key, getStr(src, key, ""));
         tenant.put("phone", getStr(src, "phone", ""));
         tenant.put("email", getStr(src, "email", ""));
         tenant.put("occupantCount", String.valueOf(src.getOrDefault("occupantCount", "1")));

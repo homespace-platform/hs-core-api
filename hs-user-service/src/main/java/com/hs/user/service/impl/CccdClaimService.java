@@ -2,7 +2,8 @@ package com.hs.user.service.impl;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.user.advice.entity.enums.UserErrorCode;
-import com.hs.user.model.User;
+import com.hs.user.model.UserKycDetails;
+import com.hs.user.repository.UserKycDetailsRepository;
 import com.hs.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class CccdClaimService {
 
     private final UserRepository userRepository;
+    private final UserKycDetailsRepository detailsRepository;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -33,18 +35,24 @@ public class CccdClaimService {
     private boolean claim(String userId, String cccd) {
         // Serialize competing claims before an ORM unique violation can log the identifier.
         jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", cccd);
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
+        if (!userRepository.existsById(userId)) {
+            throw new AppException(UserErrorCode.USER_NOT_EXISTED);
+        }
+        UserKycDetails details = detailsRepository.findById(userId).orElseGet(() -> {
+            var row = new UserKycDetails();
+            row.setUserId(userId);
+            return row;
+        });
 
-        if (cccd.equals(user.getCccd())) {
+        if (cccd.equals(details.getCccd())) {
             return true;
         }
-        if (userRepository.existsByCccdAndIdNot(cccd, userId)) {
+        if (detailsRepository.existsByCccdAndUserIdNot(cccd, userId)) {
             return false;
         }
 
-        user.setCccd(cccd);
-        userRepository.saveAndFlush(user);
+        details.setCccd(cccd);
+        detailsRepository.saveAndFlush(details);
         return true;
     }
 }

@@ -51,7 +51,7 @@ class VnptKycPostgresTest {
     @Autowired jakarta.persistence.EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager manager;
-    @BeforeEach void reset(){steps.deleteAllInBatch();details.deleteAllInBatch();verifications.deleteAllInBatch();users.deleteAllInBatch();jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_test_cccd ON users(cccd)");}
+    @BeforeEach void reset(){steps.deleteAllInBatch();details.deleteAllInBatch();verifications.deleteAllInBatch();users.deleteAllInBatch();jdbc.execute("ALTER TABLE users DROP COLUMN IF EXISTS cccd");}
     void user(String id){User u=new User();u.setId(id);u.setUsername(id);u.setEmail(id+"@example.invalid");users.saveAndFlush(u);}
     @Test void concurrentStartsReuseOneOwnedAttemptAndProviderSurvivesReload() throws Exception {
         user("alice");var start=new CountDownLatch(1);
@@ -69,7 +69,7 @@ class VnptKycPostgresTest {
             var b=pool.submit(()->{start.await();return new TransactionTemplate(manager).execute(tx->claims.claimInCurrentTransaction("bob","001234567890"));});start.countDown();
             assertNotEquals(a.get(15,TimeUnit.SECONDS),b.get(15,TimeUnit.SECONDS));
         }
-        assertEquals(1,jdbc.queryForObject("select count(*) from users where cccd = '001234567890'",Integer.class));
+        assertEquals(1,jdbc.queryForObject("select count(*) from user_kyc_details where cccd = '001234567890'",Integer.class));
     }
     @Test void cancelBlocksLateProviderResultAndDuplicateReservationCannotSpendAgain() {
         user("alice");String id=store.start("alice").sessionId();
@@ -116,6 +116,33 @@ class VnptKycPostgresTest {
             assertEquals(0,details.count());
         } finally {jdbc.execute("ALTER TABLE user_kyc_details DROP CONSTRAINT test_details_failure");}
     }
+    @Test void legacyColumnMigratesWithoutOverwritingKycAndIsRemovedIdempotently() {
+        user("alice");user("bob");
+        jdbc.execute("ALTER TABLE users ADD COLUMN cccd varchar(20)");
+        jdbc.update("UPDATE users SET cccd = ? WHERE id = ?", "001234567890", "alice");
+        jdbc.update("UPDATE users SET cccd = ? WHERE id = ?", "009999999999", "bob");
+        var row = new UserKycDetails();row.setUserId("bob");row.setCccd("008888888888");row.setFullName("Existing verified name");details.saveAndFlush(row);
+        var migration = new com.hs.user.config.database.CccdUniquenessInitializer(jdbc, manager);
+        migration.run();migration.run();
+        assertEquals("001234567890", details.findById("alice").orElseThrow().getCccd());
+        assertEquals("008888888888", details.findById("bob").orElseThrow().getCccd());
+        assertEquals("Existing verified name", details.findById("bob").orElseThrow().getFullName());
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'cccd'", Integer.class));
+        // User consumers read the projection from KYC even after the legacy column is gone.
+        assertEquals("001234567890", users.findById("alice").orElseThrow().getCccd());
+        new TransactionTemplate(manager).executeWithoutResult(tx ->
+                assertEquals("001234567890", users.lockMembershipOwner("alice").orElseThrow().getCccd()));
+    }
+
+    @Test void conflictingLegacyCitizensAbortMigrationWithoutDroppingData() {
+        user("alice");user("bob");
+        jdbc.execute("ALTER TABLE users ADD COLUMN cccd varchar(20)");
+        jdbc.update("UPDATE users SET cccd = ?", "001234567890");
+        assertThrows(IllegalStateException.class, () -> new com.hs.user.config.database.CccdUniquenessInitializer(jdbc, manager).run());
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM users WHERE cccd IS NOT NULL", Integer.class));
+        assertEquals(0, details.count());
+    }
+
     private void proof(String attempt) {
         evidence(attempt,"upload","front",null,null,null,null,null,"{}");
         evidence(attempt,"upload","back",null,null,null,null,null,"{}");

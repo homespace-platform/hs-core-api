@@ -15,9 +15,8 @@ import com.hs.listing.service.ListingAmenitySnapshots;
 import com.hs.listing.service.ListingPolicyService;
 import com.hs.payment.dto.BankAccountSnapshotDto;
 import com.hs.payment.model.PaymentRequest;
-import com.hs.user.model.Address;
 import com.hs.user.model.User;
-import com.hs.user.repository.AddressRepository;
+import com.hs.user.service.KycService;
 import com.hs.user.repository.UserRepository;
 import lombok.Builder;
 import lombok.Getter;
@@ -68,22 +67,22 @@ public class ContractDataBuilder {
             + "QR cũ chỉ hủy khi hóa đơn kỳ sau thực sự nhận công nợ.";
 
     private final UserRepository userRepository;
-    private final AddressRepository addressRepository;
+    private final KycService kycService;
     @org.springframework.beans.factory.annotation.Autowired
     private com.hs.listing.repository.ListingAddressRepository listingAddresses;
     private final ObjectMapper objectMapper;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private com.hs.payment.repository.PaymentRequestRepository payments;
 
-    public ContractDataBuilder(UserRepository userRepository, AddressRepository addressRepository) {
-        this(userRepository, addressRepository, new ObjectMapper());
+    public ContractDataBuilder(UserRepository userRepository, KycService kycService) {
+        this(userRepository, kycService, new ObjectMapper());
     }
 
     @org.springframework.beans.factory.annotation.Autowired
-    public ContractDataBuilder(UserRepository userRepository, AddressRepository addressRepository,
+    public ContractDataBuilder(UserRepository userRepository, KycService kycService,
             ObjectMapper objectMapper) {
         this.userRepository = userRepository;
-        this.addressRepository = addressRepository;
+        this.kycService = kycService;
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
     }
 
@@ -375,12 +374,9 @@ public class ContractDataBuilder {
     // --- Bên A / Bên B ---
 
     private Map<String, Object> buildLandlord(String landlordId, BankAccountSnapshotDto bank) {
-        Map<String, Object> map = new LinkedHashMap<>();
+        Map<String, Object> map = identityOf(landlordId);
         User user = findUser(landlordId);
 
-        map.put("fullName", fullNameOf(user, "Chủ nhà (Bên A)"));
-        map.put("idNumber", nullToEmpty(user == null ? null : user.getCccd()));
-        map.put("permanentAddress", permanentAddressOf(landlordId));
         map.put("phone", nullToEmpty(user == null ? null : user.getPhone()));
         map.put("email", nullToEmpty(user == null ? null : user.getEmail()));
         map.put("bankName", bank != null && isNotBlank(bank.bankName()) ? bank.bankName() : "");
@@ -390,13 +386,10 @@ public class ContractDataBuilder {
     }
 
     private Map<String, Object> buildTenant(RentalRequest request, BankAccountSnapshotDto bank) {
-        Map<String, Object> map = new LinkedHashMap<>();
         String renterId = request != null ? request.getRenterId() : null;
+        Map<String, Object> map = identityOf(renterId);
         User user = findUser(renterId);
 
-        map.put("fullName", firstNonBlank(request != null ? request.getRenterName() : null, fullNameOf(user, "Người thuê (Bên B)")));
-        map.put("idNumber", nullToEmpty(user == null ? null : user.getCccd()));
-        map.put("permanentAddress", permanentAddressOf(renterId));
         map.put("phone", firstNonBlank(request != null ? request.getRenterPhone() : null, user == null ? null : user.getPhone()));
         map.put("email", firstNonBlank(request != null ? request.getRenterEmail() : null, user == null ? null : user.getEmail()));
         map.put("occupantCount", resolveOccupantCount(request));
@@ -1285,22 +1278,18 @@ public class ContractDataBuilder {
         return userRepository.findById(userId).orElse(null);
     }
 
-    private String permanentAddressOf(String userId) {
-        if (userId == null || userId.isBlank()) {
-            return "";
-        }
-        return addressRepository.findByUser_IdAndActiveTrue(userId)
-                .map(Address::getDisplay)
-                .map(ContractDataBuilder::nullToEmpty)
-                .orElse("");
-    }
-
-    private static String fullNameOf(User user, String fallback) {
-        if (user == null) {
-            return fallback;
-        }
-        String name = joinNonBlank(" ", nullToEmpty(user.getFirstName()), nullToEmpty(user.getLastName()));
-        return isNotBlank(name) ? name : fallback;
+    private Map<String, Object> identityOf(String userId) {
+        var identity = userId == null || userId.isBlank() ? null : kycService.getVerifiedDetails(userId);
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("fullName", identity == null ? "" : nullToEmpty(identity.fullName()));
+        fields.put("idNumber", identity == null ? "" : nullToEmpty(identity.cccd()));
+        fields.put("birthDate", identity == null ? "" : nullToEmpty(identity.birthDate()));
+        fields.put("gender", identity == null ? "" : nullToEmpty(identity.gender()));
+        fields.put("permanentAddress", identity == null ? "" : nullToEmpty(identity.permanentAddress()));
+        fields.put("issueDate", identity == null ? "" : nullToEmpty(identity.issueDate()));
+        fields.put("expirationDate", identity == null ? "" : nullToEmpty(identity.expirationDate()));
+        fields.put("issuePlace", identity == null ? "" : nullToEmpty(identity.issuePlace()));
+        return fields;
     }
 
     private static int resolveOccupantCount(RentalRequest request) {

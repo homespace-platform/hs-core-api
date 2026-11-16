@@ -8,15 +8,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** Ensures CCCD is unique in PostgreSQL. */
+/** Moves legacy citizen IDs to KYC and enforces uniqueness at their only storage location. */
 @Component
 @Order(0)
 @RequiredArgsConstructor
 public class CccdUniquenessInitializer implements CommandLineRunner {
-
-    private static final String STANDARD_INDEX = "uk_users_cccd_standard";
-    private static final String LEGACY_TEST_INDEX = "uk_users_cccd_test_admin_pair";
-    private static final String LEGACY_TEST_CHECK = "ck_users_cccd_test_admin_pair";
 
     private final JdbcTemplate jdbc;
     private final PlatformTransactionManager transactionManager;
@@ -24,18 +20,40 @@ public class CccdUniquenessInitializer implements CommandLineRunner {
     @Override
     public void run(String... args) {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-            if (constraintExists(LEGACY_TEST_CHECK)) {
-                jdbc.execute("ALTER TABLE users DROP CONSTRAINT " + LEGACY_TEST_CHECK);
+            jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended('homespace.kyc.schema', 0))");
+            if (legacyColumnExists()) {
+                jdbc.execute("LOCK TABLE users, user_kyc_details IN SHARE ROW EXCLUSIVE MODE");
+                Boolean duplicate = jdbc.queryForObject("""
+                        SELECT EXISTS (
+                            SELECT cccd FROM (
+                                SELECT NULLIF(BTRIM(cccd), '') AS cccd FROM user_kyc_details
+                                UNION ALL
+                                SELECT NULLIF(BTRIM(u.cccd), '') FROM users u
+                                WHERE NOT EXISTS (SELECT 1 FROM user_kyc_details k
+                                    WHERE k.user_id = u.id AND NULLIF(BTRIM(k.cccd), '') IS NOT NULL)
+                            ) candidates
+                            WHERE cccd IS NOT NULL GROUP BY cccd HAVING COUNT(*) > 1
+                        )
+                        """, Boolean.class);
+                if (Boolean.TRUE.equals(duplicate)) {
+                    throw new IllegalStateException("Duplicate citizen IDs prevent KYC migration; reconcile the records before restarting.");
+                }
+                jdbc.execute("""
+                        INSERT INTO user_kyc_details (user_id, cccd)
+                        SELECT id, BTRIM(cccd) FROM users WHERE NULLIF(BTRIM(cccd), '') IS NOT NULL
+                        ON CONFLICT (user_id) DO UPDATE
+                        SET cccd = COALESCE(NULLIF(BTRIM(user_kyc_details.cccd), ''), EXCLUDED.cccd)
+                        """);
+                jdbc.execute("ALTER TABLE users DROP COLUMN cccd");
             }
-            jdbc.execute("DROP INDEX IF EXISTS " + LEGACY_TEST_INDEX);
-            jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS " + STANDARD_INDEX + " ON users (cccd)");
+            jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_user_kyc_details_cccd ON user_kyc_details (cccd)");
         });
     }
 
-    private boolean constraintExists(String name) {
+    private boolean legacyColumnExists() {
         Long count = jdbc.queryForObject(
-                "SELECT count(*) FROM pg_constraint WHERE conrelid = 'public.users'::regclass AND conname = ?",
-                Long.class, name);
+                "SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'cccd'",
+                Long.class);
         return count != null && count > 0;
     }
 }

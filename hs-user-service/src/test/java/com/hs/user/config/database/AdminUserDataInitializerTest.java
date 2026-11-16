@@ -42,18 +42,16 @@ class AdminUserDataInitializerTest {
         verify(users).save(saved.capture());
         assertEquals("keycloak-id", saved.getValue().getId());
         assertEquals(RoleConstants.ADMIN, saved.getValue().getRole().getName());
-        assertNull(saved.getValue().getCccd());
-        verify(users, never()).existsByCccdAndIdNot(any(), any());
     }
 
-    @Test void existingAdminKeepsItsCitizenId() {
+    @Test void existingAdminIsNotRewritten() {
         var users = mock(UserRepository.class);
         var roles = mock(RoleRepository.class);
         var realm = mock(RealmResource.class);
         var keycloakUsers = mock(UsersResource.class);
         var representation = new UserRepresentation();representation.setId("keycloak-id");
         var role = new Role();role.setName(RoleConstants.ADMIN);
-        var existing = new User();existing.setId("keycloak-id");existing.setRole(role);existing.setCccd("001234567890");
+        var existing = new User();existing.setId("keycloak-id");existing.setRole(role);existing.setFirstName("Existing profile");
         when(roles.findByName(RoleConstants.ADMIN)).thenReturn(Optional.of(role));
         when(realm.users()).thenReturn(keycloakUsers);
         when(keycloakUsers.searchByUsername("homespace", true)).thenReturn(List.of(representation));
@@ -64,7 +62,7 @@ class AdminUserDataInitializerTest {
                 null,"System","Administrator");
         new AdminUserDataInitializer(users, roles, realm, new BootstrapAdminProperties(List.of(account))).run();
 
-        assertEquals("001234567890", existing.getCccd());
+        assertEquals("Existing profile", existing.getFirstName());
         verify(users, never()).save(any());
         verify(users, never()).saveAndFlush(any());
     }

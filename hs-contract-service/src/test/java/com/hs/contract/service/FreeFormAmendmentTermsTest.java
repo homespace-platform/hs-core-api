@@ -193,8 +193,8 @@ class FreeFormAmendmentTermsTest {
         }
         assertEquals("Original agreement",original.getSpecialTerms());
     }
-    @Test void documentIdentityBankLeaseAndDepositCanBeEditedButSignedSourceStaysIntact() {
-        var c=changes("fields",Map.of("landlord",Map.of("fullName","Tên trên phụ lục","idNumber","001234","bankAccountNumber","000111"),
+    @Test void documentBankLeaseAndDepositCanBeEditedWhileSignedIdentityStaysIntact() {
+        var c=changes("fields",Map.of("landlord",Map.of("bankAccountNumber","000111"),
                 "lease",Map.of("handoverDateText","16/10/2026","durationMonths","6"),
                 "financial",Map.of("depositAmountValue","20000000","paymentCycle","Mỗi 3 tháng","paymentMethod","Chuyển khoản theo thỏa thuận")));
         var result=builder.build(original,c);var lease=(Map<?,?>)result.terms().get("lease");var f=(Map<?,?>)result.terms().get("financial");
@@ -259,4 +259,10 @@ class FreeFormAmendmentTermsTest {
         assertTrue(documentTerms.contains(ContractDataBuilder.DEFAULT_OVERDUE_TERMS));assertTrue(documentTerms.endsWith("Ghi chú mới"));
         assertTrue(original.getSpecialTerms().endsWith("Ghi chú của hai bên"));
     }
+    @Test void legalIdentityCannotBeChangedByAFreeFormAmendment() {
+        for (String key : ContractDraftContent.IDENTITY_FIELDS)
+            assertThrows(AppException.class, () -> builder.build(original,
+                    changes("fields", Map.of("landlord", Map.of(key, "self-entered")))));
+    }
+
 }

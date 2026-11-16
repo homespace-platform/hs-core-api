@@ -186,8 +186,7 @@ public class DepositAgreementService {
         var optional=new ArrayList<Map<String,String>>();
         for(var party:Map.of("landlord",s.getLandlord(),"tenant",s.getTenant()).entrySet()) {
             String side=party.getKey().equals("landlord")?"Bên A":"Bên B";
-            row(optional,side+" - CCCD",party.getValue().get("idNumber"));row(optional,side+" - Email",party.getValue().get("email"));
-            row(optional,side+" - Địa chỉ liên hệ theo hồ sơ",party.getValue().get("permanentAddress"));
+            row(optional,side+" - Email",party.getValue().get("email"));
         }
         row(optional,"Tầng",s.getProperty().get("floor"));row(optional,"Phạm vi thuê",s.getProperty().get("rentalScope"));
         row(optional,"Mã ngân hàng do bên giao dịch cung cấp",p.getBankTransactionReference());model.put("depositOptionalRows",optional);

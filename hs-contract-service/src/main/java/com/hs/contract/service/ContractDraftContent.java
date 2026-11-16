@@ -13,7 +13,10 @@ import static com.hs.user.validation.UserValidationPatterns.VIETNAMESE_PHONE;
 final class ContractDraftContent {
     private ContractDraftContent() {}
 
-    static final Set<String> PARTY_FIELDS = Set.of("fullName", "idNumber", "permanentAddress", "phone", "email",
+    static final Set<String> IDENTITY_FIELDS = Set.of("fullName", "idNumber", "birthDate", "gender",
+            "permanentAddress", "issueDate", "expirationDate", "issuePlace");
+    static final Set<String> PARTY_FIELDS = Set.of("fullName", "idNumber", "birthDate", "gender",
+            "permanentAddress", "issueDate", "expirationDate", "issuePlace", "phone", "email",
             "bankName", "bankAccountNumber", "bankAccountHolder");
     static final Set<String> RESIDENT_FIELDS = Set.of("occupantCount", "motorbikeCount", "carCount");
     static final Set<String> PROPERTY_FIELDS = Set.of("fullAddress", "areaText", "rentalScope", "features");
@@ -36,14 +39,18 @@ final class ContractDraftContent {
         requireKeys(fields, PARTY_FIELDS, "Thông tin các bên");
         for (var entry : fields.entrySet()) {
             String key = entry.getKey();
+            if (IDENTITY_FIELDS.contains(key)) {
+                if (!Objects.equals(Objects.toString(entry.getValue(), ""), Objects.toString(target.get(key), ""))) {
+                    throw invalid("Danh tính trên hợp đồng lấy từ KYC đã xác thực và không được chỉnh sửa thủ công.");
+                }
+                continue;
+            }
             String value = text(entry.getValue(), !"email".equals(key), 1000, "Thông tin các bên");
             if ("phone".equals(key) && !value.matches(VIETNAMESE_PHONE))
                 throw invalid("Nhập số điện thoại di động Việt Nam hợp lệ.");
             if ("email".equals(key) && !value.isEmpty()
                     && (value.length() > 100 || !value.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+")))
                 throw invalid("Nhập địa chỉ email hợp lệ (tối đa 100 ký tự).");
-            if ("idNumber".equals(key) && !value.matches("(?:[0-9]{9}|[0-9]{12})"))
-                throw invalid("Số định danh phải gồm 9 hoặc 12 chữ số.");
             if ("bankAccountNumber".equals(key) && !value.matches("[0-9]{1,34}"))
                 throw invalid("Số tài khoản phải gồm 1–34 chữ số; giữ nguyên các số 0 đầu.");
             target.put(key, value);

@@ -10,13 +10,17 @@ public final class DepositFieldCatalog {
     public static final String KIND = "DEPOSIT";
     private final Map<String,TemplateFieldDefinition> fields = new LinkedHashMap<>();
     public DepositFieldCatalog(ContractFieldCatalog lease) {
-        String[] reused={"landlord.fullName","landlord.phone","landlord.bankAccountHolder","landlord.bankAccountNumber","landlord.bankName",
-            "tenant.fullName","tenant.phone","tenant.bankAccountHolder","tenant.bankAccountNumber","tenant.bankName","tenant.occupantCount","tenant.motorbikeCount","tenant.carCount",
+        String[] reused={"landlord.fullName","landlord.idNumber","landlord.permanentAddress","landlord.birthDate","landlord.gender","landlord.issueDate","landlord.expirationDate","landlord.issuePlace","landlord.phone","landlord.bankAccountHolder","landlord.bankAccountNumber","landlord.bankName",
+            "tenant.fullName","tenant.idNumber","tenant.permanentAddress","tenant.birthDate","tenant.gender","tenant.issueDate","tenant.expirationDate","tenant.issuePlace","tenant.phone","tenant.bankAccountHolder","tenant.bankAccountNumber","tenant.bankName","tenant.occupantCount","tenant.motorbikeCount","tenant.carCount",
             "property.propertyType","property.fullAddress","property.areaText","property.unitNumber","lease.startDateText","lease.endDateText","lease.durationMonths",
             "rent.amountNumber","rent.amountWords","deposit.amountNumber","deposit.amountWords"};
         for(String key:reused) {
             var original=lease.getDefinition(key).orElseThrow();
             add(key,original.getLabel(),original.getDescription(),original.getExample());
+            if (Set.of("issueDate", "expirationDate", "issuePlace").contains(key.substring(key.indexOf('.') + 1))) {
+                fields.get(key).setRequired(false);
+                fields.get(key).setRequiredForCategories(Set.of());
+            }
         }
         add("depositAgreement.number","Số hợp đồng cọc","Mã văn bản cọc riêng, không phải số hợp đồng thuê","DC-20261024-DEMO");
         add("depositAgreement.issuedAtText","Ngày giờ lập","Ngày lập snapshot, không phải thời gian ký số","24/10/2026 09:00:00");

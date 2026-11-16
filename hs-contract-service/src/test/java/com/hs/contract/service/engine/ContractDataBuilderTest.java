@@ -11,8 +11,6 @@ import com.hs.listing.model.ListingCharge;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.model.constant.ListingEnums.BillingMethod;
 import com.hs.listing.model.constant.ListingEnums.ChargeType;
-import com.hs.user.model.Address;
-import com.hs.user.repository.AddressRepository;
 import com.hs.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 
@@ -41,7 +39,7 @@ class ContractDataBuilderTest {
         var laterAsset = new ListingFurnishingAsset(); laterAsset.setAssetName("Tủ lạnh mới"); laterAsset.setQuantity(2);
         var listing = Listing.builder().category(ListingCategory.HOUSE).areaM2(new BigDecimal("300"))
                 .houseDetail(house).furnishings(List.of(laterAsset)).build();
-        var builder = new ContractDataBuilder(mock(UserRepository.class),mock(AddressRepository.class),mapper);
+        var builder = new ContractDataBuilder(mock(UserRepository.class),mock(com.hs.user.service.KycService.class),mapper);
         var result = builder.build(request,listing);
         assertEquals("Phòng trọ",result.getProperty().get("propertyType"));
         assertEquals("Địa chỉ đã chốt",result.getProperty().get("fullAddress"));
@@ -61,7 +59,7 @@ class ContractDataBuilderTest {
         var branch = PropertyBranch.builder().buildingAmenities(Set.of(wifi)).buildingRules("Không gây ồn sau 22 giờ").build();
         var listing = Listing.builder().category(ListingCategory.APARTMENT).amenities(Set.of(wifi))
                 .branch(branch).customAmenities(List.of(dry)).furnishings(List.of(asset)).charges(List.of(fee)).build();
-        var result = new ContractDataBuilder(mock(UserRepository.class),mock(AddressRepository.class)).build(RentalRequest.builder().occupantCount(1).build(),listing);
+        var result = new ContractDataBuilder(mock(UserRepository.class),mock(com.hs.user.service.KycService.class)).build(RentalRequest.builder().occupantCount(1).build(),listing);
         var wifiRow = result.getAmenities().stream().filter(a -> "WIFI".equals(a.get("code"))).findFirst().orElseThrow();
         assertEquals("LISTING",wifiRow.get("sourceType"));
         assertEquals(Set.of("index","code","name","sourceType"),wifiRow.keySet());
@@ -89,13 +87,13 @@ class ContractDataBuilderTest {
                 .build();
 
         UserRepository userRepository = mock(UserRepository.class);
-        AddressRepository addressRepository = mock(AddressRepository.class);
-        Address landlordAddress = new Address();
-        landlordAddress.setDisplay("12 Nguyễn Huệ, Phường Sài Gòn, TP. Hồ Chí Minh");
-        when(addressRepository.findByUser_IdAndActiveTrue("landlord-id"))
-                .thenReturn(Optional.of(landlordAddress));
-
-        ContractDataBuilder builder = new ContractDataBuilder(userRepository, addressRepository);
+        var kyc = mock(com.hs.user.service.KycService.class);
+        var identity = new com.hs.user.model.UserKycDetails();
+        identity.setFullName("HỌ TÊN ĐÃ XÁC THỰC");identity.setCccd("001234567890");
+        identity.setBirthDate("16/02/2004");identity.setGender("Nam");
+        identity.setPermanentAddress("12 Nguyễn Huệ, Phường Sài Gòn, TP. Hồ Chí Minh");
+        when(kyc.getVerifiedDetails("landlord-id")).thenReturn(identity.toResponse());
+        ContractDataBuilder builder = new ContractDataBuilder(userRepository, kyc);
 
         ContractDataBuilder.ContractSnapshots snapshots = builder.build(request, listing);
 
@@ -173,7 +171,7 @@ class ContractDataBuilderTest {
                 .depositAmount(new BigDecimal("12000000"))
                 .build();
 
-        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(AddressRepository.class));
+        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(com.hs.user.service.KycService.class));
         var snapshots = builder.build(request, listing);
 
         assertEquals("Vinhomes Grand Park", snapshots.getProperty().get("projectName"));
@@ -208,7 +206,7 @@ class ContractDataBuilderTest {
                 .occupantCount(4)
                 .build();
 
-        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(AddressRepository.class));
+        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(com.hs.user.service.KycService.class));
         var snapshots = builder.build(request, listing);
 
         assertEquals("Toàn bộ tầng 1 và tầng 2, có sân để xe riêng", snapshots.getProperty().get("rentalScope"));
@@ -241,7 +239,7 @@ class ContractDataBuilderTest {
                 .occupantCount(2)
                 .build();
 
-        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(AddressRepository.class));
+        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(com.hs.user.service.KycService.class));
         var snapshots = builder.build(request, listing);
 
         assertEquals("Phòng P.302", snapshots.getProperty().get("unitNumber"));
@@ -273,7 +271,7 @@ class ContractDataBuilderTest {
                 .occupantCount(2)
                 .build();
 
-        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(AddressRepository.class));
+        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(com.hs.user.service.KycService.class));
         var snapshots = builder.build(request, listing);
 
         // Verify that branchId, branchName, branchCode, branch capacities are absent
@@ -314,7 +312,7 @@ class ContractDataBuilderTest {
                 .renterId("tenant-1")
                 .build();
 
-        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(AddressRepository.class));
+        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(com.hs.user.service.KycService.class));
         var snapshots = builder.build(request, listing);
 
         // Equipment table should have Máy lạnh
@@ -348,7 +346,7 @@ class ContractDataBuilderTest {
                 .renterId("tenant-1")
                 .build();
 
-        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(AddressRepository.class));
+        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(com.hs.user.service.KycService.class));
         var snapshots = builder.build(request, listing);
 
         var petAmenity = snapshots.getAmenities().stream()
@@ -392,7 +390,7 @@ class ContractDataBuilderTest {
                 .carCount(1)
                 .build();
 
-        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(AddressRepository.class));
+        ContractDataBuilder builder = new ContractDataBuilder(mock(UserRepository.class), mock(com.hs.user.service.KycService.class));
         var snapshots = builder.build(request, listing);
 
         assertEquals(2, snapshots.getTenant().get("motorbikeCount"));
@@ -404,4 +402,38 @@ class ContractDataBuilderTest {
         var carRow = snapshots.getCharges().stream().filter(c -> "Phí gửi ô tô".equals(c.get("name"))).findFirst().orElseThrow();
         assertEquals("1200000", carRow.get("estimatedMonthlyAmount"));
     }
+    @Test void bothPartiesUseVerifiedKycInsteadOfSelfEnteredNamesAndBirthDates() {
+        var kyc = mock(com.hs.user.service.KycService.class);
+        var identity = new com.hs.user.model.UserKycDetails();
+        identity.setCccd("001234567890");identity.setFullName("LEGAL KYC NAME");
+        identity.setBirthDate("16/02/2004");identity.setGender("Nam");identity.setPermanentAddress("KYC permanent address");
+        identity.setIssueDate("31/05/2021");identity.setExpirationDate("16/02/2029");identity.setIssuePlace("Verified issuer");
+        when(kyc.getVerifiedDetails(org.mockito.ArgumentMatchers.anyString())).thenReturn(identity.toResponse());
+        var request = RentalRequest.builder().ownerId("landlord").renterId("tenant")
+                .renterName("Self entered renter name").occupantCount(1).build();
+        var source = new com.hs.user.model.User();source.setFirstName("Self entered profile name");source.setDob(java.time.LocalDate.of(2008, 1, 1));
+        var users = mock(UserRepository.class);
+        when(users.findById(org.mockito.ArgumentMatchers.anyString())).thenReturn(Optional.of(source));
+        var builder = new ContractDataBuilder(users, kyc);
+        var result = builder.build(request, null);
+        for (var party : java.util.List.of(result.getLandlord(), result.getTenant())) {
+            assertEquals("LEGAL KYC NAME", party.get("fullName"));assertEquals("16/02/2004", party.get("birthDate"));
+            assertEquals("001234567890", party.get("idNumber"));assertEquals("Nam", party.get("gender"));
+            assertEquals("KYC permanent address", party.get("permanentAddress"));
+            assertEquals("31/05/2021", party.get("issueDate"));assertEquals("16/02/2029", party.get("expirationDate"));
+            assertEquals("Verified issuer", party.get("issuePlace"));
+        }
+        var renderer = new ContractRenderService(new com.fasterxml.jackson.databind.ObjectMapper());
+        var model = renderer.buildDataModelFromSnapshots(result.getLandlord(), result.getTenant(), result.getProperty(),
+                result.getLease(), result.getFinancial(), result.getCharges(), result.getEquipments(), result.getMeters(),
+                "TEST", java.time.LocalDate.of(2026, 11, 17), "HCM");
+        for (String side : java.util.List.of("landlord", "tenant"))
+            for (String key : java.util.List.of("fullName", "idNumber", "birthDate", "gender", "permanentAddress", "issueDate", "expirationDate", "issuePlace"))
+                assertEquals(result.getLandlord().get(key), ContractRenderService.resolvePath(model, side + "." + key));
+        org.mockito.Mockito.verify(kyc).getVerifiedDetails("landlord");org.mockito.Mockito.verify(kyc).getVerifiedDetails("tenant");
+        org.mockito.Mockito.reset(kyc);
+        var missing = builder.build(request, null);
+        assertEquals("", missing.getLandlord().get("fullName"));assertEquals("", missing.getTenant().get("birthDate"));
+    }
+
 }

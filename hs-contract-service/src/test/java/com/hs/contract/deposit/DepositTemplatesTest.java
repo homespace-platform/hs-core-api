@@ -18,7 +18,7 @@ class DepositTemplatesTest {
             byte[] bytes=templateContent(category,catalog);
             var validation=analyzer.analyzeTemplate(new ByteArrayInputStream(bytes),category,"DEPOSIT");
             assertTrue(validation.isValid(),validation.getWarnings().toString());assertTrue(validation.getMissingRequiredFields().isEmpty());
-            assertEquals(category==ListingCategory.HOUSE?41:42,validation.getDetectedPlaceholders().size());
+            assertEquals(category==ListingCategory.HOUSE?49:50,validation.getDetectedPlaceholders().size());
             assertFalse(analyzer.analyzeTemplate(new ByteArrayInputStream(bytes),category).getInvalidPlaceholders().isEmpty(),"Lease catalog must not accept deposit tags");
             var model=DepositDataModel.dummy(renderer.buildDummyDataModel());
             @SuppressWarnings("unchecked") var owner=(Map<String,Object>)model.get("landlord");owner.put("bankAccountNumber","000123456789");

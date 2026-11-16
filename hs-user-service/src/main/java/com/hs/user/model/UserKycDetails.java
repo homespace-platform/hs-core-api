@@ -14,7 +14,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "user_kyc_details")
+@Table(name = "user_kyc_details", uniqueConstraints = @jakarta.persistence.UniqueConstraint(
+        name = "uk_user_kyc_details_cccd", columnNames = "cccd"))
 @Getter @Setter @NoArgsConstructor
 public class UserKycDetails {
     @Id @Column(name = "user_id", length = 36, nullable = false)

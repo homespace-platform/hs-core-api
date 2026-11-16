@@ -60,7 +60,7 @@ class ContractPropertyFeatureLabelsTest {
         }
         String json=mapper.writeValueAsString(captured.build());
         var request=RentalRequest.builder().listingSnapshot(json).occupantCount(1).build();
-        var data=new ContractDataBuilder(mock(UserRepository.class),mock(AddressRepository.class),mapper).build(request,null);
+        var data=new ContractDataBuilder(mock(UserRepository.class),mock(com.hs.user.service.KycService.class),mapper).build(request,null);
         var features=(List<?>)data.getProperty().get("features");
         assertTrue(mapper.writeValueAsString(features).contains("Đầy đủ nội thất"));
         assertFalse(mapper.writeValueAsString(features).contains("FULLY_FURNISHED"));
