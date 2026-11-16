@@ -15,7 +15,7 @@ class VnptKycProxyTest {
     ObjectMapper mapper=new ObjectMapper();
     VnptKycClient client=mock(VnptKycClient.class);
     VnptKycStore store=mock(VnptKycStore.class);
-    VnptKycProxy proxy=new VnptKycProxy(client,store,new VnptKycProperties(true,"https://example.test","test","test","test",15,5,1),mapper);
+    VnptKycProxy proxy=new VnptKycProxy(client,store,new VnptKycProperties(true,"https://example.test","test","test",15,5,1),mapper);
     @Test void browserCannotChooseUpstreamAuthCorrelationOrDocumentClass() throws Exception {
         when(store.prepare(eq("alice"),eq("attempt"),any(),eq(List.of("front","face")))).thenAnswer(call->{VnptKycStep s=call.getArgument(2);s.setState("RUNNING");s.setAttemptId("attempt");s.setClientSession("WEB-SDK_test_attempt_123");return s;});
         when(client.json(eq("/ai/v1/web/face/compare"),any())).thenReturn(mapper.readTree("{\"message\":\"IDG-00000000\",\"object\":{\"msg\":\"NOMATCH\"},\"private\":\"discard\"}"));

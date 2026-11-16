@@ -19,7 +19,7 @@ class VnptKycStoreTest {
     VnptKycStepRepository steps=mock(VnptKycStepRepository.class);
     CccdClaimService claims=mock(CccdClaimService.class);
     ObjectMapper mapper=new ObjectMapper();
-    VnptKycStore store=new VnptKycStore(users,verifications,steps,new VnptKycProperties(true,"https://example.test","test","test","test",15,5,1),claims,mapper);
+    VnptKycStore store=new VnptKycStore(users,verifications,steps,new VnptKycProperties(true,"https://example.test","test","test",15,5,1),claims,mapper);
     KycVerification attempt;
     @BeforeEach void setup() {
         attempt=KycVerification.builder().id("attempt").userId("alice").provider(KycProvider.VNPT).status(KycStatus.PENDING).expiresAt(Instant.now().plusSeconds(900)).build();
@@ -29,10 +29,10 @@ class VnptKycStoreTest {
         assertThrows(AppException.class,()->store.finalizeAttempt("bob","attempt"));
         attempt.setExpiresAt(Instant.now().minusSeconds(1));assertThrows(AppException.class,()->store.finalizeAttempt("alice","attempt"));
         attempt.setExpiresAt(Instant.now().plusSeconds(60));attempt.setStatus(KycStatus.EXPIRED);assertThrows(AppException.class,()->store.finalizeAttempt("alice","attempt"));
-        verifyNoInteractions(claims,steps);
+        verifyNoInteractions(steps);verify(claims,never()).tryClaim(anyString(),anyString());
     }
     @Test void verifiedFinalizeIsIdempotent() {
-        attempt.setStatus(KycStatus.VERIFIED);assertEquals(KycStatus.VERIFIED,store.finalizeAttempt("alice","attempt"));verifyNoInteractions(claims,steps);
+        attempt.setStatus(KycStatus.VERIFIED);assertEquals(KycStatus.VERIFIED,store.finalizeAttempt("alice","attempt"));verifyNoInteractions(steps);verify(claims,never()).tryClaim(anyString(),anyString());
     }
     @Test void retiredPendingAttemptDoesNotBlockVnptAndItsHistoryIsKept() {
         User user=new User();user.setId("alice");user.setActive(true);
@@ -55,7 +55,7 @@ class VnptKycStoreTest {
         assertThrows(AppException.class,()->store.start("alice"));verify(verifications,never()).save(any());
     }
     @Test void temporaryEvidenceIsPurgedEvenWhenProviderIsDisabled() {
-        var disabledStore=new VnptKycStore(users,verifications,steps,new VnptKycProperties(false,"https://example.test","","","",15,5,1),claims,mapper);
+        var disabledStore=new VnptKycStore(users,verifications,steps,new VnptKycProperties(false,"https://example.test","","",15,5,1),claims,mapper);
         Instant before=Instant.now().minusSeconds(86400);
         disabledStore.purgeTemporaryEvidence();
         Instant after=Instant.now().minusSeconds(86400);
@@ -85,12 +85,13 @@ class VnptKycStoreTest {
     @Test void coherentEvidenceClaimsLeadingZeroIdOnce() {
         when(steps.findByAttemptIdOrderByCreatedAtAsc("attempt")).thenReturn(evidence());when(claims.tryClaim("alice","001234567890")).thenReturn(true);
         assertEquals(KycStatus.VERIFIED,store.finalizeAttempt("alice","attempt"));assertNotNull(attempt.getVerifiedAt());
+        var order=inOrder(claims,verifications);order.verify(claims).lockVerification("alice");order.verify(verifications).lockById("attempt");
         assertEquals(KycStatus.VERIFIED,store.finalizeAttempt("alice","attempt"));verify(claims,times(1)).tryClaim("alice","001234567890");
     }
     @Test void failureOrDuplicateIdNeverVerifies() {
         var proof=evidence();proof.stream().filter(x->x.getKind().equals("compare")).findFirst().orElseThrow().setResultJson("{\"message\":\"IDG-00000000\",\"object\":{\"msg\":\"NOMATCH\"}}");
         when(steps.findByAttemptIdOrderByCreatedAtAsc("attempt")).thenReturn(proof);
-        assertEquals(KycStatus.REJECTED,store.finalizeAttempt("alice","attempt"));verifyNoInteractions(claims);
+        assertEquals(KycStatus.REJECTED,store.finalizeAttempt("alice","attempt"));verify(claims,never()).tryClaim(anyString(),anyString());
         attempt.setStatus(KycStatus.PENDING);when(steps.findByAttemptIdOrderByCreatedAtAsc("attempt")).thenReturn(evidence());
         assertEquals(KycStatus.REJECTED,store.finalizeAttempt("alice","attempt"));assertNull(attempt.getVerifiedAt());
     }
@@ -107,7 +108,7 @@ class VnptKycStoreTest {
             when(steps.findByAttemptIdOrderByCreatedAtAsc("attempt")).thenReturn(proof);
             assertThrows(AppException.class,()->store.finalizeAttempt("alice","attempt"),scenario);
         }
-        verifyNoInteractions(claims);
+        verify(claims,never()).tryClaim(anyString(),anyString());
     }
     private List<VnptKycStep> evidence() {
         List<VnptKycStep> all=new ArrayList<>();

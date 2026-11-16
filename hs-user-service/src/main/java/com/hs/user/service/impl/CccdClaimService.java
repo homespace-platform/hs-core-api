@@ -9,9 +9,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Claims CCCD in an isolated transaction so unique conflicts do not poison the webhook TX.
+ * Claims CCCD under a shared lock; ADMIN uses its enclosing transaction, VNPT uses an isolated claim.
  */
 @Slf4j
 @Service
@@ -21,6 +22,17 @@ public class CccdClaimService {
     private final UserRepository userRepository;
     private final org.springframework.transaction.PlatformTransactionManager transactionManager;
     private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void lockVerification(String userId) {
+        // Serialize manual verification with VNPT finalization before either locks its evidence rows.
+        jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?, 1))", userId);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean claimInCurrentTransaction(String userId, String cccd) {
+        return claim(userId, cccd);
+    }
 
     /**
      * @return true if this user now owns the CCCD; false if already taken by another account

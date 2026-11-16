@@ -56,7 +56,8 @@ public enum UserErrorCode implements AppException.ErrorCode {
     KYC_REQUIRED(2508, "Identity verification (KYC) is required before this action", HttpStatus.FORBIDDEN),
     KYC_ATTEMPT_INVALID(2509, "Phiên xác minh không hợp lệ hoặc đã hết hạn. Vui lòng bắt đầu lại.", HttpStatus.CONFLICT),
     KYC_INPUT_INVALID(2510, "Dữ liệu xác minh không hợp lệ.", HttpStatus.BAD_REQUEST),
-    KYC_ATTEMPT_LIMIT(2511, "Đã đạt giới hạn lượt xác minh. Vui lòng thử lại sau.", HttpStatus.TOO_MANY_REQUESTS);
+    KYC_ATTEMPT_LIMIT(2511, "Đã đạt giới hạn lượt xác minh. Vui lòng thử lại sau.", HttpStatus.TOO_MANY_REQUESTS),
+    KYC_CCCD_ALREADY_USED(2512, "CCCD đã được sử dụng bởi tài khoản khác.", HttpStatus.CONFLICT);
 
     UserErrorCode(int code, String message, HttpStatusCode statusCode) {
         this.code = code;

@@ -20,6 +20,7 @@ public class VnptKycClient {
     private static final Logger log = LoggerFactory.getLogger(VnptKycClient.class);
     private final VnptKycProperties config;
     private final ObjectMapper mapper;
+    private final VnptAccessTokenProvider tokens;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     public JsonNode json(String endpoint, JsonNode body) {
@@ -38,26 +39,33 @@ public class VnptKycClient {
     private JsonNode send(String endpoint, String type, byte[] body) {
         if (!config.configured()) throw new AppException(UserErrorCode.KYC_NOT_CONFIGURED);
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(config.baseUrl().replaceAll("/+$", "")+endpoint+"?challengeCode=00000"))
-                .timeout(Duration.ofSeconds(45)).header("Authorization", "Bearer "+config.accessToken())
-                .header("Token-id",config.tokenId()).header("Token-key",config.tokenKey())
-                .header("mac-address","WEB-001").header("Content-Type",type)
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
-            HttpResponse<java.io.InputStream> response = http.send(request,HttpResponse.BodyHandlers.ofInputStream());
-            try (var stream=response.body()) {
-                byte[] bytes=stream.readNBytes(262145);
-                if (response.statusCode()<200 || response.statusCode()>=300 || bytes.length>262144) {
-                    log.warn("VNPT {} returned HTTP {}, response bytes {}", endpoint, response.statusCode(), bytes.length);
-                    throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR);
+            for (int attempt = 0; attempt < 2; attempt++) {
+                String token = tokens.accessToken();
+                HttpRequest request = HttpRequest.newBuilder(URI.create(config.baseUrl().replaceAll("/+$", "")+endpoint+"?challengeCode=00000"))
+                    .timeout(Duration.ofSeconds(45)).header("Authorization", "Bearer "+token)
+                    .header("mac-address","WEB-001").header("Content-Type",type)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(body)).build();
+                HttpResponse<java.io.InputStream> response = http.send(request,HttpResponse.BodyHandlers.ofInputStream());
+                try (var stream=response.body()) {
+                    byte[] bytes=stream.readNBytes(262145);
+                    if (response.statusCode() == 401) {
+                        tokens.invalidate(token);
+                        if (attempt == 0) continue;
+                    }
+                    if (response.statusCode()<200 || response.statusCode()>=300 || bytes.length>262144) {
+                        log.warn("VNPT {} returned HTTP {}, response bytes {}", endpoint, response.statusCode(), bytes.length);
+                        throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR);
+                    }
+                    JsonNode result=mapper.readTree(bytes);
+                    if (result == null || !result.isObject()) {
+                        log.warn("VNPT {} returned a non-object response", endpoint);
+                        throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR);
+                    }
+                    if (result.path("object").isTextual()) ((com.fasterxml.jackson.databind.node.ObjectNode)result).set("object",mapper.readTree(result.path("object").asText()));
+                    return result;
                 }
-                JsonNode result=mapper.readTree(bytes);
-                if (!result.isObject()) {
-                    log.warn("VNPT {} returned a non-object response", endpoint);
-                    throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR);
-                }
-                if (result.path("object").isTextual()) ((com.fasterxml.jackson.databind.node.ObjectNode)result).set("object",mapper.readTree(result.path("object").asText()));
-                return result;
             }
+            throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR);
         } catch (InterruptedException ex) { Thread.currentThread().interrupt(); log.warn("VNPT {} request interrupted", endpoint); throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR); }
         catch (AppException ex) { throw ex; }
         catch (Exception ex) { log.warn("VNPT {} request failed: {}", endpoint, ex.getClass().getSimpleName()); throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR); }

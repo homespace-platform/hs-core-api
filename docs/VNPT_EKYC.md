@@ -9,13 +9,18 @@ Người chưa xác minh dùng VNPT eKYC tại `/settings/account-security`. FPT
 ```dotenv
 VNPT_EKYC_ENABLED=true
 VNPT_EKYC_BASE_URL=https://api.idg.vnpt.vn
-VNPT_EKYC_ACCESS_TOKEN=<credential-local>
-VNPT_EKYC_TOKEN_ID=<credential-local>
-VNPT_EKYC_TOKEN_KEY=<credential-local>
+VNPT_EKYC_CLIENT_ID=<credential-local>
+VNPT_EKYC_CLIENT_SECRET=<credential-local>
 ```
 
 Không dùng credential trong sample SDK; không đặt các giá trị này vào NEXT_PUBLIC hoặc frontend. Chỉ bật sau khi xác nhận tenant có quyền API Web/3D. Dùng endpoint môi trường do VNPT cấp; không tự coi sandbox là production. Access token cần được quản lý/gia hạn theo gói VNPT.
-`VNPT_EKYC_ACCESS_TOKEN` chỉ chứa chuỗi token, không có tiền tố `Bearer `; Core tự thêm tiền tố này vào header.
+Core chỉ hỗ trợ bảo mật mức 2: gọi `POST /auth/oauth/token` với JSON `client_id`, `client_secret`, `grant_type=client_credentials`. Token được cache trong bộ nhớ theo `expires_in`, cấp lại trước hạn tối đa 60 giây và dùng chung giữa các request đồng thời trong cùng instance. Token lỗi/thiếu thời hạn không được cache. Khi gọi dịch vụ eKYC, Core gửi `Authorization: Bearer <access_token>`; không gửi Token-id/Token-key mức 1.
+
+Nếu VNPT trả HTTP 401 cho một bước SDK, Core bỏ token bị từ chối, lấy token mới và thử lại bước đó tối đa một lần. Timeout, lỗi mạng và 5xx không tự replay bước eKYC. Token và Client Secret không được ghi log hoặc trả về frontend.
+
+Không cần khai báo token tĩnh, chế độ xác thực hoặc Token-id/Token-key. Nếu nâng cấp từ cấu hình mức 1, xóa các field cũ khỏi `.env` rồi restart Core.
+
+Thay đổi mức xác thực chỉ nằm ở Core; không đổi SDK, endpoint HomeSpace, policy KYC hoặc hồ sơ VERIFIED. Chưa tích hợp kiểm tra `dataSign`/`dataBase64`; việc xác minh chữ ký phản hồi là hạng mục riêng.
 
 2. Chuẩn bị SDK từ thư mục `hs-web-app`:
 
@@ -46,7 +51,15 @@ Khi chạy `next dev`, màn hình VNPT có thêm lựa chọn tải ảnh giấy
 - Parser nhận schema có căn cứ trong tài liệu; trường bắt buộc thiếu hoặc schema khác sẽ không tự VERIFIED. Cần đối chiếu response tenant thật trước nghiệm thu live, đặc biệt card_type, OCR checking/match fields và liveness 3D.
 - Ảnh chỉ được chuyển tiếp trong request; không lưu S3/raw base64. Lưu bằng chứng tối thiểu có TTL 24 giờ, được dọn mỗi giờ. CCCD gắn vào user khi đã đạt policy và claim duy nhất. Không ghi raw payload/credential vào log hay Kafka.
 - Bước face 3D của SDK upload thêm blob quét dạng `text`; Core giới hạn kích thước, chỉ chấp nhận mã hash của blob này trong đúng phiên hiện tại và không tính nó là ảnh giấy tờ/khuôn mặt.
-- Admin chỉ được đồng bộ kiểu/provider và trạng thái/cancel để đọc dữ liệu mới đúng; lựa chọn capture VNPT được triển khai trên web theo phạm vi yêu cầu. Mobile chưa triển khai.
+- Capture VNPT được triển khai trên web. Admin portal có thêm xác minh thủ công tại chi tiết tài khoản; mobile chưa triển khai.
+
+## ADMIN xác minh thủ công
+
+- `GET /api/v1/admin/users/{userId}/kyc` đọc trạng thái; `POST .../kyc/verify` nhận JSON `{ "cccd": "<12 chữ số>" }`. Chỉ ADMIN đang hoạt động được thao tác; danh tính người thực hiện lấy từ context đã xác thực.
+- Core kiểm tra tài khoản đang hoạt động, chưa VERIFIED và CCCD chưa thuộc tài khoản khác. CCCD giữ dạng chuỗi để không mất số 0 đầu.
+- Ghi CCCD và hồ sơ `provider=ADMIN`, `status=VERIFIED`, thời điểm xác minh và `createdBy` trong cùng transaction. Đóng các phiên đang chờ để kết quả VNPT đến muộn không ghi đè.
+- Xác minh ADMIN và finalize VNPT được tuần tự hóa theo user; kiểm tra trùng CCCD dùng khóa advisory chung và unique index hiện có. Schema migration mở rộng CHECK provider, giữ lịch sử DIDIT/VNPT.
+- Các KYC gate, profile và SmartCA công nhận hồ sơ ADMIN VERIFIED qua cùng policy; không giả lập kết quả sinh trắc học VNPT.
 
 ## Nghiệm thu
 

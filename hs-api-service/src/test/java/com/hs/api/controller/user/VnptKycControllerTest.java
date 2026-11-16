@@ -22,7 +22,7 @@ class VnptKycControllerTest {
     KycService kyc=mock(KycService.class);
     CurrentUserUtils identity=mock(CurrentUserUtils.class);
     ObjectMapper mapper=new ObjectMapper();
-    VnptKycController controller=new VnptKycController(store,proxy,kyc,identity,mapper,new VnptKycProperties(true,"https://example.test","test","test","test",15,5,1));
+    VnptKycController controller=new VnptKycController(store,proxy,kyc,identity,mapper,new VnptKycProperties(true,"https://example.test","test","test",15,5,1));
     void actor(){User u=new User();u.setId("alice");when(identity.getCurrentUser()).thenReturn(u);}
     @Test void sessionAndStepsUseVerifiedActorNotPayloadIdentity() throws Exception {
         actor();controller.start();verify(store).start("alice");

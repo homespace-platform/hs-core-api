@@ -94,6 +94,7 @@ public class VnptKycStore {
     }
     @Transactional
     public KycStatus finalizeAttempt(String userId,String attempt) {
+        claims.lockVerification(userId);
         KycVerification v=owned(userId,attempt,true);
         if(v.getStatus()==KycStatus.VERIFIED)return v.getStatus();
         List<VnptKycStep> all=steps.findByAttemptIdOrderByCreatedAtAsc(attempt);
