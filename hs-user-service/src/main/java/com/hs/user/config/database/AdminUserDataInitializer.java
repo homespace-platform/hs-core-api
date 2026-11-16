@@ -29,10 +29,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class AdminUserDataInitializer implements CommandLineRunner {
 
-    /** Fallback CCCD when env does not set {@code cccd} for the account. */
-    public static final String DEFAULT_BOOTSTRAP_ADMIN_CCCD = "075999999999";
-    public static final String DEFAULT_BOOTSTRAP_ADMIN_CCCD_2 = "075999999998";
-
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final RealmResource keycloakRealm;
@@ -49,18 +45,16 @@ public class AdminUserDataInitializer implements CommandLineRunner {
                 .findByName(RoleConstants.ADMIN)
                 .orElseThrow(() -> new IllegalStateException("Missing default role: " + RoleConstants.ADMIN));
 
-        for (int i = 0; i < accounts.size(); i++) {
-            BootstrapAdminAccount account = accounts.get(i);
-            String cccd = resolveCccd(account, i);
+        for (BootstrapAdminAccount account : accounts) {
             try {
-                seedOrSyncAdmin(account, adminRole, cccd);
+                seedOrSyncAdmin(account, adminRole);
             } catch (RuntimeException exception) {
                 log.error("Failed to seed bootstrap admin '{}': {}", account.username(), exception.getMessage());
             }
         }
     }
 
-    private void seedOrSyncAdmin(BootstrapAdminAccount account, Role adminRole, String cccd) {
+    private void seedOrSyncAdmin(BootstrapAdminAccount account, Role adminRole) {
         if (account.username() == null || account.email() == null || account.password() == null) {
             log.warn("Skipping bootstrap admin — username/email/password required");
             return;
@@ -70,13 +64,12 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         if (userRepository.existsById(userId)) {
             syncPhone(userId, account);
             ensureAdminRole(userId, adminRole, account.email());
-            syncCccd(userId, account.email(), cccd);
-            log.info("Bootstrap admin '{}' already present — synced role/phone/cccd", account.username());
+            log.info("Bootstrap admin '{}' already present — synced role/phone", account.username());
             return;
         }
 
         try {
-            persistAdmin(userId, account, adminRole, cccd);
+            persistAdmin(userId, account, adminRole);
             log.warn("Bootstrap admin '{}' is ready with the configured password. Change it after the first login.",
                     account.username());
         } catch (Exception exception) {
@@ -84,15 +77,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
                     account.username(), exception.getMessage());
             syncPhone(userId, account);
             ensureAdminRole(userId, adminRole, account.email());
-            syncCccd(userId, account.email(), cccd);
         }
-    }
-
-    private static String resolveCccd(BootstrapAdminAccount account, int index) {
-        if (account.cccd() != null && !account.cccd().isBlank()) {
-            return account.cccd().trim();
-        }
-        return index == 0 ? DEFAULT_BOOTSTRAP_ADMIN_CCCD : DEFAULT_BOOTSTRAP_ADMIN_CCCD_2;
     }
 
     private String findOrCreateKeycloakAdmin(BootstrapAdminAccount account) {
@@ -146,7 +131,7 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         return credential;
     }
 
-    private void persistAdmin(String userId, BootstrapAdminAccount account, Role adminRole, String cccd) {
+    private void persistAdmin(String userId, BootstrapAdminAccount account, Role adminRole) {
         User admin = userRepository.findById(userId).orElseGet(() -> {
             User created = new User();
             created.setId(userId);
@@ -159,9 +144,6 @@ public class AdminUserDataInitializer implements CommandLineRunner {
         admin.setLastName(account.lastName());
         admin.setPhone(account.phoneNumber());
         admin.setRole(adminRole);
-        if (cccd != null && !userRepository.existsByCccdAndIdNot(cccd, userId)) {
-            admin.setCccd(cccd);
-        }
         admin.setActive(true);
         admin.setOnBoarded(false);
 
@@ -210,35 +192,6 @@ public class AdminUserDataInitializer implements CommandLineRunner {
             });
         } catch (RuntimeException exception) {
             log.warn("Could not sync bootstrap admin phone: {}", exception.getMessage());
-        }
-    }
-
-    private void syncCccd(String userId, String email, String cccd) {
-        if (cccd == null || cccd.isBlank()) {
-            return;
-        }
-
-        try {
-            userRepository.findById(userId).ifPresent(admin -> {
-                if (cccd.equals(admin.getCccd())) {
-                    return;
-                }
-                if (userRepository.existsByCccdAndIdNot(cccd, userId)) {
-                    log.warn("Cannot sync bootstrap admin CCCD — already used by another account");
-                    return;
-                }
-
-                admin.setCccd(cccd);
-                UserContextHolder.set(new UserContext(userId, email));
-                try {
-                    userRepository.saveAndFlush(admin);
-                    log.info("Synced bootstrap admin CCCD for user {}", userId);
-                } finally {
-                    UserContextHolder.clear();
-                }
-            });
-        } catch (RuntimeException exception) {
-            log.warn("Could not sync bootstrap admin CCCD: {}", exception.getMessage());
         }
     }
 

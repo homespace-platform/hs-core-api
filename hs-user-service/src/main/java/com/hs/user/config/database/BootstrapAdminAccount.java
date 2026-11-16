@@ -12,8 +12,7 @@ public record BootstrapAdminAccount(
         String password,
         String phoneNumber,
         String firstName,
-        String lastName,
-        String cccd
+        String lastName
 ) {
 
     public BootstrapAdminAccount {
@@ -22,7 +21,6 @@ public record BootstrapAdminAccount(
         phoneNumber = normalize(phoneNumber);
         firstName = normalize(firstName);
         lastName = normalize(lastName);
-        cccd = normalize(cccd);
     }
 
     private static String normalize(String value) {
