@@ -33,7 +33,7 @@ python scripts/setup-vnpt-sdk.py D:/approved-artifacts/web-sdk-version-3.2.1.0.z
 Script kiểm checksum ZIP và main bundle; chỉ lấy các asset nằm trong allowlist, không lấy `index.html` chứa credential mẫu. Asset được đặt trong `public/vendor/vnpt/` đã ignore Git. Môi trường build/deploy cần cấp artifact được phép phân phối và chạy bước này trước khi đóng gói. Khi đổi version phải review contract rồi cập nhật checksum/asset list.
 
 3. Restart Core API và Gateway. Web nhận code mới qua dev server; restart web nếu không có hot reload.
-4. Schema: bổ sung `expires_at` và `verified_details` (TEXT) vào `kyc_verifications`, bảng `vnpt_kyc_steps`. Với DB cũ, migration Java cập nhật enum CHECK để nhận VNPT và giữ DIDIT; không cần drop dữ liệu. Cấu hình JPA local dùng `update` để thêm cột; môi trường quản lý schema thủ công cần thêm cột trước khi deploy.
+4. Schema: `kyc_verifications` giữ trạng thái và thời điểm xác minh; `user_kyc_details` lưu thông tin CCCD và kết quả kiểm tra VNPT theo `user_id`; `vnpt_kyc_steps` lưu bằng chứng tạm thời. Môi trường local cần tạo lại schema trước khi chạy bản này vì không có migration/backfill cho cột `verified_details` cũ.
 5. Đăng nhập tài khoản chưa VERIFIED, mở Tài khoản và bảo mật → chọn VNPT eKYC → Xác minh ngay.
 
 Khi chạy `next dev`, màn hình VNPT có thêm lựa chọn tải ảnh giấy tờ lên để thử nghiệm (`PHOTO_AND_UPLOAD` theo bundle SDK 3.2.1.0; tài liệu gọi lựa chọn này là `BOTH`). Bản build production chỉ hiện chụp trực tiếp. Ảnh JPEG/PNG tối đa 1 MB theo giới hạn backend hiện tại.
@@ -52,15 +52,12 @@ Khi chạy `next dev`, màn hình VNPT có thêm lựa chọn tải ảnh giấy
 - Parser nhận schema có căn cứ trong tài liệu; trường bắt buộc thiếu hoặc schema khác sẽ không tự VERIFIED. Cần đối chiếu response tenant thật trước nghiệm thu live, đặc biệt card_type, OCR checking/match fields và liveness 3D.
 - Ảnh chỉ được chuyển tiếp trong request; không lưu S3/raw base64. Lưu bằng chứng tối thiểu có TTL 24 giờ, được dọn mỗi giờ. CCCD gắn vào user khi đã đạt policy và claim duy nhất. Không ghi raw payload/credential vào log hay Kafka.
 - Bước face 3D của SDK upload thêm blob quét dạng `text`; Core giới hạn kích thước, chỉ chấp nhận mã hash của blob này trong đúng phiên hiện tại và không tính nó là ảnh giấy tờ/khuôn mặt.
-- Capture VNPT được triển khai trên web. Admin portal có thêm xác minh thủ công tại chi tiết tài khoản; mobile chưa triển khai.
+- Capture VNPT được triển khai trên web; admin portal chỉ đọc trạng thái KYC. Mobile chưa triển khai.
 
-## ADMIN xác minh thủ công
+## ADMIN đọc trạng thái
 
-- `GET /api/v1/admin/users/{userId}/kyc` đọc trạng thái; `POST .../kyc/verify` nhận JSON `{ "cccd": "<12 chữ số>" }`. Chỉ ADMIN đang hoạt động được thao tác; danh tính người thực hiện lấy từ context đã xác thực.
-- Core kiểm tra tài khoản đang hoạt động, chưa VERIFIED và CCCD chưa thuộc tài khoản khác. CCCD giữ dạng chuỗi để không mất số 0 đầu.
-- Ghi CCCD và hồ sơ `provider=ADMIN`, `status=VERIFIED`, thời điểm xác minh và `createdBy` trong cùng transaction. Đóng các phiên đang chờ để kết quả VNPT đến muộn không ghi đè.
-- Xác minh ADMIN và finalize VNPT được tuần tự hóa theo user; kiểm tra trùng CCCD dùng khóa advisory chung và unique index hiện có. Schema migration mở rộng CHECK provider, giữ lịch sử DIDIT/VNPT.
-- Các KYC gate, profile và SmartCA công nhận hồ sơ ADMIN VERIFIED qua cùng policy; không giả lập kết quả sinh trắc học VNPT.
+- `GET /api/v1/admin/users/{userId}/kyc` chỉ dành cho ADMIN đang hoạt động. Xác minh nhanh bằng CCCD đã tạm tắt; `POST .../kyc/verify` không còn khả dụng vì hồ sơ mới yêu cầu đủ thông tin và kết quả kiểm tra từ VNPT.
+- Lịch sử hồ sơ `provider=ADMIN` vẫn được nhận diện trong chính sách KYC; luồng VNPT của người dùng không thay đổi.
 
 ## Nghiệm thu
 

@@ -14,7 +14,8 @@ import static org.mockito.Mockito.*;
 class KycProviderSelectionTest {
     UserRepository users=mock(UserRepository.class);
     KycVerificationRepository records=mock(KycVerificationRepository.class);
-    KycServiceImpl service=new KycServiceImpl(users,records,new com.fasterxml.jackson.databind.ObjectMapper());
+    UserKycDetailsRepository details=mock(UserKycDetailsRepository.class);
+    KycServiceImpl service=new KycServiceImpl(users,records,details);
     @BeforeEach void actor(){User u=new User();u.setId("alice");when(users.existsById("alice")).thenReturn(true);when(users.findByIdForUpdate("alice")).thenReturn(Optional.of(u));}
     KycVerification vnpt(){return KycVerification.builder().id("attempt").userId("alice").provider(KycProvider.VNPT).providerSessionId("WEB-SDK_test_123").status(KycStatus.PENDING).expiresAt(Instant.now().plusSeconds(60)).build();}
     @Test void newUsersDefaultToVnpt(){
@@ -33,9 +34,9 @@ class KycProviderSelectionTest {
         assertNull(service.getVerifiedDetails("alice"));
     }
     @Test void detailsAreReadOnlyForTheRequestedVerifiedUser(){
-        var v=KycVerification.builder().id("attempt").userId("alice").provider(KycProvider.VNPT).status(KycStatus.VERIFIED)
-                .verifiedDetails("{\"cccd\":\"001234567890\"}").build();
+        var v=KycVerification.builder().id("attempt").userId("alice").provider(KycProvider.VNPT).status(KycStatus.VERIFIED).build();
         when(records.findFirstByUserIdAndStatusOrderByVerifiedAtDesc("alice",KycStatus.VERIFIED)).thenReturn(Optional.of(v));
+        when(details.findById("alice")).thenReturn(Optional.of(UserKycDetails.from("alice",new com.hs.user.dto.response.KycVerifiedDetailsResponse("001234567890",null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null))));
         assertEquals("001234567890",service.getVerifiedDetails("alice").cccd());
         assertThrows(AppException.class,()->service.getVerifiedDetails("bob"));
         verify(records,never()).findFirstByUserIdAndStatusOrderByVerifiedAtDesc("bob",KycStatus.VERIFIED);

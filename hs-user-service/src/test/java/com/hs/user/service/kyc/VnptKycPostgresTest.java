@@ -4,13 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.common.advice.entity.AppException;
 import com.hs.user.config.vnpt.*;
 import com.hs.user.model.*;
-import com.hs.user.model.Role;
 import com.hs.user.model.constant.*;
 import com.hs.user.repository.*;
 import com.hs.user.service.impl.CccdClaimService;
 import com.hs.user.service.impl.KycServiceImpl;
-import com.hs.user.utils.CurrentUserUtils;
-import com.hs.user.constant.RoleConstants;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,29 +34,24 @@ import static org.junit.jupiter.api.Assertions.*;
 @ContextConfiguration(classes=VnptKycPostgresTest.Config.class)
 @TestPropertySource(properties={"spring.datasource.url=${HS_KYC_TEST_PG_URL}","spring.datasource.username=${HS_KYC_TEST_PG_USER}","spring.datasource.password=${HS_KYC_TEST_PG_PASSWORD}","spring.jpa.hibernate.ddl-auto=create-drop","spring.datasource.hikari.connection-init-sql=SET lock_timeout TO '5s'"})
 @Transactional(propagation=Propagation.NOT_SUPPORTED)
-@Import({VnptKycStore.class,CccdClaimService.class,AdminKycService.class,KycServiceImpl.class})
+@Import({VnptKycStore.class,CccdClaimService.class,KycServiceImpl.class})
 class VnptKycPostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs.user.model") @EnableJpaRepositories(basePackageClasses=UserRepository.class) @EnableJpaAuditing
     static class Config {
         @Bean ObjectMapper mapper(){return new ObjectMapper();}
         @Bean VnptKycProperties properties(){return new VnptKycProperties(true,"https://example.test","test","test",15,5,1);}
-        @Bean CurrentUserUtils actor(){
-            var actor=org.mockito.Mockito.mock(CurrentUserUtils.class);
-            var admin=new User();admin.setId("operator");var role=new Role();role.setName(RoleConstants.ADMIN);admin.setRole(role);
-            org.mockito.Mockito.when(actor.getCurrentUser()).thenReturn(admin);return actor;
-        }
     }
     @Autowired UserRepository users;
     @Autowired KycVerificationRepository verifications;
+    @Autowired UserKycDetailsRepository details;
     @Autowired VnptKycStepRepository steps;
     @Autowired VnptKycStore store;
     @Autowired CccdClaimService claims;
-    @Autowired AdminKycService adminKyc;
     @Autowired KycServiceImpl kyc;
     @Autowired jakarta.persistence.EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager manager;
-    @BeforeEach void reset(){steps.deleteAllInBatch();verifications.deleteAllInBatch();users.deleteAllInBatch();jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_test_cccd ON users(cccd)");}
+    @BeforeEach void reset(){steps.deleteAllInBatch();details.deleteAllInBatch();verifications.deleteAllInBatch();users.deleteAllInBatch();jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_test_cccd ON users(cccd)");}
     void user(String id){User u=new User();u.setId(id);u.setUsername(id);u.setEmail(id+"@example.invalid");users.saveAndFlush(u);}
     @Test void concurrentStartsReuseOneOwnedAttemptAndProviderSurvivesReload() throws Exception {
         user("alice");var start=new CountDownLatch(1);
@@ -73,8 +65,8 @@ class VnptKycPostgresTest {
     @Test void concurrentCitizenClaimsHaveExactlyOneWinner() throws Exception {
         user("alice");user("bob");var start=new CountDownLatch(1);
         try(var pool=Executors.newFixedThreadPool(2)) {
-            var a=pool.submit(()->{start.await();return claims.tryClaim("alice","001234567890");});
-            var b=pool.submit(()->{start.await();return claims.tryClaim("bob","001234567890");});start.countDown();
+            var a=pool.submit(()->{start.await();return new TransactionTemplate(manager).execute(tx->claims.claimInCurrentTransaction("alice","001234567890"));});
+            var b=pool.submit(()->{start.await();return new TransactionTemplate(manager).execute(tx->claims.claimInCurrentTransaction("bob","001234567890"));});start.countDown();
             assertNotEquals(a.get(15,TimeUnit.SECONDS),b.get(15,TimeUnit.SECONDS));
         }
         assertEquals(1,jdbc.queryForObject("select count(*) from users where cccd = '001234567890'",Integer.class));
@@ -100,54 +92,29 @@ class VnptKycPostgresTest {
         assertEquals(2,verifications.count());assertEquals(KycProvider.DIDIT,verifications.findById(old.getId()).orElseThrow().getProvider());
     }
 
-    @Test void concurrentManualClaimsHaveOneWinnerAndOneVerifiedRecord() throws Exception {
-        user("alice");user("bob");var start=new CountDownLatch(1);
-        try(var pool=Executors.newFixedThreadPool(2)) {
-            var a=pool.submit(()->{start.await();return manualVerify("alice","001234567890");});
-            var b=pool.submit(()->{start.await();return manualVerify("bob","001234567890");});start.countDown();
-            assertNotEquals(a.get(15,TimeUnit.SECONDS),b.get(15,TimeUnit.SECONDS));
-        }
-        assertEquals(1,verifications.findAll().stream().filter(v->v.getStatus()==KycStatus.VERIFIED).count());
-        assertEquals(1,jdbc.queryForObject("select count(*) from users where cccd = '001234567890'",Integer.class));
-    }
-
     @Test void verifiedDetailsSurviveTemporaryEvidencePurge() throws Exception {
         user("alice");String id=store.start("alice").sessionId();proof(id);
+        assertEquals(1,jdbc.queryForObject("select count(*) from pg_constraint where conname = 'fk_user_kyc_details_user'",Integer.class));
         var ocr=steps.findByAttemptIdOrderByCreatedAtAsc(id).stream().filter(s->"ocr".equals(s.getKind())).findFirst().orElseThrow();
         var response=(com.fasterxml.jackson.databind.node.ObjectNode)new ObjectMapper().readTree(ocr.getResultJson());
         ((com.fasterxml.jackson.databind.node.ObjectNode)response.path("object")).put("name","NGUYEN VAN A");
         ocr.setResultJson(response.toString());steps.saveAndFlush(ocr);
         assertEquals(KycStatus.VERIFIED,store.finalizeAttempt("alice",id));
         steps.deleteAllInBatch();entityManager.clear();
+        assertEquals(1,details.count());
         assertEquals("NGUYEN VAN A",kyc.getVerifiedDetails("alice").fullName());
         assertEquals("001234567890",kyc.getVerifiedDetails("alice").cccd());
     }
 
-    @Test void failedManualRecordRollsBackTheCitizenClaimAndPendingSessionChanges() {
-        user("alice");String id=store.start("alice").sessionId();
-        jdbc.execute("ALTER TABLE kyc_verifications ADD CONSTRAINT test_manual_failure CHECK (provider <> 'ADMIN')");
+    @Test void detailsWriteFailureRollsBackCitizenClaimAndVerification() {
+        user("alice");String id=store.start("alice").sessionId();proof(id);
+        jdbc.execute("ALTER TABLE user_kyc_details ADD CONSTRAINT test_details_failure CHECK (cccd <> '001234567890')");
         try {
-            assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->adminKyc.verify("alice","001234567890"));
+            assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->store.finalizeAttempt("alice",id));
             assertNull(users.findById("alice").orElseThrow().getCccd());
             assertEquals(KycStatus.PENDING,verifications.findById(id).orElseThrow().getStatus());
-        } finally {jdbc.execute("ALTER TABLE kyc_verifications DROP CONSTRAINT test_manual_failure");}
-    }
-
-    @Test void concurrentManualAndVnptVerificationCannotOverwriteEachOther() throws Exception {
-        user("alice");String id=store.start("alice").sessionId();proof(id);
-        var start=new CountDownLatch(1);
-        try(var pool=Executors.newFixedThreadPool(2)) {
-            var manual=pool.submit(()->{start.await();return manualVerify("alice","001234567899");});
-            var vnpt=pool.submit(()->{start.await();try{return store.finalizeAttempt("alice",id)==KycStatus.VERIFIED;}catch(AppException ex){return false;}});
-            start.countDown();assertNotEquals(manual.get(15,TimeUnit.SECONDS),vnpt.get(15,TimeUnit.SECONDS));
-        }
-        var verified=verifications.findAll().stream().filter(v->v.getStatus()==KycStatus.VERIFIED).toList();
-        assertEquals(1,verified.size());
-        assertEquals(verified.get(0).getProvider()==KycProvider.ADMIN?"001234567899":"001234567890",users.findById("alice").orElseThrow().getCccd());
-    }
-
-    private boolean manualVerify(String userId,String cccd) {
-        try{return adminKyc.verify(userId,cccd).status()==KycStatus.VERIFIED;}catch(AppException ex){return false;}
+            assertEquals(0,details.count());
+        } finally {jdbc.execute("ALTER TABLE user_kyc_details DROP CONSTRAINT test_details_failure");}
     }
     private void proof(String attempt) {
         evidence(attempt,"upload","front",null,null,null,null,null,"{}");

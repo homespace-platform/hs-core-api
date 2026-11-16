@@ -2,6 +2,7 @@ package com.hs.user.service.kyc;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hs.user.model.UserKycDetails;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -37,5 +38,13 @@ class VnptKycDetailsTest {
         assertNull(details.frontBackIdentical());
         assertNull(details.eyesOpen());
         assertNull(details.faceMatchPercent());
+    }
+
+    @Test void everyResultFieldSurvivesEntityMapping() throws Exception {
+        var details = VnptKycDetails.from(
+                result("{\"id\":\"001234567890\",\"name\":\"A\",\"birth_day\":\"01/01/2000\",\"recent_location\":\"Hanoi\",\"gender\":\"Nam\",\"issue_date\":\"01/01/2020\",\"valid_date\":\"01/01/2030\",\"issue_place\":\"Noi cap\"}"),
+                result("{\"msg\":\"MATCH\",\"prob\":97.654}"), result("{\"liveness\":\"success\",\"is_eye_open\":\"yes\",\"blur_face\":\"no\"}"),
+                result("{\"masked\":\"no\"}"), result("{\"fake_liveness\":false}"), result("{\"fake_liveness\":false}"), mapper);
+        assertEquals(details, UserKycDetails.from("alice", details).toResponse());
     }
 }

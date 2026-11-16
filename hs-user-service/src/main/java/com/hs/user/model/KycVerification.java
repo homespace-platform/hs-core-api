@@ -79,8 +79,4 @@ public class KycVerification extends BaseEntity {
     @Column(name = "expires_at")
     Instant expiresAt;
 
-    /** Selected VNPT result fields retained after temporary capture evidence is purged. */
-    @Column(name = "verified_details", columnDefinition = "text")
-    String verifiedDetails;
-
 }

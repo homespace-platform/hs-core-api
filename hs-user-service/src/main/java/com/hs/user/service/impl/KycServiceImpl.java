@@ -4,12 +4,13 @@ import com.hs.common.advice.entity.AppException;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.response.KycStatusResponse;
 import com.hs.user.dto.response.KycVerifiedDetailsResponse;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.user.model.KycVerification;
+import com.hs.user.model.UserKycDetails;
 import com.hs.user.model.constant.KycProvider;
 import com.hs.user.service.kyc.KycPolicy;
 import com.hs.user.model.constant.KycStatus;
 import com.hs.user.repository.KycVerificationRepository;
+import com.hs.user.repository.UserKycDetailsRepository;
 import com.hs.user.repository.UserRepository;
 import com.hs.user.service.KycService;
 import java.time.Instant;
@@ -37,18 +38,16 @@ public class KycServiceImpl implements KycService {
 
     private final UserRepository userRepository;
     private final KycVerificationRepository kycVerificationRepository;
-    private final ObjectMapper mapper;
+    private final UserKycDetailsRepository details;
 
     @Override
     @Transactional(readOnly = true)
     public KycVerifiedDetailsResponse getVerifiedDetails(String userId) {
         requireUser(userId);
         return kycVerificationRepository.findFirstByUserIdAndStatusOrderByVerifiedAtDesc(userId, KycStatus.VERIFIED)
-                .filter(v -> v.getProvider() == KycProvider.VNPT && v.getVerifiedDetails() != null)
-                .map(v -> {
-                    try { return mapper.readValue(v.getVerifiedDetails(), KycVerifiedDetailsResponse.class); }
-                    catch (Exception ex) { throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR); }
-                }).orElse(null);
+                .filter(v -> v.getProvider() == KycProvider.VNPT)
+                .flatMap(v -> details.findById(userId))
+                .map(UserKycDetails::toResponse).orElse(null);
     }
 
     @Override
