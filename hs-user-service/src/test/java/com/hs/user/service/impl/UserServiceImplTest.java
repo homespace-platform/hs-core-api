@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 import com.hs.user.model.User;
+import com.hs.user.model.Role;
 import com.hs.user.model.constant.KycProvider;
 import com.hs.user.service.kyc.KycPolicy;
 import com.hs.user.model.constant.KycStatus;
@@ -27,6 +28,32 @@ import com.hs.user.service.KeycloakUserService;
 import com.hs.user.utils.CurrentUserUtils;
 
 class UserServiceImplTest {
+
+    @Test
+    void adminProfileReportsActualVerificationWithoutAnExemption() {
+        var users = mock(UserRepository.class);
+        var verifications = mock(KycVerificationRepository.class);
+        var actor = mock(CurrentUserUtils.class);
+        var user = new User();
+        user.setId("admin-1");
+        user.setActive(true);
+        var role = new Role();
+        role.setName("ADMIN");
+        user.setRole(role);
+        when(actor.getCurrentUser()).thenReturn(user);
+        when(users.findById("admin-1")).thenReturn(Optional.of(user));
+        var service = new UserServiceImpl(users, mock(RoleRepository.class), mock(AddressRepository.class),
+                verifications, mock(KeycloakUserService.class), actor, mock(AccountNotificationWriter.class));
+
+        assertFalse(service.getUserProfile().kycVerified());
+        assertFalse(service.getUserProfile().kycOptional());
+        assertFalse(service.getPublicUserProfile("admin-1").kycVerified());
+
+        when(verifications.existsByUserIdAndProviderInAndStatus(
+                "admin-1", KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED)).thenReturn(true);
+        assertTrue(service.getUserProfile().kycVerified());
+        assertTrue(service.getPublicUserProfile("admin-1").kycVerified());
+    }
 
     @Test
     void returnsOnlyPublicProfileFields() {

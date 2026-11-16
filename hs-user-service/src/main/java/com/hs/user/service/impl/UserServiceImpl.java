@@ -246,10 +246,7 @@ public class UserServiceImpl implements UserService {
                 User user = currentUserUtils.getCurrentUser();
                 Address address = addressRepository.findByUser_IdAndActiveTrue(user.getId()).orElse(null);
                 boolean identityVerified = kycVerificationRepository.existsByUserIdAndProviderInAndStatus(user.getId(), KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED);
-                boolean kycOptional = KycPolicy.isAdminTrusted(user);
-                // Admin is trusted as verified for business rules (no eKYC required).
-                boolean kycVerified = KycPolicy.isIdentitySatisfied(user, identityVerified);
-                return UserMapper.mapToUserProfileResponse(user, address, kycVerified, kycOptional);
+                return UserMapper.mapToUserProfileResponse(user, address, identityVerified);
         }
 
         @Override
@@ -266,7 +263,7 @@ public class UserServiceImpl implements UserService {
                                 .firstName(user.getFirstName())
                                 .lastName(user.getLastName())
                                 .avatarUrl(user.getAvatarUrl())
-                                .kycVerified(KycPolicy.isIdentitySatisfied(user, identityVerified))
+                                .kycVerified(identityVerified)
                                 .createdAt(user.getCreatedAt())
                                 .build();
         }

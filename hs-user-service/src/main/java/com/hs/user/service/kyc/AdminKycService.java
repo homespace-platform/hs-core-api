@@ -2,6 +2,7 @@ package com.hs.user.service.kyc;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
+import com.hs.user.constant.RoleConstants;
 import com.hs.user.dto.response.KycStatusResponse;
 import com.hs.user.service.KycService;
 import com.hs.user.utils.CurrentUserUtils;
@@ -22,6 +23,8 @@ public class AdminKycService {
 
     private void requireAdmin() {
         var admin = actor.getCurrentUser();
-        if (!KycPolicy.isAdminTrusted(admin)) throw new AppException(ErrorCode.UNAUTHORIZED);
+        if (admin.getRole() == null || !RoleConstants.ADMIN.equals(admin.getRole().getName())) {
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
     }
 }
