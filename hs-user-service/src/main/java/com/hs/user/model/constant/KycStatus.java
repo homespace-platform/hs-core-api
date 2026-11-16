@@ -1,6 +1,6 @@
 package com.hs.user.model.constant;
 
-/** HomeSpace KYC lifecycle status (mapped from Didit verification statuses). */
+/** HomeSpace KYC lifecycle status. */
 public enum KycStatus {
     NOT_VERIFIED,
     PENDING,

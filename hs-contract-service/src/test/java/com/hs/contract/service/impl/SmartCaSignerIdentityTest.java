@@ -11,6 +11,7 @@ import com.hs.user.constant.RoleConstants;
 import com.hs.user.model.Role;
 import com.hs.user.model.User;
 import com.hs.user.model.constant.KycProvider;
+import com.hs.user.service.kyc.KycPolicy;
 import com.hs.user.model.constant.KycStatus;
 import com.hs.user.repository.KycVerificationRepository;
 import com.hs.user.repository.UserRepository;
@@ -34,8 +35,8 @@ class SmartCaSignerIdentityTest {
         when(userRepository.findById("admin")).thenReturn(Optional.of(admin));
 
         assertSame(admin, service.requireUserWithCccd("admin"));
-        verify(kycVerificationRepository, never()).existsByUserIdAndProviderAndStatus(
-                "admin", KycProvider.DIDIT, KycStatus.VERIFIED);
+        verify(kycVerificationRepository, never()).existsByUserIdAndProviderInAndStatus(
+                "admin", KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED);
     }
 
     @Test
@@ -44,8 +45,8 @@ class SmartCaSignerIdentityTest {
         when(userRepository.findById("tenant")).thenReturn(Optional.of(user));
 
         assertThrows(AppException.class, () -> service.requireUserWithCccd("tenant"));
-        verify(kycVerificationRepository).existsByUserIdAndProviderAndStatus(
-                "tenant", KycProvider.DIDIT, KycStatus.VERIFIED);
+        verify(kycVerificationRepository).existsByUserIdAndProviderInAndStatus(
+                "tenant", KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED);
     }
 
     @Test
@@ -54,8 +55,16 @@ class SmartCaSignerIdentityTest {
         when(userRepository.findById("admin")).thenReturn(Optional.of(admin));
 
         assertThrows(AppException.class, () -> service.requireUserWithCccd("admin"));
-        verify(kycVerificationRepository, never()).existsByUserIdAndProviderAndStatus(
-                "admin", KycProvider.DIDIT, KycStatus.VERIFIED);
+        verify(kycVerificationRepository, never()).existsByUserIdAndProviderInAndStatus(
+                "admin", KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED);
+    }
+
+    @Test
+    void regularUserWithVnptVerifiedMayUseOwnCccd() {
+        User user = user("tenant", RoleConstants.USER, "001234567890");
+        when(userRepository.findById("tenant")).thenReturn(Optional.of(user));
+        when(kycVerificationRepository.existsByUserIdAndProviderInAndStatus("tenant", KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED)).thenReturn(true);
+        assertSame(user, service.requireUserWithCccd("tenant"));
     }
 
     private static User user(String id, String roleName, String cccd) {

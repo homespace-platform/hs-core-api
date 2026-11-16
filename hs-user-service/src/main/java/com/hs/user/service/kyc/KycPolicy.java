@@ -6,10 +6,13 @@ import com.hs.user.model.User;
 
 /**
  * KYC policy derived from role — no extra DB column.
- * ADMIN is treated as identity-verified by default (bypass Didit for business gates).
- * USER must complete Didit KYC when a feature requires it.
+ * ADMIN is treated as identity-verified by default (bypass eKYC for business gates).
+ * USER must complete KYC when a feature requires it.
  */
 public final class KycPolicy {
+    // Existing verified identities remain valid after retiring their provider integration.
+    public static final java.util.List<com.hs.user.model.constant.KycProvider> ACCEPTED_PROVIDERS = java.util.List.of(
+            com.hs.user.model.constant.KycProvider.DIDIT, com.hs.user.model.constant.KycProvider.VNPT);
 
     private KycPolicy() {
     }
@@ -35,9 +38,9 @@ public final class KycPolicy {
 
     /**
      * Use when a feature requires identity verification.
-     * Admins always pass; others need Didit {@code VERIFIED}.
+     * Admins always pass; others need an accepted provider with {@code VERIFIED}.
      */
-    public static boolean isIdentitySatisfied(User user, boolean diditVerified) {
-        return isAdminTrusted(user) || diditVerified;
+    public static boolean isIdentitySatisfied(User user, boolean identityVerified) {
+        return isAdminTrusted(user) || identityVerified;
     }
 }

@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import com.hs.user.model.User;
 import com.hs.user.model.constant.KycProvider;
+import com.hs.user.service.kyc.KycPolicy;
 import com.hs.user.model.constant.KycStatus;
 import com.hs.user.notification.AccountNotificationWriter;
 import com.hs.user.repository.AddressRepository;
@@ -41,8 +42,8 @@ class UserServiceImplTest {
         user.setActive(true);
         user.setCreatedAt(Instant.parse("2026-01-01T00:00:00Z"));
         when(users.findById("user-1")).thenReturn(Optional.of(user));
-        when(verifications.existsByUserIdAndProviderAndStatus(
-                "user-1", KycProvider.DIDIT, KycStatus.VERIFIED)).thenReturn(true);
+        when(verifications.existsByUserIdAndProviderInAndStatus(
+                "user-1", KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED)).thenReturn(true);
 
         var service = new UserServiceImpl(
                 users,

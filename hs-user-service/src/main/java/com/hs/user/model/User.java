@@ -58,7 +58,7 @@ public class User extends BaseEntity {
     @Column(length = 15, unique = true)
     String phone;
 
-    /** Citizen ID (CCCD) filled from Didit KYC when Approved. Unique across users. */
+    /** Citizen ID (CCCD) filled from verified KYC. Unique across users. */
     @Column(name = "cccd", length = 20)
     String cccd;
 

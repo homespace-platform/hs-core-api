@@ -31,10 +31,9 @@ public class KycGateService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
 
-        boolean diditVerified = kycVerificationRepository.existsByUserIdAndProviderAndStatus(
-                userId, KycProvider.DIDIT, KycStatus.VERIFIED);
+        boolean identityVerified = kycVerificationRepository.existsByUserIdAndProviderInAndStatus(userId, KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED);
 
-        if (!KycPolicy.isIdentitySatisfied(user, diditVerified)) {
+        if (!KycPolicy.isIdentitySatisfied(user, identityVerified)) {
             throw new AppException(UserErrorCode.KYC_REQUIRED);
         }
     }

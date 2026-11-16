@@ -10,14 +10,14 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface KycVerificationRepository extends JpaRepository<KycVerification, String> {
 
-    Optional<KycVerification> findFirstByUserIdAndProviderOrderByCreatedAtDesc(
-            String userId, KycProvider provider);
+    Optional<KycVerification> findFirstByUserIdAndStatusOrderByVerifiedAtDesc(String userId, KycStatus status);
+    Optional<KycVerification> findFirstByUserIdOrderByCreatedAtDesc(String userId);
+    List<KycVerification> findByUserIdAndStatusInOrderByCreatedAtDesc(String userId, Collection<KycStatus> statuses);
+    long countByUserIdAndProviderAndCreatedAtAfter(String userId, KycProvider provider, java.time.Instant since);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("select k from KycVerification k where k.id = :id")
+    Optional<KycVerification> lockById(@org.springframework.data.repository.query.Param("id") String id);
 
-    Optional<KycVerification> findByProviderAndProviderSessionId(
-            KycProvider provider, String providerSessionId);
+    boolean existsByUserIdAndProviderInAndStatus(String userId, Collection<KycProvider> providers, KycStatus status);
 
-    List<KycVerification> findByUserIdAndProviderAndStatusInOrderByCreatedAtDesc(
-            String userId, KycProvider provider, Collection<KycStatus> statuses);
-
-    boolean existsByUserIdAndProviderAndStatus(String userId, KycProvider provider, KycStatus status);
 }

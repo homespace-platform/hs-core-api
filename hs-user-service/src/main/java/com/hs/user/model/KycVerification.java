@@ -12,7 +12,6 @@ import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
-import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -61,7 +60,7 @@ public class KycVerification extends BaseEntity {
     @Column(nullable = false, length = 32)
     KycStatus status;
 
-    /** Raw Didit status label, e.g. Approved / In Progress. */
+    /** Historical provider status label. */
     @Column(name = "provider_status", length = 64)
     String providerStatus;
 
@@ -77,22 +76,7 @@ public class KycVerification extends BaseEntity {
     @Column(name = "verified_at")
     Instant verifiedAt;
 
-    public static KycVerification createPending(
-            String userId,
-            String providerSessionId,
-            String workflowId,
-            String sessionUrl,
-            String providerStatus
-    ) {
-        return KycVerification.builder()
-                .id(UUID.randomUUID().toString())
-                .userId(userId)
-                .provider(KycProvider.DIDIT)
-                .providerSessionId(providerSessionId)
-                .workflowId(workflowId)
-                .status(KycStatus.PENDING)
-                .providerStatus(providerStatus != null ? providerStatus : "Not Started")
-                .sessionUrl(sessionUrl)
-                .build();
-    }
+    @Column(name = "expires_at")
+    Instant expiresAt;
+
 }

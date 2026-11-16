@@ -47,15 +47,16 @@ public enum UserErrorCode implements AppException.ErrorCode {
     KEYCLOAK_USER_CREATE_FAILED(2304, "Keycloak user creation failed", HttpStatus.BAD_GATEWAY),
     KEYCLOAK_INVITATION_SEND_FAILED(2305, "Failed to send invitation email", HttpStatus.BAD_GATEWAY),
 
-    // 25xx KYC / Didit
+    // 25xx KYC
     KYC_NOT_CONFIGURED(2501, "KYC provider is not configured", HttpStatus.SERVICE_UNAVAILABLE),
     KYC_ALREADY_VERIFIED(2502, "Identity is already verified", HttpStatus.CONFLICT),
     KYC_PROVIDER_ERROR(2503, "KYC provider request failed", HttpStatus.BAD_GATEWAY),
-    KYC_WEBHOOK_INVALID(2504, "Invalid KYC webhook signature", HttpStatus.UNAUTHORIZED),
-    KYC_WEBHOOK_STALE(2505, "KYC webhook timestamp is outside the allowed window", HttpStatus.UNAUTHORIZED),
     KYC_SESSION_NOT_FOUND(2506, "KYC session not found", HttpStatus.NOT_FOUND),
     KYC_CANCEL_NOT_ALLOWED(2507, "No cancellable KYC session", HttpStatus.CONFLICT),
-    KYC_REQUIRED(2508, "Identity verification (KYC) is required before this action", HttpStatus.FORBIDDEN);
+    KYC_REQUIRED(2508, "Identity verification (KYC) is required before this action", HttpStatus.FORBIDDEN),
+    KYC_ATTEMPT_INVALID(2509, "Phiên xác minh không hợp lệ hoặc đã hết hạn. Vui lòng bắt đầu lại.", HttpStatus.CONFLICT),
+    KYC_INPUT_INVALID(2510, "Dữ liệu xác minh không hợp lệ.", HttpStatus.BAD_REQUEST),
+    KYC_ATTEMPT_LIMIT(2511, "Đã đạt giới hạn lượt xác minh. Vui lòng thử lại sau.", HttpStatus.TOO_MANY_REQUESTS);
 
     UserErrorCode(int code, String message, HttpStatusCode statusCode) {
         this.code = code;
