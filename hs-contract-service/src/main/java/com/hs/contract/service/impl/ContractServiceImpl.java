@@ -90,6 +90,8 @@ public class ContractServiceImpl implements ContractService {
     @Autowired(required=false) private com.hs.contract.service.RentalOnboardingService onboarding;
     @Autowired private com.hs.contract.deposit.DepositAgreementService depositAgreements;
     @Autowired private com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
+    @Autowired private com.hs.contract.repository.RentalWorkflowRecordRepository workflowRecords;
+    @Autowired private com.hs.contract.repository.WorkflowSigningDocumentRepository workflowSigningDocuments;
     private static final String SIGNING_CITY = "Thành phố Hồ Chí Minh";
 
     private final ContractRepository contractRepository;
@@ -1369,6 +1371,20 @@ public class ContractServiceImpl implements ContractService {
         Contract contract = findContractAndCheckAccess(contractId);
         if (contract.getParentContractId() != null) contract = findContractAndCheckAccess(contract.getParentContractId());
         final String rootId = contract.getId();
+        if (contract.getAgreedEarlyEndExclusive() != null) {
+            var workflow = workflowRecords.findById(Objects.toString(contract.getMutualTerminationWorkflowId(), "")).orElse(null);
+            if (workflow == null || !rootId.equals(workflow.getContractId()) || !"EARLY_EXIT".equals(workflow.getKind())
+                    || !Set.of("AGREED", "RETURNED").contains(workflow.getStatus()) || workflow.getPayloadJson() == null
+                    || !contract.getAgreedEarlyEndExclusive().toString().equals(Objects.toString(fromJson(workflow.getPayloadJson(), MAP_TYPE).get("endExclusive"), "")))
+                return null;
+            var signed = workflowSigningDocuments.findByWorkflowIdAndContentHash(workflow.getId(), com.hs.contract.service.WorkflowDocumentService.hash(workflow)).orElse(null);
+            if (signed == null || signed.getSignedAt() == null) return null;
+            var agreement = findContractAndCheckAccess(signed.getSigningContractId());
+            if (!rootId.equals(agreement.getParentContractId()) || !"WORKFLOW".equals(agreement.getAgreementKind())
+                    || agreement.getStatus() != ContractStatus.ACTIVE || agreement.getSignedAt() == null
+                    || !Objects.equals(agreement.getRentalRequestId(), contract.getRentalRequestId())) return null;
+            return signedFinalPdf(agreement.getId(), agreement.getCurrentRevisionId());
+        }
         // Same source of truth as effective contract fields and billing. SCHEDULED is
         // effective at the boundary even if the synchronization job has not run yet.
         ContractRevision effective = termsResolver.at(contract, billingTime.today());
@@ -1378,8 +1394,13 @@ public class ContractServiceImpl implements ContractService {
             if (!rootId.equals(owner.getParentContractId()) || !"AMENDMENT".equals(owner.getAgreementKind()))
                 throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
-        return documentRepository.findByContractIdAndRevisionId(ownerId, effective.getId()).stream()
-                .filter(d -> ownerId.equals(d.getContractId()) && effective.getId().equals(d.getRevisionId()))
+        return signedFinalPdf(ownerId, effective.getId());
+    }
+
+    private ContractDocumentResponse signedFinalPdf(String ownerId, String revisionId) {
+        if (revisionId == null) return null;
+        return documentRepository.findByContractIdAndRevisionId(ownerId, revisionId).stream()
+                .filter(d -> ownerId.equals(d.getContractId()) && revisionId.equals(d.getRevisionId()))
                 .filter(d -> d.getPurpose() == DocumentPurpose.SIGNED_FINAL && d.getDocumentType() == ContractDocumentType.PDF
                         && d.getStatus() == DocumentGenerationStatus.READY && d.getStorageObjectId() != null && !d.getStorageObjectId().isBlank())
                 .max(Comparator.comparing(ContractDocument::getGeneratedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
@@ -1522,6 +1543,7 @@ public class ContractServiceImpl implements ContractService {
                 .parentContractId(c.getParentContractId())
                 .agreementKind(c.getAgreementKind())
                 .effectiveLeaseMonths(c.getEffectiveLeaseMonths())
+                .agreedEarlyEndExclusive(c.getAgreedEarlyEndExclusive())
                 .status(c.getStatus())
                 .rentalPaymentId(c.getRentalPaymentId())
                 .paymentStatus(paymentStatusOf(c))

@@ -1,6 +1,6 @@
 # Ghi nhận PDF hợp đồng lên blockchain
 
-Tính năng chạy trong `hs-contract-service`, được Core API nạp cùng luồng ký SmartCA. Phạm vi là **HĐ Cọc, HĐ Thuê gốc và phụ lục AMENDMENT đã ký đủ**. Khi deploy registry mới, cập nhật địa chỉ backend trước khi bật worker; dữ liệu proof trên registry cũ không tự chuyển sang registry mới.
+Tính năng chạy trong `hs-contract-service`, được Core API nạp cùng luồng ký SmartCA. Phạm vi là **HĐ Cọc, HĐ Thuê gốc, phụ lục điều chỉnh, văn bản gia hạn và phụ lục chấm dứt sớm đã ký đủ**. Khi deploy registry mới, cập nhật địa chỉ backend trước khi bật worker; dữ liệu proof trên registry cũ không tự chuyển sang registry mới.
 
 ## 1. Luồng xử lý
 
@@ -84,7 +84,7 @@ Hai bảng mới:
 
 Sau khi bạn tạo lại CSDL, khởi động Core với `JPA_DDL_AUTO=update` để Hibernate tạo bảng, cột và ràng buộc theo entity hiện tại. Chờ Core bootstrap xong rồi chạy seed data theo quy trình hiện có; không cần file SQL vá schema riêng.
 
-Job được lưu bền vững, không phụ thuộc tab trình duyệt. Khi tắt tính năng, worker dừng và dữ liệu đã có vẫn được giữ. Khi bật lại, worker tiếp tục các job đang chờ; hợp đồng ký trong lúc tắt/chưa đủ cấu hình công khai không tự được ghi bù. Chưa có backfill hàng loạt hoặc proof cho gia hạn RENEWAL.
+Job được lưu bền vững, không phụ thuộc tab trình duyệt. Khi tắt tính năng, worker dừng và dữ liệu đã có vẫn được giữ. Khi bật lại, worker tiếp tục các job đang chờ. Văn bản đã ký trước bản cập nhật này được xếp hàng khi người có quyền mở bằng chứng, nếu PDF còn hash và phiên bản S3 cố định lúc ký. Không tự ghi bù tài liệu thiếu bằng chứng cố định; không có backfill hàng loạt.
 
 Các cột bổ sung: `storage_objects.s3_version_id`, `row_version` (default `0`); `contract_documents.signed_sha256`, `signed_s3_version_id`, `integrity_status`, `integrity_checked_at`, `integrity_message`. Hash/version lúc ký không được cập nhật lại qua luồng ứng dụng. Kết quả kiểm tra gần nhất lưu trên tài liệu; mỗi lần kiểm tra có audit log `CONTRACT_DOCUMENT_INTEGRITY`, không tạo bảng audit riêng. Seed cũ có thể bỏ qua các cột nullable/default này; không tự điền hash/version giả cho dữ liệu seed.
 

@@ -15,8 +15,8 @@ public final class RentalWorkflowPayloads {
         @Size(max=5) List<@NotBlank String> evidenceIds) {}
     public record RentRefund(@NotBlank String paymentId,@NotNull @DecimalMin("0.01") @Digits(integer=10,fraction=2) BigDecimal amount) {}
     public record Termination(@NotNull @PositiveOrZero Long expectedRevision,@NotNull LocalDate endExclusive,
-        @NotBlank @Size(min=10,max=1000) String reason,@NotBlank @Size(min=10,max=1000) String handoverTerms,
-        @NotBlank @Pattern(regexp="FULL_STARTED_PERIOD|DAILY_PRORATED") String finalRentPolicy,
-        @NotNull @Size(max=50) List<@Valid RentRefund> rentRefunds,
+        @NotBlank @Size(min=10,max=1000) String reason,@Size(max=1000) String handoverTerms,
+        @Pattern(regexp="FULL_STARTED_PERIOD|DAILY_PRORATED") String finalRentPolicy,
+        @Size(max=50) List<@Valid RentRefund> rentRefunds,
         @Size(max=5) List<@NotBlank String> evidenceIds) {}
 }

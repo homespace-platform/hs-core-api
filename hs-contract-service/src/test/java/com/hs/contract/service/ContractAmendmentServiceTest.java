@@ -552,6 +552,22 @@ class ContractAmendmentServiceTest {
         assertThrows(AppException.class,() -> service.decide("root",next.getId(),"owner",new AmendmentDecision("WITHDRAW",null)));
         assertEquals("SCHEDULED",next.getStatus());
     }
+    @Test void eitherPartyCanCancelApprovedAppendixAfterOneSignatureButNotAfterBoth(){
+        for(String actor:List.of("owner","tenant")){
+            var proposal=request("owner");var child=approve(proposal);
+            var first=SignatureRequest.builder().status(SignatureRequestStatus.SIGNED).build();
+            var pending=SignatureRequest.builder().status(SignatureRequestStatus.EMBEDDING).build();
+            when(signatures.findByContractIdOrderByCreatedAtDesc(child.getId())).thenReturn(List.of(first,pending));
+            service.decide("root",proposal.getId(),actor,new AmendmentDecision("CANCEL",null));
+            assertEquals("WITHDRAWN",proposal.getStatus());assertEquals(ContractStatus.CANCELLED,child.getStatus());
+            assertEquals(SignatureRequestStatus.SIGNED,first.getStatus());assertEquals(SignatureRequestStatus.CANCELLED,pending.getStatus());
+            assertThrows(AppException.class,()->service.validateSigning(child));
+        }
+        var proposal=request("owner");var child=approve(proposal);child.setStatus(ContractStatus.ACTIVE);
+        assertThrows(AppException.class,()->service.decide("root",proposal.getId(),"tenant",new AmendmentDecision("CANCEL",null)));
+        assertThrows(AppException.class,()->service.decide("root",proposal.getId(),"owner",new AmendmentDecision("WITHDRAW",null)));
+        assertEquals("APPROVED",proposal.getStatus());
+    }
     TenantAmendmentRequest wish() { return new TenantAmendmentRequest(UUID.randomUUID().toString(),"Tôi muốn giảm tiền phòng xuống 1 triệu",List.of()); }
     @Test void tenantCanOnlyRequestNegotiationNeverSubmitStructuredTerms() {
         assertThrows(AppException.class,() -> service.propose("root","tenant",payload(Map.of("rentAmount","1000000"))));

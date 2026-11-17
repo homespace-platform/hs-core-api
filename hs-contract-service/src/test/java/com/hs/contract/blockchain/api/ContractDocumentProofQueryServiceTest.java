@@ -7,10 +7,15 @@ import com.hs.contract.advice.ContractErrorCode;
 import com.hs.contract.blockchain.client.BlockchainException;
 import com.hs.contract.blockchain.client.RegistryClient;
 import com.hs.contract.blockchain.persistence.ContractDocumentProof;
+import com.hs.contract.blockchain.persistence.ContractDocumentProofEnqueuer;
 import com.hs.contract.blockchain.persistence.ContractDocumentProofRepository;
 import com.hs.contract.blockchain.persistence.ProofStatus;
 import com.hs.contract.dto.response.ContractDocumentResponse;
+import com.hs.contract.model.Contract;
+import com.hs.contract.model.ContractDocument;
 import com.hs.contract.model.constant.*;
+import com.hs.contract.repository.ContractDocumentRepository;
+import com.hs.contract.repository.ContractRepository;
 import com.hs.contract.service.ContractService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,7 +36,10 @@ class ContractDocumentProofQueryServiceTest {
     private final ContractService contracts = mock(ContractService.class);
     private final ContractDocumentProofRepository proofs = mock(ContractDocumentProofRepository.class);
     private final RegistryClient registry = mock(RegistryClient.class);
-    private final ContractDocumentProofQueryService service = new ContractDocumentProofQueryService(contracts, proofs, registry);
+    private final ContractRepository agreements = mock(ContractRepository.class);
+    private final ContractDocumentRepository documents = mock(ContractDocumentRepository.class);
+    private final ContractDocumentProofEnqueuer enqueuer = mock(ContractDocumentProofEnqueuer.class);
+    private final ContractDocumentProofQueryService service = new ContractDocumentProofQueryService(contracts, proofs, registry, agreements, documents, enqueuer);
     private ContractDocumentResponse document;
     private ContractDocumentProof proof;
 
@@ -69,6 +77,37 @@ class ContractDocumentProofQueryServiceTest {
         assertEquals("NOT_AVAILABLE", service.get("pdf").status());
         verifyNoInteractions(registry);
         assertEquals(HttpStatus.CONFLICT, assertThrows(AppException.class, () -> service.verify("pdf", HASH)).getStatusCode());
+    }
+
+    @Test void signedDocumentWithoutProofIsEnqueuedOnceUsingItsFrozenHash() {
+        var appendix = Contract.builder().id("contract").parentContractId("root").agreementKind("WORKFLOW")
+                .rentalRequestId("rental").currentRevisionId("revision").status(ContractStatus.ACTIVE)
+                .signedAt(Instant.parse("2026-11-17T00:00:00Z")).build();
+        var signed = ContractDocument.builder().id("pdf").contractId("contract").revisionId("revision")
+                .storageObjectId("storage").signedSha256(HASH).signedS3VersionId("version-1")
+                .documentType(ContractDocumentType.PDF).purpose(DocumentPurpose.SIGNED_FINAL)
+                .status(DocumentGenerationStatus.READY).build();
+        proof.setStatus(ProofStatus.PENDING);
+        when(proofs.findById("pdf")).thenReturn(Optional.empty(), Optional.empty(), Optional.of(proof));
+        when(documents.findById("pdf")).thenReturn(Optional.of(signed));
+        when(agreements.findById("contract")).thenReturn(Optional.of(appendix));
+        when(agreements.findByIdForUpdate("contract")).thenReturn(Optional.of(appendix));
+        assertEquals("PENDING", service.get("pdf").status());
+        assertEquals("PENDING", service.get("pdf").status());
+        verify(enqueuer, times(1)).enqueue(appendix, signed, HASH);
+        verify(agreements, times(1)).findByIdForUpdate("contract");
+    }
+
+    @Test void unsignedOrUnpinnedPdfCannotBeBackfilled() {
+        when(proofs.findById("pdf")).thenReturn(Optional.empty());
+        document.setPurpose(DocumentPurpose.SIGNED_LANDLORD);
+        assertEquals("NOT_AVAILABLE", service.get("pdf").status());
+        verifyNoInteractions(documents, agreements, enqueuer);
+        document.setPurpose(DocumentPurpose.SIGNED_FINAL);
+        when(documents.findById("pdf")).thenReturn(Optional.of(ContractDocument.builder().id("pdf")
+                .contractId("contract").signedSha256(HASH).build()));
+        assertEquals("NOT_AVAILABLE", service.get("pdf").status());
+        verifyNoInteractions(agreements, enqueuer);
     }
 
     @Test void statusReadNeverNeedsRpcOrSignerSecrets() {

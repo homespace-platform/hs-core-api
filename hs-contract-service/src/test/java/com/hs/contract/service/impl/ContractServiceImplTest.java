@@ -105,12 +105,24 @@ class ContractServiceImplTest {
         org.springframework.test.util.ReflectionTestUtils.setField(f.service,"depositLedger",ledger);
         assertEquals(snapshot,f.service.getContractForAdmin("root").getDepositLedger());verify(ledger).forRental("rental");
     }
+    @Test void contractResponseExposesAgreedEarlyEndWithoutRewritingSignedRevision(){
+        var f=new EffectiveDocumentFixture();var date=java.time.LocalDate.of(2026,12,1);
+        org.springframework.test.util.ReflectionTestUtils.setField(f.service,"depositLedger",mock(com.hs.payment.service.DepositLedgerService.class));
+        f.root.setAgreedEarlyEndExclusive(date);f.root.setAgreedEarlyBillingMonths(2);
+        var revision=f.snapshots.get("root-revision");revision.setLeaseSnapshot("{\"endDateText\":\"01/03/2027\"}");
+        assertEquals(date,f.service.getContract("root").getAgreedEarlyEndExclusive());
+        assertEquals(date,f.service.getContractForAdmin("root").getAgreedEarlyEndExclusive());
+        assertEquals("{\"endDateText\":\"01/03/2027\"}",revision.getLeaseSnapshot());
+        verify(f.revisions,never()).save(any());
+    }
     private final class EffectiveDocumentFixture {
         final ContractRepository contracts = mock(ContractRepository.class);
         final ContractRevisionRepository revisions = mock(ContractRevisionRepository.class);
         final ContractDocumentRepository documents = mock(ContractDocumentRepository.class);
         final StorageService storage = mock(StorageService.class);
         final com.hs.contract.repository.ContractAmendmentRepository amendments = mock(com.hs.contract.repository.ContractAmendmentRepository.class);
+        final com.hs.contract.repository.RentalWorkflowRecordRepository workflows = mock(com.hs.contract.repository.RentalWorkflowRecordRepository.class);
+        final com.hs.contract.repository.WorkflowSigningDocumentRepository workflowDocuments = mock(com.hs.contract.repository.WorkflowSigningDocumentRepository.class);
         final java.util.Map<String,Contract> owners = new java.util.HashMap<>();
         final java.util.Map<String,ContractRevision> snapshots = new java.util.HashMap<>();
         final java.util.List<com.hs.contract.model.ContractAmendment> history = new java.util.ArrayList<>();
@@ -129,6 +141,8 @@ class ContractServiceImplTest {
             when(storage.createDownloadUrl(anyString())).thenAnswer(i -> new com.hs.storage.dto.response.StorageUrlResponse("https://files.example/download/"+i.getArgument(0),java.time.Instant.parse("2026-10-15T10:00:00Z")));
             org.springframework.test.util.ReflectionTestUtils.setField(service,"storageService",storage);
             org.springframework.test.util.ReflectionTestUtils.setField(service,"termsResolver",new com.hs.contract.service.ContractTermsResolver(amendments,revisions));
+            org.springframework.test.util.ReflectionTestUtils.setField(service,"workflowRecords",workflows);
+            org.springframework.test.util.ReflectionTestUtils.setField(service,"workflowSigningDocuments",workflowDocuments);
             at("2026-11-15T10:00:00");UserContextHolder.set(new UserContext("owner","owner@example.com"));
             signedPdf("root");
         }
@@ -151,6 +165,37 @@ class ContractServiceImplTest {
                     .storageObjectId(owner+"-object").fileName(owner+".pdf").generatedAt(java.time.Instant.parse("2026-10-15T05:00:00Z")).build();
             files.add(file);return file;
         }
+    }
+    @Test void signedEarlyExitPdfBecomesEffectiveWithoutRewritingTheOriginal() {
+        var f=new EffectiveDocumentFixture();
+        f.root.setRentalRequestId("rental");f.root.setMutualTerminationWorkflowId("rental:EARLY_EXIT");
+        f.root.setAgreedEarlyEndExclusive(java.time.LocalDate.of(2026,12,17));
+        var workflow=new com.hs.contract.model.RentalWorkflowRecord();
+        workflow.setId("rental:EARLY_EXIT");workflow.setContractId("root");workflow.setKind("EARLY_EXIT");
+        workflow.setStatus("AGREED");workflow.setPayloadJson("{\"endExclusive\":\"2026-12-17\"}");
+        when(f.workflows.findById(workflow.getId())).thenReturn(Optional.of(workflow));
+        var agreement=Contract.builder().id("early-exit").parentContractId("root").agreementKind("WORKFLOW")
+                .rentalRequestId("rental").landlordId("owner").tenantId("tenant").currentRevisionId("exit-revision")
+                .status(ContractStatus.ACTIVE).signedAt(java.time.Instant.parse("2026-11-17T05:00:00Z")).build();
+        f.owners.put(agreement.getId(),agreement);f.snapshots.put("exit-revision",ContractRevision.builder().id("exit-revision").contract(agreement).build());
+        var binding=new com.hs.contract.model.WorkflowSigningDocument();binding.setWorkflowId(workflow.getId());
+        binding.setContentHash(com.hs.contract.service.WorkflowDocumentService.hash(workflow));binding.setSigningContractId(agreement.getId());
+        binding.setSignedAt(java.time.Instant.parse("2026-11-17T05:00:00Z"));
+        when(f.workflowDocuments.findByWorkflowIdAndContentHash(workflow.getId(),binding.getContentHash())).thenReturn(Optional.of(binding));
+        f.signedPdf(agreement.getId());
+        for(String actor:List.of("owner","tenant")) {
+            UserContextHolder.set(new UserContext(actor,actor+"@example.com"));
+            assertEquals("early-exit-pdf",f.service.getEffectiveDocument("root").getId());
+        }
+        assertEquals("root-pdf",f.files.getFirst().getId());
+        UserContextHolder.set(new UserContext("outsider","outsider@example.com"));
+        assertThrows(AppException.class,()->f.service.getEffectiveDocument("root"));
+        UserContextHolder.set(new UserContext("owner","owner@example.com"));
+        binding.setSignedAt(null);assertNull(f.service.getEffectiveDocument("root"));
+        binding.setSignedAt(java.time.Instant.parse("2026-11-17T05:00:00Z"));
+        agreement.setParentContractId("another-root");assertNull(f.service.getEffectiveDocument("root"));
+        agreement.setParentContractId("root");
+        workflow.setPayloadJson("{\"endExclusive\":\"2027-01-17\"}");assertNull(f.service.getEffectiveDocument("root"));
     }
     @Test void effectivePdfChangesExactlyAtVietnamMidnightAndUsesSimulatedTimeForBothParties() {
         var f=new EffectiveDocumentFixture();

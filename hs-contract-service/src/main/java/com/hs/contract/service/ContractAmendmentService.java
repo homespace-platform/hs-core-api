@@ -211,6 +211,17 @@ public class ContractAmendmentService {
         Contract c = root(id, actor); syncLocked(c);
         ContractAmendment a = proposal(c, proposalId);
         if (p == null || p.action() == null) throw invalid("Thiếu hành động phản hồi.");
+        if ("APPROVED".equals(a.getStatus()) && Set.of("CANCEL", "WITHDRAW", "REJECT", "REQUEST_CHANGES").contains(p.action())) {
+            Contract child = contracts.findByIdForUpdate(a.getAgreementContractId()).orElseThrow(this::forbidden);
+            if (child.getSignedAt() != null || child.getStatus() == ContractStatus.ACTIVE) throw invalid("Phụ lục đã ký đủ hai bên; không thể hủy.");
+        }
+        if ("CANCEL".equals(p.action())) {
+            if (!"APPROVED".equals(a.getStatus())) throw invalid("Chỉ hủy phụ lục đang chờ ký.");
+            cancelAgreement(a);
+            a.setStatus("WITHDRAWN"); a.setDecidedAt(time.now()); amendments.save(a);
+            notices.other(c, actor, com.hs.contract.notification.AmendmentNotificationWriter.Event.AMENDMENT_WITHDRAWN);
+            return response(c);
+        }
         if ("WITHDRAW".equals(p.action())) {
             if (!actor.equals(a.getProposerId()) || !Set.of("REQUESTED", "CHANGES_REQUESTED", "APPROVED").contains(a.getStatus())) throw forbidden();
             cancelAgreement(a);

@@ -19,16 +19,16 @@ Không còn biên bản nhận nhà riêng. Ngày thuê, ngày nhận nhà sớm
 
 ### Chấm dứt sớm theo thỏa thuận
 
-1. Dùng **Chấm dứt sớm theo thỏa thuận** cho HĐ đang hiệu lực, kể cả người thuê thanh toán đúng hạn. Đề nghị ghi ngày kết thúc, lý do, trả nhà và nguồn hoàn tiền thuê nếu có. Gia hạn/phụ lục/chênh lệch cọc đang chờ phải xử lý trước.
-2. Ngày kết thúc không bao gồm ngày đó: kết thúc 20/12 thì ngày thuê cuối là 19/12. Chọn **Trọn kỳ đã bắt đầu** hoặc **Theo số ngày thực tế trong kỳ**.
-3. Khi chọn theo ngày, bấm đối chiếu phép tính rồi chủ động ghi khoản hoàn vào thỏa thuận. Core tính theo ngày neo HĐ, dùng số ngày thực tế 28/29/30/31 và nguồn thuê đã thực nhận. Chưa rõ nguồn hoặc chưa nhận tiền thì đối soát hóa đơn gốc trước; không sửa/xóa hóa đơn đã phát hành. Phí khác không tự chia theo ngày.
-4. Bên còn lại đồng ý đúng bản mới chốt ngày kết thúc. Chữ ký thỏa thuận hoặc nút đồng ý chưa xác nhận nhà đã trả/tiền đã nhận.
-5. Đến ngày trả nhà, cả hai xác nhận thực tế. Hoàn tất hóa đơn cuối, khoản hoàn thuê đã thống nhất và quyết toán cọc. Cọc không tự bị giữ toàn bộ vì kết thúc sớm.
-6. Mục chấm dứt hiển thị theo nguồn tài chính thật: chờ trả nhà, hóa đơn, hoàn thuê, quyết toán, hoàn/thu thêm, disputed hoặc hoàn tất. Đã trả nhà chưa đủ để kết luận đã hoàn tất tiền.
+1. Dùng **Chấm dứt sớm theo thỏa thuận** cho HĐ đang hiệu lực, kể cả người thuê thanh toán đúng hạn. Người thuê mở modal, chọn ngày ở cuối cùng trên lịch và ghi lý do; chủ nhà đồng ý hoặc từ chối. Gia hạn/phụ lục/chênh lệch cọc đang chờ phải xử lý trước.
+2. Lịch chỉ cho chọn ngày cuối của kỳ tháng neo từ ngày bắt đầu HĐ, từ hôm nay trở đi và trước kỳ hết hạn hiện tại. Ví dụ bắt đầu 15/03: ngày ở cuối các kỳ là 14/04, 14/05…; mốc kết thúc lưu ở backend là ngày kế tiếp lúc 00:00, không bao gồm ngày đó. Backend cung cấp danh sách ngày được chọn; không tính lại kỳ thuê trong trình duyệt.
+3. Đề nghị mới chỉ kết thúc đủ kỳ, không chia theo ngày hay nhập khoản hoàn tùy ý. Không cho cắt qua hóa đơn hoặc khoản tiền thuê đã thu/đang đối soát bao phủ kỳ sau. Dữ liệu tiền đã chốt và văn bản đã ký được giữ nguyên. Hồ sơ cũ đã được chấp thuận vẫn được đối chiếu theo dữ liệu đã lưu.
+4. Gửi đề nghị chưa đổi hạn thuê. Chủ nhà từ chối/người thuê rút giữ nguyên ngày kết thúc; chủ nhà đồng ý đúng bản sẽ chuyển APPROVED và tự tạo phụ lục Word/PDF trong cùng giao dịch (tạo lỗi thì phê duyệt cũng hoàn tác), hạn thuê chưa đổi. Hệ thống điền điều khoản đang hiệu lực vào mẫu Word, cập nhật ngày kết thúc/số kỳ trong bản phụ lục và kèm đối chiếu hạn cũ → hạn mới. Khi chưa đủ hai chữ ký, chủ nhà hoặc người thuê có thể hủy đề nghị, kể cả một bên đã ký; kết quả ký đến muộn không được áp dụng. Chủ nhà ký trước, người thuê ký sau trên cùng PDF. Chỉ callback đã kiểm chứng đủ hai chữ ký và PDF cuối đúng phiên bản mới chuyển AGREED, cập nhật mốc kết thúc vận hành. Trước khi áp dụng, backend kiểm tra lại hóa đơn, tiền thuê, nguồn hợp đồng và phiên bản để chặn đề nghị đã lỗi thời.
+5. Mốc kết thúc mới hiển thị riêng với thời hạn gốc trong văn bản đã ký. Đến ngày trả nhà, cả hai vẫn xác nhận thực tế; hóa đơn cuối và quyết toán cọc thực hiện ở chức năng hiện có. Đồng ý chấm dứt không tự xác nhận bàn giao, giải phóng nhà hoặc hoàn/giữ cọc.
+6. Lịch sử, chứng cứ và văn bản riêng vẫn tra cứu được. Mục chấm dứt hiển thị theo nghĩa vụ thực tế: chờ trả nhà, hóa đơn, quyết toán, hoàn/thu thêm, tranh chấp hoặc hoàn tất.
 
 ### PDF và chữ ký riêng
 
-Mở **PDF & chữ ký SmartCA riêng** để tạo/mở PDF của đúng bản. Bản cũ vẫn tra cứu được; không được ký/áp dụng thay nội dung mới. HĐ thuê và HĐ cọc gốc giữ nguyên. Văn bản liên kết không sửa qua màn soạn HĐ gốc.
+Sau khi chủ nhà đồng ý, mở **Phụ lục thời hạn & chữ ký SmartCA** để tạo/mở Word và PDF của đúng bản. Bản cũ vẫn tra cứu được; không được ký/áp dụng thay nội dung mới. HĐ thuê và HĐ cọc gốc giữ nguyên. Văn bản liên kết không sửa qua màn soạn HĐ gốc.
 
 Chủ nhà ký trước, người thuê ký sau. Chỉ khi backend kiểm chứng đủ hai chữ ký và PDF cuối thì văn bản riêng được ghi nhận. Thỏa thuận chấm dứt chỉ ghi nhận thỏa thuận, các bước trả nhà và nhận tiền vẫn riêng. Khi thiếu kết nối/chứng thư, vẫn đọc PDF; không có nút ký giả thay SmartCA.
 

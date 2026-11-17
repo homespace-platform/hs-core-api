@@ -16,7 +16,7 @@ public class WorkflowDocumentCommitter {
         var w=support.records.findById(event.workflowId()).orElseThrow(support::missing);if(!event.contentHash().equals(WorkflowDocumentService.hash(w)))throw support.invalid("Văn bản ký không còn khớp hồ sơ nguồn.");
         var rental=support.rentals.findById(w.getRentalRequestId()).orElseThrow(support::missing);
         if("EARLY_EXIT".equals(w.getKind())){
-            if("PROPOSED".equals(w.getStatus())){
+            if("APPROVED".equals(w.getStatus())){
                 String consenting=w.getProposedBy().equals(rental.getOwnerId())?rental.getRenterId():rental.getOwnerId();termination.actSigned(rental.getId(),consenting,action(w.getRevision()));
             }
             signingNotices.fullySigned(contracts.findById(event.signingContractId()).orElseThrow(support::missing));

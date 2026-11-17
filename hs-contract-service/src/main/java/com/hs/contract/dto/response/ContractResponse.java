@@ -29,6 +29,7 @@ public class ContractResponse {
     private String agreementKind;
     private String depositAgreementContractId;
     private Integer effectiveLeaseMonths;
+    private java.time.LocalDate agreedEarlyEndExclusive;
     private ContractStatus status;
     private ContractPaymentStatus paymentStatus;
     private String rentalPaymentId;

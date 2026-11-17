@@ -38,7 +38,7 @@ public class ContractDocumentProofEnqueuer {
         String caseId = DocumentProofHash.sha256(("homespace:case:" + contract.getRentalRequestId())
                 .getBytes(StandardCharsets.UTF_8));
         int documentKind = "DEPOSIT".equals(contract.getAgreementKind()) ? 1
-                : "AMENDMENT".equals(contract.getAgreementKind()) ? 3 : 2;
+                : contract.getParentContractId() != null ? 3 : 2;
         var existing = proofs.findById(document.getId());
         if (existing.isPresent()) {
             ContractDocumentProof saved = existing.get();
@@ -80,7 +80,7 @@ public class ContractDocumentProofEnqueuer {
         String kind = contract.getAgreementKind();
         boolean supported = contract.getParentContractId() == null
                 ? kind == null || "LEASE".equals(kind) || "DEPOSIT".equals(kind)
-                : "AMENDMENT".equals(kind);
+                : kind == null || "AMENDMENT".equals(kind) || "RENEWAL".equals(kind) || "WORKFLOW".equals(kind);
         return supported
                 && document.getId() != null && document.getStorageObjectId() != null
                 && Objects.equals(contract.getId(), document.getContractId())

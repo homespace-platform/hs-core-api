@@ -77,7 +77,7 @@ public class RentalWorkflowSupport {
         w.setHistoryJson(json(h));records.saveAndFlush(w);
     }
     RentalWorkflowView view(Source s,List<String> actions,String blocked,String obligation,List<com.hs.payment.dto.PaymentRequestResponse> refunds){
-        var w=s.record();return new RentalWorkflowView(w.getKind(),w.getStatus(),w.getRevision(),role(s),s.contract()==null?null:s.contract().getId(),w.getSourceRevisionId(),w.getProposedBy(),time.now(),w.getRespondBy(),w.getOwnerConfirmedAt(),w.getTenantConfirmedAt(),map(w.getPayloadJson()),history(w),actions,blocked,w.getComplaintId(),obligation,refunds,null);
+        var w=s.record();return new RentalWorkflowView(w.getKind(),w.getStatus(),w.getRevision(),role(s),s.contract()==null?null:s.contract().getId(),w.getSourceRevisionId(),w.getProposedBy(),time.now(),w.getRespondBy(),w.getOwnerConfirmedAt(),w.getTenantConfirmedAt(),map(w.getPayloadJson()),history(w),actions,blocked,w.getComplaintId(),obligation,refunds,null,null);
     }
     void acknowledge(RentalWorkflowPayloads.Action p){if(p==null||!p.acknowledged())throw invalid("Cần xác nhận rõ nội dung và việc bàn giao thực tế.");text(p.reason());}
     AppException missing(){return new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);}

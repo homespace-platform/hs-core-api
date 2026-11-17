@@ -1,41 +1,55 @@
 package com.hs.contract.service;
 import com.hs.contract.model.*;
+import com.hs.contract.repository.ContractTemplateVersionRepository;
 import com.hs.contract.service.converter.DocumentConversionService;
+import com.hs.contract.service.engine.ContractRenderService;
+import com.hs.storage.service.StorageService;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.xwpf.usermodel.*;
 import org.springframework.stereotype.Component;
-import java.io.ByteArrayOutputStream;
-import java.math.*;
+import java.io.*;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
+/** Populate the recorded Word template with effective terms, then append the dated termination adjustment. */
 @Component @RequiredArgsConstructor
 public class WorkflowPdfRenderer {
     private final DocumentConversionService conversion;
     private final RentalWorkflowSupport support;
-    public byte[] render(Contract root,RentalWorkflowRecord source,ContractRevision revision){
-        try(var doc=new XWPFDocument();var output=new ByteArrayOutputStream()){
-            var body=doc.getDocument().getBody();var section=body.isSetSectPr()?body.getSectPr():body.addNewSectPr();
-            var page=section.addNewPgSz();page.setW(BigInteger.valueOf(11906));page.setH(BigInteger.valueOf(16838));
-            var margin=section.addNewPgMar();margin.setTop(BigInteger.valueOf(1000));margin.setBottom(BigInteger.valueOf(1000));margin.setLeft(BigInteger.valueOf(1100));margin.setRight(BigInteger.valueOf(1100));
-            text(doc,"HOMESPACE",16,true);text(doc,"THỎA THUẬN CHẤM DỨT THUÊ TRƯỚC HẠN",16,true);
-            text(doc,"Liên kết HĐ: "+root.getContractNumber()+" · Bản nguồn: "+source.getRevision(),10,false);
-            text(doc,"Bên cho thuê: "+Objects.toString(support.map(revision.getLandlordSnapshot()).get("fullName"),"Theo hợp đồng gốc"),11,true);
-            text(doc,"Bên thuê: "+Objects.toString(support.map(revision.getTenantSnapshot()).get("fullName"),"Theo hợp đồng gốc"),11,true);
-            var property=support.map(revision.getPropertySnapshot());
-            text(doc,"Nhà/phòng: "+Objects.toString(property.get("fullAddress"),"Theo địa chỉ trong hợp đồng gốc")+" · Phòng/căn: "+Objects.toString(property.get("unitNumber"),"Theo hợp đồng gốc"),11,false);
-            var p=support.map(source.getPayloadJson());text(doc,"Nội dung và căn cứ",12,true);text(doc,Objects.toString(p.get("reason"),""),11,false);
-                text(doc,"Ngày kết thúc (không tính ngày này): "+Objects.toString(p.get("endExclusive"),""),11,true);
-                text(doc,"Cách trả nhà và tài sản: "+Objects.toString(p.get("handoverTerms"),""),11,false);
-                text(doc,"DAILY_PRORATED".equals(p.get("finalRentPolicy"))?"Tiền thuê kỳ cuối tính theo ngày thực tế của kỳ; phí khác theo HĐ/hóa đơn.":"Tiền thuê và phí cố định tính trọn kỳ đã bắt đầu.",11,false);
-                var calc=support.map(source.getCalculationJson());if(!calc.isEmpty()){text(doc,"Đơn giá tháng: "+money(calc.get("monthlyRent"))+" · Số ngày: "+calc.get("usedDays")+"/"+calc.get("periodDays")+" · Tiền thuê kỳ cuối: "+money(calc.get("agreedFinalRent")),11,false);text(doc,Objects.toString(calc.get("explanation"),""),10,false);}
-                if(p.get("rentRefunds") instanceof List<?> refunds&&!refunds.isEmpty())for(int i=0;i<refunds.size();i++){var refund=(Map<?,?>)refunds.get(i);var payment=support.payments.findById(Objects.toString(refund.get("paymentId"),"")).orElseThrow(support::missing);text(doc,"Khoản hoàn tiền thuê "+(i+1)+": "+money(refund.get("amount"))+" · Nguồn nhận: "+payment.getTransferReference(),11,false);}
-                else text(doc,"Không có khoản hoàn tiền thuê bổ sung trong thỏa thuận này.",11,false);
-                text(doc,"Chưa coi đã trả nhà hoặc hoàn tất tiền chỉ vì ký văn bản. Hai bên xác nhận trả nhà thực tế, thanh toán hóa đơn cuối rồi quyết toán cọc theo hồ sơ riêng; cọc không tự bị giữ toàn bộ.",11,false);
-            text(doc,"Xác nhận và chữ ký",12,true);text(doc,"Hai bên đã đối chiếu đúng nội dung này. Chữ ký số được kiểm chứng trên PDF. Việc xác nhận nhận tiền vẫn thực hiện riêng qua thanh toán; văn bản này không tạo chứng từ ngân hàng.",11,false);
-            text(doc,"BÊN CHO THUÊ                                      BÊN THUÊ",11,true);
-            doc.write(output);return conversion.convertDocxToPdf(output.toByteArray(),"homespace-workflow.docx").orElseThrow(()->support.invalid("Chưa chuyển được PDF. Kiểm tra dịch vụ chuyển văn bản và thử lại; hồ sơ gốc không thay đổi."));
-        }catch(com.hs.common.advice.entity.AppException e){throw e;}catch(Exception e){throw new IllegalStateException("Cannot render workflow PDF",e);}
+    private final ContractTemplateVersionRepository templates;
+    private final StorageService storage;
+    private final ContractRenderService renderService;
+    private final ContractTermsResolver effectiveTerms;
+    public byte[] render(Contract root,RentalWorkflowRecord source,ContractRevision revision){return pdf(renderDocx(root,source,revision));}
+    public byte[] pdf(byte[] docx){return conversion.convertDocxToPdf(docx,"homespace-termination-annex.docx").orElseThrow(()->support.invalid("Chưa chuyển được PDF phụ lục. Hợp đồng gốc không thay đổi."));}
+    public byte[] renderDocx(Contract root,RentalWorkflowRecord source,ContractRevision revision){
+        try{
+            var template=templates.findById(revision.getTemplateVersionId()).orElseThrow(support::missing);
+            var current=effectiveTerms.at(root,support.time.today());
+            if(!current.getId().equals(source.getSourceRevisionId()))throw support.invalid("Điều khoản hiệu lực đã đổi; cần lập lại phụ lục.");
+            var model=renderService.buildDataModelFromSnapshots(support.map(revision.getLandlordSnapshot()),support.map(revision.getTenantSnapshot()),
+                support.map(revision.getPropertySnapshot()),support.map(revision.getLeaseSnapshot()),support.map(revision.getFinancialSnapshot()),
+                rows(revision.getChargesSnapshot()),rows(revision.getEquipmentSnapshot()),support.map(revision.getInitialMetersSnapshot()),support.map(revision.getInitialPaymentSnapshot()),
+                rows(revision.getAmenitiesSnapshot()),support.map(revision.getPoliciesSnapshot()),Objects.toString(revision.getSpecialTerms(),""),
+                revision.getSchemaVersion()==null?2:revision.getSchemaVersion(),revision.getRevisionNumber(),root.getContractNumber(),support.time.today(),"Thành phố Hồ Chí Minh");
+            byte[] populated=renderService.renderDocx(new ByteArrayInputStream(storage.downloadDirect(template.getStorageObjectId())),model);
+            try(var doc=new XWPFDocument(new ByteArrayInputStream(populated));var out=new ByteArrayOutputStream()){
+                var heading=doc.createParagraph();heading.setPageBreak(true);var run=heading.createRun();run.setBold(true);run.setFontSize(14);run.setText("PHỤ LỤC ĐIỀU CHỈNH THỜI HẠN HỢP ĐỒNG");
+                line(doc,"Kèm hợp đồng số "+root.getContractNumber()+"; điều khoản đang áp dụng: "+current.getId()+"; bản đề nghị: "+source.getRevision());
+                var rental=support.rentals.findById(source.getRentalRequestId()).orElseThrow(support::missing);
+                var oldEnd=ContractLeaseCalc.end(rental.getMoveInDate(),ContractLeaseCalc.months(root,rental));
+                var newEnd=LocalDate.parse(support.map(source.getPayloadJson()).get("endExclusive").toString());
+                line(doc,"Ngày ở cuối cùng trước điều chỉnh: "+display(oldEnd.minusDays(1))+". Mốc kết thúc cũ: "+display(oldEnd)+" lúc 00:00 (không gồm ngày này).");
+                line(doc,"Ngày ở cuối cùng sau điều chỉnh: "+display(newEnd.minusDays(1))+". Mốc kết thúc mới: "+display(newEnd)+" lúc 00:00 (không gồm ngày này).");
+                line(doc,"Lý do: "+Objects.toString(support.map(source.getPayloadJson()).get("reason"),""));
+                line(doc,"Chỉ áp dụng thời hạn mới sau khi hai bên ký số đầy đủ và được hệ thống kiểm chứng trên cùng PDF. Chủ nhà ký trước, người thuê ký sau. Chưa ký đủ thì thời hạn đang áp dụng giữ nguyên.");
+                line(doc,"Các điều khoản khác giữ nguyên theo hợp đồng và các phụ lục đã có hiệu lực. Không viết lại văn bản đã ký, không tính lại hóa đơn đã phát hành hay khoản tiền đã nhận. Bàn giao nhà thực tế, hóa đơn cuối và quyết toán cọc thực hiện riêng; chữ ký không thay thế xác nhận nhận tiền.");
+                doc.write(out);return out.toByteArray();
+            }
+        }catch(com.hs.common.advice.entity.AppException e){throw e;}catch(Exception e){throw new IllegalStateException("Cannot render termination annex from Word template",e);}
     }
-    private void text(XWPFDocument d,String value,int size,boolean bold){var p=d.createParagraph();p.setSpacingAfter(120);p.setSpacingBetween(1.12);var r=p.createRun();r.setFontFamily("Arial");r.setFontSize(size);r.setBold(bold);String[] lines=value.split("\\R",-1);for(int i=0;i<lines.length;i++){if(i>0)r.addBreak();r.setText(lines[i]);}}
-    private String money(Object value){try{return String.format(Locale.forLanguageTag("vi-VN"),"%,.0f đ",new BigDecimal(value.toString()));}catch(Exception e){return "chưa ghi nhận";}}
+    private List<Map<String,Object>> rows(String json)throws Exception{return json==null?List.of():support.mapper.readValue(json,new com.fasterxml.jackson.core.type.TypeReference<List<Map<String,Object>>>(){});}
+    private String display(LocalDate d){return d.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));}
+    private void line(XWPFDocument d,String text){var p=d.createParagraph();p.setSpacingAfter(120);var r=p.createRun();r.setFontFamily("Times New Roman");r.setFontSize(12);r.setText(text);}
 }

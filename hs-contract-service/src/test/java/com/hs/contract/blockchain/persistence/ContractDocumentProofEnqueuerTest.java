@@ -103,10 +103,7 @@ class ContractDocumentProofEnqueuerTest {
     }
 
     @Test
-    void renewalWorkflowAndOrphanAmendmentDocumentsAreOutsideScope() {
-        Contract renewal = contract(null);
-        renewal.setParentContractId("parent-lease");
-        enqueuer.enqueue(renewal, document(), HASH);
+    void orphanAppendixDocumentsAreOutsideScope() {
         enqueuer.enqueue(contract("AMENDMENT"), document(), HASH);
         enqueuer.enqueue(contract("WORKFLOW"), document(), HASH);
         verifyNoInteractions(proofs);
@@ -121,6 +118,33 @@ class ContractDocumentProofEnqueuerTest {
                 && "pdf-final".equals(proof.getDocumentId()) && HASH.equals(proof.getDocumentHash())
                 && proof.getDocumentKind() == 3
                 && DocumentProofHash.sha256("homespace:case:rental".getBytes(StandardCharsets.UTF_8)).equals(proof.getCaseId())));
+    }
+
+    @Test
+    void fullySignedEarlyTerminationAppendixReceivesItsOwnProof() {
+        Contract appendix = contract("WORKFLOW");
+        appendix.setParentContractId("root-lease");
+        enqueuer.enqueue(appendix, document(), HASH);
+        verify(proofs).save(argThat(proof -> "contract".equals(proof.getContractId())
+                && "pdf-final".equals(proof.getDocumentId()) && HASH.equals(proof.getDocumentHash())
+                && proof.getDocumentKind() == 3));
+    }
+
+    @Test
+    void fullySignedLegacyRenewalReceivesAnAppendixProof() {
+        Contract renewal = contract(null);
+        renewal.setParentContractId("root-lease");
+        enqueuer.enqueue(renewal, document(), HASH);
+        verify(proofs).save(argThat(proof -> "contract".equals(proof.getContractId())
+                && "pdf-final".equals(proof.getDocumentId()) && proof.getDocumentKind() == 3));
+    }
+
+    @Test
+    void explicitlyTypedRenewalAlsoReceivesAnAppendixProof() {
+        Contract renewal = contract("RENEWAL");
+        renewal.setParentContractId("root-lease");
+        enqueuer.enqueue(renewal, document(), HASH);
+        verify(proofs).save(argThat(proof -> proof.getDocumentKind() == 3));
     }
 
     @Test
