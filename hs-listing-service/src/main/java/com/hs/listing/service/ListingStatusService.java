@@ -7,6 +7,7 @@ import com.hs.listing.model.ListingStatusHistory;
 import com.hs.listing.model.constant.*;
 import com.hs.listing.notification.ListingNotificationWriter;
 import com.hs.listing.repository.ListingRepository;
+import com.hs.listing.repository.ListingFavoriteRepository;
 import com.hs.listing.repository.ListingStatusHistoryRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,8 @@ public class ListingStatusService {
     private com.hs.listing.membership.MembershipService memberships;
     @org.springframework.beans.factory.annotation.Autowired
     private ListingNotificationWriter notifications;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ListingFavoriteRepository favorites;
     private final int publicationDurationDays;
 
     public ListingStatusService(
@@ -270,6 +273,7 @@ public class ListingStatusService {
             }
             return;
         }
+        ListingStatus previousOperational = listing.getOperationalStatus();
         if (validateExisting && previous == null) {
             throw new AppException(ListingErrorCode.INVALID_LISTING_STATUS_TRANSITION);
         }
@@ -292,7 +296,7 @@ public class ListingStatusService {
         if (nearbyEvents != null && target == ListingStatus.PUBLISHED)
             nearbyEvents.publishEvent(new com.hs.listing.nearby.NearbyTypes.ScanChanged(listing.getId()));
 
-        cancelAppointmentsIfUnavailable(listing,previous,target,actorId);
+        cancelAppointmentsIfUnavailable(listing,previousOperational,target,actorId);
 
         historyRepository.save(ListingStatusHistory.builder()
                 .listingId(listing.getId())
@@ -366,9 +370,22 @@ public class ListingStatusService {
     }
 
     private void cancelAppointmentsIfUnavailable(Listing listing, ListingStatus previous, ListingStatus target, String actorId) {
+        if (previous == ListingStatus.PUBLISHED && target != ListingStatus.PUBLISHED) {
+            favorites.findActiveUserIdsByListingId(listing.getId()).forEach(recipient ->
+                    notifications.enqueueSavedUnavailable(listing, recipient, actorId));
+        }
         if (target != ListingStatus.PUBLISHED && target != ListingStatus.RESERVED
                 && (previous == ListingStatus.PUBLISHED || previous == ListingStatus.RESERVED)) {
             appointmentService.cancelActiveAppointmentsForListing(listing.getId(), target, actorId);
+        }
+    }
+
+    @Transactional
+    public void notifySavedContentUpdated(Listing listing, String actorId) {
+        if (listing.getOperationalStatus() == ListingStatus.PUBLISHED) {
+            // shortcut: fanout joins the listing transaction; page durable fanout if favorite counts make saves slow.
+            favorites.findActiveUserIdsByListingId(listing.getId()).forEach(recipient ->
+                    notifications.enqueueSavedUpdated(listing, recipient, actorId));
         }
     }
 }

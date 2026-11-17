@@ -9,6 +9,7 @@ import com.hs.listing.notification.ListingNotificationOutbox;
 import com.hs.listing.notification.ListingNotificationOutboxRepository;
 import com.hs.listing.notification.ListingNotificationWriter;
 import com.hs.listing.repository.ListingRepository;
+import com.hs.listing.repository.ListingFavoriteRepository;
 import com.hs.listing.repository.ListingStatusHistoryRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -18,6 +19,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -25,6 +27,7 @@ import static org.mockito.Mockito.*;
 class ListingStatusServiceTest {
     private final ListingNotificationOutboxRepository outbox = mock(ListingNotificationOutboxRepository.class);
     private final ListingRepository listings = mock(ListingRepository.class);
+    private final ListingFavoriteRepository favorites = mock(ListingFavoriteRepository.class);
     private final ListingStatusHistoryRepository history = mock(ListingStatusHistoryRepository.class);
     private final ViewingAppointmentService appointments = mock(ViewingAppointmentService.class);
     private final ListingStatusService service = new ListingStatusService(
@@ -34,6 +37,7 @@ class ListingStatusServiceTest {
     void notifications() {
         org.springframework.test.util.ReflectionTestUtils.setField(service, "notifications",
                 new ListingNotificationWriter(outbox, "test.notifications"));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "favorites", favorites);
     }
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -87,6 +91,21 @@ class ListingStatusServiceTest {
     }
 
     @Test
+    void violationDuringPublicContentReviewNotifiesSavedUsersExactlyOnce() {
+        Listing listing = listing(ListingStatus.PENDING_REVIEW);
+        listing.setPendingEditId("pending-edit");
+        listing.setReviewOperationalStatus(ListingStatus.PUBLISHED);
+        listing.setReviewOriginStatus(ListingStatus.PUBLISHED);
+        when(listings.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
+        when(favorites.findActiveUserIdsByListingId("listing-1")).thenReturn(List.of("fan-1"));
+        service.changeByAdmin("admin", "listing-1", ListingStatus.VIOLATION, "reason");
+        var rows = ArgumentCaptor.forClass(ListingNotificationOutbox.class);
+        verify(outbox, times(2)).save(rows.capture());
+        assertEquals(1, rows.getAllValues().stream().filter(row -> row.getPayload().contains("SAVED_LISTING_UNAVAILABLE")).count());
+        verify(favorites).findActiveUserIdsByListingId("listing-1");
+    }
+
+    @Test
     void violationDiscardsPendingEditWithoutAnEditRejectionEvent() {
         Listing listing = listing(ListingStatus.PENDING_REVIEW);
         listing.setPendingEditId("pending-edit"); listing.setPendingEditPayload("unreviewed");
@@ -113,6 +132,39 @@ class ListingStatusServiceTest {
         service.releaseRentedAfterTermination("listing-1", "owner-1");
         service.applySubmission(listing(ListingStatus.DRAFT), ListingSubmissionAction.SUBMIT_FOR_REVIEW, "owner-1", ListingStatusActorType.USER);
         verifyNoInteractions(outbox);
+    }
+
+    @Test
+    void publishedListingBecomingUnavailableNotifiesActiveFavoritesOnceWithoutNotifyingOwner() {
+        Listing listing = publishedListingWithWindow(Duration.ofDays(3));
+        when(listings.findByIdForUpdate("listing-1")).thenReturn(Optional.of(listing));
+        when(favorites.findActiveUserIdsByListingId("listing-1")).thenReturn(List.of("fan-1", "owner-1"));
+
+        service.changeByOwner("owner-1", "listing-1", ListingStatus.HIDDEN, null);
+
+        var row = ArgumentCaptor.forClass(ListingNotificationOutbox.class);
+        verify(outbox).save(row.capture());
+        var event = tools.jackson.databind.json.JsonMapper.builder().build().readTree(row.getValue().getPayload());
+        assertEquals("SAVED_LISTING_UNAVAILABLE", event.get("eventType").asText());
+        assertEquals("fan-1", event.get("recipients").get(0).asText());
+        assertEquals(ListingStatus.HIDDEN, listing.getStatus());
+        verify(favorites).findActiveUserIdsByListingId("listing-1");
+    }
+
+    @Test
+    void contentReviewKeepsSavedListingAvailableUntilModerationActuallyRejectsIt() {
+        Listing listing = publishedListingWithWindow(Duration.ofDays(3));
+        when(favorites.findActiveUserIdsByListingId("listing-1")).thenReturn(List.of("fan-1"));
+
+        service.beginContentReview(listing, "owner-1");
+        verifyNoInteractions(favorites, outbox);
+        listing.setPendingEditId("edit-1");
+        service.finishContentReview(listing, "reviewer", false, "reason");
+
+        verify(favorites).findActiveUserIdsByListingId("listing-1");
+        var row = ArgumentCaptor.forClass(ListingNotificationOutbox.class);
+        verify(outbox).save(row.capture());
+        assertTrue(row.getValue().getPayload().contains("SAVED_LISTING_UNAVAILABLE"));
     }
 
     @Test

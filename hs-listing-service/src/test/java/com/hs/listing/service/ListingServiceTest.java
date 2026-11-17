@@ -9,6 +9,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.util.Optional;
+import java.util.List;
 import com.hs.common.advice.entity.AppException; import com.hs.listing.repository.*; import com.hs.storage.repository.StorageObjectRepository; import com.hs.listing.repository.ListingAddressRepository; import org.junit.jupiter.api.Test; import static org.junit.jupiter.api.Assertions.*; import static org.mockito.Mockito.*;
 class ListingServiceTest {
     @org.junit.jupiter.params.ParameterizedTest
@@ -626,6 +627,7 @@ class ListingServiceTest {
     void stagedContentChangesPreserveTheStatusAtDecision(com.hs.listing.model.constant.ListingStatus finalStatus) {
         var listingRepo = mock(ListingRepository.class);
         var statusService = new ListingStatusService(listingRepo,mock(ListingStatusHistoryRepository.class),mock(ViewingAppointmentService.class),30);
+        ReflectionTestUtils.setField(statusService, "favorites", mock(ListingFavoriteRepository.class));
         var storage = mock(StorageObjectRepository.class);
         ListingService service = new ListingService(listingRepo, mock(ListingAddressRepository.class),
                 storage, mock(com.hs.storage.service.StorageService.class),
@@ -898,10 +900,46 @@ class ListingServiceTest {
         verifyNoInteractions(f.outbox);
     }
 
+    @Test
+    void publicApprovedEditNotifiesSavedListingUsersOnceAndPrivateEditsStaySilent() {
+        var f = new NotificationFixture(); f.listing.setStatus(ListingStatus.PUBLISHED);
+        when(f.favorites.findActiveUserIdsByListingId("listing")).thenReturn(List.of("fan", "persisted-owner", "admin"));
+        String editId = f.service.upsert("persisted-owner", createDummyRequest(null, "listing", "R202", ListingSubmissionAction.SUBMIT_FOR_REVIEW)).pendingEditId();
+        verifyNoInteractions(f.favorites, f.outbox);
+        f.service.decideEdit("admin", "listing", editId, true, null);
+        var rows = ArgumentCaptor.forClass(ListingNotificationOutbox.class);
+        verify(f.outbox, times(2)).save(rows.capture());
+        var event = tools.jackson.databind.json.JsonMapper.builder().build().readTree(rows.getAllValues().getLast().getPayload());
+        assertEquals("SAVED_LISTING_UPDATED", event.get("eventType").asText());
+        assertEquals("fan", event.get("recipients").get(0).asText());
+        assertEquals("Title", event.get("data").get("listingTitle").asText());
+        assertThrows(AppException.class, () -> f.service.decideEdit("admin", "listing", editId, true, null));
+        verify(f.outbox, times(2)).save(any());
+
+        var hidden = new NotificationFixture(); hidden.listing.setStatus(ListingStatus.HIDDEN);
+        String hiddenEdit = hidden.service.upsert("persisted-owner", createDummyRequest(null, "listing", "R202", ListingSubmissionAction.SUBMIT_FOR_REVIEW)).pendingEditId();
+        hidden.service.decideEdit("admin", "listing", hiddenEdit, true, null);
+        verifyNoInteractions(hidden.favorites);
+    }
+
+    @Test
+    void directPublicAdminEditNotifiesSavedListingUsersButDraftDoesNot() {
+        var f = new NotificationFixture(); f.listing.setStatus(ListingStatus.PUBLISHED);
+        when(f.favorites.findActiveUserIdsByListingId("listing")).thenReturn(List.of("fan"));
+        f.service.updateByAdmin("admin", "listing", createDummyRequest(null, "listing"));
+        var rows = ArgumentCaptor.forClass(ListingNotificationOutbox.class);
+        verify(f.outbox, times(2)).save(rows.capture());
+        assertTrue(rows.getAllValues().getLast().getPayload().contains("SAVED_LISTING_UPDATED"));
+        var draft = new NotificationFixture();
+        draft.service.updateByAdmin("admin", "listing", createDummyRequest(null, "listing"));
+        verifyNoInteractions(draft.favorites);
+    }
+
     private static class NotificationFixture {
         final ListingRepository listings = mock(ListingRepository.class);
         final ListingNotificationOutboxRepository outbox = mock(ListingNotificationOutboxRepository.class);
         final RentalRequestService snapshots = mock(RentalRequestService.class);
+        final ListingFavoriteRepository favorites = mock(ListingFavoriteRepository.class);
         final com.hs.common.location.VietmapService vietmap = mock(com.hs.common.location.VietmapService.class);
         final Listing listing = Listing.builder().id("listing").ownerId("persisted-owner").category(ListingCategory.ROOM)
                 .status(ListingStatus.DRAFT).title("Published content").expiresAt(java.time.Instant.now().plusSeconds(86400)).build();
@@ -918,6 +956,7 @@ class ListingServiceTest {
             var notifications = new ListingNotificationWriter(outbox, "test.notifications");
             var statuses = new ListingStatusService(listings, mock(ListingStatusHistoryRepository.class), mock(ViewingAppointmentService.class), 30);
             ReflectionTestUtils.setField(statuses, "notifications", notifications);
+            ReflectionTestUtils.setField(statuses, "favorites", favorites);
             service = new ListingService(listings, mock(ListingAddressRepository.class), storage, mock(com.hs.storage.service.StorageService.class),
                     mock(AmenityRepository.class), mock(FurnishingItemRepository.class), statuses, mock(PropertyBranchRepository.class), mock(ListingPolicyService.class));
             ReflectionTestUtils.setField(service, "notifications", notifications);

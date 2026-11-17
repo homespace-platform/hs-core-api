@@ -60,14 +60,16 @@ class BroadcastNotificationPostgresTest {
     long pending() { return jdbc.queryForObject("SELECT COUNT(*) FROM notification_broadcast_outbox WHERE sent_at IS NULL", Long.class); }
     String cursor() { return jdbc.queryForObject("SELECT recipient_cursor FROM notification_broadcast_outbox WHERE event_id = 'news_123'", String.class); }
 
-    @Test void recipientsAreActiveUsersAtCutoffIncludingLegacyNullCreationDatesAndEmptyJobsFinish() {
+    @Test void recipientsAreActiveUsersAndAdminsAtCutoffIncludingLegacyNullCreationDatesAndEmptyJobsFinish() {
         String landlord = roles.saveAndFlush(Role.builder().name("LANDLORD").build()).getId();
+        String admin = roles.saveAndFlush(Role.builder().name("ADMIN").build()).getId();
         user("alice", userRole, true, CUTOFF.minusSeconds(1)); user("legacy", userRole, true, null);
+        user("admin", admin, true, CUTOFF.minusSeconds(1));
         user("later", userRole, true, CUTOFF.plusSeconds(1)); user("disabled", userRole, false, CUTOFF.minusSeconds(1));
         user("landlord", landlord, true, CUTOFF.minusSeconds(1)); service.enqueueNews(BroadcastNotificationServiceTest.NEWS);
         var kafka = kafka(); new BroadcastNotificationPublisher(jdbc, kafka, manager).publishPending(); assertEquals(0, pending());
         var payload = org.mockito.ArgumentCaptor.forClass(String.class); verify(kafka).send(anyString(), eq("news_123"), payload.capture());
-        assertEquals(List.of("alice", "legacy"), BroadcastNotificationService.JSON.convertValue(
+        assertEquals(List.of("admin", "alice", "legacy"), BroadcastNotificationService.JSON.convertValue(
                 BroadcastNotificationService.read(payload.getValue()).get("recipients"), List.class));
         jdbc.update("DELETE FROM notification_broadcast_outbox"); users.deleteAllInBatch(); service.enqueueNews(BroadcastNotificationServiceTest.NEWS);
         var empty = kafka(); new BroadcastNotificationPublisher(jdbc, empty, manager).publishPending(); assertEquals(0, pending()); verifyNoInteractions(empty);

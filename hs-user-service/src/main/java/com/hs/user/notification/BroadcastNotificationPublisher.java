@@ -23,7 +23,7 @@ public class BroadcastNotificationPublisher {
             """;
     static final String RECIPIENTS_SQL = """
             SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
-            WHERE u.active = true AND r.name = 'USER' AND (u.created_at IS NULL OR u.created_at <= ?)
+            WHERE u.active = true AND r.name IN ('USER', 'ADMIN') AND (u.created_at IS NULL OR u.created_at <= ?)
               AND (CAST(? AS varchar) IS NULL OR u.id > ?)
             ORDER BY u.id LIMIT 100
             """;

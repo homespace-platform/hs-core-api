@@ -174,6 +174,7 @@ public class ListingService {
         if (saved.getApprovedEditId() != null) captureApprovedSnapshot(saved);
         // Policy: every accepted admin save is an update (new snapshot/revision), so separate saves each notify.
         notifications.enqueue(saved, adminId, com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_UPDATED);
+        listingStatusService.notifySavedContentUpdated(saved, adminId);
         return response(saved);
     }
 
@@ -272,6 +273,7 @@ public class ListingService {
         notifications.enqueue(saved, adminId, approve
                 ? com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_EDIT_APPROVED
                 : com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_EDIT_REJECTED, editId, null);
+        if (approve) listingStatusService.notifySavedContentUpdated(saved, adminId);
         return saved;
     }
 

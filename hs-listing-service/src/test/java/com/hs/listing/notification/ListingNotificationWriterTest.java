@@ -144,4 +144,31 @@ class ListingNotificationWriterTest {
         assertEquals(120, json.readTree(rows.getAllValues().getFirst().getPayload()).get("data").get("listingTitle").asText().length());
         assertFalse(json.readTree(rows.getAllValues().getLast().getPayload()).get("data").has("listingTitle"));
     }
+
+    @Test
+    void savedListingNoticeCarriesOnlySafeListingFieldsAndSkipsTheActorAndOwner() {
+        Listing listing = listing();
+        writer.enqueueSavedUnavailable(listing, "fan-1", "admin");
+        writer.enqueueSavedUnavailable(listing, "admin", "admin");
+        writer.enqueueSavedUnavailable(listing, "persisted-owner", "admin");
+        var row = ArgumentCaptor.forClass(ListingNotificationOutbox.class);
+        verify(outbox).save(row.capture());
+        var event = json.readTree(row.getValue().getPayload());
+        assertEquals("SAVED_LISTING_UNAVAILABLE", event.get("eventType").asText());
+        assertEquals("fan-1", event.get("recipients").get(0).asText());
+        assertEquals(Set.of("listingId", "listingTitle"), json.readValue(event.get("data").toString(), Map.class).keySet());
+        assertEquals(listing.getId(), event.get("data").get("listingId").asText());
+        assertEquals("Phòng đẹp trung tâm", event.get("data").get("listingTitle").asText());
+        assertFalse(row.getValue().getPayload().contains("private"));
+    }
+
+    @Test
+    void savedListingUpdateCarriesTheSameMinimalSafeContext() {
+        writer.enqueueSavedUpdated(listing(), "fan-1", "admin");
+        var row = ArgumentCaptor.forClass(ListingNotificationOutbox.class);
+        verify(outbox).save(row.capture());
+        var event = json.readTree(row.getValue().getPayload());
+        assertEquals("SAVED_LISTING_UPDATED", event.get("eventType").asText());
+        assertEquals(Set.of("listingId", "listingTitle"), json.readValue(event.get("data").toString(), Map.class).keySet());
+    }
 }

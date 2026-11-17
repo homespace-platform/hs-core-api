@@ -23,4 +23,12 @@ public interface ListingFavoriteRepository extends JpaRepository<ListingFavorite
 
     @Query("SELECT lf.listing.id FROM ListingFavorite lf JOIN lf.listing l WHERE lf.userId = :userId AND lf.active = true AND l.active = true AND l.status = com.hs.listing.model.constant.ListingStatus.PUBLISHED")
     List<String> findFavoriteListingIdsByUserId(@Param("userId") String userId);
+
+    @Query(value = """
+            SELECT DISTINCT f.user_id FROM listing_favorites f
+            JOIN users u ON u.id = f.user_id
+            WHERE f.listing_id = :listingId AND f.active = true AND u.active = true
+            ORDER BY f.user_id
+            """, nativeQuery = true)
+    List<String> findActiveUserIdsByListingId(@Param("listingId") String listingId);
 }

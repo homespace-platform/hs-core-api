@@ -63,10 +63,8 @@ public class ListingNotificationWriter {
         Instant now = Instant.now();
         Map<String, String> data = new LinkedHashMap<>();
         data.put("listingId", listing.getId());
-        if (listing.getTitle() != null) {
-            String title = listing.getTitle().replaceAll("[<>\\p{Cntrl}]", " ").replaceAll("\\s+", " ").trim();
-            if (!title.isEmpty()) data.put("listingTitle", title.substring(0, Math.min(title.length(), 120)).trim());
-        }
+        String title = safeTitle(listing);
+        if (title != null) data.put("listingTitle", title);
         if (edit) data.put("editId", editId);
         if (status != null) data.put("status", status.name());
         String payload = json.writeValueAsString(Map.of(
@@ -74,5 +72,38 @@ public class ListingNotificationWriter {
                 "occurredAt", TIMESTAMP.format(now), "recipients", List.of(recipient),
                 "data", data));
         outbox.save(new ListingNotificationOutbox(eventId, listing.getId(), topic, payload, now));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void enqueueSavedUnavailable(Listing listing, String recipientId, String actorId) {
+        enqueueSaved(listing, recipientId, actorId, "SAVED_LISTING_UNAVAILABLE");
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void enqueueSavedUpdated(Listing listing, String recipientId, String actorId) {
+        enqueueSaved(listing, recipientId, actorId, "SAVED_LISTING_UPDATED");
+    }
+
+    private void enqueueSaved(Listing listing, String recipientId, String actorId, String type) {
+        if (listing.getId() == null || listing.getId().isBlank() || recipientId == null || recipientId.isBlank())
+            throw new IllegalStateException("Saved listing notification identity missing");
+        if (recipientId.equals(listing.getOwnerId()) || recipientId.equals(actorId)) return;
+        String eventId = UUID.randomUUID().toString();
+        Instant now = Instant.now();
+        Map<String, String> data = new LinkedHashMap<>();
+        data.put("listingId", listing.getId());
+        String title = safeTitle(listing);
+        if (title != null) data.put("listingTitle", title);
+        String payload = json.writeValueAsString(Map.of(
+                "eventId", eventId, "eventType", type, "version", 1,
+                "occurredAt", TIMESTAMP.format(now), "recipients", List.of(recipientId),
+                "data", data));
+        outbox.save(new ListingNotificationOutbox(eventId, listing.getId(), topic, payload, now));
+    }
+
+    private static String safeTitle(Listing listing) {
+        if (listing.getTitle() == null) return null;
+        String title = listing.getTitle().replaceAll("[<>\\p{Cntrl}]", " ").replaceAll("\\s+", " ").trim();
+        return title.isEmpty() ? null : title.substring(0, Math.min(title.length(), 120)).trim();
     }
 }
