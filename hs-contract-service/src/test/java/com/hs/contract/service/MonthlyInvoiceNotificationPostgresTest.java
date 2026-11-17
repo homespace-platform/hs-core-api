@@ -98,6 +98,8 @@ class MonthlyInvoiceNotificationPostgresTest {
     }
 
     @MockitoBean ContractAmendmentService amendments;
+    @MockitoBean com.hs.contract.deposit.DepositAgreementService depositAgreements;
+    @MockitoBean RentalWorkflowSupport workflowSupport;
     @MockitoBean ContractTermsResolver terms;
     @MockitoBean ListingStatusService listings;
     @MockitoBean ParkingReservationService parking;

@@ -81,6 +81,24 @@ public class DepositAgreementService {
         c.setStatus(ContractStatus.TERMINATED);c.setTerminationCompletedAt(time.now());contracts.save(c);
         audit(rentalId,"SYSTEM","DEPOSIT_TERMINATED_TENANT_DEFAULT",reason);
     }
+
+    /** Called with the lease locked; completion changes lifecycle metadata only. */
+    @Transactional
+    public void completeAfterLeaseSettlement(Contract lease,ContractClosure settlement) {
+        if(lease.getParentContractId()!=null || isDeposit(lease) || lease.getStatus()!=ContractStatus.CLOSED || lease.getSignedAt()==null
+            || !lease.getId().equals(settlement.getContractId()) || !"CLOSED".equals(settlement.getStatus()) || settlement.getClosedAt()==null)
+            throw invalid("Chưa hoàn tất quyết toán hợp đồng thuê để đóng hợp đồng cọc.");
+        var found=find(lease.getRentalRequestId());
+        if(found.isEmpty())return;
+        var c=contracts.findByIdForUpdate(found.get().getId()).orElseThrow();
+        if(!isDeposit(c) || c.getParentContractId()!=null || !Objects.equals(lease.getRentalRequestId(),c.getRentalRequestId())
+            || !Objects.equals(lease.getLandlordId(),c.getLandlordId()) || !Objects.equals(lease.getTenantId(),c.getTenantId()))
+            throw invalid("Hợp đồng cọc không khớp các bên của hợp đồng thuê.");
+        if(c.getStatus()!=ContractStatus.ACTIVE || c.getSignedAt()==null)return;
+        c.setStatus(ContractStatus.CLOSED);contracts.save(c);
+        audit(lease.getRentalRequestId(),"SYSTEM","DEPOSIT_CLOSED_LEASE_SETTLEMENT",
+            "Hoàn tất HĐ cọc theo quyết toán HĐ thuê "+lease.getContractNumber()+" tại "+STAMP.format(settlement.getClosedAt())+". Bản ký được giữ để đối chiếu.");
+    }
     /** Resolve lazy associations in this transaction; only scalar values may leave the service. */
     public record Overview(boolean required, boolean signingAllowed, String blockedReason, String signingContractId,String leaseContractId,String obligation) {
         public Overview(boolean required,boolean allowed,String reason,String signingId){this(required,allowed,reason,signingId,null,null);}
@@ -90,14 +108,16 @@ public class DepositAgreementService {
     public Overview overview(String rentalId, String actor) {
         var rental=participant(rentalId,actor);
         var found=find(rentalId);
+        boolean completed=found.filter(c->c.getStatus()==ContractStatus.CLOSED).isPresent();
         boolean exempt=isExempt(rental);
         boolean amountKnown=rental.getDepositAmount()!=null && rental.getDepositAmount().signum()>=0;
-        boolean eligible=rental.getStatus()==RentalRequestStatus.ACCEPTED
+        boolean eligible=!completed&&rental.getStatus()==RentalRequestStatus.ACCEPTED
             && rental.getResolutionWorkflowId()==null && rental.getCancellationRequestedAt()==null && rental.getListing()!=null
             && rental.getListing().getOperationalStatus()==ListingStatus.RESERVED;
         boolean expired=found.filter(c->c.getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING
             && c.getTenantSigningDueAt()!=null && !time.now().isBefore(c.getTenantSigningDueAt())).isPresent();
-        String blocked=exempt?"Không yêu cầu đặt cọc: bỏ qua hợp đồng cọc, tiếp tục thanh toán tiền thuê và ký hợp đồng thuê."
+        String blocked=completed?"Hợp đồng cọc đã hoàn tất cùng quyết toán hợp đồng thuê. Bản ký và bằng chứng blockchain được giữ để tra cứu."
+            :exempt?"Không yêu cầu đặt cọc: bỏ qua hợp đồng cọc, tiếp tục thanh toán tiền thuê và ký hợp đồng thuê."
             :!amountKnown?"Chưa xác định được số tiền cọc đã thống nhất; cần đối soát hồ sơ trước khi ký."
             :rental.getDefaultCompletedAt()!=null?"Hợp đồng cọc đã chấm dứt do lỗi bên thuê: không hoàn tất nghĩa vụ đúng hạn. Bản đã ký được giữ để tra cứu."
             :!eligible?"Hồ sơ đã chuyển bước hoặc đang chờ hủy/đối soát. Tài liệu đã ký vẫn được giữ để tra cứu."
@@ -105,6 +125,7 @@ public class DepositAgreementService {
         var lease=contracts.findByRentalRequestId(rentalId).orElse(null);
         var ledger=ledgers.findByRentalRequestId(rentalId).orElse(null);
         String obligation=ledger!=null&&Set.of(DepositStatus.REFUND_DUE,DepositStatus.REFUNDED,DepositStatus.RETAINED_BY_LANDLORD,DepositStatus.DISPUTED).contains(ledger.getStatus())?ledger.getStatus().name()
+            :completed||lease!=null&&lease.getStatus()==ContractStatus.CLOSED?"ENDED"
             :lease!=null&&lease.getSignedAt()!=null?"TRANSFERRED_TO_LEASE"
             :rental.getStatus()==RentalRequestStatus.ACCEPTED?"RESERVATION_PENDING":"ENDED";
         return new Overview(!exempt,

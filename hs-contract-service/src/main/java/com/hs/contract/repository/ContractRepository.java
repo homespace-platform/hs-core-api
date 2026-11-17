@@ -33,6 +33,16 @@ public interface ContractRepository extends JpaRepository<Contract, String>, Jpa
     List<String> findLifecycleIdsAfter(@Param("statuses") java.util.Collection<ContractStatus> statuses,
                                       @Param("afterId") String afterId, Pageable pageable);
 
+    @Query("select lease.id from Contract lease, ContractClosure settlement, DepositAgreement link, Contract deposit "
+        + "where lease.parentContractId is null and lease.status = com.hs.contract.model.constant.ContractStatus.CLOSED and lease.signedAt is not null "
+        + "and settlement.contractId = lease.id and settlement.status = 'CLOSED' and settlement.closedAt is not null "
+        + "and link.rentalRequestId = lease.rentalRequestId and deposit.id = link.signingContractId "
+        + "and deposit.agreementKind = 'DEPOSIT' and deposit.parentContractId is null "
+        + "and deposit.status = com.hs.contract.model.constant.ContractStatus.ACTIVE and deposit.signedAt is not null "
+        + "and deposit.rentalRequestId = lease.rentalRequestId and deposit.landlordId = lease.landlordId and deposit.tenantId = lease.tenantId "
+        + "order by lease.id")
+    List<String> findSettledLeaseIdsWithActiveDeposit(Pageable pageable);
+
     Optional<Contract> findByContractNumber(String contractNumber);
 
     List<Contract> findByLandlordIdOrderByCreatedAtDesc(String landlordId);

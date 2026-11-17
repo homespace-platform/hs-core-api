@@ -73,6 +73,66 @@ class DepositAgreementServiceTest {
         verify(contracts,times(1)).save(c);verify(agreements,never()).save(any());
         verify(events).save(argThat(e->"DEPOSIT_TERMINATED_TENANT_DEFAULT".equals(e.getAction())&&e.getNote().contains("Lỗi Bên B")&&"SYSTEM".equals(e.getActorId())));
     }
+
+    private Contract settledLease() {
+        return Contract.builder().id("lease").contractNumber("HD-SETTLED").rentalRequestId("rental")
+            .landlordId("owner").tenantId("tenant").status(ContractStatus.CLOSED).signedAt(now.minusSeconds(500)).build();
+    }
+    private ContractClosure settledClosure() {
+        return ContractClosure.builder().contractId("lease").status("CLOSED").closedAt(now).build();
+    }
+    @Test void leaseSettlementClosesTheLinkedDepositOnceAndPreservesAllSigningData() {
+        var deposit=depositDocument(ContractStatus.ACTIVE);deposit.setLandlordId("owner");deposit.setTenantId("tenant");
+        deposit.setSignedAt(now.minusSeconds(1000));deposit.setCurrentRevisionId("signed-deposit-revision");
+        var signedAt=deposit.getSignedAt();
+        service.completeAfterLeaseSettlement(settledLease(),settledClosure());
+        service.completeAfterLeaseSettlement(settledLease(),settledClosure());
+        assertEquals(ContractStatus.CLOSED,deposit.getStatus());assertEquals(signedAt,deposit.getSignedAt());
+        assertEquals("signed-deposit-revision",deposit.getCurrentRevisionId());
+        verify(contracts,times(1)).save(deposit);
+        verify(events,times(1)).save(argThat(e->"DEPOSIT_CLOSED_LEASE_SETTLEMENT".equals(e.getAction())&&e.getNote().contains("HD-SETTLED")));
+        verify(agreements,never()).save(any());verifyNoInteractions(signatures,revisions,ledgers,payments);
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=ContractStatus.class,names={"ACTIVE","EXPIRED","TERMINATED","CANCELLED"})
+    void incompleteLeaseCannotCloseItsDeposit(ContractStatus state) {
+        var lease=settledLease();lease.setStatus(state);
+        assertThrows(AppException.class,()->service.completeAfterLeaseSettlement(lease,settledClosure()));
+        verifyNoInteractions(agreements);verify(contracts,never()).save(any());
+    }
+    @Test void incompleteOrForeignSettlementCannotCloseADeposit() {
+        var closure=settledClosure();closure.setClosedAt(null);
+        assertThrows(AppException.class,()->service.completeAfterLeaseSettlement(settledLease(),closure));
+        closure.setClosedAt(now);closure.setStatus("REFUND_PENDING");
+        assertThrows(AppException.class,()->service.completeAfterLeaseSettlement(settledLease(),closure));
+        closure.setStatus("CLOSED");closure.setContractId("another-lease");
+        assertThrows(AppException.class,()->service.completeAfterLeaseSettlement(settledLease(),closure));
+        verify(contracts,never()).save(any());
+    }
+    @Test void settlementCannotCloseAnotherPartysDepositOrAnUnsignedDocument() {
+        var deposit=depositDocument(ContractStatus.ACTIVE);deposit.setLandlordId("other-owner");deposit.setTenantId("tenant");deposit.setSignedAt(now);
+        assertThrows(AppException.class,()->service.completeAfterLeaseSettlement(settledLease(),settledClosure()));
+        deposit.setLandlordId("owner");deposit.setSignedAt(null);
+        service.completeAfterLeaseSettlement(settledLease(),settledClosure());
+        assertEquals(ContractStatus.ACTIVE,deposit.getStatus());verify(contracts,never()).save(any());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=ContractStatus.class,names={"DRAFT","CANCELLED","TERMINATED","CLOSED"})
+    void settlementKeepsOtherDepositOutcomesIntact(ContractStatus state) {
+        var deposit=depositDocument(state);deposit.setLandlordId("owner");deposit.setTenantId("tenant");deposit.setSignedAt(now);
+        service.completeAfterLeaseSettlement(settledLease(),settledClosure());
+        assertEquals(state,deposit.getStatus());verify(contracts,never()).save(any());verifyNoInteractions(events);
+    }
+    @Test void exemptLeaseWithNoDepositDocumentCompletesWithoutInventingOne() {
+        service.completeAfterLeaseSettlement(settledLease(),settledClosure());
+        verify(contracts,never()).save(any());verify(agreements,never()).save(any());verifyNoInteractions(events);
+    }
+    @Test void completedDepositOverviewDisablesSigningAndExplainsTheFinalOutcome() {
+        var deposit=depositDocument(ContractStatus.CLOSED);deposit.setSignedAt(now);
+        var view=service.overview("rental","owner");
+        assertFalse(view.signingAllowed());assertEquals("ENDED",view.obligation());
+        assertTrue(view.blockedReason().contains("đã hoàn tất"));assertTrue(service.tenantHasSigned("rental"));
+    }
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(value=ContractStatus.class,names={"DRAFT","LANDLORD_SIGNATURE_PENDING","TENANT_SIGNATURE_PENDING","CANCELLED"})
     void unsignedDepositCannotBeTerminatedAsATenantDefault(ContractStatus status) {

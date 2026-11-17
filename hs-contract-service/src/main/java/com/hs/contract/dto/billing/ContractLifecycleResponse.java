@@ -7,4 +7,5 @@ import java.util.List;
 public record ContractLifecycleResponse(Instant serverNow, LocalDate endExclusive, Instant renewalOpensAt,
     Instant renewalSignBy, boolean canRequestRenewal, List<ContractRenewal> renewals, ContractClosure closure,
     BigDecimal heldDeposit, boolean canProposeClosure, PaymentRequestResponse refundPayment,
-    PaymentRequestResponse balancePayment, ClosureBillingResponse billing, com.hs.payment.dto.DepositLedgerView deposit,String rentalRequestId) {}
+    PaymentRequestResponse balancePayment, ClosureBillingResponse billing, com.hs.payment.dto.DepositLedgerView deposit,String rentalRequestId,
+    boolean earlyReturnPending) {}

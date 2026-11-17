@@ -39,6 +39,8 @@ public class ContractLifecycleService {
     @org.springframework.beans.factory.annotation.Autowired private DisputeCaseRepository complaintCases;
     @org.springframework.beans.factory.annotation.Autowired private org.springframework.context.ApplicationEventPublisher complaintEvents;
     @org.springframework.beans.factory.annotation.Autowired(required=false) private RentalWorkflowRecordRepository workflows;
+    @org.springframework.beans.factory.annotation.Autowired private RentalWorkflowSupport workflowSupport;
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.contract.deposit.DepositAgreementService depositAgreements;
     @org.springframework.beans.factory.annotation.Autowired(required=false) private WorkflowDocumentService workflowDocuments;
     @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager entityManager;
     @org.springframework.beans.factory.annotation.Autowired private com.hs.payment.service.DepositLedgerService depositLedger;
@@ -168,8 +170,6 @@ public class ContractLifecycleService {
     }
     private ContractLifecycleResponse proposeClosureLocked(Contract c,String actor,ClosurePayload p,String caseId) {
         String id=c.getId();
-        if(c.getAgreedEarlyEndExclusive()!=null && (workflows==null||workflows.findById(c.getRentalRequestId()+":EARLY_EXIT").filter(w->"RETURNED".equals(w.getStatus())&&w.getOwnerConfirmedAt()!=null&&w.getTenantConfirmedAt()!=null).isEmpty()))
-            throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Hai bên cần xác nhận trả nhà theo thỏa thuận chấm dứt trước khi quyết toán cọc.");
         if(c.getStatus()!=ContractStatus.EXPIRED || p==null || !p.vacantPossessionConfirmed()
                 || p.note()==null || p.note().trim().length()<10 || p.note().length()>2000 || !moneyValid(p.otherDeduction())) throw notAllowed();
         ContractClosure close=closures.findById(id).orElse(ContractClosure.builder().contractId(id).status("WAITING_HANDOVER").build());
@@ -195,6 +195,7 @@ public class ContractLifecycleService {
         responseDeadline(close);
         appendClosureEvent(close,"PROPOSED",actor,close.getNote(),List.of());
         closures.save(close); deposit.setStatus(DepositStatus.SETTLEMENT_PENDING); deposits.save(deposit);
+        confirmEarlyReturn(c,actor);
         if(caseId==null)terminationNotices.tenant(c,com.hs.contract.notification.TerminationNotificationWriter.Event.SETTLEMENT_RESPONSE_NEEDED);
         return response(c,actor);
     }
@@ -223,6 +224,7 @@ public class ContractLifecycleService {
                 || agreedDeductions.stream().anyMatch(d->d==null||!moneyValid(d.amount()))
                 || agreedDeductions.stream().map(ClosureDeduction::amount).reduce(ZERO,BigDecimal::add).compareTo(deduction)!=0)
             throw new AppException(ContractErrorCode.LIFECYCLE_INVALID,"Sổ cọc hoặc khoản khấu trừ đã khác đề xuất; cần lập lại để hai bên đối chiếu.");
+        confirmEarlyReturn(c,actor);
         BigDecimal retained=held.min(deduction);
         BigDecimal previousRetained=deposit.getRetainedAmount()==null?ZERO:deposit.getRetainedAmount();
         if(!moneyValid(previousRetained))throw invalid();
@@ -342,6 +344,11 @@ public class ContractLifecycleService {
             }); } catch(RuntimeException e) { log.error("LEASE_LIFECYCLE_SYNC_FAILED contract={}",id,e); }
             afterId=ids.get(ids.size()-1);
         }
+        for(String id:contracts.findSettledLeaseIdsWithActiveDeposit(PageRequest.of(0,100))) {
+            try { new TransactionTemplate(transactionManager).executeWithoutResult(tx->{
+                var c=contracts.findByIdForUpdate(id).orElse(null);if(c!=null)syncLocked(c);
+            }); } catch(RuntimeException e) { log.error("DEPOSIT_SETTLEMENT_SYNC_FAILED contract={}",id,e); }
+        }
         syncObligationDeadlines();
     }
     private void syncObligationDeadlines() {
@@ -423,6 +430,9 @@ public class ContractLifecycleService {
             log.info("LEASE_EXPIRED contract={} end={}",c.getId(),end(c));
         }
         closures.findById(c.getId()).ifPresent(s->{
+            if(c.getStatus()==ContractStatus.CLOSED && "CLOSED".equals(s.getStatus()) && s.getClosedAt()!=null) {
+                depositAgreements.completeAfterLeaseSettlement(c,s);return;
+            }
             if(Set.of("PROPOSED","DISPUTED").contains(s.getStatus()) && s.getRespondBy()!=null
                     && !now.isBefore(s.getRespondBy()) && s.getResponseOverdueAt()==null) {
                 preserveLegacyProposal(s); s.setResponseOverdueAt(now);
@@ -448,6 +458,7 @@ public class ContractLifecycleService {
         preserveLegacyProposal(s);
         appendClosureEvent(s,"CLOSED","SYSTEM","Đã hoàn tất nghĩa vụ quyết toán.",List.of());
         s.setStatus("CLOSED"); s.setClosedAt(time.now()); c.setStatus(ContractStatus.CLOSED); contracts.save(c);
+        depositAgreements.completeAfterLeaseSettlement(c,s);
         terminationNotices.both(c,com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_CLOSED);
     }
     private ContractLifecycleResponse response(Contract c,String actor) {
@@ -456,14 +467,14 @@ public class ContractLifecycleService {
         DepositRecord deposit=deposits.findByRentalRequestId(c.getRentalRequestId()).orElse(null);
         List<ContractRenewal> history=renewals.findByContractIdOrderByRequestedAtDesc(c.getId());
         history.forEach(r->{ if(r.getAgreementContractId()!=null) contracts.findById(r.getAgreementContractId()).ifPresent(a->r.setAgreementStatus(a.getStatus())); });
+        boolean earlyReturnPending=!earlyReturnConfirmed(c);
         return new ContractLifecycleResponse(time.now(),end(c),opens(c),signBy(c),actor.equals(c.getTenantId())&&canRequest(c),
                 history,close,deposit==null?null:deposit.getHeldAmount(),
                 actor.equals(c.getLandlordId())&&c.getStatus()==ContractStatus.EXPIRED
-                    && earlyReturnConfirmed(c)
                     && activeSettlementCase(c).isEmpty()
                     && deposit!=null && Set.of(DepositStatus.HELD,DepositStatus.SETTLEMENT_PENDING,DepositStatus.DISPUTED).contains(deposit.getStatus())
-                    && allBillsPaid(c) && (close==null || Set.of("WAITING_HANDOVER","PROPOSED","DISPUTED").contains(close.getStatus())),
-                close==null?null:paymentView(close.getRefundPaymentId(),actor),close==null?null:paymentView(close.getBalancePaymentId(),actor),billingView(c,actor,close),depositLedger.forRental(c.getRentalRequestId()),c.getRentalRequestId());
+                    && settlementBlockReason(c)==null && (close==null || Set.of("WAITING_HANDOVER","PROPOSED","DISPUTED").contains(close.getStatus())),
+                close==null?null:paymentView(close.getRefundPaymentId(),actor),close==null?null:paymentView(close.getBalancePaymentId(),actor),billingView(c,actor,close),depositLedger.forRental(c.getRentalRequestId()),c.getRentalRequestId(),earlyReturnPending);
     }
     private com.hs.payment.dto.PaymentRequestResponse paymentView(String id,String actor) {
         return id==null?null:payments.toResponse(paymentRepository.findById(id).orElseThrow(this::notAllowed),actor);
@@ -481,14 +492,43 @@ public class ContractLifecycleService {
                 && b.getRolledToInvoiceId()!=null && list.stream().anyMatch(next->b.getRolledToInvoiceId().equals(next.getId()) && next.getPeriodIndex()>b.getPeriodIndex()));
     }
     private void requirePaidBills(Contract c) {
-        if(!earlyReturnConfirmed(c))throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Cần hai bên xác nhận trả nhà và xử lý khiếu nại chấm dứt trước khi chốt cọc.");
-        if(c.getAgreedEarlyEndExclusive()!=null&&paymentRepository.findAllByContractIdAndType(c.getId(),PaymentType.INITIAL_PAYMENT_REFUND).stream().anyMatch(p->p.getStatus()!=PaymentStatus.CONFIRMED))
-            throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Cần hoàn và xác nhận đủ tiền thuê trả trước theo thỏa thuận trước khi chốt cọc.");
-        if(paymentRepository.findAllByContractIdAndType(c.getId(),PaymentType.DEPOSIT_ADJUSTMENT).stream().anyMatch(p->p.getStatus()!=PaymentStatus.CONFIRMED))
-            throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Phải đối soát xong khoản chênh lệch cọc trước khi quyết toán/hoàn cọc.");
-        if(!allBillsPaid(c)) throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,"Phải thanh toán và chủ nhà xác nhận tất cả hóa đơn kỳ cuối/bổ sung trước khi quyết toán cọc.");
+        String blocked=settlementBlockReason(c);
+        if(blocked!=null)throw new AppException(ContractErrorCode.LIFECYCLE_NOT_ALLOWED,blocked);
     }
-    private boolean earlyReturnConfirmed(Contract c){return c.getAgreedEarlyEndExclusive()==null||workflows!=null&&workflows.findById(c.getRentalRequestId()+":EARLY_EXIT").filter(w->"RETURNED".equals(w.getStatus())&&w.getOwnerConfirmedAt()!=null&&w.getTenantConfirmedAt()!=null).isPresent()&&(complaintCases==null||complaintCases.findByActiveKey("RENTAL:"+c.getRentalRequestId()+":TERMINATION").isEmpty());}
+    private String settlementBlockReason(Contract c) {
+        if(!earlySettlementReady(c))return "Cần thỏa thuận chấm dứt sớm đã ký hợp lệ và xử lý khiếu nại chấm dứt còn mở trước khi chốt cọc.";
+        if(c.getAgreedEarlyEndExclusive()!=null&&paymentRepository.findAllByContractIdAndType(c.getId(),PaymentType.INITIAL_PAYMENT_REFUND).stream().anyMatch(p->p.getStatus()!=PaymentStatus.CONFIRMED))
+            return "Cần hoàn và xác nhận đủ tiền thuê trả trước theo thỏa thuận trước khi chốt cọc.";
+        if(paymentRepository.findAllByContractIdAndType(c.getId(),PaymentType.DEPOSIT_ADJUSTMENT).stream().anyMatch(p->p.getStatus()!=PaymentStatus.CONFIRMED))
+            return "Phải đối soát xong khoản chênh lệch cọc trước khi quyết toán/hoàn cọc.";
+        return allBillsPaid(c)?null:"Phải thanh toán và chủ nhà xác nhận tất cả hóa đơn kỳ cuối/bổ sung trước khi quyết toán cọc.";
+    }
+    private Optional<RentalWorkflowRecord> earlyReturnRecord(Contract c) {
+        return workflows==null?Optional.empty():workflows.findById(c.getRentalRequestId()+":EARLY_EXIT")
+            .filter(w->c.getId().equals(w.getContractId())&&"EARLY_EXIT".equals(w.getKind())&&Set.of("AGREED","RETURNED").contains(w.getStatus()));
+    }
+    private boolean earlySettlementReady(Contract c) {
+        return c.getAgreedEarlyEndExclusive()==null || earlyReturnRecord(c).isPresent()
+            && (complaintCases==null||complaintCases.findByActiveKey("RENTAL:"+c.getRentalRequestId()+":TERMINATION").isEmpty());
+    }
+    private boolean earlyReturnConfirmed(Contract c) {
+        return c.getAgreedEarlyEndExclusive()==null || earlyReturnRecord(c)
+            .filter(w->"RETURNED".equals(w.getStatus())&&w.getOwnerConfirmedAt()!=null&&w.getTenantConfirmedAt()!=null).isPresent();
+    }
+    private void confirmEarlyReturn(Contract c,String actor) {
+        if(c.getAgreedEarlyEndExclusive()==null)return;
+        var w=earlyReturnRecord(c).orElseThrow(this::notAllowed);
+        boolean owner=actor.equals(c.getLandlordId());
+        if(!owner&&!actor.equals(c.getTenantId()))throw notAllowed();
+        if(owner?w.getOwnerConfirmedAt()!=null:w.getTenantConfirmedAt()!=null)return;
+        if(owner)w.setOwnerConfirmedAt(time.now());else w.setTenantConfirmedAt(time.now());
+        if(w.getOwnerConfirmedAt()!=null&&w.getTenantConfirmedAt()!=null)w.setStatus("RETURNED");
+        workflowSupport.save(new RentalWorkflowSupport.Source(rental(c),c,w,actor),"CONFIRM_RETURN",
+            owner?"Chủ nhà xác nhận nhận lại nhà thực tế khi gửi đề xuất quyết toán cọc.":"Người thuê xác nhận trả nhà thực tế khi đồng ý đề xuất quyết toán cọc.",List.of());
+        terminationNotices.other(c,actor,"RETURNED".equals(w.getStatus())
+            ?com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_RETURN_COMPLETED
+            :com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_RETURN_CONFIRMED);
+    }
     private MonthlyInvoice lastCostsBill(Contract c) {
         MonthlyInvoice original=invoices.findByContractIdAndPeriodIndex(c.getId(),months(c)-1).orElseThrow(this::notAllowed);
         return invoices.findByContractIdOrderByPeriodIndexDesc(c.getId()).stream()

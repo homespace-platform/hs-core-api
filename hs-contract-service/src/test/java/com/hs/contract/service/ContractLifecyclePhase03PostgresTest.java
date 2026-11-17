@@ -66,6 +66,8 @@ class ContractLifecyclePhase03PostgresTest {
         @Override public LocalDate today(){return now().atZone(BillingTime.ZONE).toLocalDate();}
     }
     @MockitoBean ContractAmendmentService amendments;
+    @MockitoBean com.hs.contract.deposit.DepositAgreementService depositAgreements;
+    @MockitoBean RentalWorkflowSupport workflowSupport;
     @MockitoBean ContractTermsResolver terms;
     @MockitoBean ListingStatusService listings;
     @MockitoBean ParkingReservationService parking;

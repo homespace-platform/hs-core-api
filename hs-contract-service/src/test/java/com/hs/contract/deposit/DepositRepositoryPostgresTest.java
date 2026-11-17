@@ -57,6 +57,31 @@ class DepositRepositoryPostgresTest {
     @Autowired com.hs.listing.repository.ListingRepository listings;
     @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
     @Autowired DepositAgreementService agreementReader;
+    @Autowired ContractClosureRepository closures;
+
+    @Test void findsOnlyCompletedSettlementsAndClosesTheirLinkedSignedDeposit() {
+        var version=version(template("LEASE"));
+        var lease=envelope("HD-SETTLED",null,version);lease.setStatus(ContractStatus.CLOSED);lease.setSignedAt(java.time.Instant.now());
+        contracts.saveAndFlush(lease);
+        var deposit=envelope("DC-SETTLED","DEPOSIT",version);deposit.setSignedAt(lease.getSignedAt());contracts.saveAndFlush(deposit);
+        var link=new DepositAgreement();link.setRentalRequestId("rental");link.setSourcePaymentId("payment");link.setSigningContractId(deposit.getId());
+        link.setSnapshotJson("{}");link.setSnapshotHash("hash");link.setCapturedAt(lease.getSignedAt());deposits.saveAndFlush(link);
+        var page=PageRequest.of(0,100);
+        assertTrue(contracts.findSettledLeaseIdsWithActiveDeposit(page).isEmpty());
+        var settlement=closures.saveAndFlush(ContractClosure.builder().contractId(lease.getId()).status("REFUND_PENDING").build());
+        assertTrue(contracts.findSettledLeaseIdsWithActiveDeposit(page).isEmpty());
+        settlement.setStatus("CLOSED");settlement.setClosedAt(lease.getSignedAt());closures.saveAndFlush(settlement);
+        deposit.setTenantId("other-tenant");contracts.saveAndFlush(deposit);
+        assertTrue(contracts.findSettledLeaseIdsWithActiveDeposit(page).isEmpty());
+        deposit.setTenantId("tenant");contracts.saveAndFlush(deposit);
+        assertEquals(List.of(lease.getId()),contracts.findSettledLeaseIdsWithActiveDeposit(page));
+        agreementReader.completeAfterLeaseSettlement(lease,settlement);contracts.flush();
+        assertEquals(ContractStatus.CLOSED,contracts.findById(deposit.getId()).orElseThrow().getStatus());
+        assertTrue(contracts.findSettledLeaseIdsWithActiveDeposit(page).isEmpty());
+        agreementReader.completeAfterLeaseSettlement(lease,settlement);
+        assertEquals("hash",deposits.findByRentalRequestId("rental").orElseThrow().getSnapshotHash());
+        assertEquals(lease.getSignedAt(),deposit.getSignedAt());
+    }
 
     @Test
     @org.springframework.transaction.annotation.Transactional(propagation=org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)

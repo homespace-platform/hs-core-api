@@ -79,7 +79,8 @@ public class RentalOnboardingService {
                        boolean canSign,boolean canRequestEarlierStart,long holdMinutes,
                        List<PaymentRequestResponse> payments,List<RentalStartChange> startChanges,String message,String askerRole,
                        Instant cancellationRequestedAt,String cancellationReason,List<RentalOnboardingEvent> history,
-                       DefaultView defaultCase,com.hs.payment.dto.DepositLedgerView deposit,boolean canRequestCancellation, String depositAgreementContractId, String depositAgreementStatus,boolean depositAgreementRequired,boolean depositAgreementTenantSigned) {}
+                       DefaultView defaultCase,com.hs.payment.dto.DepositLedgerView deposit,boolean canRequestCancellation, String depositAgreementContractId, String depositAgreementStatus,boolean depositAgreementRequired,boolean depositAgreementTenantSigned,
+                       LocalDate originalEndExclusive,String leaseTermSource) {}
     public record DefaultView(String eligibleKind,Instant notifiedAt,Instant respondBy,String reason,
                               Instant disputedAt,Instant completedAt,boolean canComplete,String policyVersion,boolean automatic) {}
     @Value("${rental.hold-duration-minutes:60}") private long holdMinutes=60;
@@ -190,11 +191,19 @@ public class RentalOnboardingService {
         boolean earlier=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getResolutionWorkflowId()==null&&r.getCancellationRequestedAt()==null&&depositReady(r)&&rent==null
             &&r.getMoveInDate().isAfter(time.today())&&(contract==null||contract.getStatus()==ContractStatus.DRAFT)
             &&changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()).stream().noneMatch(c->"REQUESTED".equals(c.getStatus()));
-        return new View(time.now(),BillingTime.ZONE.toString(),stage,r.getMoveInDate(),r.getMoveInDate().plusMonths(r.getLeaseMonths()),
+        var originalEnd=r.getMoveInDate().plusMonths(r.getLeaseMonths());
+        var end=originalEnd;
+        String termSource=null;
+        if(contract!=null && contract.getSignedAt()!=null) {
+            end=contract.getAgreedEarlyEndExclusive()!=null?contract.getAgreedEarlyEndExclusive()
+                :ContractLeaseCalc.end(r.getMoveInDate(),ContractLeaseCalc.months(contract,r));
+            if(!end.equals(originalEnd))termSource=contract.getAgreedEarlyEndExclusive()!=null?"EARLY_EXIT":"SIGNED_ADJUSTMENT";
+        }
+        return new View(time.now(),BillingTime.ZONE.toString(),stage,r.getMoveInDate(),end,
             opens,rent!=null?rent.getDueAt():null,signDue,r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getResolutionWorkflowId()==null&&r.getCancellationRequestedAt()==null&&paid&&(contract==null||contract.getStatus()==ContractStatus.DRAFT),signingOpen&&contract!=null,earlier,holdMinutes,
             rows,changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()),message,actor.equals(r.getOwnerId())?"LANDLORD":"TENANT",r.getCancellationRequestedAt(),r.getCancellationReason(),events.findByRentalRequestIdOrderByOccurredAtDesc(r.getId()),
             defaultView(r),depositLedger.forRental(r.getId()),canCancel(r,contract),depositDocument==null?null:depositDocument.getId(),depositDocument==null?null:depositDocument.getStatus().name(),!depositExempt,
-            depositAgreements!=null && depositAgreements.tenantHasSigned(r.getId()));
+            depositAgreements!=null && depositAgreements.tenantHasSigned(r.getId()),originalEnd,termSource);
     }
     @Transactional public View requestEarlier(String id,String actor,StartRequest request) {
         var r=rental(id,actor);sync(r);

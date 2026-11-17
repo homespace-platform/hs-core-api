@@ -196,6 +196,8 @@ class PaymentDisputePostgresTest {
         assertEquals(ContractStatus.EXPIRED,contracts.findById(contractId).orElseThrow().getStatus());
         paymentService.confirmReceipt(paymentId,"tenant");
         var lifecycle=mock(ContractLifecycleService.class,CALLS_REAL_METHODS);
+        ReflectionTestUtils.setField(lifecycle,"depositAgreements",mock(com.hs.contract.deposit.DepositAgreementService.class));
+        ReflectionTestUtils.setField(lifecycle,"terminationNotices",mock(com.hs.contract.notification.TerminationNotificationWriter.class));
         ReflectionTestUtils.setField(lifecycle,"contracts",contracts);ReflectionTestUtils.setField(lifecycle,"closures",closures);
         ReflectionTestUtils.setField(lifecycle,"renewals",mock(ContractRenewalRepository.class));ReflectionTestUtils.setField(lifecycle,"invoices",invoices);
         ReflectionTestUtils.setField(lifecycle,"paymentRepository",payments);ReflectionTestUtils.setField(lifecycle,"payments",paymentService);

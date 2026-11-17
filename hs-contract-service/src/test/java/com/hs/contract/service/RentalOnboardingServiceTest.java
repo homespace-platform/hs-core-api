@@ -72,6 +72,50 @@ class RentalOnboardingServiceTest {
         when(payments.findByRentalRequestIdAndType("rental",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.empty());
         org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",mock(com.hs.contract.deposit.DepositAgreementService.class));
     }
+
+    @Test void completedLeaseShowsTheSignedEarlyEndInsteadOfTheOriginalReservationEnd() {
+        rental.setStatus(RentalRequestStatus.COMPLETED);
+        rental.setMoveInDate(LocalDate.of(2026,11,17));
+        var lease=Contract.builder().id("lease").status(ContractStatus.ACTIVE).signedAt(now)
+            .effectiveLeaseMonths(6).agreedEarlyEndExclusive(LocalDate.of(2026,12,17)).build();
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(lease));
+        for(String actor:List.of("owner","tenant")) {
+            var view=service.refresh("rental",actor);
+            assertEquals(LocalDate.of(2026,11,17),view.startsOn());
+            assertEquals(LocalDate.of(2026,12,17),view.endExclusive());
+            assertEquals(LocalDate.of(2027,2,17),view.originalEndExclusive());
+            assertEquals("EARLY_EXIT",view.leaseTermSource());
+        }
+        assertEquals(3,rental.getLeaseMonths());
+        verify(contracts,never()).save(any());verifyNoInteractions(documents,signatures,parking);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints={1,6})
+    void signedTermAdjustmentsAndRenewalsReplaceTheReservationEnd(int months) {
+        rental.setStatus(RentalRequestStatus.COMPLETED);
+        var lease=Contract.builder().id("lease").status(ContractStatus.ACTIVE).signedAt(now)
+            .effectiveLeaseMonths(months).build();
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(lease));
+        for(String actor:List.of("owner","tenant")) {
+            var view=service.refresh("rental",actor);
+            assertEquals(rental.getMoveInDate().plusMonths(months),view.endExclusive());
+            assertEquals(rental.getMoveInDate().plusMonths(3),view.originalEndExclusive());
+            assertEquals("SIGNED_ADJUSTMENT",view.leaseTermSource());
+        }
+        assertEquals(3,rental.getLeaseMonths());verify(contracts,never()).save(any());
+    }
+
+    @Test void originalAndUnsignedLeaseTermsKeepTheReservationEnd() {
+        var original=service.refresh("rental","tenant");
+        assertEquals(LocalDate.of(2027,2,1),original.endExclusive());
+        assertEquals(original.endExclusive(),original.originalEndExclusive());assertNull(original.leaseTermSource());
+        var lease=Contract.builder().id("lease").status(ContractStatus.TENANT_SIGNATURE_PENDING)
+            .effectiveLeaseMonths(1).agreedEarlyEndExclusive(LocalDate.of(2026,12,1)).build();
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(lease));
+        var unsigned=service.refresh("rental","owner");
+        assertEquals(original.endExclusive(),unsigned.endExclusive());assertNull(unsigned.leaseTermSource());
+    }
     @Test void exemptFutureRentalSkipsDepositWithoutNeedingAZeroValueReceipt() {
         exemptWithoutDepositPayment();
         var view=service.refresh("rental","tenant");

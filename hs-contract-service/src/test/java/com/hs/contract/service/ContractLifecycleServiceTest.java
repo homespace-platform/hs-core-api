@@ -55,6 +55,7 @@ class ContractLifecycleServiceTest {
     RenewalNotificationWriter renewalNotices=mock(RenewalNotificationWriter.class);
     AgreementSigningNotificationWriter signingNotices=mock(AgreementSigningNotificationWriter.class);
     com.hs.contract.notification.TerminationNotificationWriter terminationNotices=mock(com.hs.contract.notification.TerminationNotificationWriter.class);
+    com.hs.contract.deposit.DepositAgreementService depositAgreements=mock(com.hs.contract.deposit.DepositAgreementService.class);
     @BeforeEach void setup() {
         service=new ContractLifecycleService(contracts,revisions,renewals,closures,rentals,invoices,deposits,paymentRepo,payments,
                 signatures,documents,listings,parking,new ObjectMapper().findAndRegisterModules(),time,mock(PlatformTransactionManager.class),storageObjects,outbox.writer);
@@ -63,6 +64,7 @@ class ContractLifecycleServiceTest {
         org.springframework.test.util.ReflectionTestUtils.setField(service,"renewalNotices",renewalNotices);
         org.springframework.test.util.ReflectionTestUtils.setField(service,"signingNotices",signingNotices);
         org.springframework.test.util.ReflectionTestUtils.setField(service,"terminationNotices",terminationNotices);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",depositAgreements);
         root=Contract.builder().id("root").contractNumber("HD-DEMO").rentalRequestId("rental").listingId("listing")
                 .landlordId("owner").tenantId("tenant").status(ContractStatus.ACTIVE).currentRevisionId("original")
                 .templateId("template").templateVersionId("template-v1").signedAt(Instant.parse("2026-10-12T03:00:00Z"))
@@ -71,7 +73,7 @@ class ContractLifecycleServiceTest {
                 .landlordSnapshot("{}").tenantSnapshot("{}").propertySnapshot("{}").templateVersionId("template-v1")
                 .chargesSnapshot("[{\"billingMethod\":\"PER_KWH\",\"unitAmount\":3500},{\"billingMethod\":\"PER_M3\",\"unitAmount\":16000}]")
                 .policiesSnapshot("{\"depositRefundDays\":15}").specialTerms("Giữ nguyên điều khoản gốc.").build();
-        rental=RentalRequest.builder().id("rental").moveInDate(LocalDate.of(2026,10,12)).leaseMonths(3).build();
+        rental=RentalRequest.builder().id("rental").ownerId("owner").renterId("tenant").moveInDate(LocalDate.of(2026,10,12)).leaseMonths(3).build();
         deposit=DepositRecord.builder().originalAmount(new BigDecimal("20000000")).heldAmount(new BigDecimal("20000000"))
                 .refundableAmount(new BigDecimal("20000000")).status(DepositStatus.HELD).build();
         contractData.put("root",root); revisionData.put("original",revision);
@@ -162,6 +164,86 @@ class ContractLifecycleServiceTest {
     @Test void missingLedgerIsUnknownAndDoesNotAdvertiseSettlementOfZeroDeposit(){
         finalBills();when(deposits.findByRentalRequestId("rental")).thenReturn(Optional.empty());
         var result=service.get("root","owner");assertNull(result.deposit());assertNull(result.heldDeposit());assertFalse(result.canProposeClosure());
+    }
+    RentalWorkflowRecord prepareEarlySettlement() {
+        finalBills();root.setAgreedEarlyEndExclusive(LocalDate.of(2026,12,12));root.setAgreedEarlyBillingMonths(2);
+        bills.removeIf(b->b.getPeriodIndex()==2);
+        var workflows=mock(RentalWorkflowRecordRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"workflows",workflows);
+        var support=new RentalWorkflowSupport(workflows,rentals,contracts,revisions,storageObjects,paymentRepo,new ObjectMapper().findAndRegisterModules(),time);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"workflowSupport",support);
+        var returned=new RentalWorkflowRecord();returned.setId("rental:EARLY_EXIT");returned.setRentalRequestId("rental");
+        returned.setContractId("root");returned.setKind("EARLY_EXIT");returned.setStatus("AGREED");
+        root.setMutualTerminationWorkflowId(returned.getId());
+        returned.setPayloadJson("{\"endExclusive\":\"2026-12-12\"}");
+        when(workflows.findById("rental:EARLY_EXIT")).thenReturn(Optional.of(returned));
+        return returned;
+    }
+    @Test void earlyExitOpensOwnerProposalExactlyAtTheSignedEndWithoutASeparateReturnStep() {
+        var returned=prepareEarlySettlement();
+        clock("2026-12-11T23:59:59");assertFalse(service.get("root","owner").canProposeClosure());
+        assertThrows(AppException.class,()->service.proposeClosure("root","owner",proposal(ZERO)));
+        clock("2026-12-12T00:00:00");
+        var ready=service.get("root","owner");assertEquals(ContractStatus.EXPIRED,root.getStatus());
+        assertTrue(ready.billing().allPaid());assertTrue(ready.earlyReturnPending());assertTrue(ready.canProposeClosure());
+        assertFalse(service.get("root","tenant").canProposeClosure());
+        assertNull(returned.getOwnerConfirmedAt());assertNull(returned.getTenantConfirmedAt());
+        assertThrows(AppException.class,()->service.proposeClosure("root","tenant",proposal(ZERO)));
+        assertThrows(AppException.class,()->service.proposeClosure("root","owner",new ClosurePayload(null,null,ZERO,"Chưa nhận lại nhà trên thực tế",false)));
+    }
+    @Test void earlyExitRecordsBilateralReturnWithSettlementAndCreatesOneRefundOnlyAfterTenantConsent() {
+        var returned=prepareEarlySettlement();
+        var proposal=service.proposeClosure("root","owner",proposal(ZERO));
+        assertNotNull(returned.getOwnerConfirmedAt());assertNull(returned.getTenantConfirmedAt());assertEquals("AGREED",returned.getStatus());
+        assertEquals(1,returned.getRevision());assertTrue(returned.getHistoryJson().contains("LANDLORD"));
+        verify(payments,never()).createContractSettlement(anyString(),anyString(),anyString(),anyString(),anyString(),any(),any(),anyBoolean(),anyString());
+        verify(listings,never()).releaseRentedAfterTermination(anyString(),anyString());
+        assertThrows(AppException.class,()->service.acceptClosure("root","tenant",new AcceptClosurePayload(proposal.closure().getProposalVersion()+1,true,true)));
+        assertThrows(AppException.class,()->service.acceptClosure("root","tenant",new AcceptClosurePayload(proposal.closure().getProposalVersion(),false,true)));
+        assertNull(returned.getTenantConfirmedAt());
+        var accepted=service.acceptClosure("root","tenant",acceptance());
+        assertEquals("RETURNED",returned.getStatus());assertNotNull(returned.getTenantConfirmedAt());assertEquals(2,returned.getRevision());
+        assertTrue(returned.getHistoryJson().contains("TENANT"));assertFalse(accepted.earlyReturnPending());
+        assertEquals("REFUND_PENDING",accepted.closure().getStatus());assertEquals(DepositStatus.REFUND_DUE,deposit.getStatus());
+        assertThrows(AppException.class,()->service.acceptClosure("root","tenant",acceptance()));
+        verify(payments,times(1)).createContractSettlement(anyString(),anyString(),anyString(),anyString(),anyString(),any(),any(),eq(true),anyString());
+        verify(listings,times(1)).releaseRentedAfterTermination(anyString(),anyString());
+    }
+    @Test void earlyExitDisputesAndUnpaidBillsStillPreventSettlementWithoutRecordingReturn() {
+        var returned=prepareEarlySettlement();
+        bills.getFirst().setStatus(MonthlyInvoiceStatus.UNPAID);
+        assertFalse(service.get("root","owner").canProposeClosure());
+        assertThrows(AppException.class,()->service.proposeClosure("root","owner",proposal(ZERO)));
+        assertNull(returned.getOwnerConfirmedAt());bills.getFirst().setStatus(MonthlyInvoiceStatus.PAID);
+        var disputes=mock(DisputeCaseRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"complaintCases",disputes);
+        when(disputes.findByActiveKey("RENTAL:rental:TERMINATION")).thenReturn(Optional.of(new DisputeCase()));
+        assertFalse(service.get("root","owner").canProposeClosure());
+        assertThrows(AppException.class,()->service.proposeClosure("root","owner",proposal(ZERO)));
+        assertNull(returned.getOwnerConfirmedAt());assertNull(returned.getTenantConfirmedAt());
+    }
+    @Test void earlyExitRechecksOutstandingTransfersAndNewBillsBeforeRecordingTenantReturn() {
+        var returned=prepareEarlySettlement();
+        var refund=PaymentRequest.builder().status(PaymentStatus.TRANSFER_REPORTED).build();
+        when(paymentRepo.findAllByContractIdAndType("root",PaymentType.INITIAL_PAYMENT_REFUND)).thenReturn(List.of(refund));
+        assertFalse(service.get("root","owner").canProposeClosure());
+        assertThrows(AppException.class,()->service.proposeClosure("root","owner",proposal(ZERO)));
+        assertNull(returned.getOwnerConfirmedAt());refund.setStatus(PaymentStatus.CONFIRMED);
+        service.proposeClosure("root","owner",proposal(ZERO));
+        bills.getFirst().setStatus(MonthlyInvoiceStatus.UNPAID);
+        assertThrows(AppException.class,()->service.acceptClosure("root","tenant",acceptance()));
+        assertNull(returned.getTenantConfirmedAt());assertEquals("AGREED",returned.getStatus());
+    }
+    @Test void earlyExitCannotUseAnUnsignedOrForeignWorkflowAndDoesNotRepeatExistingReturnConfirmations() {
+        var returned=prepareEarlySettlement();returned.setStatus("APPROVED");
+        assertFalse(service.get("root","owner").canProposeClosure());
+        assertThrows(AppException.class,()->service.proposeClosure("root","owner",proposal(ZERO)));
+        returned.setStatus("AGREED");returned.setContractId("other-contract");
+        assertFalse(service.get("root","owner").canProposeClosure());
+        returned.setContractId("root");returned.setStatus("RETURNED");
+        returned.setOwnerConfirmedAt(time.now().minusSeconds(3600));returned.setTenantConfirmedAt(time.now().minusSeconds(1800));
+        service.proposeClosure("root","owner",proposal(ZERO));service.acceptClosure("root","tenant",acceptance());
+        assertEquals(0,returned.getRevision());assertNull(returned.getHistoryJson());
     }
     @Test void approvalCreatesSeparateImmutableAgreementWithoutExtendingOrChargingAgain() {
         Contract child=approve();assertEquals("root",child.getParentContractId());assertEquals(ContractStatus.DRAFT,child.getStatus());
@@ -350,8 +432,29 @@ class ContractLifecycleServiceTest {
         propose();service.acceptClosure("root","tenant",acceptance());
         paymentData.get("settlement").setStatus(PaymentStatus.TRANSFER_REPORTED);service.get("root","tenant");
         assertEquals("REFUND_PENDING",closureData.get("root").getStatus());
+        verifyNoInteractions(depositAgreements);
         paymentData.get("settlement").setStatus(PaymentStatus.CONFIRMED);service.get("root","tenant");
         assertEquals("CLOSED",closureData.get("root").getStatus());assertEquals(ContractStatus.CLOSED,root.getStatus());
+        verify(depositAgreements).completeAfterLeaseSettlement(root,closureData.get("root"));
+    }
+    @Test void alreadySettledLeaseReconcilesItsDepositWithoutRepeatingClosureOrPayment() {
+        root.setStatus(ContractStatus.CLOSED);
+        var closedAt=time.now().minusSeconds(100);
+        var close=ContractClosure.builder().contractId("root").status("CLOSED").closedAt(closedAt).build();
+        closureData.put("root",close);
+        service.get("root","owner");service.get("root","tenant");
+        verify(depositAgreements,times(2)).completeAfterLeaseSettlement(root,close);
+        assertEquals(closedAt,close.getClosedAt());verifyNoInteractions(terminationNotices);
+        verify(payments,never()).createContractSettlement(anyString(),anyString(),anyString(),anyString(),anyString(),any(),any(),anyBoolean(),anyString());
+    }
+    @Test void backgroundReconciliationProcessesOnlyTheBoundedStaleDepositCandidates() {
+        root.setStatus(ContractStatus.CLOSED);
+        var close=ContractClosure.builder().contractId("root").status("CLOSED").closedAt(time.now()).build();closureData.put("root",close);
+        when(contracts.findSettledLeaseIdsWithActiveDeposit(any())).thenReturn(List.of("root"));
+        service.scheduledSync();
+        verify(depositAgreements).completeAfterLeaseSettlement(root,close);
+        verify(contracts).findSettledLeaseIdsWithActiveDeposit(argThat(p->p.getPageSize()==100&&p.getPageNumber()==0));
+        verifyNoInteractions(terminationNotices);
     }
     @Test void overdueRefundIsNeverAutomaticallyConfirmedOrCancelled() {
         propose();service.acceptClosure("root","tenant",acceptance());clock("2027-01-30T10:00:00");
@@ -368,6 +471,7 @@ class ContractLifecycleServiceTest {
     @Test void noDeductionsBeyondHeldCreatesClosedSettlementWithoutTransfer() {
         finalBills();service.proposeClosure("root","owner",new ClosurePayload(new BigDecimal("1660"),new BigDecimal("101"),new BigDecimal("20000000"),"Hai bên thống nhất khấu trừ toàn bộ cọc.",true));
         service.acceptClosure("root","tenant",acceptance());assertEquals(ContractStatus.CLOSED,root.getStatus());
+        verify(depositAgreements).completeAfterLeaseSettlement(root,closureData.get("root"));
         verify(payments,never()).createContractSettlement(anyString(),anyString(),anyString(),anyString(),anyString(),any(),any(),anyBoolean(),anyString());
     }
     private void waiveDeposit() {
@@ -379,6 +483,7 @@ class ContractLifecycleServiceTest {
         assertEquals(ContractStatus.EXPIRED,root.getStatus());
         var result=service.acceptClosure("root","tenant",acceptance());
         assertEquals(ContractStatus.CLOSED,root.getStatus());assertEquals("CLOSED",result.closure().getStatus());
+        verify(depositAgreements).completeAfterLeaseSettlement(root,result.closure());
         assertNull(result.closure().getRefundPaymentId());assertNull(result.closure().getBalancePaymentId());assertNull(result.closure().getRefundDueAt());
         assertNull(result.refundPayment());assertNull(result.balancePayment());
         assertEquals(DepositStatus.HELD,deposit.getStatus());assertEquals(0,deposit.getRetainedAmount().signum());assertNull(deposit.getRetainedAt());
@@ -404,6 +509,7 @@ class ContractLifecycleServiceTest {
         assertEquals(ContractStatus.EXPIRED,root.getStatus());
         paymentData.get("settlement").setStatus(PaymentStatus.CONFIRMED);
         assertEquals("CLOSED",service.get("root","owner").closure().getStatus());
+        verify(depositAgreements).completeAfterLeaseSettlement(root,closureData.get("root"));
     }
     @Test void initiallyWaivedDepositStillRefundsFundsActuallyHeldAfterAnAdjustment() {
         waiveDeposit();deposit.setHeldAmount(new BigDecimal("3000000"));deposit.setRefundableAmount(new BigDecimal("3000000"));
