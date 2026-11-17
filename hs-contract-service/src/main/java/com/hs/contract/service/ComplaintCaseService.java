@@ -36,6 +36,7 @@ import java.util.*;
 /** Shares cases/audit with payment disputes; never turns a finding into a receipt or unilateral forfeiture. */
 @Service @RequiredArgsConstructor
 public class ComplaintCaseService {
+    private static final int ADMIN_REVIEW_LIMIT=2;
     private final DisputeCaseRepository cases;
     private final DisputeCaseEventRepository events;
     private final RentalRequestRepository rentals;
@@ -163,9 +164,10 @@ public class ComplaintCaseService {
         if(p==null)throw invalid("Thiếu nội dung thao tác.");
         if(p.settlement()!=null||p.outcome()!=null&&!"RECORD_FINDING".equals(p.outcome()))throw invalid("Khiếu nại chỉ trao đổi và ghi kết luận; không sửa hợp đồng hoặc quyết toán.");
         var before=complaint(id);party(before,actor);lockSource(before.getRentalRequestId(),before.getContractId());
-        var d=lockCase(id,p);party(d,actor);String reason=text(p.reason(),500);var metadata=new LinkedHashMap<String,Object>();
+        var d=lockCase(id,p);party(d,actor);int reviews=adminReviewCount(events.findByCaseIdOrderByRevisionAsc(d.getId()));String reason=text(p.reason(),500);var metadata=new LinkedHashMap<String,Object>();
         if(!"COMMENT".equals(action)&&p.evidenceIds()!=null&&!p.evidenceIds().isEmpty())throw invalid("Bổ sung chứng cứ bằng phản hồi riêng.");
         if(d.getStatus()==DisputeCaseStatus.RESOLVED&& !"REOPEN".equals(action))throw forbidden("Hồ sơ đã đóng; cần mở lại có lý do.");
+        if(reviews>=ADMIN_REVIEW_LIMIT)throw forbidden("Kết luận lần hai đã kết thúc hồ sơ; không thể cập nhật thêm.");
         switch(action){
             case "COMMENT" -> {
                 var r=rentals.findById(d.getRentalRequestId()).orElseThrow(this::missing);
@@ -178,11 +180,15 @@ public class ComplaintCaseService {
             }
             case "ESCALATE" -> {
                 bilateral(d);
+                if(reviews>=ADMIN_REVIEW_LIMIT)throw forbidden("HomeSpace đã kết luận đủ hai lần; hồ sơ đã kết thúc.");
+                d.setAssignedTo(null);
                 d.setStatus(DisputeCaseStatus.ESCALATED);d.setComplaintStage("WAITING_ADMIN");d.setEscalatedAt(time.now());d.setRespondBy(deadline());d.setResponseDueFor("ADMIN");clearProposal(d);
             }
+            case "CLOSE" -> {bilateral(d);resolve(d,actor,reason,"CLOSED");}
             case "WITHDRAW" -> {bilateral(d);if(!actor.equals(roundOpener(d)))throw forbidden("Chỉ người mở lượt khiếu nại này được rút trước khi chuyển admin.");resolve(d,actor,reason,"WITHDRAWN");}
             case "REOPEN" -> {
                 if(d.getStatus()!=DisputeCaseStatus.RESOLVED)throw forbidden("Hồ sơ còn đang mở.");
+                if(reviews>=ADMIN_REVIEW_LIMIT)throw forbidden("Kết luận lần hai đã kết thúc hồ sơ; không thể mở lại.");
                 if(cases.findByActiveKey(key(d)).isPresent())throw forbidden("Đã có một hồ sơ đang mở cùng vấn đề.");
                 metadata.put("previousDecision",Objects.toString(d.getComplaintDecision(),""));
                 d.setStatus(DisputeCaseStatus.OPEN);d.setActiveKey(key(d));d.setComplaintStage("WAITING_RESPONSE");
@@ -214,6 +220,8 @@ public class ComplaintCaseService {
         admin(actor);var before=complaint(id);lockSource(before.getRentalRequestId(),before.getContractId());var d=lockCase(id,p);
         if(actor.equals(d.getPayerId())||actor.equals(d.getPayeeId()))throw forbidden("Admin không tự phân xử vụ việc của mình.");
         if(d.getStatus()!=DisputeCaseStatus.ESCALATED)throw forbidden("Chỉ tiếp nhận hồ sơ đã chuyển HomeSpace.");
+        int reviews=adminReviewCount(events.findByCaseIdOrderByRevisionAsc(d.getId()));
+        if(reviews>=ADMIN_REVIEW_LIMIT)throw forbidden("HomeSpace đã kết luận đủ hai lần; hồ sơ đã kết thúc.");
         if(p.evidenceIds()!=null&&!p.evidenceIds().isEmpty())throw invalid("Admin không thay chứng cứ hai bên bằng file quyết định.");
         String reason=text(p.reason(),500);var metadata=new LinkedHashMap<String,Object>();
         if("CLAIM".equals(action)){
@@ -232,7 +240,9 @@ public class ComplaintCaseService {
                 case "DECIDE" -> {
                     if(!canConclude(d))throw forbidden("Đợi bên được yêu cầu bổ sung phản hồi hoặc hết hạn trước khi kết luận.");
                     d.setComplaintOutcome("RECORD_FINDING");d.setComplaintDecision(reason);
-                    metadata.put("outcome","RECORD_FINDING");resolve(d,actor,reason,"CLOSED");
+                    metadata.put("outcome","RECORD_FINDING");metadata.put("adminReview",reviews+1);
+                    if(reviews+1>=ADMIN_REVIEW_LIMIT)resolve(d,actor,reason,"CLOSED");
+                    else {d.setStatus(DisputeCaseStatus.OPEN);d.setComplaintStage("FOLLOW_UP");d.setAssignedTo(null);d.setRespondBy(null);d.setResponseDueFor(null);clearProposal(d);}
                 }
                 default -> throw invalid("Thao tác quản trị không được hỗ trợ.");
             }
@@ -254,27 +264,37 @@ public class ComplaintCaseService {
         var d=complaint(id);em.refresh(d,LockModeType.PESSIMISTIC_WRITE);
         if(p!=null&&(p.expectedRevision()==null||p.expectedRevision()!=d.getRevision()))throw new AppException(ContractErrorCode.COMPLAINT_STALE);
         var r=rentals.findById(d.getRentalRequestId()).orElseThrow(this::missing);
-        if(!r.getRenterId().equals(d.getPayerId())||!r.getOwnerId().equals(d.getPayeeId()))throw forbidden("Các bên của hồ sơ nguồn đã thay đổi.");return d;
+        if(!r.getRenterId().equals(d.getPayerId())||!r.getOwnerId().equals(d.getPayeeId()))throw forbidden("Các bên của hồ sơ nguồn đã thay đổi.");
+        // Older workflows could leave a case active after multiple conclusions.
+        if(d.getStatus()!=DisputeCaseStatus.RESOLVED&&adminReviewCount(events.findByCaseIdOrderByRevisionAsc(d.getId()))>=ADMIN_REVIEW_LIMIT){
+            String reason=Objects.toString(d.getComplaintDecision(),"HomeSpace đã kết luận đủ hai lần; kết thúc hồ sơ.");
+            resolve(d,"SYSTEM",reason,"CLOSED");finish(d,"SYSTEM","SYSTEM","FINALIZED",reason,Map.of());
+        }
+        return d;
     }
+    private int adminReviewCount(List<DisputeCaseEvent> history){return Math.toIntExact(history.stream().filter(e->"ADMIN".equals(e.getActorRole())&&"DECIDE".equals(e.getAction())).count());}
     private boolean canConclude(DisputeCase d){return Set.of("UNDER_REVIEW","FOLLOW_UP").contains(d.getComplaintStage())||"WAITING_INFO".equals(d.getComplaintStage())&&overdue(d);}
     private void resolve(DisputeCase d,String actor,String reason,String stage){d.setStatus(DisputeCaseStatus.RESOLVED);d.setComplaintStage(stage);d.setActiveKey(null);d.setResolvedAt(time.now());d.setResolvedBy(actor);d.setResolutionReason(reason);d.setRespondBy(null);d.setResponseDueFor(null);clearProposal(d);}
     private void clearProposal(DisputeCase d){d.setProposedBy(null);d.setProposalReason(null);d.setComplaintProposal(null);}
     private void finish(DisputeCase d,String actor,String role,String action,String reason,Map<String,Object> metadata){d.setRevision(d.getRevision()+1);cases.saveAndFlush(d);audit(d,actor,role,action,reason,null,metadata);}
     private void audit(DisputeCase d,String actor,String role,String action,String reason,String file,Map<String,Object> metadata){events.save(DisputeCaseEvent.builder().caseId(d.getId()).revision(d.getRevision()).actorId(actor).actorRole(role).action(action).reason(reason).evidenceStorageId(file).metadataJson(json(metadata)).occurredAt(time.now()).build());}
     private ComplaintView view(DisputeCase d,String actor,boolean administrator,boolean details){
+        var history=events.findByCaseIdOrderByRevisionAsc(d.getId());
+        int reviews=adminReviewCount(history);
         var allowed=new ArrayList<String>();
-        if(d.getStatus()==DisputeCaseStatus.RESOLVED){if(!administrator)allowed.add("REOPEN");}
-        else if(administrator){if(d.getStatus()==DisputeCaseStatus.ESCALATED&&!actor.equals(d.getPayerId())&&!actor.equals(d.getPayeeId())){
-            if(!actor.equals(d.getAssignedTo()))allowed.add("CLAIM");
-            else {allowed.add("COMMENT");allowed.add("REQUEST_INFO");if(canConclude(d))allowed.add("DECIDE");}
-        }} else {
-            allowed.add("COMMENT");
-            if(d.getStatus()==DisputeCaseStatus.OPEN){allowed.add("ESCALATE");if(actor.equals(roundOpener(d)))allowed.add("WITHDRAW");}
+        if(d.getStatus()==DisputeCaseStatus.RESOLVED){if(!administrator&&reviews<ADMIN_REVIEW_LIMIT)allowed.add("REOPEN");}
+        else if(reviews<ADMIN_REVIEW_LIMIT){
+            if(administrator){if(d.getStatus()==DisputeCaseStatus.ESCALATED&&!actor.equals(d.getPayerId())&&!actor.equals(d.getPayeeId())){
+                if(!actor.equals(d.getAssignedTo()))allowed.add("CLAIM");
+                else {allowed.add("COMMENT");allowed.add("REQUEST_INFO");if(canConclude(d))allowed.add("DECIDE");}
+            }} else {
+                allowed.add("COMMENT");
+                if(d.getStatus()==DisputeCaseStatus.OPEN){allowed.add("ESCALATE");allowed.add("CLOSE");}
+            }
         }
-        var history=details?events.findByCaseIdOrderByRevisionAsc(d.getId()):List.<DisputeCaseEvent>of();
         return new ComplaintView(d.getId(),d.getRentalRequestId(),d.getContractId(),d.getPayerId(),d.getPayeeId(),category(d),d.getReason(),d.getOpenedBy(),d.getOpenedAt(),d.getStatus(),d.getComplaintStage(),d.getRevision(),d.getRespondBy(),d.getResponseDueFor(),overdue(d),d.getAssignedTo(),d.getComplaintOutcome(),d.getComplaintDecision(),d.getProposedBy(),d.getProposalReason(),d.getSourceVersion(),d.getTenantCompletedAt()!=null,d.getLandlordCompletedAt()!=null,allowed,
-            history.stream().map(e->new DisputeCaseView.Event(e.getRevision(),e.getAction(),e.getActorId(),e.getActorRole(),e.getReason(),e.getEvidenceStorageId(),e.getMetadataJson(),e.getOccurredAt())).toList(),details?attachedEvidence(d,history):List.of(),
-            details&&category(d)==ComplaintCategory.DEPOSIT_SETTLEMENT&&d.getContractId()!=null?closures.findById(d.getContractId()).map(c->new ComplaintView.Settlement(c.getProposalVersion(),c.getStatus(),c.getOtherDeduction(),c.getRefundAmount(),c.getBalanceAmount(),c.getNote(),c.getComplaintOwnerApprovedAt()!=null,c.getAcceptedAt()!=null)).orElse(null):null,d.getResolutionReason(),details?workflowSources(history):List.of());
+            (details?history:List.<DisputeCaseEvent>of()).stream().map(e->new DisputeCaseView.Event(e.getRevision(),e.getAction(),e.getActorId(),e.getActorRole(),e.getReason(),e.getEvidenceStorageId(),e.getMetadataJson(),e.getOccurredAt())).toList(),details?attachedEvidence(d,history):List.of(),
+            details&&category(d)==ComplaintCategory.DEPOSIT_SETTLEMENT&&d.getContractId()!=null?closures.findById(d.getContractId()).map(c->new ComplaintView.Settlement(c.getProposalVersion(),c.getStatus(),c.getOtherDeduction(),c.getRefundAmount(),c.getBalanceAmount(),c.getNote(),c.getComplaintOwnerApprovedAt()!=null,c.getAcceptedAt()!=null)).orElse(null):null,d.getResolutionReason(),details?workflowSources(history):List.of(),reviews,ADMIN_REVIEW_LIMIT,d.getStatus()==DisputeCaseStatus.RESOLVED&&reviews>=ADMIN_REVIEW_LIMIT);
     }
     public List<String> attachedEvidence(DisputeCase d,List<DisputeCaseEvent> history){
         return ComplaintEvidenceSnapshot.ids(mapper,d,history);

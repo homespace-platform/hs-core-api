@@ -165,7 +165,8 @@ class ComplaintCasePostgresTest {
     ComplaintView disputedClosure(){proposal("100000");var close=closures.findById(id).orElseThrow();service.disputeClosure(id,"tenant",new DisputeClosurePayload(close.getProposalVersion(),"Không đồng ý khoản khấu trừ kính đã vỡ sẵn",List.of()));return complaints.forRental(rentalId,"tenant").getFirst();}
     ComplaintView adminConclusion(ComplaintView c){
         c=claim(escalate(c));
-        return complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Đã đối chiếu và hướng dẫn hai bên xử lý",null,"RECORD_FINDING",null,null));
+        c=complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Đã đối chiếu và hướng dẫn hai bên xử lý",null,"RECORD_FINDING",null,null));
+        return complaints.act(c.id(),"tenant","CLOSE",action(c));
     }
     @ParameterizedTest @org.junit.jupiter.params.provider.EnumSource(ComplaintCategory.class)
     void partiesCanOpenCategoriesButOnlyActualClosureObjectionCanOpenSettlementCase(ComplaintCategory category){
@@ -190,7 +191,7 @@ class ComplaintCasePostgresTest {
         var c=open(ComplaintCategory.CONDITION);var reviewed=c;
         for(String action:List.of("PROPOSE","ACCEPT","DECLINE","APPROVE_SETTLEMENT","CONFIRM_COMPLETE","REJECT_DECISION"))
             assertThrows(AppException.class,()->complaints.act(reviewed.id(),"tenant",action,action(reviewed)));
-        assertEquals(List.of("COMMENT","ESCALATE","WITHDRAW"),c.allowedActions());
+        assertEquals(List.of("COMMENT","ESCALATE","CLOSE"),c.allowedActions());
         c=complaints.act(c.id(),"tenant","ESCALATE",action(c));assertEquals("WAITING_ADMIN",c.stage());
     }
     @Test void withdrawAndReopenKeepHistoryAndCannotCreateSecondActiveIssue(){
@@ -227,7 +228,7 @@ class ComplaintCasePostgresTest {
         assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());
         assertEquals(0,ledger.forRental(rentalId).heldAmount().compareTo(principal));
     }
-    @Test void adminFindingClosesSupportCaseAndAllowsReopeningWithoutChangingMoney(){
+    @Test void partiesCanCloseAfterFirstFindingAndReopenWithoutChangingMoney(){
         var c=adminConclusion(open(ComplaintCategory.REPAIR));assertEquals("CLOSED",c.stage());assertEquals(DisputeCaseStatus.RESOLVED,c.status());
         c=complaints.act(c.id(),"tenant","REOPEN",action(c));assertEquals(DisputeCaseStatus.OPEN,c.status());assertNull(c.outcome());
         assertEquals(0,ledger.forRental(rentalId).heldAmount().compareTo(principal));assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());
@@ -275,9 +276,9 @@ class ComplaintCasePostgresTest {
         var c=open(ComplaintCategory.REPAIR);admin("admin");
         assertTrue(disputes.adminList("admin",null,1,50).getResult().isEmpty());
         assertThrows(AppException.class,()->disputes.adminGet(c.id(),"admin"));
-        assertEquals(1,complaints.adminList("admin",DisputeCaseStatus.OPEN,ComplaintCategory.REPAIR,false,1,20).getResult().size());
-        assertTrue(complaints.adminList("admin",null,null,true,1,20).getResult().isEmpty());
-        time.instant=c.respondBy();assertEquals(1,complaints.adminList("admin",null,null,true,1,20).getResult().size());
+        assertTrue(complaints.adminList("admin",DisputeCaseStatus.OPEN,ComplaintCategory.REPAIR,false,1,20).getResult().stream().anyMatch(row->row.id().equals(c.id())));
+        assertTrue(complaints.adminList("admin",null,null,true,1,20).getResult().stream().noneMatch(row->row.id().equals(c.id())));
+        time.instant=c.respondBy();assertTrue(complaints.adminList("admin",null,null,true,1,20).getResult().stream().anyMatch(row->row.id().equals(c.id())));
     }
     @Test void twoSimultaneousOpensOnlyCreateOneActiveIssue(){
         assertEquals(List.of(0,6076),race(()->open(ComplaintCategory.REPAIR)));
@@ -312,6 +313,61 @@ class ComplaintCasePostgresTest {
         var next=complaints.forRental(rentalId,"tenant").stream().filter(row->row.status()!=DisputeCaseStatus.RESOLVED).findFirst().orElseThrow();
         assertNotEquals(c.id(),next.id());assertEquals((long)fresh.getProposalVersion(),next.sourceVersion());
         assertThrows(AppException.class,()->accept(fresh.getProposalVersion()));
+    }
+    @Test void twoAdminConclusionsAreTheHardLimitAcrossDiscussionAndReassignment(){
+        var c=claim(escalate(open(ComplaintCategory.REPAIR)));
+        c=complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Kết luận lần đầu: đề nghị chủ nhà sửa khóa",null,"RECORD_FINDING",null,null));
+        assertEquals(DisputeCaseStatus.OPEN,c.status());assertEquals("FOLLOW_UP",c.stage());assertEquals(1,c.adminReviewCount());assertFalse(c.finalClosed());
+        assertTrue(complaints.adminGet(c.id(),"admin").allowedActions().isEmpty());
+        var first=c;assertThrows(AppException.class,()->complaints.adminAct(first.id(),"admin","DECIDE",action(first)));
+        c=complaints.act(c.id(),"tenant","COMMENT",action(c));c=complaints.act(c.id(),"owner","COMMENT",action(c));
+        assertEquals(1,c.adminReviewCount());c=complaints.act(c.id(),"owner","ESCALATE",action(c));assertNull(c.assignedTo());
+        admin("second-admin");c=complaints.adminAct(c.id(),"second-admin","CLAIM",action(c));assertEquals(1,c.adminReviewCount());
+        c=complaints.adminAct(c.id(),"second-admin","DECIDE",new ComplaintAction(c.revision(),"Kết luận cuối: đã kiểm tra toàn bộ phản hồi",null,"RECORD_FINDING",null,null));
+        assertEquals(DisputeCaseStatus.RESOLVED,c.status());assertEquals("CLOSED",c.stage());assertTrue(c.finalClosed());assertEquals(2,c.adminReviewCount());
+        assertTrue(c.allowedActions().isEmpty());assertTrue(complaints.adminGet(c.id(),"second-admin").allowedActions().isEmpty());
+        var last=c;
+        for(String actor:List.of("tenant","owner"))for(String action:List.of("COMMENT","CLOSE","ESCALATE","REOPEN"))
+            assertThrows(AppException.class,()->complaints.act(last.id(),actor,action,action(last)));
+        for(String action:List.of("CLAIM","COMMENT","DECIDE"))assertThrows(AppException.class,()->complaints.adminAct(last.id(),"second-admin",action,action(last)));
+        assertEquals(2,caseEvents.findByCaseIdOrderByRevisionAsc(c.id()).stream().filter(e->"ADMIN".equals(e.getActorRole())&&"DECIDE".equals(e.getAction())).count());
+        assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());assertEquals(0,ledger.forRental(rentalId).heldAmount().compareTo(principal));
+    }
+    @Test void closeAndReopenDoNotResetFirstAdminConclusion(){
+        var c=adminConclusion(open(ComplaintCategory.REPAIR));assertEquals(1,c.adminReviewCount());
+        c=complaints.act(c.id(),"owner","REOPEN",action(c));assertEquals(1,c.adminReviewCount());
+        c=claim(escalate(c));c=complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Kết luận lần hai sau khi hồ sơ mở lại",null,"RECORD_FINDING",null,null));
+        assertEquals(2,c.adminReviewCount());assertTrue(c.finalClosed());
+    }
+    @Test void concurrentSecondConclusionsCommitExactlyOneFinalDecision(){
+        var c=adminConclusion(open(ComplaintCategory.CONDITION));c=complaints.act(c.id(),"tenant","REOPEN",action(c));c=claim(escalate(c));
+        var reviewed=c;var p=new ComplaintAction(c.revision(),"Đã kiểm tra lại lần cuối toàn bộ chứng cứ",null,"RECORD_FINDING",null,null);
+        assertEquals(List.of(0,6075),race(()->{admin("admin");complaints.adminAct(reviewed.id(),"admin","DECIDE",p);}));
+        c=complaints.get(c.id(),"tenant");assertTrue(c.finalClosed());assertEquals(2,c.adminReviewCount());
+    }
+    @Test void failedSecondConclusionAuditCannotCloseCaseOrConsumeBudget(){
+        var c=adminConclusion(open(ComplaintCategory.CONDITION));c=complaints.act(c.id(),"owner","REOPEN",action(c));c=claim(escalate(c));var reviewed=c;
+        doThrow(new IllegalStateException("Audit unavailable")).when(caseEvents).save(any(DisputeCaseEvent.class));
+        assertThrows(IllegalStateException.class,()->complaints.adminAct(reviewed.id(),"admin","DECIDE",new ComplaintAction(reviewed.revision(),"Kết luận cuối phải được ghi lịch sử nguyên vẹn",null,"RECORD_FINDING",null,null)));
+        var after=complaints.get(c.id(),"tenant");assertEquals(1,after.adminReviewCount());assertEquals("UNDER_REVIEW",after.stage());assertEquals(reviewed.revision(),after.revision());
+        assertFalse(after.finalClosed());assertTrue(cases.findByActiveKey("RENTAL:"+rentalId+":CONDITION").isPresent());
+    }
+    @Test void otherPartyCanCloseIssueWithoutAdminAndSimultaneousCloseCannotDoubleApply(){
+        var c=open(ComplaintCategory.REPAIR);var reviewed=c;
+        assertEquals(List.of(0,6075),race(()->complaints.act(reviewed.id(),"owner","CLOSE",action(reviewed))));
+        c=complaints.get(c.id(),"tenant");assertEquals(DisputeCaseStatus.RESOLVED,c.status());assertEquals(0,c.adminReviewCount());
+        assertEquals(1,c.events().stream().filter(e->"CLOSE".equals(e.action())).count());
+    }
+    @Test void legacyActiveCaseWithTwoConclusionsIsFinalizedOnceAndRetainsAudit(){
+        var c=claim(escalate(open(ComplaintCategory.REPAIR)));String caseId=c.id();
+        tx(()->{var d=cases.findById(caseId).orElseThrow();long revision=d.getRevision();
+            for(int i=1;i<=2;i++)caseEvents.saveAndFlush(DisputeCaseEvent.builder().caseId(caseId).revision(++revision).actorId("admin").actorRole("ADMIN").action("DECIDE").reason("Kết luận từ phiên bản xử lý cũ").occurredAt(time.now()).build());
+            d.setRevision(revision);d.setComplaintStage("FOLLOW_UP");cases.saveAndFlush(d);});
+        c=complaints.get(caseId,"tenant");assertTrue(c.finalClosed());assertEquals(2,c.adminReviewCount());assertEquals(DisputeCaseStatus.RESOLVED,c.status());
+        long revision=c.revision();assertEquals(revision,complaints.get(caseId,"owner").revision());
+        assertEquals(1,c.events().stream().filter(e->"FINALIZED".equals(e.action())).count());
+        assertTrue(cases.findByActiveKey("RENTAL:"+rentalId+":REPAIR").isEmpty());
+        assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());
     }
     @Test void malformedOrForeignEvidenceCannotAttachOrChangeCase(){
         var c=open(ComplaintCategory.REPAIR);String file=UUID.randomUUID().toString();

@@ -13,6 +13,7 @@ import com.hs.contract.repository.ContractRepository;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.payment.model.DisputeCase;
+import com.hs.payment.model.DisputeCaseEvent;
 import com.hs.payment.model.constant.DisputeCaseStatus;
 import com.hs.payment.repository.DisputeCaseEventRepository;
 import com.hs.payment.repository.DisputeCaseRepository;
@@ -47,6 +48,7 @@ class ComplaintCaseServiceTest {
             cases, events, rentals, contracts, closures, storage,
             new ObjectMapper().findAndRegisterModules(), time);
     private DisputeCase complaint;
+    private final java.util.ArrayList<DisputeCaseEvent> audit=new java.util.ArrayList<>();
     private final Instant now = Instant.parse("2026-12-13T03:00:00Z");
 
     @BeforeEach void fixture() {
@@ -66,7 +68,8 @@ class ComplaintCaseServiceTest {
         when(contracts.findById("contract")).thenReturn(Optional.of(contract));
         when(cases.findById("case")).thenReturn(Optional.of(complaint));
         when(cases.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
-        when(events.findByCaseIdOrderByRevisionAsc("case")).thenReturn(List.of());
+        when(events.findByCaseIdOrderByRevisionAsc("case")).thenReturn(audit);
+        when(events.save(any())).thenAnswer(call->{DisputeCaseEvent event=call.getArgument(0);audit.add(event);return event;});
         admin("admin");
     }
 
@@ -184,7 +187,7 @@ class ComplaintCaseServiceTest {
 
     @Test void ordinaryPartyCanEscalateWithoutAnAgreementWorkflow() {
         complaint.setStatus(DisputeCaseStatus.OPEN);complaint.setComplaintStage("WAITING_RESPONSE");
-        assertEquals(List.of("COMMENT","ESCALATE","WITHDRAW"),service.get("case","tenant").allowedActions());
+        assertEquals(List.of("COMMENT","ESCALATE","CLOSE"),service.get("case","tenant").allowedActions());
         var result=service.act("case","tenant","ESCALATE",action(7));
         assertEquals("WAITING_ADMIN",result.stage());assertNull(result.proposedBy());
         verify(contracts,never()).save(any());verify(closures,never()).save(any());
@@ -195,14 +198,24 @@ class ComplaintCaseServiceTest {
             assertThrows(AppException.class,()->service.act("case","tenant",action,action(7)));
         assertEquals(7,complaint.getRevision());verify(events,never()).save(any());
     }
-    @Test void adminConclusionClosesOnlyTheSupportCaseAndCanBeReopened() {
-        complaint.setAssignedTo("admin");complaint.setComplaintStage("UNDER_REVIEW");
-        var closed=service.adminAct("case","admin","DECIDE",new ComplaintAction(7L,"Đã đối chiếu và hướng dẫn hai bên sửa khóa",null,"RECORD_FINDING",null,null));
-        assertEquals(DisputeCaseStatus.RESOLVED,closed.status());assertEquals("CLOSED",closed.stage());
-        assertEquals("RECORD_FINDING",closed.outcome());assertNull(closed.respondBy());
+    private com.hs.contract.dto.complaint.ComplaintView decide(){
+        return service.adminAct("case","admin","DECIDE",action(complaint.getRevision()));
+    }
+    private void readyReview(){complaint.setAssignedTo("admin");complaint.setComplaintStage("UNDER_REVIEW");}
+    @Test void firstConclusionAllowsDiscussionAndOnlyAnExplicitSecondEscalationLetsAdminActAgain() {
+        readyReview();var first=decide();
+        assertEquals(DisputeCaseStatus.OPEN,first.status());assertEquals("FOLLOW_UP",first.stage());assertEquals(1,first.adminReviewCount());
+        assertEquals(2,first.adminReviewLimit());assertFalse(first.finalClosed());assertNull(first.assignedTo());assertNull(first.respondBy());
+        assertEquals(List.of("COMMENT","ESCALATE","CLOSE"),service.get("case","tenant").allowedActions());
+        assertTrue(service.adminGet("case","admin").allowedActions().isEmpty());
+        assertThrows(AppException.class,this::decide);
+        var comment=service.act("case","tenant","COMMENT",action(first.revision()));assertEquals(1,comment.adminReviewCount());
+        var next=service.act("case","owner","ESCALATE",action(comment.revision()));assertEquals("WAITING_ADMIN",next.stage());
+        assertEquals(1,next.adminReviewCount());assertNull(next.assignedTo());
+        service.adminAct("case","admin","CLAIM",action(next.revision()));
+        var last=decide();assertEquals(DisputeCaseStatus.RESOLVED,last.status());assertTrue(last.finalClosed());assertEquals(2,last.adminReviewCount());
+        assertTrue(last.allowedActions().isEmpty());assertNull(last.respondBy());
         verify(contracts,never()).save(any());verify(closures,never()).save(any());
-        var reopened=service.act("case","tenant","REOPEN",action(8));
-        assertEquals(DisputeCaseStatus.OPEN,reopened.status());assertNull(reopened.decision());
     }
     @Test void adminCannotSubmitASettlementRevisionEvenWithAValidCaseRevision() {
         complaint.setAssignedTo("admin");complaint.setComplaintStage("UNDER_REVIEW");
@@ -221,7 +234,7 @@ class ComplaintCaseServiceTest {
         complaint.setAssignedTo("admin");complaint.setComplaintStage("WAITING_INFO");complaint.setResponseDueFor("tenant");
         assertThrows(AppException.class,()->service.adminAct("case","admin","DECIDE",action(7)));
         complaint.setRespondBy(now);
-        assertEquals(DisputeCaseStatus.RESOLVED,service.adminAct("case","admin","DECIDE",action(7)).status());
+        assertEquals(DisputeCaseStatus.OPEN,service.adminAct("case","admin","DECIDE",action(7)).status());
     }
     @Test void adminReplyRequiresClaimAndCannotBeForgedByAParty() {
         assertThrows(AppException.class,()->service.adminAct("case","admin","COMMENT",action(7)));
@@ -234,5 +247,59 @@ class ComplaintCaseServiceTest {
         assertEquals(List.of("COMMENT"),service.get("case","tenant").allowedActions());
         assertTrue(service.adminGet("case","admin").allowedActions().contains("DECIDE"));
         verify(events,never()).save(any());verify(contracts,never()).save(any());verify(closures,never()).save(any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"tenant","owner"})
+    void eitherPartyCanCloseASelfResolvedIssue(String actor){
+        complaint.setStatus(DisputeCaseStatus.OPEN);complaint.setComplaintStage("DISCUSSING");
+        assertTrue(service.get("case",actor).allowedActions().contains("CLOSE"));
+        var result=service.act("case",actor,"CLOSE",action(7));
+        assertEquals(DisputeCaseStatus.RESOLVED,result.status());assertEquals(0,result.adminReviewCount());assertFalse(result.finalClosed());
+        assertEquals(List.of("REOPEN"),result.allowedActions());verify(contracts,never()).save(any());verify(closures,never()).save(any());
+    }
+    @Test void closingAndReopeningAfterFirstConclusionDoesNotResetTheBudget(){
+        readyReview();var first=decide();
+        var closed=service.act("case","owner","CLOSE",action(first.revision()));assertEquals(1,closed.adminReviewCount());
+        var reopened=service.act("case","tenant","REOPEN",action(closed.revision()));assertEquals(1,reopened.adminReviewCount());
+        var next=service.act("case","tenant","ESCALATE",action(reopened.revision()));
+        service.adminAct("case","admin","CLAIM",action(next.revision()));assertTrue(decide().finalClosed());
+    }
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"COMMENT","ESCALATE","CLOSE","WITHDRAW","REOPEN"})
+    void noPartyMutationIsAllowedAfterTheSecondConclusion(String action){
+        audit.add(DisputeCaseEvent.builder().actorRole("ADMIN").action("DECIDE").revision(1).build());
+        readyReview();var last=decide();assertTrue(last.finalClosed());
+        assertThrows(AppException.class,()->service.act("case","tenant",action,action(last.revision())));
+        assertEquals(2,service.get("case","owner").adminReviewCount());assertTrue(service.get("case","owner").allowedActions().isEmpty());
+    }
+    @Test void noAdminCanClaimReplyOrConcludeAfterTheSecondConclusion(){
+        audit.add(DisputeCaseEvent.builder().actorRole("ADMIN").action("DECIDE").revision(1).build());readyReview();decide();
+        admin("another-admin");
+        for(String action:List.of("CLAIM","COMMENT","REQUEST_INFO","DECIDE"))
+            assertThrows(AppException.class,()->service.adminAct("case","another-admin",action,action(complaint.getRevision())));
+        assertEquals(2,audit.stream().filter(e->"DECIDE".equals(e.getAction())).count());
+    }
+    @Test void commentsClaimsAndReassignmentDoNotConsumeAdminConclusions(){
+        service.adminAct("case","admin","CLAIM",action(7));
+        service.adminAct("case","admin","COMMENT",action(8));
+        admin("another-admin");var result=service.adminAct("case","another-admin","CLAIM",action(9));
+        assertEquals(0,result.adminReviewCount());assertEquals("UNDER_REVIEW",result.stage());
+    }
+    @Test void staleSecondConclusionCannotConsumeAnotherReview(){
+        audit.add(DisputeCaseEvent.builder().actorRole("ADMIN").action("DECIDE").revision(1).build());readyReview();
+        var last=decide();assertThrows(AppException.class,()->service.adminAct("case","admin","DECIDE",action(last.revision()-1)));
+        assertEquals(2,service.get("case","tenant").adminReviewCount());
+    }
+    @Test void unrelatedPartyCannotCloseTheComplaint(){
+        complaint.setStatus(DisputeCaseStatus.OPEN);
+        assertThrows(AppException.class,()->service.act("case","stranger","CLOSE",action(7)));
+        verify(events,never()).save(any());
+    }
+
+    @Test void readingLegacyActiveCaseWithTwoConclusionsFinalizesItWithoutChangingMoney(){
+        audit.add(DisputeCaseEvent.builder().actorRole("ADMIN").action("DECIDE").revision(1).build());
+        audit.add(DisputeCaseEvent.builder().actorRole("ADMIN").action("DECIDE").revision(2).build());
+        var result=service.get("case","tenant");assertTrue(result.finalClosed());assertEquals(DisputeCaseStatus.RESOLVED,result.status());
+        assertEquals(2,result.adminReviewCount());assertTrue(result.allowedActions().isEmpty());
+        verify(contracts,never()).save(any());verify(closures,never()).save(any());
     }
 }

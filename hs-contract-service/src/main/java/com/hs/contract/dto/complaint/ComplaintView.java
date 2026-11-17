@@ -8,7 +8,7 @@ public record ComplaintView(String id,String rentalRequestId,String contractId,S
     long revision,Instant respondBy,String responseDueFor,boolean overdue,String assignedTo,String outcome,
     String decision,String proposedBy,String proposalReason,Long sourceVersion,
     boolean tenantCompleted,boolean landlordCompleted,List<String> allowedActions,
-    List<DisputeCaseView.Event> events,List<String> evidenceIds,Settlement settlement,String closingReason,List<ComplaintWorkflowSource> sources) {
+    List<DisputeCaseView.Event> events,List<String> evidenceIds,Settlement settlement,String closingReason,List<ComplaintWorkflowSource> sources,int adminReviewCount,int adminReviewLimit,boolean finalClosed) {
     public record Settlement(int version,String status,java.math.BigDecimal deduction,java.math.BigDecimal refund,
         java.math.BigDecimal balance,String note,boolean ownerApproved,boolean accepted) {}
 }
