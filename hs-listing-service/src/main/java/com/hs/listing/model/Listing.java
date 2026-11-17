@@ -14,7 +14,8 @@ import java.util.*;
 @Table(name = "listings", indexes = {
         @Index(name = "idx_listings_owner_status", columnList = "owner_id, status"),
         @Index(name = "idx_listings_status_submitted", columnList = "status, submitted_at"),
-        @Index(name = "idx_listings_status_expires", columnList = "status, expires_at")
+        @Index(name = "idx_listings_status_expires", columnList = "status, expires_at"),
+        @Index(name = "uk_listings_slug", columnList = "slug", unique = true)
 })
 @Getter
 @Setter
@@ -34,6 +35,9 @@ public class Listing extends BaseEntity {
     private PropertyBranch branch;
     @Column(nullable = false)
     private String title;
+    /** SEO slug, assigned once at creation and immutable. Nullable: seeded rows are backfilled at startup. */
+    @Column(length = 160)
+    private String slug;
     @Column(nullable = false, columnDefinition = "text")
     private String description;
     @Enumerated(EnumType.STRING)

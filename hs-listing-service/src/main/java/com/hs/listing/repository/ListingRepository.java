@@ -15,6 +15,9 @@ import java.util.Optional;
 public interface ListingRepository extends JpaRepository<Listing, String>, JpaSpecificationExecutor<Listing> {
     Page<Listing> findAllByOwnerIdAndActiveTrue(String ownerId, Pageable pageable);
     Optional<Listing> findByIdAndActiveTrue(String id);
+    boolean existsBySlug(String slug);
+    @org.springframework.data.jpa.repository.Query("SELECT l.id FROM Listing l WHERE l.slug = :slug AND l.active = true")
+    Optional<String> findIdBySlugAndActiveTrue(@org.springframework.data.repository.query.Param("slug") String slug);
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @org.springframework.data.jpa.repository.Query("SELECT l FROM Listing l WHERE l.id = :id AND l.active = true")
     Optional<Listing> findByIdForAppointmentCreation(@org.springframework.data.repository.query.Param("id") String id);

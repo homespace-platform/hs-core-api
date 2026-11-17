@@ -63,6 +63,13 @@ Ca hồi quy chính: bài đăng được duyệt từ điện `2925`/nước `1
 - Source snapshot được đóng băng tại lần duyệt, gồm cả địa chỉ/tiện ích từ chi nhánh. Không dựng lại từ dữ liệu chi nhánh có thể đã sửa sau đó.
 - Bản cũ chưa có snapshot duyệt cần gửi lại bản sửa qua admin trước khi dùng nút đồng bộ. Không tự sửa hợp đồng cũ.
 
+## Slug tin đăng (SEO)
+
+- `listings.slug` (varchar(160), nullable, unique index `uk_listings_slug`): `<tiêu-đề-không-dấu, tối đa ~80 ký tự>-<8 ký tự [a-z0-9]>`. Sinh một lần khi tạo tin (`ListingSlugGenerator`), **bất biến** khi sửa tiêu đề.
+- `ListingSlugBackfill` chạy khi Core khởi động, gán slug cho mọi tin `slug IS NULL` (ví dụ tin do seed SQL chèn), theo lô, idempotent.
+- `slug` được thêm (chỉ thêm) vào `ListingDetailResponse`, `PublicListingSummaryResponse`, `MyListingSummaryResponse`, `AdminListingSummaryResponse`, `CreateListingResponse`.
+- Endpoint mới: GET `/public/listings/by-slug/{slug}` và GET `/listings/by-slug/{slug}`; cùng hành vi, quyền xem và response với `/{listingId}` tương ứng. Các endpoint theo `listingId` giữ nguyên. Không có slug khớp trả 404 như tin không tồn tại.
+
 ## Kiểm thử và vận hành
 
 Các ca tự động bao gồm giữ trạng thái duyệt tin; token cũ; khóa field API; giữ snapshot khi đang chờ duyệt phụ lục; không sửa lịch sử tiền; 6 → 3 tháng/ngày cuối tháng; kỳ riêng dài hơn; hợp đồng đã ký; hết hạn mới; hóa đơn đã phát hành; người/xe vượt giới hạn; chỗ xe đã kích hoạt; policy theo mã danh mục; dùng số người/xe của phụ lục đang hiệu lực để tính chênh lệch.

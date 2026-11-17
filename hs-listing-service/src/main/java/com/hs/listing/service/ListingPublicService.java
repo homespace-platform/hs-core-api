@@ -388,6 +388,7 @@ public class ListingPublicService {
 
         return new PublicListingSummaryResponse(
                 listing.getId(),
+                listing.getSlug(),
                 listing.getTitle(),
                 listing.getCategory(),
                 listing.getAreaM2(),

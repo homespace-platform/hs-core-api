@@ -12,6 +12,7 @@ import java.time.LocalDate;
 
 public record PublicListingSummaryResponse(
         String id,
+        String slug,
         String title,
         ListingCategory category,
         BigDecimal areaM2,

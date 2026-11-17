@@ -123,6 +123,13 @@ public class PublicListingController {
                 .build();
     }
 
+    @GetMapping("/by-slug/{slug}")
+    public com.hs.common.dto.ApiResponse<ListingDetailResponse> getPublicListingDetailBySlug(@PathVariable String slug) {
+        return com.hs.common.dto.ApiResponse.<ListingDetailResponse>builder()
+                .result(listingQueryService.getBySlug(null, slug))
+                .build();
+    }
+
     @org.springframework.web.bind.annotation.PostMapping("/{listingId}/view")
     public com.hs.common.dto.ApiResponse<com.hs.listing.service.ListingViewService.ViewRecordResult> recordView(
             @PathVariable String listingId,

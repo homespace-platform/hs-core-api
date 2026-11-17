@@ -6,6 +6,7 @@ import java.time.Instant;
 
 public record CreateListingResponse(
         String id,
+        String slug,
         ListingStatus status,
         String title,
         Instant submittedAt,

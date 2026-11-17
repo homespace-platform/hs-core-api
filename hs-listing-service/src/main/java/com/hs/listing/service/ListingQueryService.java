@@ -87,6 +87,14 @@ public class ListingQueryService {
         return counts;
     }
 
+    /** Same visibility/ownership rules as {@link #getById}; the slug is only resolved to an id first. */
+    @Transactional(readOnly = true)
+    public ListingDetailResponse getBySlug(String viewerId, String slug) {
+        String id = listingRepository.findIdBySlugAndActiveTrue(slug)
+                .orElseThrow(() -> new AppException(ErrorCode.ROUTE_NOT_FOUND));
+        return getById(viewerId, id);
+    }
+
     @Transactional(readOnly = true)
     public ListingDetailResponse getById(String viewerId, String listingId) {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
@@ -113,7 +121,7 @@ public class ListingQueryService {
                 ? branchRepository.findByIdAndActiveTrue(listing.getBranchId()).map(PropertyBranch::getName).orElse(null)
                 : null;
         return new MyListingSummaryResponse(
-                listing.getId(), listing.getBranchId(), branchName, listing.getTitle(), listing.getCategory(), listing.getStatus(),
+                listing.getId(), listing.getSlug(), listing.getBranchId(), branchName, listing.getTitle(), listing.getCategory(), listing.getStatus(),
                 listing.getAvailableFrom(), listing.getAreaM2(), listing.getPriceAmount(), listing.getCurrency(),
                 listing.getPriceUnit(), listing.isNegotiable(), cover == null ? null : publicUrl(cover.getStorageObject()),
                 cover == null ? null : cover.getStorageObject().getId(), listing.getMedia().size(), fullAddress,
@@ -168,7 +176,7 @@ public class ListingQueryService {
                 ? branchRepository.findByIdAndActiveTrue(listing.getBranchId()).map(PropertyBranch::getName).orElse(null)
                 : null;
         return new ListingDetailResponse(
-                listing.getId(), listing.getOwnerId(), listing.getBranchId(), branchName, listing.getTitle(), listing.getDescription(),
+                listing.getId(), listing.getSlug(), listing.getOwnerId(), listing.getBranchId(), branchName, listing.getTitle(), listing.getDescription(),
                 listing.getCategory(), listing.getStatus(),
                 listing.getAvailableFrom(), listing.getAreaM2(),
                 listing.getMaxMotorbikeCount(), listing.getMaxCarCount(),

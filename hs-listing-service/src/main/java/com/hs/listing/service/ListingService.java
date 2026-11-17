@@ -111,6 +111,7 @@ public class ListingService {
         }
 
         applyCommonFields(l, ownerId, r);
+        ensureSlug(l);
         attachDetail(l, r);
         attachCatalogs(l, r);
         attachCharges(l, r);
@@ -132,6 +133,7 @@ public class ListingService {
         validate(request, null);
         Listing listing = new Listing();
         applyContent(listing, ownerId, request);
+        ensureSlug(listing);
         listingStatusService.applySubmission(
                 listing, request.submissionAction(), adminId, ListingStatusActorType.ADMIN);
         Listing saved = listingRepository.save(listing);
@@ -197,7 +199,7 @@ public class ListingService {
 
     private CreateListingResponse response(Listing listing) {
         return new CreateListingResponse(
-                listing.getId(), listing.getStatus(), listing.getTitle(),
+                listing.getId(), listing.getSlug(), listing.getStatus(), listing.getTitle(),
                 listing.getSubmittedAt(), listing.getPublishedAt(), listing.getPendingEditId(), listing.getOperationalStatus());
     }
 
@@ -293,6 +295,11 @@ public class ListingService {
     private String writeEdit(CreateListingRequest edit) {
         try { return mapper.writeValueAsString(edit); }
         catch (Exception e) { throw error(400, "LISTING_EDIT_INVALID", "Không thể lưu bản sửa."); }
+    }
+
+    /** Slug is assigned once (creation, or first save of a legacy row) and never changed by later edits. */
+    void ensureSlug(Listing l) {
+        if (l.getSlug() == null) l.setSlug(ListingSlugGenerator.generate(l.getTitle(), listingRepository::existsBySlug));
     }
 
     private void requireActor(String actorId) {

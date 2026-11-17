@@ -7,6 +7,7 @@ import java.time.Instant;
 
 public record AdminListingSummaryResponse(
         String id,
+        String slug,
         String title,
         ListingCategory category,
         ListingStatus status,

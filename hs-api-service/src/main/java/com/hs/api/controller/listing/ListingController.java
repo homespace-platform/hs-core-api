@@ -69,6 +69,13 @@ public class ListingController {
                 .build();
     }
 
+    @GetMapping("/by-slug/{slug}")
+    public ApiResponse<ListingDetailResponse> getBySlug(@PathVariable String slug) {
+        return ApiResponse.<ListingDetailResponse>builder()
+                .result(listingQueryService.getBySlug(currentUserId(), slug))
+                .build();
+    }
+
     @PatchMapping("/{listingId}/status")
     public ApiResponse<ListingDetailResponse> changeStatus(
             @PathVariable String listingId,

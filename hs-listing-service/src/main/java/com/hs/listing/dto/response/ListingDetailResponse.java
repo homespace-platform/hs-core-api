@@ -12,6 +12,7 @@ import java.util.List;
 
 public record ListingDetailResponse(
                 String id,
+                String slug,
                 String ownerId,
                 String branchId,
                 String branchName,

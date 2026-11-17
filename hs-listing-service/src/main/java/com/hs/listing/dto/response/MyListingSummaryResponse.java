@@ -8,6 +8,7 @@ import java.time.LocalDate;
 
 public record MyListingSummaryResponse(
         String id,
+        String slug,
         String branchId,
         String branchName,
         String title,
