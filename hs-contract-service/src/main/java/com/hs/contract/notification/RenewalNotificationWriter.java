@@ -20,7 +20,7 @@ import java.util.UUID;
 
 @Service
 public class RenewalNotificationWriter {
-    public enum Event { RENEWAL_REQUESTED, RENEWAL_APPROVED, RENEWAL_REJECTED, RENEWAL_EXPIRED }
+    public enum Event { RENEWAL_REQUESTED, RENEWAL_APPROVED, RENEWAL_REJECTED, RENEWAL_EXPIRED, LEASE_RENEWAL_WINDOW_OPENED }
     private static final DateTimeFormatter TIMESTAMP = new DateTimeFormatterBuilder().appendInstant(3).toFormatter();
     private final ContractNotificationOutboxRepository outbox;
     private final String topic;

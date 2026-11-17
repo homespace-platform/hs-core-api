@@ -33,16 +33,19 @@ import com.hs.contract.repository.WorkflowSigningDocumentRepository;
 @TestPropertySource(properties = {"spring.datasource.url=${HS_TEST_PG_URL}", "spring.datasource.username=${HS_TEST_PG_USER}",
         "spring.datasource.password=${HS_TEST_PG_PASSWORD}", "spring.jpa.hibernate.ddl-auto=create-drop", "spring.profiles.active=test"})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import({AgreementSigningNotificationWriter.class, AmendmentNotificationWriter.class, RenewalNotificationWriter.class, TerminationNotificationWriter.class})
+@Import({AgreementSigningNotificationWriter.class, AmendmentNotificationWriter.class, RenewalNotificationWriter.class, TerminationNotificationWriter.class, ComplaintNotificationWriter.class})
 class AgreementSigningNotificationPostgresTest {
     @SpringBootConfiguration
     @EntityScan("com.hs.contract.notification")
-    @EnableJpaRepositories(basePackageClasses = ContractNotificationOutboxRepository.class)
+    @EnableJpaRepositories(basePackageClasses = ContractNotificationOutboxRepository.class,
+        excludeFilters=@org.springframework.context.annotation.ComponentScan.Filter(type=org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,classes=ComplaintAdminAudienceRepository.class))
     static class Config {}
 
     @MockitoBean ContractRepository contracts;
     @MockitoBean WorkflowSigningDocumentRepository documents;
     @MockitoBean RentalWorkflowRecordRepository workflows;
+    @MockitoBean ComplaintAdminAudienceRepository complaintAdmins;
+    @Autowired ComplaintNotificationWriter complaintWriter;
     @Autowired AgreementSigningNotificationWriter writer;
     @Autowired AmendmentNotificationWriter amendmentWriter;
     @Autowired RenewalNotificationWriter renewalWriter;
@@ -51,6 +54,18 @@ class AgreementSigningNotificationPostgresTest {
     @Autowired PlatformTransactionManager manager;
 
     @BeforeEach void clearOutbox() { outbox.deleteAll(); }
+
+    @Test void complaintOutboxIsAtomicWithItsCallingTransaction() {
+        var c=com.hs.payment.model.DisputeCase.builder().id("case").subjectType("RENTAL").rentalRequestId("rental")
+            .payerId("tenant").payeeId("owner").status(com.hs.payment.model.constant.DisputeCaseStatus.OPEN).build();
+        assertThrows(IllegalTransactionStateException.class,()->complaintWriter.changed(c,"tenant","TENANT","OPENED",java.util.Map.of()));
+        new TransactionTemplate(manager).executeWithoutResult(tx->complaintWriter.changed(c,"tenant","TENANT","OPENED",java.util.Map.of()));
+        assertEquals(1,outbox.count());
+        assertThrows(IllegalStateException.class,()->new TransactionTemplate(manager).executeWithoutResult(tx->{
+            complaintWriter.changed(c,"tenant","TENANT","CLOSE",java.util.Map.of());throw new IllegalStateException("rollback");
+        }));
+        assertEquals(1,outbox.count());
+    }
 
     @Test void writesOnlyInsideTheCallerTransactionAndRollsBackWithIt() throws Exception {
         var lease = Contract.builder().id("lease").landlordId("landlord").tenantId("tenant").build();

@@ -107,6 +107,23 @@ class ContractLifecycleServiceTest {
         clock("2026-12-13T10:00:00");
     }
     void clock(String local) { var now=LocalDateTime.parse(local).atZone(BillingTime.ZONE);when(time.now()).thenReturn(now.toInstant());when(time.today()).thenReturn(now.toLocalDate()); }
+    @Test void renewalWindowIsAnnouncedOnceForTheCurrentEffectiveEndAndNeverBeforeTheWindow() {
+        root.setEffectiveLeaseMonths(4);clock("2026-12-13T10:00:00");
+        service.get("root","tenant");verifyNoInteractions(renewalNotices);assertNull(root.getRenewalReminderEndExclusive());
+        clock("2027-01-13T10:00:00");service.get("root","owner");service.get("root","tenant");
+        assertEquals(LocalDate.of(2027,2,12),root.getRenewalReminderEndExclusive());
+        verify(renewalNotices,times(1)).both(root,RenewalNotificationWriter.Event.LEASE_RENEWAL_WINDOW_OPENED);
+        root.setEffectiveLeaseMonths(5);service.get("root","tenant");
+        clock("2027-02-11T10:00:00");service.get("root","owner");service.get("root","tenant");
+        assertEquals(LocalDate.of(2027,3,12),root.getRenewalReminderEndExclusive());
+        verify(renewalNotices,times(2)).both(root,RenewalNotificationWriter.Event.LEASE_RENEWAL_WINDOW_OPENED);
+    }
+    @Test void pendingEarlyExitAndClosedLeaseNeverAdvertiseRenewal() {
+        root.setMutualTerminationWorkflowId("rental:EARLY_EXIT");service.get("root","tenant");
+        assertNull(root.getRenewalReminderEndExclusive());verifyNoInteractions(renewalNotices);
+        root.setStatus(ContractStatus.CLOSED);root.setMutualTerminationWorkflowId(null);service.get("root","tenant");
+        assertNull(root.getRenewalReminderEndExclusive());verifyNoInteractions(renewalNotices);
+    }
     @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(booleans={false,true})
     void confirmedPaymentCancelsLegacyOrUnilateralNoticeOnce(boolean unilateral) throws Exception {
         root.setTerminationProposedAt(time.now());root.setTerminationProposalInvoiceId("bill");

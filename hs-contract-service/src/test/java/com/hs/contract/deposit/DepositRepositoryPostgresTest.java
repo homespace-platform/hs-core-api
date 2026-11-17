@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
     "spring.jpa.hibernate.ddl-auto=create-drop","spring.jpa.open-in-view=false"})
 class DepositRepositoryPostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs")
-    @EnableJpaRepositories(basePackageClasses={ContractRepository.class,DepositAgreementRepository.class,com.hs.listing.repository.RentalRequestRepository.class})
+    @EnableJpaRepositories(basePackageClasses={ContractRepository.class,DepositAgreementRepository.class,com.hs.listing.repository.RentalRequestRepository.class,com.hs.contract.notification.ComplaintAdminAudienceRepository.class})
     static class Config {
         @org.springframework.context.annotation.Bean
         DepositAgreementService agreementReader(DepositAgreementRepository agreements,ContractRepository contracts,
@@ -58,6 +58,25 @@ class DepositRepositoryPostgresTest {
     @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
     @Autowired DepositAgreementService agreementReader;
     @Autowired ContractClosureRepository closures;
+    @Autowired com.hs.contract.notification.ComplaintAdminAudienceRepository adminAudience;
+    @Autowired jakarta.persistence.EntityManager entityManager;
+
+    @Test void complaintAdminAudiencePagesOnlyActiveAdminsAndExcludesBothParties() {
+        var role=com.hs.user.model.Role.builder().id("admin-role").name("ADMIN").build();entityManager.persist(role);
+        var userRole=com.hs.user.model.Role.builder().id("user-role").name("USER").build();entityManager.persist(userRole);
+        for(String id:List.of("admin-a","admin-b","owner","tenant","disabled","ordinary")) {
+            var user=new com.hs.user.model.User();user.setId(id);user.setUsername(id);user.setEmail(id+"@example.test");
+            user.setRole("ordinary".equals(id)?userRole:role);user.setActive(!"disabled".equals(id));entityManager.persist(user);
+        }
+        entityManager.flush();
+        assertEquals(List.of("admin-a"),adminAudience.findIdsAfter("tenant","owner",null,PageRequest.of(0,1)));
+        assertEquals(List.of("admin-b"),adminAudience.findIdsAfter("tenant","owner","admin-a",PageRequest.of(0,1)));
+        assertTrue(adminAudience.findIdsAfter("tenant","owner","admin-b",PageRequest.of(0,100)).isEmpty());
+        assertTrue(adminAudience.isActiveAdmin("admin-a"));assertFalse(adminAudience.isActiveAdmin("disabled"));assertFalse(adminAudience.isActiveAdmin("ordinary"));
+        assertEquals(4,adminAudience.findIdsAfter(null,null,null,PageRequest.of(0,100)).size());
+        role.setActive(false);entityManager.flush();
+        assertFalse(adminAudience.isActiveAdmin("admin-a"));assertTrue(adminAudience.findIdsAfter(null,null,null,PageRequest.of(0,100)).isEmpty());
+    }
 
     @Test void findsOnlyCompletedSettlementsAndClosesTheirLinkedSignedDeposit() {
         var version=version(template("LEASE"));

@@ -16,6 +16,13 @@ import java.util.Optional;
 public interface ViewingAppointmentRepository
                 extends JpaRepository<ViewingAppointment, String>, JpaSpecificationExecutor<ViewingAppointment> {
 
+        @Query("select a.id from ViewingAppointment a where a.active = true and a.status = com.hs.listing.model.constant.AppointmentStatus.CONFIRMED "
+            + "and (a.appointmentDate > :today or a.appointmentDate = :today and a.startTime > :now) "
+            + "and (a.appointmentDate < :lastDate or a.appointmentDate = :lastDate and a.startTime <= :lastTime) "
+            + "and (a.reminderAppointmentDate is null or a.reminderStartTime is null or a.reminderAppointmentDate <> a.appointmentDate or a.reminderStartTime <> a.startTime) order by a.id")
+        List<String> findReminderIds(@Param("today") LocalDate today,@Param("now") LocalTime now,
+                @Param("lastDate") LocalDate lastDate,@Param("lastTime") LocalTime lastTime,org.springframework.data.domain.Pageable page);
+
         Optional<ViewingAppointment> findByIdAndActiveTrue(String id);
 
         @Query("SELECT va FROM ViewingAppointment va JOIN FETCH va.listing l WHERE va.id = :id AND va.active = true")

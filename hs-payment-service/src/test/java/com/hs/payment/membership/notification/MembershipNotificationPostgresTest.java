@@ -86,6 +86,16 @@ class MembershipNotificationPostgresTest {
         root.putObject("transaction").put("transaction_id",tx).put("transaction_status","APPROVED").put("transaction_type","PAYMENT")
             .put("transaction_currency","VND").put("transaction_amount","49000");return root;
     }
+    @Test void membershipExpiryQueryUsesRenewedExpiryAndSeparateSoonAndExpiredMarkers() {
+        var now=Instant.parse("2026-11-17T00:00:00Z");var soon=now.plusSeconds(3*86400);var page=org.springframework.data.domain.PageRequest.of(0,100);
+        var m=new ListingMembership();m.setOwnerId(order.getOwnerId());m.setTier(MembershipTier.STARTER);m.setPaidExpiresAt(now.plusSeconds(3600));memberships.saveAndFlush(m);
+        assertEquals(List.of(order.getOwnerId()),memberships.findExpiryNoticeOwnerIds(now,soon,page));
+        m.setExpiryReminderFor(m.getPaidExpiresAt());memberships.saveAndFlush(m);assertTrue(memberships.findExpiryNoticeOwnerIds(now,soon,page).isEmpty());
+        var expiry=m.getPaidExpiresAt();assertEquals(List.of(order.getOwnerId()),memberships.findExpiryNoticeOwnerIds(expiry,expiry.plusSeconds(3*86400),page));
+        m.setExpiredNoticeFor(expiry);memberships.saveAndFlush(m);assertTrue(memberships.findExpiryNoticeOwnerIds(expiry,expiry.plusSeconds(3*86400),page).isEmpty());
+        m.setPaidExpiresAt(now.plusSeconds(30*86400L));memberships.saveAndFlush(m);assertTrue(memberships.findExpiryNoticeOwnerIds(now,soon,page).isEmpty());
+        assertEquals(List.of(order.getOwnerId()),memberships.findExpiryNoticeOwnerIds(now.plusSeconds(28*86400L),now.plusSeconds(31*86400L),page));
+    }
     @Test void businessActivationOrderAndNoticeCommitOnceAndSecondPaymentTriggersOneReview(){
         service.sepayIpn(callback("first"));service.sepayIpn(callback("first"));
         assertEquals(MembershipOrder.Status.PAID,orders.findById(order.getId()).orElseThrow().getStatus());

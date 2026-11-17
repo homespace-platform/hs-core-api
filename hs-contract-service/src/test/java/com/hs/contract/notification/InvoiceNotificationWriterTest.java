@@ -20,8 +20,8 @@ class InvoiceNotificationWriterTest {
     final Contract contract = Contract.builder().id("contract").landlordId("landlord").tenantId("tenant").build();
     final MonthlyInvoice invoice = MonthlyInvoice.builder().id("invoice").contractId("contract").build();
 
-    @Test void thirteenEventsExactlyAndEveryEnqueueMethodRequiresAnExistingTransaction() {
-        assertEquals(13, Event.values().length);
+    @Test void fifteenEventsExactlyAndEveryEnqueueMethodRequiresAnExistingTransaction() {
+        assertEquals(15, Event.values().length);
         long mandatory = Stream.of(InvoiceNotificationWriter.class.getDeclaredMethods()).filter(m -> m.getName().startsWith("enqueue"))
                 .map(m -> m.getAnnotation(Transactional.class)).filter(t -> t != null && t.propagation() == Propagation.MANDATORY).count();
         assertEquals(3, mandatory);
@@ -69,12 +69,13 @@ class InvoiceNotificationWriterTest {
         var bill = MonthlyInvoice.builder().id(java.util.UUID.randomUUID().toString()).contractId(live.getId()).build();
         for (Event event : Event.values()) {
             if (event == Event.INVOICE_DRAFT_READY || event == Event.INVOICE_EXTENSION_REQUESTED
-                    || event == Event.INVOICE_OVERDUE_ACTION_ACKNOWLEDGED || event == Event.INVOICE_OVERDUE_ACTION_REQUIRED)
+                    || event == Event.INVOICE_OVERDUE_ACTION_ACKNOWLEDGED || event == Event.INVOICE_OVERDUE_ACTION_REQUIRED
+                    || event == Event.INVOICE_METER_REMINDER)
                 writer.enqueueLandlord(live, bill, event);
             else if (event == Event.INVOICE_OVERDUE || event == Event.INVOICE_DEFERRED) writer.enqueueBoth(live, bill, event);
             else writer.enqueueTenant(live, bill, event);
         }
-        assertEquals(13, probe.sent().stream().map(InvoiceOutboxProbe.Sent::type).distinct().count());
+        assertEquals(15, probe.sent().stream().map(InvoiceOutboxProbe.Sent::type).distinct().count());
         String out = System.getenv("HS_INVOICE_FIXTURE_OUT");
         if (out != null && !out.isBlank())
             java.nio.file.Files.write(java.nio.file.Path.of(out), probe.rows().stream().map(r -> r.getPayload()).toList());

@@ -35,6 +35,7 @@ class ContractDocumentProofWorkerTest {
     @Mock StorageService storage;
     @Mock BlockchainSenderLeaseStore leases;
     @Mock PlatformTransactionManager transactions;
+    @Mock com.hs.contract.notification.OperationalIncidentService incidents;
     BlockchainProperties properties;
     ContractDocumentProofWorker worker;
     ContractDocumentProof proof;
@@ -46,6 +47,7 @@ class ContractDocumentProofWorkerTest {
         properties.setChainId(31337);
         properties.setRegistryAddress(ADDRESS);
         worker = new ContractDocumentProofWorker(properties, proofs, registry, storage, leases, transactions);
+        org.springframework.test.util.ReflectionTestUtils.setField(worker,"incidents",incidents);
         proof = new ContractDocumentProof();
         proof.setDocumentId("document");
         proof.setStorageObjectId("storage");

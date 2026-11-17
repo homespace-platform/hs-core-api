@@ -19,6 +19,17 @@ import org.springframework.data.domain.Pageable;
 @Repository
 public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, String> {
 
+    @Query("select p.id from PaymentRequest p where p.active = true and p.status in :statuses "
+        + "and p.invoiceId is null and p.type <> com.hs.payment.model.constant.PaymentType.MONTHLY_RENT and p.totalAmount > 0 "
+        + "and (p.reminderForDueAt is null or p.reminderForDueAt <> p.dueAt) "
+        + "and (((p.type in :billingTypes or p.type = com.hs.payment.model.constant.PaymentType.OTHER_CHARGE and p.contractId is not null) "
+        + "and p.dueAt > :billingNow and p.dueAt <= :billingSoon and (p.opensAt is null or p.opensAt <= :billingNow)) "
+        + "or (p.type not in :billingTypes and (p.type <> com.hs.payment.model.constant.PaymentType.OTHER_CHARGE or p.contractId is null) "
+        + "and p.dueAt > :realNow and p.dueAt <= :realSoon and (p.opensAt is null or p.opensAt <= :realNow))) order by p.id")
+    List<String> findDueSoonIds(@Param("statuses") Collection<PaymentStatus> statuses,@Param("billingTypes") Collection<PaymentType> billingTypes,
+        @Param("billingNow") Instant billingNow,@Param("billingSoon") Instant billingSoon,@Param("realNow") Instant realNow,
+        @Param("realSoon") Instant realSoon,Pageable page);
+
     Optional<PaymentRequest> findByRentalRequestIdAndType(String rentalRequestId, PaymentType type);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

@@ -72,6 +72,7 @@ class ComplaintCasePostgresTest {
         @Override public LocalDate today(){return now().atZone(BillingTime.ZONE).toLocalDate();}
     }
     @MockitoBean ContractAmendmentService amendments;
+    @MockitoBean com.hs.contract.notification.ComplaintNotificationWriter complaintNotifications;
     @MockitoBean com.hs.contract.deposit.DepositAgreementService depositAgreements;
     @MockitoBean RentalWorkflowSupport workflowSupport;
     @MockitoBean ContractTermsResolver terms;

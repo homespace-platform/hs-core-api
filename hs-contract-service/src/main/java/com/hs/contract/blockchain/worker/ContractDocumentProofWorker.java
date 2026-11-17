@@ -23,6 +23,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @RequiredArgsConstructor
 @Slf4j
 public class ContractDocumentProofWorker {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.contract.notification.OperationalIncidentService incidents;
     private final BlockchainProperties properties;
     private final ContractDocumentProofRepository proofs;
     private final RegistryClient registry;
@@ -187,6 +189,9 @@ public class ContractDocumentProofWorker {
             change.accept(current);
             current.setUpdatedAt(Instant.now());
             proofs.saveAndFlush(current);
+            if(current.getStatus()==ProofStatus.CONFIRMED || current.getStatus()==ProofStatus.FAILED
+                    || current.getErrorCode()!=null && current.getAttempts()>=3)
+                incidents.observe("proof:"+documentId,"BLOCKCHAIN",documentId,current.getStatus()!=ProofStatus.CONFIRMED);
             return true;
         }));
     }

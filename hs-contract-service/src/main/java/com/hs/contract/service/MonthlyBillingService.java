@@ -1026,6 +1026,7 @@ public class MonthlyBillingService {
         RentalRequest rental = rentalRequests.findById(contract.getRentalRequestId()).orElse(null);
         if (rental == null || rental.getMoveInDate() == null || leaseMonths(contract, rental) == null) return;
         LocalDate start = rental.getMoveInDate();
+        var announcedDrafts=new java.util.HashSet<String>();
         for (int index = 0; index < leaseMonths(contract, rental); index++) {
             LocalDate end = start.plusMonths(index + 1);
             if(contract.getAgreedEarlyEndExclusive()!=null&&end.isAfter(contract.getAgreedEarlyEndExclusive()))end=contract.getAgreedEarlyEndExclusive();
@@ -1037,13 +1038,14 @@ public class MonthlyBillingService {
                         .periodEndExclusive(end).status(MonthlyInvoiceStatus.DRAFT)
                         .totalAmount(BigDecimal.ZERO).build());
                 notifications.enqueueLandlord(contract, draft, Event.INVOICE_DRAFT_READY);
+                announcedDrafts.add(draft.getId());
             }
         }
         for (MonthlyInvoice invoice : invoices.findByContractIdOrderByPeriodIndexDesc(contractId)) {
             MonthlyInvoice locked = lockInvoice(invoice.getId());
             reconcile(locked);
             autoDeferIdleInvoice(locked);
-            processMilestones(contract, locked, true);
+            processMilestones(contract, locked, !announcedDrafts.contains(locked.getId()));
         }
     }
 
@@ -1224,6 +1226,7 @@ public class MonthlyBillingService {
                 changed = true;
                 log.info("BILLING_METER_REMINDER landlord={} contract={} invoice={} deadline={}",
                         contract.getLandlordId(), contract.getId(), invoice.getId(), meterDeadline(invoice));
+                if(announce)notifications.enqueueLandlord(contract,invoice,Event.INVOICE_METER_REMINDER);
             }
             if (invoice.getMeterDeadlineLoggedAt() == null && !now.isBefore(meterDeadline(invoice))) {
                 invoice.setMeterDeadlineLoggedAt(now);
@@ -1237,11 +1240,13 @@ public class MonthlyBillingService {
                 && invoice.getPaymentReminderLoggedAt() == null
                 && !now.isBefore(invoice.getDueAt().atZone(BillingTime.ZONE).toLocalDate()
                         .minusDays(2).atStartOfDay(BillingTime.ZONE).toInstant())
-                && !now.isAfter(invoice.getDueAt())) {
+                && !now.isAfter(invoice.getDueAt())
+                && payments.findByInvoiceId(invoice.getId()).map(p->p.getStatus()==PaymentStatus.AWAITING_TRANSFER || p.getStatus()==PaymentStatus.REJECTED).orElse(false)) {
             invoice.setPaymentReminderLoggedAt(now);
             changed = true;
             log.info("BILLING_PAYMENT_REMINDER tenant={} contract={} invoice={} amount={} due={}",
                     contract.getTenantId(), contract.getId(), invoice.getId(), invoice.getTotalAmount(), invoice.getDueAt());
+            if(announce)notifications.enqueueTenant(contract,invoice,Event.INVOICE_PAYMENT_REMINDER);
         }
         if (invoice.getStatus() == MonthlyInvoiceStatus.OVERDUE && invoice.getDueAt() != null
                 && invoice.getOverdueActionLoggedAt() == null

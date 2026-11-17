@@ -98,6 +98,21 @@ class AppointmentNotificationPostgresTest {
         });
     }
 
+    @Test void reminderQueryTracksTheCommittedScheduleAndSkipsAlreadyRemindedOrCancelledRows() {
+        var now=LocalDateTime.of(2026,11,17,9,0);var last=now.plusHours(24);var page=org.springframework.data.domain.PageRequest.of(0,100);
+        tx.executeWithoutResult(t->{
+            var a=appointments.findByIdForUpdate(bookingId).orElseThrow();a.setAppointmentDate(now.toLocalDate());
+            a.setStartTime(now.toLocalTime().plusHours(1));a.setStatus(AppointmentStatus.CONFIRMED);appointments.saveAndFlush(a);
+            assertEquals(List.of(bookingId),appointments.findReminderIds(now.toLocalDate(),now.toLocalTime(),last.toLocalDate(),last.toLocalTime(),page));
+            a.setReminderAppointmentDate(a.getAppointmentDate());a.setReminderStartTime(a.getStartTime());appointments.saveAndFlush(a);
+            assertTrue(appointments.findReminderIds(now.toLocalDate(),now.toLocalTime(),last.toLocalDate(),last.toLocalTime(),page).isEmpty());
+            a.setStartTime(now.toLocalTime().plusHours(2));appointments.saveAndFlush(a);
+            assertEquals(List.of(bookingId),appointments.findReminderIds(now.toLocalDate(),now.toLocalTime(),last.toLocalDate(),last.toLocalTime(),page));
+            a.setStatus(AppointmentStatus.CANCELLED);appointments.saveAndFlush(a);
+            assertTrue(appointments.findReminderIds(now.toLocalDate(),now.toLocalTime(),last.toLocalDate(),last.toLocalTime(),page).isEmpty());
+        });
+    }
+
     @Test
     @EnabledIfEnvironmentVariable(named = "HS_TEST_KAFKA_BROKERS", matches = ".+")
     @EnabledIfEnvironmentVariable(named = "HS_TEST_KAFKA_TOPIC", matches = "homespace\\.notification\\.publisher\\.test\\.[a-zA-Z0-9-]+")

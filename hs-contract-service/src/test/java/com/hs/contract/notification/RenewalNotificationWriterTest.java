@@ -55,7 +55,7 @@ class RenewalNotificationWriterTest {
 
     @Test void exportsActualJavaEnvelopesForTheCompiledConsumer() throws Exception {
         for (var type : RenewalNotificationWriter.Event.values()) writer.other(root, "tenant", type);
-        assertEquals(4, rows.size());
+        assertEquals(5, rows.size());
         String output = System.getenv("HS_RENEWAL_FIXTURE_OUT");
         if (output != null && !output.isBlank())
             Files.write(Path.of(output), rows.stream().map(ContractNotificationOutbox::getPayload).toList());

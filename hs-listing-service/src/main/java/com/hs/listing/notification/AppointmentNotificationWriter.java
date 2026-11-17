@@ -23,7 +23,7 @@ public class AppointmentNotificationWriter {
     public enum Event {
         BOOKING_REQUESTED, BOOKING_CONFIRMED, BOOKING_REJECTED, BOOKING_CANCELLED,
         BOOKING_RESCHEDULE_REQUESTED, BOOKING_RESCHEDULE_APPROVED, BOOKING_RESCHEDULE_REJECTED,
-        BOOKING_COMPLETED, BOOKING_EXPIRED
+        BOOKING_COMPLETED, BOOKING_EXPIRED, BOOKING_REMINDER
     }
     private static final DateTimeFormatter TIMESTAMP = new DateTimeFormatterBuilder().appendInstant(3).toFormatter();
     private final JsonMapper json = JsonMapper.builder().build();

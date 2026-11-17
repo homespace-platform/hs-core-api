@@ -34,6 +34,14 @@ class TerminationNotificationWriterTest {
         assertEquals(6, event.size());
     }
 
+    @Test void earlyExitApprovalUsesItsOwnEventBeforeTheSignaturesAndTargetsOnlyTheTenant() throws Exception {
+        writer.other(root,"owner",TerminationNotificationWriter.Event.TERMINATION_APPROVED);
+        var event=json.readTree(rows.getFirst().getPayload());
+        assertEquals("TERMINATION_APPROVED",event.get("eventType").asText());
+        assertEquals("tenant",event.get("recipients").get(0).asText());
+        assertEquals(1,event.get("data").size());assertEquals("root",event.get("data").get("contractId").asText());
+    }
+
     @Test void bothTargetsDistinctPartiesAndRejectsUntrustedIdentity() {
         writer.both(root, TerminationNotificationWriter.Event.TERMINATION_ENDED);
         assertEquals(2, rows.size());

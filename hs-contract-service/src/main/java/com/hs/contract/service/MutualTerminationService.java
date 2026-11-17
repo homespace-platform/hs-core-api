@@ -104,7 +104,10 @@ public class MutualTerminationService {
             default -> throw support.invalid("Thao tác không hợp lệ.");
         }
         support.save(s,action,reason,List.of());
-        if("ACCEPT".equals(action))workflowDocuments.prepare(rental,"early-exit",actor,w.getRevision());
+        if("ACCEPT".equals(action)) {
+            workflowDocuments.prepare(rental,"early-exit",actor,w.getRevision());
+            terminationNotices.other(s.contract(),actor,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_APPROVED);
+        }
         if("CONFIRM_RETURN".equals(action))terminationNotices.other(s.contract(),actor,"RETURNED".equals(w.getStatus())
                 ?com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_RETURN_COMPLETED
                 :com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_RETURN_CONFIRMED);

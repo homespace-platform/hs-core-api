@@ -130,6 +130,45 @@ class MonthlyBillingServiceTest {
         verifyNoInteractions(payments);
     }
 
+    @Test void meterAndPaymentRemindersUseTheirStoredPartiesAndDoNotRepeatOnReplay() {
+        var contract=contracts.findById("contract").orElseThrow();
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"processMilestones",contract,invoice,true);
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"processMilestones",contract,invoice,true);
+        assertEquals(List.of(k("METER_REMINDER","landlord","invoice")),outbox.keys());
+        invoice.setStatus(MonthlyInvoiceStatus.UNPAID);invoice.setDueAt(time.now().plusSeconds(86400));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.AWAITING_TRANSFER).build()));
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"processMilestones",contract,invoice,true);
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"processMilestones",contract,invoice,true);
+        assertEquals(List.of(k("METER_REMINDER","landlord","invoice"),k("PAYMENT_REMINDER","tenant","invoice")),outbox.keys());
+    }
+    @Test void newlyIssuedBillAndConfirmedBillDoNotReceiveRedundantPaymentReminders() {
+        var contract=contracts.findById("contract").orElseThrow();
+        invoice.setStatus(MonthlyInvoiceStatus.UNPAID);invoice.setDueAt(time.now().plusSeconds(86400));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.AWAITING_TRANSFER).build()));
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"processMilestones",contract,invoice,false);
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"processMilestones",contract,invoice,true);
+        assertTrue(outbox.rows().isEmpty());
+        invoice.setStatus(MonthlyInvoiceStatus.PAID);invoice.setPaymentReminderLoggedAt(null);
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"processMilestones",contract,invoice,true);
+        assertTrue(outbox.rows().isEmpty());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","DISPUTED","CONFIRMED","CANCELLED","EXPIRED"})
+    void paymentReminderDoesNotAskForAnotherTransferWhileReceiptIsBeingReviewedOrClosed(PaymentStatus status) {
+        var contract=contracts.findById("contract").orElseThrow();invoice.setStatus(MonthlyInvoiceStatus.UNPAID);
+        invoice.setDueAt(time.now().plusSeconds(86400));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(status).build()));
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"processMilestones",contract,invoice,true);
+        assertTrue(outbox.rows().isEmpty());assertNull(invoice.getPaymentReminderLoggedAt());
+    }
+    @Test void incompleteLegacyPaymentStatusDoesNotCrashBillingOrSendReminder() {
+        var contract=contracts.findById("contract").orElseThrow();invoice.setStatus(MonthlyInvoiceStatus.UNPAID);
+        invoice.setDueAt(time.now().plusSeconds(86400));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().build()));
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(service,"processMilestones",contract,invoice,true);
+        assertTrue(outbox.rows().isEmpty());assertNull(invoice.getPaymentReminderLoggedAt());
+    }
+
     @Test
     void firstPeriodSettlesMetersAndExtrasWithoutChargingRentTwice() {
         MonthlyInvoiceResponse result = service.issue("invoice", "landlord",
@@ -1628,6 +1667,8 @@ class MonthlyBillingServiceTest {
         assertEquals(List.of(), outbox.keys());
         Contract contract = contracts.findById("contract").orElseThrow();
         when(contracts.findByIdForUpdate("contract")).thenReturn(Optional.of(contract));
+        // The history read must return the same persisted row/id as the draft insert above it.
+        invoice.setId("draft-0");when(invoices.findByIdForUpdate("draft-0")).thenReturn(Optional.of(invoice));
         when(invoices.findByContractIdOrderByPeriodIndexDesc("contract")).thenReturn(List.of(invoice));
         demoTime("2026-11-02T10:00:00");
         service.list("contract", "tenant");

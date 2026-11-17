@@ -79,4 +79,6 @@ public class KycVerification extends BaseEntity {
     @Column(name = "expires_at")
     Instant expiresAt;
 
+    Instant retryNoticeSentAt;
+
 }

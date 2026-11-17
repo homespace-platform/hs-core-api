@@ -84,6 +84,7 @@ class RentalWorkflowPostgresTest {
         @Override public LocalDate today(){return now().atZone(BillingTime.ZONE).toLocalDate();}
     }
     @MockitoBean ContractAmendmentService amendments;
+    @MockitoBean com.hs.contract.notification.ComplaintNotificationWriter complaintNotifications;
     @MockitoBean ContractTermsResolver terms;
     @MockitoBean ListingStatusService listings;
     @MockitoBean ParkingReservationService parking;

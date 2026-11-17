@@ -90,6 +90,8 @@ public class Contract extends BaseEntity {
     private String agreementKind;
     @Column(name = "effective_lease_months")
     private Integer effectiveLeaseMonths;
+    /** Deduplicate the renewal-window notice by the effective operational end, without changing signed terms. */
+    private java.time.LocalDate renewalReminderEndExclusive;
 
     /** Separately accepted early-exit agreement; original signed lease dates stay immutable. */
     private java.time.LocalDate agreedEarlyEndExclusive;

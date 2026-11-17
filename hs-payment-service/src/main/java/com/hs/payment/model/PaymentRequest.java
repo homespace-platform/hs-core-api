@@ -20,7 +20,8 @@ import java.util.UUID;
                 @Index(name = "idx_payment_request_contract", columnList = "contract_id"),
                 @Index(name = "idx_payment_request_payer_status", columnList = "payer_id, status"),
                 @Index(name = "idx_payment_request_payee_status", columnList = "payee_id, status"),
-                @Index(name = "idx_payment_request_ref", columnList = "transfer_reference")
+                @Index(name = "idx_payment_request_ref", columnList = "transfer_reference"),
+                @Index(name = "idx_payment_request_reminder", columnList = "active,status,due_at")
         },
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_payment_request_transfer_ref", columnNames = {"transfer_reference"}),
@@ -106,6 +107,8 @@ public class PaymentRequest extends BaseEntity {
 
     @Column(name = "due_at")
     Instant dueAt;
+
+    Instant reminderForDueAt;
 
     /** Not a QR expiry: the business opening time is enforced by every payment entry point. */
     @Column(name = "opens_at")

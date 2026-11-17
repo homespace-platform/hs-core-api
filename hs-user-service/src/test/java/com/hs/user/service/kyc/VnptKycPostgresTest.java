@@ -46,6 +46,8 @@ class VnptKycPostgresTest {
     @Autowired UserKycDetailsRepository details;
     @Autowired VnptKycStepRepository steps;
     @Autowired VnptKycStore store;
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.hs.user.notification.AccountNotificationWriter notifications;
     @Autowired CccdClaimService claims;
     @Autowired KycServiceImpl kyc;
     @Autowired jakarta.persistence.EntityManager entityManager;
@@ -53,6 +55,24 @@ class VnptKycPostgresTest {
     @Autowired PlatformTransactionManager manager;
     @BeforeEach void reset(){steps.deleteAllInBatch();details.deleteAllInBatch();verifications.deleteAllInBatch();users.deleteAllInBatch();jdbc.execute("ALTER TABLE users DROP COLUMN IF EXISTS cccd");}
     void user(String id){User u=new User();u.setId(id);u.setUsername(id);u.setEmail(id+"@example.invalid");users.saveAndFlush(u);}
+    @Test void expiryNoticeQuerySuppressesOlderAttemptsAndExplicitlyCancelledSessions() {
+        user("alice");var now=Instant.now();var page=org.springframework.data.domain.PageRequest.of(0,100);
+        var old=KycVerification.builder().id("old").userId("alice").provider(KycProvider.VNPT).providerSessionId("old")
+            .status(KycStatus.PENDING).expiresAt(now.minusSeconds(1)).build();verifications.saveAndFlush(old);
+        assertEquals(List.of("old"),verifications.findExpiredAttemptIdsNeedingNotice(now,page));
+        var latest=KycVerification.builder().id("latest").userId("alice").provider(KycProvider.VNPT).providerSessionId("latest")
+            .status(KycStatus.EXPIRED).expiresAt(now.minusSeconds(1)).build();verifications.saveAndFlush(latest);
+        jdbc.update("update kyc_verifications set created_at = ? where id = 'old'",java.sql.Timestamp.from(now.minusSeconds(100)));
+        jdbc.update("update kyc_verifications set created_at = ? where id = 'latest'",java.sql.Timestamp.from(now));
+        assertTrue(verifications.findExpiredAttemptIdsNeedingNotice(now,page).isEmpty());
+        latest.setStatus(KycStatus.PENDING);verifications.saveAndFlush(latest);
+        assertEquals(List.of("latest"),verifications.findExpiredAttemptIdsNeedingNotice(now,page));
+        var account=users.findById("alice").orElseThrow();account.setActive(false);users.saveAndFlush(account);
+        assertTrue(verifications.findExpiredAttemptIdsNeedingNotice(now,page).isEmpty());
+        account.setActive(true);users.saveAndFlush(account);
+        assertEquals(List.of("latest"),verifications.findExpiredAttemptIdsNeedingNotice(now,page));
+        latest.setRetryNoticeSentAt(now);verifications.saveAndFlush(latest);assertTrue(verifications.findExpiredAttemptIdsNeedingNotice(now,page).isEmpty());
+    }
     @Test void concurrentStartsReuseOneOwnedAttemptAndProviderSurvivesReload() throws Exception {
         user("alice");var start=new CountDownLatch(1);
         try(var pool=Executors.newFixedThreadPool(2)){

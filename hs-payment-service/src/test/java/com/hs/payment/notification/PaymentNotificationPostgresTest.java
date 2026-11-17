@@ -76,6 +76,21 @@ class PaymentNotificationPostgresTest {
             .direction(PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.TRANSFER_REPORTED).totalAmount(new BigDecimal("3000000"))
             .transferReference("HS"+UUID.randomUUID().toString().replace("-","").substring(0,12)).dueAt(now.plusSeconds(3600)).build());
     }
+    @Test void dueSoonQueryUsesPaymentClockAndActualDueDateMarkerWithoutReturningReportedTransfers() {
+        var page=org.springframework.data.domain.PageRequest.of(0,100);
+        var states=Set.of(PaymentStatus.AWAITING_TRANSFER,PaymentStatus.REJECTED);
+        var realNow=now.minusSeconds(30*86400L);
+        payment.setType(PaymentType.DEPOSIT_REFUND);payment.setStatus(PaymentStatus.AWAITING_TRANSFER);payments.saveAndFlush(payment);
+        assertEquals(List.of(payment.getId()),payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page));
+        payment.setReminderForDueAt(payment.getDueAt());payments.saveAndFlush(payment);
+        assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page).isEmpty());
+        payment.setDueAt(now.plusSeconds(7200));payments.saveAndFlush(payment);
+        assertEquals(List.of(payment.getId()),payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page));
+        payment.setType(PaymentType.UTILITY);payments.saveAndFlush(payment);
+        assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page).isEmpty());
+        payment.setType(PaymentType.DEPOSIT_REFUND);payment.setStatus(PaymentStatus.TRANSFER_REPORTED);payments.saveAndFlush(payment);
+        assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page).isEmpty());
+    }
     @Test void authorizedConfirmationCommitsOutcomeAndSingleNoticeAndReplayIsSilent() throws Exception{
         service.confirmReceipt(payment.getId(),"payee");service.confirmReceipt(payment.getId(),"payee");
         assertEquals(PaymentStatus.CONFIRMED,readStatus());assertEquals(1,outbox.count());

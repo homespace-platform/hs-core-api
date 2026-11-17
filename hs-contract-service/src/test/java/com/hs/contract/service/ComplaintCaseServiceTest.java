@@ -44,6 +44,7 @@ class ComplaintCaseServiceTest {
     private final ContractClosureRepository closures = mock(ContractClosureRepository.class);
     private final StorageObjectRepository storage = mock(StorageObjectRepository.class);
     private final BillingTime time = mock(BillingTime.class);
+    private final com.hs.contract.notification.ComplaintNotificationWriter notifications=mock(com.hs.contract.notification.ComplaintNotificationWriter.class);
     private final ComplaintCaseService service = new ComplaintCaseService(
             cases, events, rentals, contracts, closures, storage,
             new ObjectMapper().findAndRegisterModules(), time);
@@ -53,6 +54,7 @@ class ComplaintCaseServiceTest {
 
     @BeforeEach void fixture() {
         ReflectionTestUtils.setField(service, "em", mock(EntityManager.class));
+        ReflectionTestUtils.setField(service,"notifications",notifications);
         when(time.now()).thenReturn(now);
         var rental = RentalRequest.builder().id("rental").ownerId("owner").renterId("tenant").build();
         var contract = Contract.builder().id("contract").rentalRequestId("rental")
@@ -76,6 +78,33 @@ class ComplaintCaseServiceTest {
     @AfterEach void clearIdentity() {
         UserContextHolder.clear();
         SecurityContextHolder.clearContext();
+    }
+
+    @Test void notificationHooksFollowTheTwoConclusionRoundsAndARepeatedClaimIsSilent() {
+        var notices=new java.util.ArrayList<String>();
+        doAnswer(call->{notices.add(call.getArgument(3)+":"+complaint.getStatus());return null;})
+            .when(notifications).changed(any(),any(),any(),any(),any());
+        service.adminAct("case","admin","CLAIM",action(7));
+        service.adminAct("case","admin","CLAIM",action(complaint.getRevision()));
+        var first=decide();
+        service.act("case","tenant","COMMENT",action(first.revision()));
+        service.act("case","owner","ESCALATE",action(complaint.getRevision()));
+        service.adminAct("case","admin","CLAIM",action(complaint.getRevision()));
+        decide();
+        assertEquals(List.of("CLAIM:ESCALATED","DECIDE:OPEN","COMMENT:OPEN","ESCALATE:ESCALATED","CLAIM:ESCALATED","DECIDE:RESOLVED"),notices);
+        assertThrows(AppException.class,()->service.act("case","tenant","REOPEN",action(complaint.getRevision())));
+        assertEquals(6,notices.size());
+    }
+
+    @Test void openingFromWorkflowAnnouncesOneNewCaseAndDoesNotAlsoAnnounceItsInitialSourceAttachment() {
+        var workflows=mock(com.hs.contract.repository.RentalWorkflowRecordRepository.class);
+        ReflectionTestUtils.setField(service,"workflows",workflows);
+        var source=new com.hs.contract.model.RentalWorkflowRecord();source.setId("rental:EARLY_EXIT");
+        source.setRentalRequestId("rental");source.setContractId("contract");source.setKind("EARLY_EXIT");source.setStatus("AGREED");source.setRevision(4);
+        when(workflows.findById(source.getId())).thenReturn(Optional.of(source));
+        service.openFromWorkflow("rental","tenant","EARLY_EXIT",4,"Cần hỗ trợ thực hiện việc trả nhà");
+        verify(notifications).changed(any(),eq("tenant"),eq("TENANT"),eq("OPENED"),any());
+        verifyNoMoreInteractions(notifications);
     }
 
     private void admin(String id) {
@@ -196,7 +225,7 @@ class ComplaintCaseServiceTest {
         complaint.setStatus(DisputeCaseStatus.OPEN);
         for(var action:List.of("PROPOSE","ACCEPT","DECLINE","APPROVE_SETTLEMENT","CONFIRM_COMPLETE","REJECT_DECISION"))
             assertThrows(AppException.class,()->service.act("case","tenant",action,action(7)));
-        assertEquals(7,complaint.getRevision());verify(events,never()).save(any());
+        assertEquals(7,complaint.getRevision());verify(events,never()).save(any());verifyNoInteractions(notifications);
     }
     private com.hs.contract.dto.complaint.ComplaintView decide(){
         return service.adminAct("case","admin","DECIDE",action(complaint.getRevision()));

@@ -46,6 +46,7 @@ public class ComplaintCaseService {
     private final ObjectMapper mapper;
     private final BillingTime time;
     @PersistenceContext private EntityManager em;
+    @org.springframework.beans.factory.annotation.Autowired private com.hs.contract.notification.ComplaintNotificationWriter notifications;
     @org.springframework.beans.factory.annotation.Autowired(required=false) private RentalWorkflowRecordRepository workflows;
     @org.springframework.beans.factory.annotation.Autowired(required=false) private com.hs.contract.repository.WorkflowSigningDocumentRepository workflowDocuments;
     @org.springframework.beans.factory.annotation.Autowired(required=false) private com.hs.contract.repository.ContractDocumentRepository contractDocuments;
@@ -125,7 +126,9 @@ public class ComplaintCaseService {
         else d=register(r,root,actor,category,text(reason,1000),List.copyOf(evidence),false,null);
         party(d,actor);
         var metadata=new LinkedHashMap<String,Object>();metadata.put("workflowSource",snapshot);metadata.put("evidenceIds",List.copyOf(evidence));
-        finish(d,actor,role(d,actor),"SOURCE_ATTACHED",text(reason,1000),metadata);
+        d.setRevision(d.getRevision()+1);cases.saveAndFlush(d);
+        audit(d,actor,role(d,actor),"SOURCE_ATTACHED",text(reason,1000),null,metadata);
+        if(active.isPresent())notifications.changed(d,actor,role(d,actor),"SOURCE_ATTACHED",metadata);
         return view(d,actor,false,true);
     }
 
@@ -146,7 +149,8 @@ public class ComplaintCaseService {
             .complaintStage(urgent?"WAITING_ADMIN":"WAITING_RESPONSE").respondBy(deadline()).responseDueFor(urgent?"ADMIN":other(r,actor))
             .escalatedAt(urgent?time.now():null).sourceVersion(close==null?null:(long)close.getProposalVersion())
             .amountSnapshot(BigDecimal.ZERO).currency("VND").initialEvidenceSnapshot(json(evidence)).revision(1).complaintRoundOpenedBy(actor).complaintRoundStartRevision(1L).build();
-        cases.saveAndFlush(d);audit(d,actor,role(d,actor),"OPENED",d.getReason(),null,Map.of("urgent",urgent,"evidenceIds",evidence));return d;
+        cases.saveAndFlush(d);audit(d,actor,role(d,actor),"OPENED",d.getReason(),null,Map.of("urgent",urgent,"evidenceIds",evidence));
+        notifications.changed(d,actor,role(d,actor),"OPENED",Map.of());return d;
     }
 
     @Transactional public List<ComplaintView> forRental(String rentalId,String actor){
@@ -276,7 +280,7 @@ public class ComplaintCaseService {
     private boolean canConclude(DisputeCase d){return Set.of("UNDER_REVIEW","FOLLOW_UP").contains(d.getComplaintStage())||"WAITING_INFO".equals(d.getComplaintStage())&&overdue(d);}
     private void resolve(DisputeCase d,String actor,String reason,String stage){d.setStatus(DisputeCaseStatus.RESOLVED);d.setComplaintStage(stage);d.setActiveKey(null);d.setResolvedAt(time.now());d.setResolvedBy(actor);d.setResolutionReason(reason);d.setRespondBy(null);d.setResponseDueFor(null);clearProposal(d);}
     private void clearProposal(DisputeCase d){d.setProposedBy(null);d.setProposalReason(null);d.setComplaintProposal(null);}
-    private void finish(DisputeCase d,String actor,String role,String action,String reason,Map<String,Object> metadata){d.setRevision(d.getRevision()+1);cases.saveAndFlush(d);audit(d,actor,role,action,reason,null,metadata);}
+    private void finish(DisputeCase d,String actor,String role,String action,String reason,Map<String,Object> metadata){d.setRevision(d.getRevision()+1);cases.saveAndFlush(d);audit(d,actor,role,action,reason,null,metadata);notifications.changed(d,actor,role,action,metadata);}
     private void audit(DisputeCase d,String actor,String role,String action,String reason,String file,Map<String,Object> metadata){events.save(DisputeCaseEvent.builder().caseId(d.getId()).revision(d.getRevision()).actorId(actor).actorRole(role).action(action).reason(reason).evidenceStorageId(file).metadataJson(json(metadata)).occurredAt(time.now()).build());}
     private ComplaintView view(DisputeCase d,String actor,boolean administrator,boolean details){
         var history=events.findByCaseIdOrderByRevisionAsc(d.getId());

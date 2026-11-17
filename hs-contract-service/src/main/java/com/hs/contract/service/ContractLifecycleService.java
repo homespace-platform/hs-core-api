@@ -429,6 +429,11 @@ public class ContractLifecycleService {
             terminationNotices.both(c, com.hs.contract.notification.TerminationNotificationWriter.Event.LEASE_EXPIRED);
             log.info("LEASE_EXPIRED contract={} end={}",c.getId(),end(c));
         }
+        if(c.getStatus()==ContractStatus.ACTIVE && c.getSignedAt()!=null
+                && !Objects.equals(c.getRenewalReminderEndExclusive(),end(c)) && canRequest(c)) {
+            c.setRenewalReminderEndExclusive(end(c));contracts.save(c);
+            renewalNotices.both(c,com.hs.contract.notification.RenewalNotificationWriter.Event.LEASE_RENEWAL_WINDOW_OPENED);
+        }
         closures.findById(c.getId()).ifPresent(s->{
             if(c.getStatus()==ContractStatus.CLOSED && "CLOSED".equals(s.getStatus()) && s.getClosedAt()!=null) {
                 depositAgreements.completeAfterLeaseSettlement(c,s);return;

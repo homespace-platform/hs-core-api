@@ -109,4 +109,7 @@ public class ViewingAppointment extends BaseEntity {
 
     @Column(name = "completed_at")
     private Instant completedAt;
+
+    private LocalDate reminderAppointmentDate;
+    private LocalTime reminderStartTime;
 }

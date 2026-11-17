@@ -27,6 +27,7 @@ public class VnptKycStore {
     private final VnptKycProperties config;
     private final CccdClaimService claims;
     private final ObjectMapper mapper;
+    private final com.hs.user.notification.AccountNotificationWriter notifications;
 
     @Transactional
     public Session start(String userId) {
@@ -91,8 +92,14 @@ public class VnptKycStore {
     }
     @Transactional
     public void fail(String userId,VnptKycStep call) {
-        owned(userId,call.getAttemptId(),false);
-        steps.findById(call.getId()).ifPresent(row -> {row.setState("FAILED");steps.save(row);});
+        var attempt=owned(userId,call.getAttemptId(),false);
+        steps.findById(call.getId()).ifPresent(row -> {
+            row.setState("FAILED");steps.save(row);
+            if(attempt.getRetryNoticeSentAt()==null) {
+                notifications.enqueueKyc(attempt,com.hs.user.notification.AccountNotificationWriter.KycEvent.KYC_RETRY_REQUIRED);
+                attempt.setRetryNoticeSentAt(Instant.now());verifications.save(attempt);
+            }
+        });
     }
     @Transactional
     public KycStatus finalizeAttempt(String userId,String attempt) {
@@ -126,7 +133,11 @@ public class VnptKycStore {
             v.setStatus(KycStatus.VERIFIED);v.setVerifiedAt(Instant.now());v.setRejectionReason(null);
             detailsRepository.save(UserKycDetails.from(userId, verifiedDetails));
         }
-        verifications.save(v);return v.getStatus();
+        verifications.save(v);
+        notifications.enqueueKyc(v,v.getStatus()==KycStatus.VERIFIED
+            ?com.hs.user.notification.AccountNotificationWriter.KycEvent.KYC_VERIFIED
+            :com.hs.user.notification.AccountNotificationWriter.KycEvent.KYC_REJECTED);
+        return v.getStatus();
     }
     private KycVerifiedDetailsResponse details(VnptKycStep ocr, VnptKycStep compare, VnptKycStep face,
                            VnptKycStep mask, VnptKycStep front, VnptKycStep back) {

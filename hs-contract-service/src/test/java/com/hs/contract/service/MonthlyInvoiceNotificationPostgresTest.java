@@ -199,6 +199,7 @@ class MonthlyInvoiceNotificationPostgresTest {
     List<String> eventsOf(String contractId) {
         return outbox.findAll().stream().sorted(Comparator.comparing(ContractNotificationOutbox::getId)).map(row -> {
             try { JsonNode e = JSON.readTree(row.getPayload());
+                if(!e.get("eventType").asText().startsWith("INVOICE_"))return null;
                 return e.get("data").get("contractId").asText().equals(contractId)
                     ? e.get("eventType").asText().replace("INVOICE_", "") + ":" + e.get("recipients").get(0).asText() + ":" + e.get("data").get("invoiceId").asText() : null;
             } catch (Exception failure) { throw new IllegalStateException(failure); }
@@ -253,7 +254,9 @@ class MonthlyInvoiceNotificationPostgresTest {
             () -> billing.scheduledSync());
         assertTrue(failures.stream().allMatch(f -> f == null || f instanceof AppException), failures.toString());
         assertEquals(MonthlyInvoiceStatus.UNPAID, invoices.findById(draft.getId()).orElseThrow().getStatus());
-        assertEquals(List.of(ev("ISSUED", "tenant", draft.getId())), events());
+        assertEquals(List.of(ev("ISSUED", "tenant", draft.getId())), events().stream().filter(e->e.startsWith("ISSUED:")).toList());
+        assertTrue(events().stream().allMatch(e->e.equals(ev("ISSUED","tenant",draft.getId()))||e.equals(ev("METER_REMINDER","owner",draft.getId()))));
+        assertTrue(events().stream().filter(e->e.startsWith("METER_REMINDER:")).count()<=1);
         assertEquals(1, paymentRepo.findAll().stream().filter(p -> draft.getId().equals(p.getInvoiceId())).count());
     }
 

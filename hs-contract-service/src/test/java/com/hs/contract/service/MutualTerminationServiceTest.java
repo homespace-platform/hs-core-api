@@ -176,6 +176,7 @@ class MutualTerminationServiceTest {
         assertThrows(AppException.class,()->service.act("rental","tenant","ACCEPT",consent(pending.revision())));
         var accepted=service.act("rental","owner","ACCEPT",consent(pending.revision()));
         assertEquals("APPROVED",accepted.status());assertNull(contract.getAgreedEarlyEndExclusive());assertNull(contract.getAgreedEarlyBillingMonths());
+        verify(notices).other(contract,"owner",TerminationNotificationWriter.Event.TERMINATION_APPROVED);
         var approvedRevision=accepted.revision();assertThrows(AppException.class,()->service.act("rental","owner","APPLY_SIGNED",consent(approvedRevision)));
         accepted=service.actSigned("rental","owner",consent(accepted.revision()));
         assertEquals("AGREED",accepted.status());assertEquals(LocalDate.of(2027,3,31),contract.getAgreedEarlyEndExclusive());assertEquals(2,contract.getAgreedEarlyBillingMonths());
@@ -184,6 +185,7 @@ class MutualTerminationServiceTest {
         verify(payments).attachOnboardingToContract("rental","lease");verify(invoices,never()).save(any());
         verify(payments,never()).createAgreedRentRefundObligation(any(),any());
         assertThrows(AppException.class,()->service.act("rental","owner","ACCEPT",consent(pending.revision())));
+        verify(notices,times(1)).other(contract,"owner",TerminationNotificationWriter.Event.TERMINATION_APPROVED);
     }
     @Test void ownerCannotCreateNewProposalOrAcceptLegacyOwnerProposal(){
         active();assertThrows(AppException.class,()->service.propose("rental","owner",request(0,LocalDate.of(2027,3,31))));
