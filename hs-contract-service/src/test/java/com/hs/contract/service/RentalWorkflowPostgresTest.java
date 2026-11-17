@@ -862,17 +862,15 @@ class RentalWorkflowPostgresTest {
         assertEquals(1,noticeOutbox.findAll().stream().map(row->NOTICE_JSON.readTree(row.getPayload()))
                 .filter(e->e.get("eventType").asText().equals("INVOICE_ISSUED")&&id.equals(e.get("data").get("contractId").asText())).count());
     }
-    @Test void phase6eComplaintProposalApprovalAndDeadlineAreSilentButActualAcceptedRefundStillNotifies(){
+    @Test void phase6eComplaintConclusionDoesNotChangeSettlementAndNormalAcceptanceStillNotifies(){
         readyClosure();var p=closureProposal("100000");service.disputeClosure(id,"tenant",new DisputeClosurePayload(p.getProposalVersion(),"Không đồng ý khoản khấu trừ cần đối chiếu",List.of()));
-        var c=complaints.forRental(rentalId,"tenant").getFirst();complaints.act(c.id(),"owner","COMMENT",complaintAction(c));c=complaints.get(c.id(),"tenant");c=complaints.act(c.id(),"tenant","ESCALATE",complaintAction(c));
+        var c=complaints.forRental(rentalId,"tenant").getFirst();c=complaints.act(c.id(),"tenant","ESCALATE",complaintAction(c));
         admin();c=complaints.adminAct(c.id(),"admin","CLAIM",complaintAction(c));
-        var revision=closurePayload("50000",Math.toIntExact(c.sourceVersion()));
-        complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Đã đối chiếu chứng cứ và đề xuất khấu trừ",null,"REVISE_SETTLEMENT",null,revision));
-        var s=closures.findById(id).orElseThrow();time.instant=s.getRespondBy();service.get(id,"tenant");service.approveComplaintSettlement(id,c.id(),s.getProposalVersion(),"owner");
+        complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Đã đối chiếu và hướng dẫn hai bên giải quyết",null,"RECORD_FINDING",null,null));
+        assertEquals(p.getProposalVersion(),closures.findById(id).orElseThrow().getProposalVersion());
         assertEquals(List.of("SETTLEMENT_RESPONSE_NEEDED:tenant","SETTLEMENT_DISPUTED:owner"),settlementEvents());
-        var accepted=service.acceptClosure(id,"tenant",new AcceptClosurePayload(s.getProposalVersion(),true,true));
+        var revised=closureProposal("50000");var accepted=service.acceptClosure(id,"tenant",new AcceptClosurePayload(revised.getProposalVersion(),true,true));
         assertEquals(List.of("PAYMENT_REQUEST_CREATED:owner"),cashEvents(accepted.refundPayment().id()));
-        assertEquals(List.of("SETTLEMENT_RESPONSE_NEEDED:tenant","SETTLEMENT_DISPUTED:owner"),settlementEvents());
     }
     @ParameterizedTest @CsvSource({"0,AWAITING_TRANSFER,owner","0,TRANSFER_REPORTED,owner","0,DISPUTED,owner","21000000,AWAITING_TRANSFER,tenant","21000000,TRANSFER_REPORTED,tenant","21000000,DISPUTED,tenant"})
     void phase6eClosureDeadlineUsesOnlyRootMarkerEvenForProofOrDispute(String deduction,PaymentStatus status,String payer){

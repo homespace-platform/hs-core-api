@@ -126,8 +126,11 @@ public class MutualTerminationService {
     private RentalWorkflowView view(RentalWorkflowSupport.Source s){
         var w=s.record();var actions=new ArrayList<String>();String blocked=null;
         boolean eligible=true;try{eligible(s);}catch(com.hs.common.advice.entity.AppException e){eligible=false;blocked=e.getMessage();}
-        if(eligible){
-            actions.add("PROPOSE");if("PROPOSED".equals(w.getStatus())){if(s.actor().equals(w.getProposedBy()))actions.add("WITHDRAW");else actions.addAll(List.of("ACCEPT","REJECT"));}
+        if(eligible)actions.add("PROPOSE");
+        if("PROPOSED".equals(w.getStatus())){
+            // An expired or blocked proposal can still be withdrawn/rejected, never silently agreed.
+            if(s.actor().equals(w.getProposedBy()))actions.add("WITHDRAW");
+            else {if(eligible)actions.add("ACCEPT");actions.add("REJECT");}
         }
         if("AGREED".equals(w.getStatus())&&!support.time.today().isBefore(s.contract().getAgreedEarlyEndExclusive().minusDays(1))&&(support.owner(s)?w.getOwnerConfirmedAt()==null:w.getTenantConfirmedAt()==null))actions.add("CONFIRM_RETURN");
         if(!"EMPTY".equals(w.getStatus()))actions.add("REPORT_ISSUE");

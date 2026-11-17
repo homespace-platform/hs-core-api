@@ -64,6 +64,38 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 class ContractServiceImplTest {
+    @Test void authenticatedAdminCanReadMetadataWithoutPresignedUrlsOrPartyMutationRights() {
+        var f=new EffectiveDocumentFixture();
+        var file=f.files.getFirst();when(f.documents.findById(file.getId())).thenReturn(Optional.of(file));
+        UserContextHolder.set(new UserContext("admin","admin@example.com"));
+        var auth=new org.springframework.security.authentication.UsernamePasswordAuthenticationToken("admin@example.com",null,
+            List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ADMIN")));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(auth);
+        try {
+            var metadata=f.service.getDocumentMetadata(file.getId());
+            assertEquals(file.getId(),metadata.getId());assertNull(metadata.getViewUrl());assertNull(metadata.getDownloadUrl());
+            verifyNoInteractions(f.storage);
+            assertThrows(AppException.class,()->f.service.getContract("root"));
+            assertThrows(AppException.class,()->f.service.getDocument(file.getId()));
+        } finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+    }
+
+    @Test void nonAdminOrUnauthenticatedAdminCannotReadAnotherPartysDocumentMetadata() {
+        var f=new EffectiveDocumentFixture();var file=f.files.getFirst();
+        when(f.documents.findById(file.getId())).thenReturn(Optional.of(file));
+        UserContextHolder.set(new UserContext("stranger",null));
+        try {
+            for(String role:List.of("ROLE_USER","ROLE_ADMIN")) {
+                var auth=org.springframework.security.authentication.UsernamePasswordAuthenticationToken.unauthenticated("stranger",null);
+                if(role.equals("ROLE_USER"))auth=new org.springframework.security.authentication.UsernamePasswordAuthenticationToken("stranger",null,
+                    List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority(role)));
+                org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(auth);
+                assertThrows(AppException.class,()->f.service.getDocumentMetadata(file.getId()));
+            }
+            verifyNoInteractions(f.storage);
+        } finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+    }
+
     @Test void adminDetailUsesTheSameRecordedDepositLedgerWithoutChangingIt(){
         var f=new EffectiveDocumentFixture();f.root.setRentalRequestId("rental");
         var ledger=mock(com.hs.payment.service.DepositLedgerService.class);

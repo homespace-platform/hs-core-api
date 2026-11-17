@@ -1336,7 +1336,21 @@ public class ContractServiceImpl implements ContractService {
     public ContractDocumentResponse getDocumentMetadata(String documentId) {
         ContractDocument document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_DOCUMENT_NOT_FOUND));
-        findContractAndCheckAccess(document.getContractId());
+        var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        var user = UserContextHolder.get();
+        boolean adminReader = user != null && user.userId() != null && !user.userId().isBlank()
+                && !"system".equals(user.userId()) && authentication != null && authentication.isAuthenticated()
+                && !(authentication instanceof org.springframework.security.authentication.AnonymousAuthenticationToken)
+                && authentication.getAuthorities().stream().anyMatch(authority ->
+                    "ROLE_ADMIN".equals(authority.getAuthority()) || "ADMIN".equals(authority.getAuthority()));
+        // Admins already read documents through the admin API; verified bytes must grant the same read access.
+        // Keep party-only access for signing, edits and every other contract operation.
+        if (adminReader) {
+            contractRepository.findById(document.getContractId())
+                    .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        } else {
+            findContractAndCheckAccess(document.getContractId());
+        }
         return toDocumentResponse(document, false);
     }
 

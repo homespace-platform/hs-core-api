@@ -163,10 +163,9 @@ class ComplaintCasePostgresTest {
     ComplaintView escalate(ComplaintView c){complaints.act(c.id(),"owner","COMMENT",action(c));c=complaints.get(c.id(),"tenant");return complaints.act(c.id(),"tenant","ESCALATE",action(c));}
     ComplaintView claim(ComplaintView c){admin("admin");return complaints.adminAct(c.id(),"admin","CLAIM",action(c));}
     ComplaintView disputedClosure(){proposal("100000");var close=closures.findById(id).orElseThrow();service.disputeClosure(id,"tenant",new DisputeClosurePayload(close.getProposalVersion(),"Không đồng ý khoản khấu trừ kính đã vỡ sẵn",List.of()));return complaints.forRental(rentalId,"tenant").getFirst();}
-    ComplaintView adminRevision(ComplaintView c){
+    ComplaintView adminConclusion(ComplaintView c){
         c=claim(escalate(c));
-        var p=new ClosurePayload(null,null,new BigDecimal("50000"),"Admin đề xuất giảm khấu trừ dựa trên chứng cứ hai bên",true,List.of(new ClosureDeduction("Thay chìa khóa theo biên bản",new BigDecimal("50000"),List.of())),Math.toIntExact(c.sourceVersion()));
-        return complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Đề xuất giải quyết từ chứng cứ hai bên",null,"REVISE_SETTLEMENT",null,p));
+        return complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Đã đối chiếu và hướng dẫn hai bên xử lý",null,"RECORD_FINDING",null,null));
     }
     @ParameterizedTest @org.junit.jupiter.params.provider.EnumSource(ComplaintCategory.class)
     void partiesCanOpenCategoriesButOnlyActualClosureObjectionCanOpenSettlementCase(ComplaintCategory category){
@@ -179,7 +178,6 @@ class ComplaintCasePostgresTest {
     @Test void initialDeadlineIsNotExtendedByOpeningPartysRepeatedCommentsAndCutoffIsInclusive(){
         var c=open(ComplaintCategory.REPAIR);var due=c.respondBy();
         c=complaints.act(c.id(),"tenant","COMMENT",action(c));assertEquals(due,c.respondBy());
-        var reviewed=c;assertThrows(AppException.class,()->complaints.act(reviewed.id(),"tenant","ESCALATE",action(reviewed)));
         time.instant=due;assertTrue(complaints.get(c.id(),"tenant").overdue());
         c=complaints.act(c.id(),"tenant","ESCALATE",action(c));assertEquals("WAITING_ADMIN",c.stage());
         assertEquals(0,ledger.forRental(rentalId).heldAmount().compareTo(principal));assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());
@@ -188,12 +186,12 @@ class ComplaintCasePostgresTest {
         var c=complaints.open(rentalId,"tenant",new ComplaintOpen(ComplaintCategory.SAFETY,"Sự cố an toàn cần HomeSpace hỗ trợ khẩn",null,true));assertEquals(DisputeCaseStatus.ESCALATED,c.status());
         assertThrows(AppException.class,()->complaints.open(rentalId,"tenant",new ComplaintOpen(ComplaintCategory.TERMS,"Nội dung điều khoản đang chưa thống nhất",null,true)));
     }
-    @Test void partyAgreementRequiresOtherPartyAndEscalationInvalidatesTheOldProposal(){
-        var c=open(ComplaintCategory.CONDITION);c=complaints.act(c.id(),"tenant","PROPOSE",action(c));var own=c;
-        assertThrows(AppException.class,()->complaints.act(own.id(),"tenant","ACCEPT",action(own)));
-        c=complaints.act(c.id(),"owner","DECLINE",action(c));assertNull(c.proposedBy());assertEquals(3,c.events().size());
-        c=complaints.act(c.id(),"tenant","ESCALATE",action(c));var escalated=c;
-        assertThrows(AppException.class,()->complaints.act(escalated.id(),"owner","ACCEPT",action(escalated)));
+    @Test void simpleExchangeDoesNotExposeAgreementOrFinancialActions(){
+        var c=open(ComplaintCategory.CONDITION);var reviewed=c;
+        for(String action:List.of("PROPOSE","ACCEPT","DECLINE","APPROVE_SETTLEMENT","CONFIRM_COMPLETE","REJECT_DECISION"))
+            assertThrows(AppException.class,()->complaints.act(reviewed.id(),"tenant",action,action(reviewed)));
+        assertEquals(List.of("COMMENT","ESCALATE","WITHDRAW"),c.allowedActions());
+        c=complaints.act(c.id(),"tenant","ESCALATE",action(c));assertEquals("WAITING_ADMIN",c.stage());
     }
     @Test void withdrawAndReopenKeepHistoryAndCannotCreateSecondActiveIssue(){
         var c=open(ComplaintCategory.TERMS);var first=c;
@@ -212,13 +210,27 @@ class ComplaintCasePostgresTest {
         var due=c.respondBy();c=complaints.act(c.id(),"owner","COMMENT",action(c));assertEquals(due,c.respondBy());assertEquals("WAITING_INFO",c.stage());
         c=complaints.act(c.id(),"tenant","COMMENT",action(c));assertEquals("UNDER_REVIEW",c.stage());assertEquals("ADMIN",c.responseDueFor());
     }
-    @Test void normalFindingTracksBilateralCompletionAndAllowsReopeningWithoutChangingMoney(){
+    @Test void retryingAdminClaimPreservesPendingInformationAndItsOriginalDeadline(){
         var c=claim(escalate(open(ComplaintCategory.REPAIR)));
-        c=complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Chủ nhà sửa khóa cửa và hai bên kiểm tra",null,"RECORD_FINDING",null,null));
-        c=complaints.act(c.id(),"owner","CONFIRM_COMPLETE",action(c));assertEquals(DisputeCaseStatus.ESCALATED,c.status());
-        c=complaints.act(c.id(),"tenant","CONFIRM_COMPLETE",action(c));assertEquals("CLOSED",c.stage());
-        c=complaints.act(c.id(),"tenant","REOPEN",action(c));assertEquals(DisputeCaseStatus.OPEN,c.status());assertNull(c.outcome());
+        c=complaints.adminAct(c.id(),"admin","REQUEST_INFO",new ComplaintAction(c.revision(),"Người thuê bổ sung ảnh khóa cửa hiện tại",null,null,"tenant",null));
+        var expected=c;time.instant=c.respondBy().plusSeconds(1);
+        c=complaints.adminAct(c.id(),"admin","CLAIM",action(c));
+        assertEquals(expected.revision(),c.revision());assertEquals(expected.respondBy(),c.respondBy());
+        assertEquals("WAITING_INFO",c.stage());assertEquals("tenant",c.responseDueFor());assertTrue(c.overdue());
+        assertEquals(expected.events().size(),c.events().size());
+        assertFalse(c.allowedActions().contains("CLAIM"));assertTrue(c.allowedActions().contains("DECIDE"));
+        admin("next-admin");c=complaints.adminAct(c.id(),"next-admin","CLAIM",action(c));
+        assertEquals("next-admin",c.assignedTo());assertEquals(expected.revision()+1,c.revision());
+        assertEquals("WAITING_INFO",c.stage());assertEquals("tenant",c.responseDueFor());assertTrue(c.overdue());
+        assertEquals(expected.respondBy(),c.respondBy());assertEquals(expected.events().size()+1,c.events().size());
+        assertFalse(c.allowedActions().contains("CLAIM"));assertTrue(c.allowedActions().contains("DECIDE"));
+        assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());
         assertEquals(0,ledger.forRental(rentalId).heldAmount().compareTo(principal));
+    }
+    @Test void adminFindingClosesSupportCaseAndAllowsReopeningWithoutChangingMoney(){
+        var c=adminConclusion(open(ComplaintCategory.REPAIR));assertEquals("CLOSED",c.stage());assertEquals(DisputeCaseStatus.RESOLVED,c.status());
+        c=complaints.act(c.id(),"tenant","REOPEN",action(c));assertEquals(DisputeCaseStatus.OPEN,c.status());assertNull(c.outcome());
+        assertEquals(0,ledger.forRental(rentalId).heldAmount().compareTo(principal));assertEquals(ContractStatus.ACTIVE,contracts.findById(id).orElseThrow().getStatus());
     }
     @Test void settlementComplaintCannotBeBypassedByNormalProposalOrAcceptance(){
         var c=disputedClosure();var original=closures.findById(id).orElseThrow();
@@ -226,25 +238,17 @@ class ComplaintCasePostgresTest {
         assertThrows(AppException.class,()->proposal("0"));assertThrows(AppException.class,()->accept(original.getProposalVersion()));
         assertEquals(DisputeCaseStatus.OPEN,c.status());assertEquals(DepositStatus.DISPUTED,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());
     }
-    @Test void fullSettlementComplaintAdminProposalBothConsentsThenActualReceiptCompletesCase(){
-        var c=adminRevision(disputedClosure());int version=Math.toIntExact(c.sourceVersion());
-        assertTrue(paymentRepo.findByContractIdAndType(id,PaymentType.DEPOSIT_REFUND).isEmpty());
-        assertEquals(0,ledger.forRental(rentalId).heldAmount().compareTo(principal));
-        assertThrows(AppException.class,()->accept(version));
-        var beforeComment=c;c=complaints.act(c.id(),"owner","COMMENT",action(c));assertEquals("FOLLOW_UP",c.stage());assertEquals(beforeComment.respondBy(),c.respondBy());
-        c=complaints.act(c.id(),"owner","APPROVE_SETTLEMENT",action(c));accept(version);
-        c=complaints.get(c.id(),"tenant");assertEquals(DisputeCaseStatus.ESCALATED,c.status());
-        var p=paymentRepo.findByContractIdAndType(id,PaymentType.DEPOSIT_REFUND).orElseThrow();assertEquals(0,p.getTotalAmount().compareTo(new BigDecimal("19950000")));
-        var pending=c;assertThrows(AppException.class,()->complaints.adminAct(pending.id(),"admin","CLOSE",action(pending)));
-        String proof=proof(p.getId(),"owner");payments.reportTransfer(p.getId(),"owner",ReportTransferRequest.builder().expectedAmount(p.getTotalAmount()).proofStorageId(proof).build());
-        assertEquals(DisputeCaseStatus.ESCALATED,complaints.get(c.id(),"tenant").status());
-        payments.confirmReceipt(p.getId(),"tenant");c=complaints.get(c.id(),"tenant");assertEquals("CLOSED",c.stage());
-        assertEquals(0,ledger.forRental(rentalId).retainedAmount().compareTo(new BigDecimal("50000")));assertEquals(ContractStatus.CLOSED,contracts.findById(id).orElseThrow().getStatus());
+    @Test void adminCannotReviseSettlementFromComplaint(){
+        var c=claim(escalate(disputedClosure()));int version=closures.findById(id).orElseThrow().getProposalVersion();
+        var p=new ClosurePayload(null,null,new BigDecimal("50000"),"Không được sửa quyết toán qua khiếu nại",true,List.of(),version);
+        assertThrows(AppException.class,()->complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Đã xem chứng cứ và muốn sửa quyết toán",null,"REVISE_SETTLEMENT",null,p)));
+        assertEquals(version,closures.findById(id).orElseThrow().getProposalVersion());
+        assertEquals(0,ledger.forRental(rentalId).heldAmount().compareTo(principal));assertTrue(paymentRepo.findByContractIdAndType(id,PaymentType.DEPOSIT_REFUND).isEmpty());
     }
-    @Test void rejectingAdminProposalInvalidatesEarlierOwnerConsentAndRequiresReviewAgain(){
-        var c=adminRevision(disputedClosure());c=complaints.act(c.id(),"owner","APPROVE_SETTLEMENT",action(c));int version=Math.toIntExact(c.sourceVersion());
-        c=complaints.act(c.id(),"tenant","REJECT_DECISION",action(c));assertEquals("UNDER_REVIEW",c.stage());
-        assertThrows(AppException.class,()->accept(version));assertNull(c.outcome());
+    @Test void closedComplaintCannotBeUsedToAcceptAnUnreviewedFinancialVersion(){
+        var c=adminConclusion(disputedClosure());int version=Math.toIntExact(c.sourceVersion());
+        assertThrows(AppException.class,()->accept(version));assertEquals("DISPUTED",closures.findById(id).orElseThrow().getStatus());
+        c=complaints.act(c.id(),"owner","REOPEN",action(c));assertEquals(DisputeCaseStatus.OPEN,c.status());
     }
     @Test void failedAuditRollsBackOpeningAndSourceObjectionTogether(){
         proposal("100000");int version=closures.findById(id).orElseThrow().getProposalVersion();
@@ -252,11 +256,10 @@ class ComplaintCasePostgresTest {
         assertThrows(IllegalStateException.class,()->service.disputeClosure(id,"tenant",new DisputeClosurePayload(version,"Không đồng ý khoản khấu trừ hiện tại",List.of())));
         assertEquals("PROPOSED",closures.findById(id).orElseThrow().getStatus());assertTrue(cases.findByActiveKey(ContractLifecycleService.settlementComplaintKey(rentalId)).isEmpty());
     }
-    @Test void auditFailureAfterAdminProposalRollsBackNewVersionAndCaseDecision(){
+    @Test void failedConclusionAuditRollsBackClosureOfSupportCase(){
         var c=claim(escalate(disputedClosure()));int version=closures.findById(id).orElseThrow().getProposalVersion();
-        var payload=new ClosurePayload(null,null,new BigDecimal("50000"),"Đề xuất mới theo chứng cứ khiếu nại",true,List.of(new ClosureDeduction("Sửa khóa cửa",new BigDecimal("50000"),List.of())),version);
-        doThrow(new IllegalStateException("Audit unavailable")).when(caseEvents).save(any(DisputeCaseEvent.class));var reviewed=c;
-        assertThrows(IllegalStateException.class,()->complaints.adminAct(reviewed.id(),"admin","DECIDE",new ComplaintAction(reviewed.revision(),"Đã đọc và đối chiếu chứng cứ hai bên",null,"REVISE_SETTLEMENT",null,payload)));
+        doThrow(new IllegalStateException("Audit unavailable")).when(caseEvents).save(any(DisputeCaseEvent.class));
+        assertThrows(IllegalStateException.class,()->complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Đã đọc và đối chiếu chứng cứ hai bên",null,"RECORD_FINDING",null,null)));
         assertEquals(version,closures.findById(id).orElseThrow().getProposalVersion());assertEquals("UNDER_REVIEW",complaints.adminGet(c.id(),"admin").stage());
     }
     @Test void privateEvidenceMustBeAttachedOwnedAndBoundBeforeSharingAndCannotBeDeleted(){
@@ -288,25 +291,27 @@ class ComplaintCasePostgresTest {
         assertEquals(List.of(0,6075),race(()->{admin("admin");complaints.adminAct(c.id(),"admin","DECIDE",p);}));
         assertEquals(1,caseEvents.findByCaseIdOrderByRevisionAsc(c.id()).stream().filter(e->e.getAction().equals("DECIDE")).count());
     }
-    @Test void oldPartyVersionCannotAcceptAfterACommentOrAnEarlierAcceptance(){
-        var c=open(ComplaintCategory.CONDITION);c=complaints.act(c.id(),"tenant","PROPOSE",action(c));var proposed=c;
+    @Test void oldPartyVersionCannotOverwriteACommentAndConcurrentSubmissionsApplyOnce(){
+        var c=open(ComplaintCategory.CONDITION);var original=c;
         c=complaints.act(c.id(),"owner","COMMENT",action(c));
-        assertEquals(6075,assertThrows(AppException.class,()->complaints.act(proposed.id(),"owner","ACCEPT",action(proposed))).getCode());
-        var fresh=c;assertEquals(List.of(0,6075),race(()->complaints.act(fresh.id(),"owner","ACCEPT",action(fresh))));
+        assertEquals(6075,assertThrows(AppException.class,()->complaints.act(original.id(),"tenant","COMMENT",action(original))).getCode());
+        var fresh=c;assertEquals(List.of(0,6075),race(()->complaints.act(fresh.id(),"tenant","COMMENT",action(fresh))));
     }
     @Test void reopeningStartsFreshResponseRoundAndOnlyItsOpenerMayWithdraw(){
         var c=open(ComplaintCategory.CONDITION);c=complaints.act(c.id(),"owner","COMMENT",action(c));
         c=complaints.act(c.id(),"tenant","WITHDRAW",action(c));c=complaints.act(c.id(),"owner","REOPEN",action(c));var current=c;
         assertThrows(AppException.class,()->complaints.act(current.id(),"tenant","WITHDRAW",action(current)));
-        assertThrows(AppException.class,()->complaints.act(current.id(),"owner","ESCALATE",action(current)));
+        assertTrue(current.allowedActions().contains("ESCALATE"));
         assertTrue(complaints.act(c.id(),"owner","WITHDRAW",action(c)).events().size()>3);
     }
-    @Test void existingObjectionEndpointAlsoInvalidatesAdminProposalAndPreservesNewEvidenceRound(){
-        var c=adminRevision(disputedClosure());c=complaints.act(c.id(),"owner","APPROVE_SETTLEMENT",action(c));int version=Math.toIntExact(c.sourceVersion());
-        service.disputeClosure(id,"tenant",new DisputeClosurePayload(version,"Chưa đồng ý phiên bản mới vì còn sai hiện trạng",List.of()));
-        c=complaints.get(c.id(),"tenant");assertEquals("UNDER_REVIEW",c.stage());assertNull(c.outcome());
-        assertNull(closures.findById(id).orElseThrow().getComplaintOwnerApprovedAt());
-        assertEquals("SOURCE_DISPUTED",c.events().getLast().action());assertThrows(AppException.class,()->accept(version));
+    @Test void aNewSettlementVersionOpensANewSupportCaseAndPreservesOldConclusion(){
+        var c=adminConclusion(disputedClosure());int oldVersion=Math.toIntExact(c.sourceVersion());
+        var fresh=proposal("50000");assertTrue(fresh.getProposalVersion()>oldVersion);
+        service.disputeClosure(id,"tenant",new DisputeClosurePayload(fresh.getProposalVersion(),"Chưa đồng ý phiên bản mới vì còn sai hiện trạng",List.of()));
+        assertEquals(DisputeCaseStatus.RESOLVED,complaints.get(c.id(),"tenant").status());
+        var next=complaints.forRental(rentalId,"tenant").stream().filter(row->row.status()!=DisputeCaseStatus.RESOLVED).findFirst().orElseThrow();
+        assertNotEquals(c.id(),next.id());assertEquals((long)fresh.getProposalVersion(),next.sourceVersion());
+        assertThrows(AppException.class,()->accept(fresh.getProposalVersion()));
     }
     @Test void malformedOrForeignEvidenceCannotAttachOrChangeCase(){
         var c=open(ComplaintCategory.REPAIR);String file=UUID.randomUUID().toString();
@@ -334,14 +339,10 @@ class ComplaintCasePostgresTest {
         c=complaints.act(c.id(),"owner","COMMENT",action(c));assertNull(c.contractId());assertEquals(DisputeCaseStatus.OPEN,c.status());
         c=complaints.act(c.id(),"tenant","ESCALATE",action(c));assertEquals(DisputeCaseStatus.ESCALATED,c.status());
     }
-    @Test void closingANonFinancialFindingCannotBypassOwnerConsentForAnOlderAdminProposal(){
-        var c=adminRevision(disputedClosure());int oldVersion=Math.toIntExact(c.sourceVersion());
-        c=complaints.act(c.id(),"owner","APPROVE_SETTLEMENT",action(c));
-        c=complaints.act(c.id(),"owner","REJECT_DECISION",action(c));
-        assertNull(closures.findById(id).orElseThrow().getComplaintOwnerApprovedAt());
-        c=complaints.adminAct(c.id(),"admin","DECIDE",new ComplaintAction(c.revision(),"Ghi kết luận trao đổi, chưa thống nhất tiền",null,"RECORD_FINDING",null,null));
-        c=complaints.adminAct(c.id(),"admin","CLOSE",action(c));assertEquals(DisputeCaseStatus.RESOLVED,c.status());
-        assertThrows(AppException.class,()->accept(oldVersion));assertTrue(paymentRepo.findByContractIdAndType(id,PaymentType.DEPOSIT_REFUND).isEmpty());
+    @Test void conclusionDoesNotAcceptMoneyAndOwnerMustProposeThroughSettlementFlow(){
+        var c=adminConclusion(disputedClosure());int oldVersion=Math.toIntExact(c.sourceVersion());
+        assertEquals(DisputeCaseStatus.RESOLVED,c.status());assertThrows(AppException.class,()->accept(oldVersion));
+        assertTrue(paymentRepo.findByContractIdAndType(id,PaymentType.DEPOSIT_REFUND).isEmpty());
         var fresh=proposal("50000");accept(fresh.getProposalVersion());
         assertEquals(0,paymentRepo.findByContractIdAndType(id,PaymentType.DEPOSIT_REFUND).orElseThrow().getTotalAmount().compareTo(new BigDecimal("19950000")));
     }

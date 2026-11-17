@@ -36,7 +36,7 @@ Chủ nhà ký trước, người thuê ký sau. Chỉ khi backend kiểm chứn
 
 1. Mở **Khiếu nại → Khiếu nại hồ sơ thuê**, lọc trạng thái/nhóm/quá hạn và đọc case. Kiểm tra các mục **Căn cứ**: phiên bản nguồn, thời điểm chụp, lịch sử, ảnh/PDF và phép tính kỳ cuối nếu có.
 2. **Tiếp nhận khiếu nại** trước khi yêu cầu bổ sung/kết luận. Admin là một bên của vụ việc không tự xử lý vụ việc của mình.
-3. Có thể yêu cầu đúng bên bổ sung hoặc ghi kết luận và theo dõi thực hiện. Với quyết toán cọc, dùng đề xuất mới có chứng cứ, chủ nhà chấp thuận và người thuê xác nhận qua luồng tài chính; admin không tự xác nhận tiền đã nhận.
+3. Chi tiết khiếu nại mở trong modal. Hai bên gửi nội dung/chứng cứ và có thể chuyển HomeSpace khi cần. Admin đã tiếp nhận được gửi trao đổi, yêu cầu đúng bên bổ sung, hoặc ghi kết luận và đóng hồ sơ (chờ phản hồi hoặc hết hạn nếu đang yêu cầu bổ sung). Không lập thỏa thuận hay sửa quyết toán từ khiếu nại; thay đổi hợp đồng và tiền thực hiện qua chức năng tương ứng. Có thể mở lại hồ sơ có lý do.
 4. Đóng khiếu nại không tự ký, tiếp tục thuê, trả phòng, xóa nợ hoặc hoàn tiền. Không sửa tay DB để bỏ qua phiên bản hay bên xác nhận.
 5. Nếu dữ liệu đổi trong lúc thao tác, tải lại, đối chiếu bản mới rồi gửi lại bằng thao tác người dùng. Frontend không tự retry POST với phiên bản mới.
 

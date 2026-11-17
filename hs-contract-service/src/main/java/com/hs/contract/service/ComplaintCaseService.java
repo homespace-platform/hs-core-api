@@ -42,7 +42,6 @@ public class ComplaintCaseService {
     private final ContractRepository contracts;
     private final ContractClosureRepository closures;
     private final StorageObjectRepository storage;
-    private final ContractLifecycleService lifecycle;
     private final ObjectMapper mapper;
     private final BillingTime time;
     @PersistenceContext private EntityManager em;
@@ -158,10 +157,11 @@ public class ComplaintCaseService {
     }
     @Transactional public ComplaintView get(String id,String actor){
         var before=complaint(id);party(before,actor);lockSource(before.getRentalRequestId(),before.getContractId());
-        var d=lockCase(id,null);party(d,actor);syncFollowUp(d);return view(d,actor,false,true);
+        var d=lockCase(id,null);party(d,actor);return view(d,actor,false,true);
     }
     @Transactional public ComplaintView act(String id,String actor,String action,ComplaintAction p){
         if(p==null)throw invalid("Thiếu nội dung thao tác.");
+        if(p.settlement()!=null||p.outcome()!=null&&!"RECORD_FINDING".equals(p.outcome()))throw invalid("Khiếu nại chỉ trao đổi và ghi kết luận; không sửa hợp đồng hoặc quyết toán.");
         var before=complaint(id);party(before,actor);lockSource(before.getRentalRequestId(),before.getContractId());
         var d=lockCase(id,p);party(d,actor);String reason=text(p.reason(),500);var metadata=new LinkedHashMap<String,Object>();
         if(!"COMMENT".equals(action)&&p.evidenceIds()!=null&&!p.evidenceIds().isEmpty())throw invalid("Bổ sung chứng cứ bằng phản hồi riêng.");
@@ -176,22 +176,8 @@ public class ComplaintCaseService {
                     d.setComplaintStage(d.getStatus()==DisputeCaseStatus.ESCALATED?"UNDER_REVIEW":"DISCUSSING");
                 }
             }
-            case "PROPOSE" -> {
-                bilateral(d);if(d.getProposedBy()!=null)throw forbidden("Phản hồi đề xuất đang chờ trước.");
-                d.setProposedBy(actor);d.setProposalReason(reason);d.setComplaintProposal(json(Map.of("agreement",reason)));
-                d.setComplaintStage("PROPOSAL_PENDING");d.setResponseDueFor(other(d,actor));d.setRespondBy(deadline());
-            }
-            case "ACCEPT" -> {
-                bilateral(d);otherProposer(d,actor);metadata.put("agreement",d.getProposalReason());metadata.put("proposedBy",d.getProposedBy());
-                resolve(d,actor,reason,"AGREED");
-            }
-            case "DECLINE" -> {
-                bilateral(d);otherProposer(d,actor);metadata.put("agreement",d.getProposalReason());clearProposal(d);
-                d.setComplaintStage("DISCUSSING");d.setResponseDueFor(null);d.setRespondBy(null);
-            }
             case "ESCALATE" -> {
                 bilateral(d);
-                if(!discussed(d,actor)&&!overdue(d))throw forbidden("Chờ bên còn lại phản hồi hoặc hết thời hạn theo cấu hình; có thể chuyển khi hai bên không thống nhất.");
                 d.setStatus(DisputeCaseStatus.ESCALATED);d.setComplaintStage("WAITING_ADMIN");d.setEscalatedAt(time.now());d.setRespondBy(deadline());d.setResponseDueFor("ADMIN");clearProposal(d);
             }
             case "WITHDRAW" -> {bilateral(d);if(!actor.equals(roundOpener(d)))throw forbidden("Chỉ người mở lượt khiếu nại này được rút trước khi chuyển admin.");resolve(d,actor,reason,"WITHDRAWN");}
@@ -204,27 +190,6 @@ public class ComplaintCaseService {
                 d.setTenantCompletedAt(null);d.setLandlordCompletedAt(null);d.setRespondBy(deadline());d.setResponseDueFor(other(d,actor));clearProposal(d);
                 d.setComplaintRoundOpenedBy(actor);d.setComplaintRoundStartRevision(d.getRevision()+1);
                 if(category(d)==ComplaintCategory.DEPOSIT_SETTLEMENT&&d.getContractId()!=null)closures.findById(d.getContractId()).ifPresent(c->d.setSourceVersion((long)c.getProposalVersion()));
-            }
-            case "APPROVE_SETTLEMENT" -> {
-                if(!actor.equals(d.getPayeeId())||!"FOLLOW_UP".equals(d.getComplaintStage())||!"REVISE_SETTLEMENT".equals(d.getComplaintOutcome()))throw forbidden("Chủ nhà chỉ đồng ý đề xuất quyết toán đang theo dõi.");
-                lifecycle.approveComplaintSettlement(d.getContractId(),d.getId(),Math.toIntExact(d.getSourceVersion()),actor);
-                d.setResponseDueFor(d.getPayerId());d.setRespondBy(deadline());
-            }
-            case "CONFIRM_COMPLETE" -> {
-                if(!"FOLLOW_UP".equals(d.getComplaintStage())||!"RECORD_FINDING".equals(d.getComplaintOutcome()))throw forbidden("Nghĩa vụ tiền phải xác nhận tại mục thanh toán.");
-                if(actor.equals(d.getPayerId())){if(d.getTenantCompletedAt()!=null)throw forbidden("Bạn đã xác nhận.");d.setTenantCompletedAt(time.now());}
-                else {if(d.getLandlordCompletedAt()!=null)throw forbidden("Bạn đã xác nhận.");d.setLandlordCompletedAt(time.now());}
-                if(d.getTenantCompletedAt()!=null&&d.getLandlordCompletedAt()!=null)resolve(d,actor,reason,"CLOSED");
-            }
-            case "REJECT_DECISION" -> {
-                if(d.getStatus()!=DisputeCaseStatus.ESCALATED||!"FOLLOW_UP".equals(d.getComplaintStage()))throw forbidden("Chưa có kết luận đang theo dõi.");
-                if(settlementAccepted(d))throw forbidden("Quyết toán đã được chấp thuận; không đảo nghĩa vụ tiền qua thao tác này. Đối soát khoản thanh toán tại hồ sơ tiền.");
-                if(d.getContractId()!=null&&category(d)==ComplaintCategory.DEPOSIT_SETTLEMENT)
-                    closures.findById(d.getContractId()).filter(c->d.getId().equals(c.getComplaintCaseId())&&c.getAcceptedAt()==null)
-                        .ifPresent(c->{c.setComplaintOwnerApprovedAt(null);closures.save(c);});
-                metadata.put("previousDecision",Objects.toString(d.getComplaintDecision(),""));
-                d.setComplaintStage("UNDER_REVIEW");d.setComplaintOutcome(null);d.setComplaintDecision(null);d.setRespondBy(deadline());d.setResponseDueFor("ADMIN");
-                d.setTenantCompletedAt(null);d.setLandlordCompletedAt(null);
             }
             default -> throw invalid("Thao tác khiếu nại không được hỗ trợ.");
         }
@@ -242,40 +207,32 @@ public class ComplaintCaseService {
         return new PageResponse<>(cases.findAll(spec,PageRequest.of(Math.max(0,page-1),Math.min(50,Math.max(1,size)),Sort.by("openedAt","id")))
             .map(d->view(d,actor,true,false)));
     }
-    @Transactional public ComplaintView adminGet(String id,String actor){admin(actor);var before=complaint(id);lockSource(before.getRentalRequestId(),before.getContractId());var d=lockCase(id,null);syncFollowUp(d);return view(d,actor,true,true);}
+    @Transactional public ComplaintView adminGet(String id,String actor){admin(actor);var before=complaint(id);lockSource(before.getRentalRequestId(),before.getContractId());var d=lockCase(id,null);return view(d,actor,true,true);}
     @Transactional public ComplaintView adminAct(String id,String actor,String action,ComplaintAction p){
         if(p==null)throw invalid("Thiếu nội dung thao tác.");
+        if(p.settlement()!=null||p.outcome()!=null&&!"RECORD_FINDING".equals(p.outcome()))throw invalid("Khiếu nại chỉ trao đổi và ghi kết luận; không sửa hợp đồng hoặc quyết toán.");
         admin(actor);var before=complaint(id);lockSource(before.getRentalRequestId(),before.getContractId());var d=lockCase(id,p);
         if(actor.equals(d.getPayerId())||actor.equals(d.getPayeeId()))throw forbidden("Admin không tự phân xử vụ việc của mình.");
         if(d.getStatus()!=DisputeCaseStatus.ESCALATED)throw forbidden("Chỉ tiếp nhận hồ sơ đã chuyển HomeSpace.");
         if(p.evidenceIds()!=null&&!p.evidenceIds().isEmpty())throw invalid("Admin không thay chứng cứ hai bên bằng file quyết định.");
         String reason=text(p.reason(),500);var metadata=new LinkedHashMap<String,Object>();
         if("CLAIM".equals(action)){
+            // Retrying ownership must not reset an unanswered information request or its deadline.
+            if(actor.equals(d.getAssignedTo()))return view(d,actor,true,true);
             metadata.put("previousAssignee",Objects.toString(d.getAssignedTo(),""));d.setAssignedTo(actor);
-            if(!"FOLLOW_UP".equals(d.getComplaintStage())){d.setComplaintStage("UNDER_REVIEW");d.setResponseDueFor("ADMIN");d.setRespondBy(deadline());}
+            if("WAITING_ADMIN".equals(d.getComplaintStage())){d.setComplaintStage("UNDER_REVIEW");d.setResponseDueFor("ADMIN");d.setRespondBy(deadline());}
         } else {
             if(!actor.equals(d.getAssignedTo()))throw forbidden("Tiếp nhận hồ sơ trước khi xử lý.");
             switch(action){
                 case "REQUEST_INFO" -> {
                     if(p.requestedFrom()==null||!Set.of(d.getPayerId(),d.getPayeeId()).contains(p.requestedFrom()))throw invalid("Chọn một trong hai bên để yêu cầu bổ sung.");
-                    if("FOLLOW_UP".equals(d.getComplaintStage()))throw forbidden("Hãy ghi nhận cần xem xét lại kết luận trước.");
                     d.setComplaintStage("WAITING_INFO");d.setResponseDueFor(p.requestedFrom());d.setRespondBy(deadline());metadata.put("requestedFrom",p.requestedFrom());
                 }
+                case "COMMENT" -> { /* Reply without changing the pending information request. */ }
                 case "DECIDE" -> {
-                    if(!"UNDER_REVIEW".equals(d.getComplaintStage()))throw forbidden("Đọc phản hồi và tiếp nhận xử lý trước khi kết luận.");
-                    if(p.outcome()==null||!Set.of("RECORD_FINDING","REVISE_SETTLEMENT").contains(p.outcome()))throw invalid("Chọn hướng giải quyết.");
-                    if("REVISE_SETTLEMENT".equals(p.outcome())){
-                        if(category(d)!=ComplaintCategory.DEPOSIT_SETTLEMENT||d.getContractId()==null||p.settlement()==null)throw invalid("Chỉ lập lại đề xuất từ khiếu nại quyết toán cọc.");
-                        var response=lifecycle.proposeComplaintSettlement(d.getContractId(),id,actor,p.settlement());
-                        d.setSourceVersion((long)response.closure().getProposalVersion());d.setResponseDueFor(d.getPayeeId());
-                        metadata.put("settlement",p.settlement());metadata.put("proposalVersion",d.getSourceVersion());
-                    } else {if(p.settlement()!=null)throw invalid("Kết luận thông thường không sửa số tiền.");d.setResponseDueFor(null);}
-                    d.setComplaintOutcome(p.outcome());d.setComplaintDecision(reason);d.setComplaintStage("FOLLOW_UP");d.setRespondBy(deadline());
-                    d.setTenantCompletedAt(null);d.setLandlordCompletedAt(null);metadata.put("outcome",p.outcome());
-                }
-                case "CLOSE" -> {
-                    if(!"FOLLOW_UP".equals(d.getComplaintStage())||!"RECORD_FINDING".equals(d.getComplaintOutcome()))throw forbidden("Khoản quyết toán chỉ đóng khi nghĩa vụ thực tế đã hoàn tất.");
-                    resolve(d,actor,reason,"CLOSED");
+                    if(!canConclude(d))throw forbidden("Đợi bên được yêu cầu bổ sung phản hồi hoặc hết hạn trước khi kết luận.");
+                    d.setComplaintOutcome("RECORD_FINDING");d.setComplaintDecision(reason);
+                    metadata.put("outcome","RECORD_FINDING");resolve(d,actor,reason,"CLOSED");
                 }
                 default -> throw invalid("Thao tác quản trị không được hỗ trợ.");
             }
@@ -299,15 +256,7 @@ public class ComplaintCaseService {
         var r=rentals.findById(d.getRentalRequestId()).orElseThrow(this::missing);
         if(!r.getRenterId().equals(d.getPayerId())||!r.getOwnerId().equals(d.getPayeeId()))throw forbidden("Các bên của hồ sơ nguồn đã thay đổi.");return d;
     }
-    private void syncFollowUp(DisputeCase d){
-        if(d.getStatus()!=DisputeCaseStatus.ESCALATED||!"FOLLOW_UP".equals(d.getComplaintStage())||!"REVISE_SETTLEMENT".equals(d.getComplaintOutcome()))return;
-        var c=contracts.findById(d.getContractId()).orElseThrow(this::missing);lifecycle.syncComplaintSource(c);
-        var close=closures.findById(c.getId()).orElseThrow(this::missing);
-        if(!d.getId().equals(close.getComplaintCaseId())||d.getSourceVersion()==null||d.getSourceVersion()!=close.getProposalVersion())return;
-        if("CLOSED".equals(close.getStatus())){resolve(d,"SYSTEM","Nghĩa vụ quyết toán đã hoàn tất qua luồng xác nhận thực nhận.","CLOSED");finish(d,"SYSTEM","SYSTEM","COMPLETED",d.getResolutionReason(),Map.of("proposalVersion",close.getProposalVersion()));}
-        else if(close.getAcceptedAt()!=null&&!Objects.equals(d.getRespondBy(),close.getRefundDueAt())){d.setRespondBy(close.getRefundDueAt());d.setResponseDueFor(close.getRefundPaymentId()!=null?d.getPayeeId():d.getPayerId());finish(d,"SYSTEM","SYSTEM","FOLLOW_UP_PAYMENT","Hai bên đã đồng ý quyết toán; tiếp tục nghĩa vụ thanh toán, chưa coi là đã nhận tiền.",Map.of("proposalVersion",close.getProposalVersion()));}
-    }
-    private boolean settlementAccepted(DisputeCase d){return "REVISE_SETTLEMENT".equals(d.getComplaintOutcome())&&d.getContractId()!=null&&closures.findById(d.getContractId()).filter(c->c.getAcceptedAt()!=null).isPresent();}
+    private boolean canConclude(DisputeCase d){return Set.of("UNDER_REVIEW","FOLLOW_UP").contains(d.getComplaintStage())||"WAITING_INFO".equals(d.getComplaintStage())&&overdue(d);}
     private void resolve(DisputeCase d,String actor,String reason,String stage){d.setStatus(DisputeCaseStatus.RESOLVED);d.setComplaintStage(stage);d.setActiveKey(null);d.setResolvedAt(time.now());d.setResolvedBy(actor);d.setResolutionReason(reason);d.setRespondBy(null);d.setResponseDueFor(null);clearProposal(d);}
     private void clearProposal(DisputeCase d){d.setProposedBy(null);d.setProposalReason(null);d.setComplaintProposal(null);}
     private void finish(DisputeCase d,String actor,String role,String action,String reason,Map<String,Object> metadata){d.setRevision(d.getRevision()+1);cases.saveAndFlush(d);audit(d,actor,role,action,reason,null,metadata);}
@@ -316,16 +265,11 @@ public class ComplaintCaseService {
         var allowed=new ArrayList<String>();
         if(d.getStatus()==DisputeCaseStatus.RESOLVED){if(!administrator)allowed.add("REOPEN");}
         else if(administrator){if(d.getStatus()==DisputeCaseStatus.ESCALATED&&!actor.equals(d.getPayerId())&&!actor.equals(d.getPayeeId())){
-            allowed.add("CLAIM");if(actor.equals(d.getAssignedTo())){if(!"FOLLOW_UP".equals(d.getComplaintStage())){allowed.add("REQUEST_INFO");if("UNDER_REVIEW".equals(d.getComplaintStage()))allowed.add("DECIDE");}else if("RECORD_FINDING".equals(d.getComplaintOutcome()))allowed.add("CLOSE");}
+            if(!actor.equals(d.getAssignedTo()))allowed.add("CLAIM");
+            else {allowed.add("COMMENT");allowed.add("REQUEST_INFO");if(canConclude(d))allowed.add("DECIDE");}
         }} else {
             allowed.add("COMMENT");
-            if(d.getStatus()==DisputeCaseStatus.OPEN){if(actor.equals(roundOpener(d)))allowed.add("WITHDRAW");if(d.getProposedBy()==null)allowed.add("PROPOSE");else if(!actor.equals(d.getProposedBy())){allowed.add("ACCEPT");allowed.add("DECLINE");}
-                if(overdue(d)||discussed(d,actor))allowed.add("ESCALATE");
-            } else if("FOLLOW_UP".equals(d.getComplaintStage())){
-                if(!settlementAccepted(d))allowed.add("REJECT_DECISION");
-                if("RECORD_FINDING".equals(d.getComplaintOutcome())&&(actor.equals(d.getPayerId())?d.getTenantCompletedAt()==null:d.getLandlordCompletedAt()==null))allowed.add("CONFIRM_COMPLETE");
-                if("REVISE_SETTLEMENT".equals(d.getComplaintOutcome())&&actor.equals(d.getPayeeId())&&d.getContractId()!=null&&closures.findById(d.getContractId()).filter(c->c.getComplaintOwnerApprovedAt()==null&&c.getAcceptedAt()==null).isPresent())allowed.add("APPROVE_SETTLEMENT");
-            }
+            if(d.getStatus()==DisputeCaseStatus.OPEN){allowed.add("ESCALATE");if(actor.equals(roundOpener(d)))allowed.add("WITHDRAW");}
         }
         var history=details?events.findByCaseIdOrderByRevisionAsc(d.getId()):List.<DisputeCaseEvent>of();
         return new ComplaintView(d.getId(),d.getRentalRequestId(),d.getContractId(),d.getPayerId(),d.getPayeeId(),category(d),d.getReason(),d.getOpenedBy(),d.getOpenedAt(),d.getStatus(),d.getComplaintStage(),d.getRevision(),d.getRespondBy(),d.getResponseDueFor(),overdue(d),d.getAssignedTo(),d.getComplaintOutcome(),d.getComplaintDecision(),d.getProposedBy(),d.getProposalReason(),d.getSourceVersion(),d.getTenantCompletedAt()!=null,d.getLandlordCompletedAt()!=null,allowed,
@@ -352,12 +296,10 @@ public class ComplaintCaseService {
     private String key(String rental,ComplaintCategory category){return "RENTAL:"+rental+":"+category.name();}
     private String key(DisputeCase d){return key(d.getRentalRequestId(),category(d));}
     private String roundOpener(DisputeCase d){return d.getComplaintRoundOpenedBy()==null?d.getOpenedBy():d.getComplaintRoundOpenedBy();}
-    private boolean discussed(DisputeCase d,String actor){return events.findByCaseIdOrderByRevisionAsc(d.getId()).stream().anyMatch(e->e.getRevision()>=(d.getComplaintRoundStartRevision()==null?1:d.getComplaintRoundStartRevision())&&!actor.equals(e.getActorId())&&Set.of("COMMENT","DECLINE","PROPOSE").contains(e.getAction()));}
     private String other(RentalRequest r,String actor){return actor.equals(r.getRenterId())?r.getOwnerId():r.getRenterId();}
     private String other(DisputeCase d,String actor){return actor.equals(d.getPayerId())?d.getPayeeId():d.getPayerId();}
     private String role(DisputeCase d,String actor){return actor.equals(d.getPayerId())?"TENANT":"LANDLORD";}
-    private void bilateral(DisputeCase d){if(d.getStatus()!=DisputeCaseStatus.OPEN)throw forbidden("Hồ sơ đã chuyển admin; không tự áp dụng đề xuất cũ.");}
-    private void otherProposer(DisputeCase d,String actor){if(d.getProposedBy()==null||actor.equals(d.getProposedBy()))throw forbidden("Đề xuất cần bên còn lại phản hồi.");}
+    private void bilateral(DisputeCase d){if(d.getStatus()!=DisputeCaseStatus.OPEN)throw forbidden("Hồ sơ đã chuyển HomeSpace; tiếp tục trao đổi với admin.");}
     private void party(RentalRequest r,String actor){if(actor==null||!actor.equals(r.getRenterId())&&!actor.equals(r.getOwnerId()))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);}
     private void party(DisputeCase d,String actor){if(actor==null||!actor.equals(d.getPayerId())&&!actor.equals(d.getPayeeId()))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);}
     private void admin(String actor){var auth=SecurityContextHolder.getContext().getAuthentication();var c=UserContextHolder.get();if(actor==null||c==null||!actor.equals(c.userId())||auth==null||!auth.isAuthenticated()||auth.getAuthorities().stream().noneMatch(a->"ADMIN".equals(a.getAuthority())))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);}

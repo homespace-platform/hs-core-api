@@ -198,31 +198,6 @@ public class ContractLifecycleService {
         if(caseId==null)terminationNotices.tenant(c,com.hs.contract.notification.TerminationNotificationWriter.Event.SETTLEMENT_RESPONSE_NEEDED);
         return response(c,actor);
     }
-    /** Admin creates only a revised proposal. Both parties must consent before any obligation is created. */
-    @Transactional public ContractLifecycleResponse proposeComplaintSettlement(String id,String caseId,String actor,ClosurePayload p) {
-        var auth=org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
-        var context=com.hs.common.context.UserContextHolder.get();
-        if(auth==null||!auth.isAuthenticated()||context==null||!actor.equals(context.userId())
-                ||auth.getAuthorities().stream().noneMatch(a->"ADMIN".equals(a.getAuthority())))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
-        var c=contracts.findByIdForUpdate(id).orElseThrow(this::notAllowed);entityManager.refresh(c);
-        var dispute=activeSettlementCase(c).filter(d->caseId.equals(d.getId())&&actor.equals(d.getAssignedTo())
-            &&d.getStatus()==com.hs.payment.model.constant.DisputeCaseStatus.ESCALATED&&"UNDER_REVIEW".equals(d.getComplaintStage())).orElseThrow(this::notAllowed);
-        var close=closures.findById(id).orElseThrow(this::notAllowed);
-        entityManager.refresh(close,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
-        if(actor.equals(c.getLandlordId())||actor.equals(c.getTenantId())||p==null||p.expectedProposalVersion()==null
-                ||dispute.getSourceVersion()==null||dispute.getSourceVersion()!=close.getProposalVersion()
-                ||p.expectedProposalVersion()!=close.getProposalVersion()||close.getAcceptedAt()!=null)throw new AppException(ContractErrorCode.COMPLAINT_STALE);
-        syncLocked(c);return proposeClosureLocked(c,actor,p,caseId);
-    }
-    @Transactional public void approveComplaintSettlement(String id,String caseId,int version,String actor) {
-        var c=root(id,actor);owner(c,actor);
-        var dispute=activeSettlementCase(c).filter(d->caseId.equals(d.getId())&&"FOLLOW_UP".equals(d.getComplaintStage())
-            &&"REVISE_SETTLEMENT".equals(d.getComplaintOutcome())).orElseThrow(this::notAllowed);
-        var close=closures.findById(id).orElseThrow(this::notAllowed);
-        if(!caseId.equals(close.getComplaintCaseId())||close.getProposalVersion()!=version||!"PROPOSED".equals(close.getStatus())
-            ||dispute.getSourceVersion()==null||dispute.getSourceVersion()!=version||close.getComplaintOwnerApprovedAt()!=null)throw notAllowed();
-        close.setComplaintOwnerApprovedAt(time.now());appendClosureEvent(close,"OWNER_APPROVED",actor,"Chủ nhà đồng ý phiên bản đề xuất từ hồ sơ khiếu nại.",List.of());closures.saveAndFlush(close);
-    }
     @Transactional public ContractLifecycleResponse acceptClosure(String id,String actor,AcceptClosurePayload p) {
         Contract c=root(id,actor); tenant(c,actor); syncLocked(c);
         ContractClosure close=closures.findById(id).orElseThrow(this::notAllowed);
@@ -558,8 +533,6 @@ public class ContractLifecycleService {
     }
     public static String settlementComplaintKey(String rentalId){return "RENTAL:"+rentalId+":DEPOSIT_SETTLEMENT";}
     private Optional<DisputeCase> activeSettlementCase(Contract c){return complaintCases==null?Optional.empty():complaintCases.findByActiveKey(settlementComplaintKey(c.getRentalRequestId()));}
-    /** Internal caller already holds the root lock and has checked access to its complaint. */
-    void syncComplaintSource(Contract c){syncLocked(c);}
     private Contract root(String id,String actor) {
         Contract c=contracts.findByIdForUpdate(id).orElseThrow(this::notAllowed);
         entityManager.refresh(c,jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
