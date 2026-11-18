@@ -88,6 +88,85 @@ class StorageServiceImplTest {
         storageService.delete("proof");assertEquals(StorageStatus.DELETED,object.getStatus());
     }
 
+    private static void authenticateAs(String... authorities) {
+        var granted = java.util.Arrays.stream(authorities)
+                .map(org.springframework.security.core.authority.SimpleGrantedAuthority::new).toList();
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken("test-user-id", "n/a", granted));
+    }
+
+    private StorageObject privateObjectOf(String ownerId) {
+        StorageObject object = StorageObject.builder().id("kyc").ownerId(ownerId).originalName("id.png")
+                .bucketName("b").objectKey("k").contentType("image/png").status(StorageStatus.READY)
+                .visibility(StorageVisibility.PRIVATE).build();
+        object.setActive(true);
+        when(repository.findById("kyc")).thenReturn(Optional.of(object));
+        return object;
+    }
+
+    @Test
+    void adminUsesUserPathsAsNormalUser_cannotReadOrChangeOthersPrivateObject() {
+        authenticateAs("ADMIN", "STORAGE_VIEW");
+        try {
+            privateObjectOf("someone-else");
+            var read = assertThrows(AppException.class, () -> storageService.getById("kyc"));
+            assertEquals(StorageErrorCode.STORAGE_ACCESS_DENIED.getCode(), read.getCode());
+            assertThrows(AppException.class, () -> storageService.createDownloadUrl("kyc"));
+            assertThrows(AppException.class, () -> storageService.delete("kyc"));
+        } finally {
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        }
+    }
+
+    @Test
+    void authorizedInternalReadsSkipOwnerAclButKeepVerifiedAccessRuleAndNeedIdentity() throws Exception {
+        var object = privateObjectOf("someone-else");
+        when(properties.downloadUrlDuration()).thenReturn(Duration.ofMinutes(5));
+        var presigned = mock(software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest.class);
+        when(presigner.presignGetObject(any(software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest.class)))
+                .thenReturn(presigned);
+        when(presigned.url()).thenReturn(URI.create("https://example.com/get").toURL());
+        authenticateAs("USER");
+        assertThrows(AppException.class, () -> storageService.getByIdAuthorized("kyc"));
+        assertThrows(AppException.class, () -> storageService.createDownloadUrlAuthorized("kyc"));
+        authenticateAs("ADMIN");
+        assertEquals("kyc", storageService.getByIdAuthorized("kyc").id());
+        assertEquals("https://example.com/get", storageService.createViewUrlAuthorized("kyc").url());
+        assertEquals("https://example.com/get", storageService.createDownloadUrlAuthorized("kyc").url());
+        var checker = mock(com.hs.storage.service.StorageAccessChecker.class);
+        storageService.setAccessCheckers(java.util.List.of(checker));
+        when(checker.requiresVerifiedAccess(object)).thenReturn(true);
+        assertThrows(AppException.class, () -> storageService.createViewUrlAuthorized("kyc"));
+        UserContextHolder.clear();
+        assertThrows(AppException.class, () -> storageService.getByIdAuthorized("kyc"));
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void adminEndpointServiceReturnsUrlWithStorageView_andRejectsWithoutIt() {
+        try {
+            privateObjectOf("someone-else");
+            authenticateAs("ADMIN");
+            assertThrows(AppException.class, () -> storageService.adminCreateDownloadUrl("kyc"));
+            assertThrows(AppException.class, () -> storageService.adminGetById("kyc"));
+            authenticateAs("STORAGE_VIEW");
+            assertThrows(AppException.class, () -> storageService.adminGetById("kyc"));
+
+            authenticateAs("ADMIN", "STORAGE_VIEW");
+            when(properties.downloadUrlDuration()).thenReturn(Duration.ofMinutes(5));
+            var presigned = mock(software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest.class);
+            when(presigner.presignGetObject(any(software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest.class)))
+                    .thenReturn(presigned);
+            when(presigned.url()).thenReturn(URI.create("https://example.com/get").toURL());
+            assertEquals("https://example.com/get", storageService.adminCreateDownloadUrl("kyc").url());
+            assertEquals("kyc", storageService.adminGetById("kyc").id());
+        } catch (java.net.MalformedURLException e) {
+            throw new AssertionError(e);
+        } finally {
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        }
+    }
+
     @Test
     void uploadDirect_validJpegProof_success() {
         byte[] validJpeg = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0x00, 0x10};

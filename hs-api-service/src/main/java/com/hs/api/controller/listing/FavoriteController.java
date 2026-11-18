@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/favorites")
@@ -25,6 +26,7 @@ public class FavoriteController {
 
     private final ListingFavoriteService favoriteService;
 
+    @PreAuthorize("hasAuthority('FAVORITE_USE')")
     @PostMapping("/{listingId}/toggle")
     public ApiResponse<Map<String, Object>> toggleFavorite(@PathVariable String listingId) {
         String userId = currentUserId();

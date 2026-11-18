@@ -73,6 +73,15 @@ class ViewingAppointmentServiceTest {
         when(listingRepository.findByIdForAppointmentCreation(LISTING_ID)).thenReturn(Optional.of(testListing));
     }
 
+    @Test
+    void availabilityOfNonPublishedListingIsNotFoundUnlessOwner() {
+        testListing.setStatus(ListingStatus.DRAFT);
+        LocalDate day = LocalDate.now(ViewingAppointmentService.VIETNAM_ZONE).plusDays(2);
+        assertThrows(AppException.class, () -> appointmentService.getAvailability(LISTING_ID, day, "renter-1"));
+        assertThrows(AppException.class, () -> appointmentService.getAvailability(LISTING_ID, day, null));
+        assertNotNull(appointmentService.getAvailability(LISTING_ID, day, OWNER_ID));
+    }
+
     @Nested
     @DisplayName("1. Availability Tests (0/1/2/3 appointments & counting PENDING + CONFIRMED)")
     class AvailabilityTests {

@@ -20,6 +20,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/listings")
@@ -31,6 +32,7 @@ public class ListingController {
     private final ListingStatusService listingStatusService;
     private final KycGateService kycGateService;
 
+    @PreAuthorize("hasAuthority('LISTING_POST')")
     @PostMapping({"", "/upsert"})
     public ResponseEntity<ApiResponse<CreateListingResponse>> upsert(
             @RequestBody @Valid CreateListingRequest request) {
@@ -76,6 +78,7 @@ public class ListingController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('LISTING_POST')")
     @PatchMapping("/{listingId}/status")
     public ApiResponse<ListingDetailResponse> changeStatus(
             @PathVariable String listingId,
@@ -86,6 +89,7 @@ public class ListingController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('LISTING_POST')")
     @PatchMapping("/{listingId}/hide")
     public ApiResponse<ListingDetailResponse> hide(@PathVariable String listingId) {
         return ApiResponse.<ListingDetailResponse>builder()

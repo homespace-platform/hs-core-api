@@ -23,7 +23,7 @@ import java.time.LocalDate;
 @RequestMapping("/admin/listings")
 @RequiredArgsConstructor
 @Validated
-@PreAuthorize("hasAuthority('ADMIN')")
+@PreAuthorize("hasAuthority('ADMIN') and hasAuthority('LISTING_VIEW')")
 public class ListingAdminController {
     private final ListingAdminService adminService;
 
@@ -55,6 +55,7 @@ public class ListingAdminController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('LISTING_CREATE')")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<CreateListingResponse> create(@RequestBody @Valid AdminCreateListingRequest request) {
@@ -64,6 +65,7 @@ public class ListingAdminController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('LISTING_UPDATE')")
     @PutMapping("/{listingId}")
     public ApiResponse<CreateListingResponse> update(
             @PathVariable String listingId,
@@ -74,6 +76,7 @@ public class ListingAdminController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('LISTING_MODERATE')")
     @PatchMapping("/{listingId}/status")
     public ApiResponse<ListingDetailResponse> changeStatus(
             @PathVariable String listingId,
@@ -87,6 +90,7 @@ public class ListingAdminController {
     public record EditDecision(@jakarta.validation.constraints.NotNull Boolean approve,
                                @jakarta.validation.constraints.Size(max = 1000) String reason) {}
 
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('LISTING_MODERATE')")
     @PatchMapping("/{listingId}/edits/{editId}")
     public ApiResponse<ListingDetailResponse> decideEdit(@PathVariable String listingId, @PathVariable String editId,
                                                          @RequestBody @Valid EditDecision request) {

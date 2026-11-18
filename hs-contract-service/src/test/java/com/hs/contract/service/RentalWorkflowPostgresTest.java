@@ -897,7 +897,7 @@ class RentalWorkflowPostgresTest {
     }
     String evidence(String actor){String id=UUID.randomUUID().toString();tx(()->storage.saveAndFlush(StorageObject.builder().id(id).ownerId(actor).originalName("source.pdf").objectKey("source/"+id).bucketName("test").contentType("application/pdf").sizeBytes(100L).purpose(StoragePurpose.GENERAL).visibility(StorageVisibility.PRIVATE).status(StorageStatus.READY).referenceType("RENTAL_COMPLAINT_EVIDENCE").referenceId(rentalId).build()));return id;}
     ComplaintAction complaintAction(ComplaintView c){return new ComplaintAction(c.revision(),"Đã kiểm tra căn cứ và phản hồi hồ sơ",null,null,null,null);}
-    void admin(){UserContextHolder.set(new UserContext("admin",null));SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("admin","n/a",List.of(new SimpleGrantedAuthority("ADMIN"))));}
+    void admin(){UserContextHolder.set(new UserContext("admin",null));SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("admin","n/a",List.of(new SimpleGrantedAuthority("ADMIN"),new SimpleGrantedAuthority("COMPLAINT_VIEW"),new SimpleGrantedAuthority("COMPLAINT_RESOLVE"),new SimpleGrantedAuthority("DISPUTE_VIEW"),new SimpleGrantedAuthority("DISPUTE_RESOLVE"))));}
     @AfterEach void clearActors(){UserContextHolder.clear();SecurityContextHolder.clearContext();}
     @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"CANCELLATION","EARLY_EXIT"})
     void sourceEvidenceFromOtherPartyReachesAdminAndDoesNotDrift(String kind){

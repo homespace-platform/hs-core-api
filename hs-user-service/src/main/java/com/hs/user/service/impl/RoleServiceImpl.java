@@ -18,6 +18,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.hs.common.advice.entity.AppException;
+import com.hs.common.context.CurrentUser;
+import com.hs.common.security.Permissions;
+import com.hs.user.constant.RoleConstants;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.request.UpdateRoleRequest;
 import com.hs.user.dto.response.RoleResponse;
@@ -25,6 +28,7 @@ import com.hs.user.mapper.RoleMapper;
 import com.hs.user.model.Permission;
 import com.hs.user.model.Role;
 import com.hs.user.model.User;
+import com.hs.user.notification.BroadcastNotificationService;
 import com.hs.user.repository.PermissionRepository;
 import com.hs.user.repository.RoleRepository;
 import com.hs.user.repository.UserRepository;
@@ -40,6 +44,7 @@ public class RoleServiceImpl implements RoleService {
     RoleRepository roleRepository;
     PermissionRepository permissionRepository;
     UserRepository userRepository;
+    BroadcastNotificationService broadcasts;
 
     @Transactional(readOnly = true)
     @Override
@@ -75,12 +80,44 @@ public class RoleServiceImpl implements RoleService {
 
         RoleMapper.updateRoleFromRequest(role, updateRoleRequest);
 
+        boolean permissionsChanged = false;
         if (updateRoleRequest.permissionIdList() != null) {
-            role.setPermissions(getPermissions(updateRoleRequest.permissionIdList()));
+            Set<Permission> requested = getPermissions(updateRoleRequest.permissionIdList());
+            assertPermissionChangeAllowed(role, requested);
+            Set<String> before = role.getPermissions() == null ? Set.of()
+                    : role.getPermissions().stream().map(Permission::getId).collect(Collectors.toSet());
+            permissionsChanged = !before.equals(requested.stream().map(Permission::getId).collect(Collectors.toSet()));
+            role.setPermissions(requested);
         }
 
         Role saved = roleRepository.save(role);
+        if (permissionsChanged) {
+            broadcasts.enqueueRolePermissionsChanged(saved.getName());
+        }
         return RoleMapper.mapToRoleResponse(saved, true, loadActors(List.of(saved)));
+    }
+
+    /** ADMIN is managed by the seed; USER only gets user-scope permissions; other roles only grant what the actor holds. */
+    private void assertPermissionChangeAllowed(Role role, Set<Permission> requested) {
+        Set<String> current = role.getPermissions() == null ? Set.of()
+                : role.getPermissions().stream().map(Permission::getId).collect(Collectors.toSet());
+        Set<Permission> added = requested.stream()
+                .filter(permission -> !current.contains(permission.getId()))
+                .collect(Collectors.toSet());
+        if (RoleConstants.ADMIN.equals(role.getName())) {
+            // Unchanged set is tolerated so the description can still be edited.
+            if (!added.isEmpty() || current.size() != requested.size()) {
+                throw new AppException(UserErrorCode.ROLE_PERMISSIONS_LOCKED);
+            }
+            return;
+        }
+        if (RoleConstants.USER.equals(role.getName())
+                && added.stream().anyMatch(permission -> !Permissions.isUserScope(permission.getName()))) {
+            throw new AppException(UserErrorCode.ROLE_PERMISSION_SCOPE_INVALID);
+        }
+        if (added.stream().anyMatch(permission -> !CurrentUser.hasAuthority(permission.getName()))) {
+            throw new AppException(UserErrorCode.PERMISSION_NOT_HELD);
+        }
     }
 
     private Set<Permission> getPermissions(Set<String> permissionIds) {

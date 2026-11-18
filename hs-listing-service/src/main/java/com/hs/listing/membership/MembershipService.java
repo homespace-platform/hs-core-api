@@ -6,7 +6,6 @@ import com.hs.listing.model.Listing;
 import com.hs.listing.repository.ListingStatusHistoryRepository;
 import com.hs.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
@@ -41,13 +40,13 @@ public class MembershipService {
         var m = memberships.findById(ownerId).orElse(null);
         if (m == null) {
             int used = (int) Math.min(3, histories.countLegacyPublications(ownerId));
-            return new View("FREE", isAdmin() ? Integer.MAX_VALUE : 3 - used, 0, null, used, isAdmin());
+            return new View("FREE", 3 - used, 0, null, used, false);
         }
         boolean paid = active(m, Instant.now());
         int reserved = paid ? m.getPaidReserved() : m.getFreeReserved();
         int remaining = paid ? m.getTier().uses - m.getPaidUsed() - reserved : 3 - m.getFreeUsed() - reserved;
-        return new View(paid ? m.getTier().name() : "FREE", isAdmin() ? Integer.MAX_VALUE : Math.max(0, remaining), reserved,
-                paid ? m.getPaidExpiresAt() : null, m.getFreeUsed(), isAdmin());
+        return new View(paid ? m.getTier().name() : "FREE", Math.max(0, remaining), reserved,
+                paid ? m.getPaidExpiresAt() : null, m.getFreeUsed(), false);
     }
 
     @Transactional
@@ -97,7 +96,7 @@ public class MembershipService {
     @Transactional
     public void reserve(Listing listing, boolean adminActor) {
         if (listing.getPublicationReservation() != null) return;
-        if (adminActor || isAdmin()) {
+        if (adminActor) {
             locked(listing.getOwnerId()); // Establish the owner's historical free count before this exempt publication.
             listing.setPublicationReservation("ADMIN");
             return;
@@ -152,10 +151,5 @@ public class MembershipService {
 
     private boolean active(ListingMembership m, Instant now) {
         return m.getTier() != null && m.getPaidExpiresAt() != null && m.getPaidExpiresAt().isAfter(now);
-    }
-
-    private boolean isAdmin() {
-        var auth = SecurityContextHolder.getContext().getAuthentication();
-        return auth != null && auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ADMIN"));
     }
 }

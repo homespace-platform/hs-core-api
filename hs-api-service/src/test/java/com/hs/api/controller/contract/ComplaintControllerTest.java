@@ -50,7 +50,7 @@ class ComplaintControllerTest {
             UserContextHolder.set(new UserContext("person",null));
             SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("person","n/a",List.of(new SimpleGrantedAuthority("TENANT"))));
             assertThrows(AccessDeniedException.class,()->secured.list(null,null,null,1,20));verifyNoInteractions(target);
-            SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("person","n/a",List.of(new SimpleGrantedAuthority("ADMIN"))));
+            SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("person","n/a",List.of(new SimpleGrantedAuthority("ADMIN"),new SimpleGrantedAuthority("COMPLAINT_VIEW"))));
             when(target.adminList("person",null,null,null,1,20)).thenReturn(new PageResponse<>());
             assertNotNull(secured.list(null,null,null,1,20));verify(target).adminList("person",null,null,null,1,20);
         }

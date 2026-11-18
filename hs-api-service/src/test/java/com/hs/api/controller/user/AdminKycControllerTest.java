@@ -29,11 +29,19 @@ class AdminKycControllerTest {
                     "actor","",List.of(new SimpleGrantedAuthority("USER"))));
             assertThrows(AccessDeniedException.class,()->controller.status("alice"));
             SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+                    "actor","",List.of(new SimpleGrantedAuthority("USER"),new SimpleGrantedAuthority("KYC_VIEW"))));
+            assertThrows(AccessDeniedException.class,()->controller.status("alice"));
+            SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
                     "actor","",List.of(new SimpleGrantedAuthority("ADMIN"))));
+            assertThrows(AccessDeniedException.class,()->controller.status("alice"));
+            SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+                    "actor","",List.of(new SimpleGrantedAuthority("ADMIN"),new SimpleGrantedAuthority("KYC_VIEW"))));
+            controller.status("alice");
+            verify(context.getBean(AdminKycService.class)).status("alice");
             var mvc=MockMvcBuilders.standaloneSetup(controller).build();
             assertEquals(404,mvc.perform(post("/admin/users/alice/kyc/verify").contentType("application/json").content("{\"cccd\":\"001234567890\"}"))
                     .andReturn().getResponse().getStatus());
-            verifyNoInteractions(context.getBean(AdminKycService.class));
+            verifyNoMoreInteractions(context.getBean(AdminKycService.class));
         } finally {SecurityContextHolder.clearContext();}
     }
 }

@@ -77,6 +77,30 @@ class BroadcastNotificationPublisherTest {
         assertEquals(payloads.getAllValues().getFirst(), payloads.getAllValues().getLast());
     }
 
+    @Test @SuppressWarnings("unchecked") void rolePermissionsEventUsesRoleScopedParameterizedQuery() throws Exception {
+        var row = mock(ResultSet.class);
+        String payload = "{\"eventId\":\"role_perms_USER_1\",\"eventType\":\"ROLE_PERMISSIONS_CHANGED\",\"version\":1,"
+                + "\"occurredAt\":\"2026-11-15T00:00:00.000Z\",\"recipients\":[],\"data\":{\"roleName\":\"USER\"}}";
+        when(row.getString("event_id")).thenReturn("role_perms_USER_1"); when(row.getString("topic")).thenReturn("notification.test");
+        when(row.getString("payload")).thenReturn(payload);
+        when(row.getTimestamp("recipient_cutoff")).thenReturn(cutoff);
+        when(jdbc.query(eq(BroadcastNotificationPublisher.CLAIM_SQL), any(RowMapper.class))).thenAnswer(call ->
+                complete ? List.of() : List.of(((RowMapper<?>)call.getArgument(1)).mapRow(row, 0)));
+        when(jdbc.queryForList(eq(BroadcastNotificationPublisher.ROLE_RECIPIENTS_SQL), eq(String.class), eq("USER"), eq(cutoff), nullable(String.class), nullable(String.class)))
+                .thenReturn(List.of("alice"));
+        when(jdbc.update(eq(BroadcastNotificationPublisher.ADVANCE_SQL), any(), any(), eq("role_perms_USER_1")))
+                .thenAnswer(call -> { complete = true; return 1; });
+        publisher().publishPending();
+        var sent = ArgumentCaptor.forClass(String.class);
+        verify(kafka).send(eq("notification.test"), eq("role_perms_USER_1"), sent.capture());
+        var event = BroadcastNotificationService.read(sent.getValue());
+        assertEquals("ROLE_PERMISSIONS_CHANGED", event.get("eventType").asText());
+        assertEquals("[\"alice\"]", event.get("recipients").toString());
+        assertEquals("{\"roleName\":\"USER\"}", event.get("data").toString());
+        verify(jdbc, never()).queryForList(eq(BroadcastNotificationPublisher.RECIPIENTS_SQL), eq(String.class), any(), any(), any());
+        assertTrue(BroadcastNotificationPublisher.ROLE_RECIPIENTS_SQL.contains("r.name = ?"));
+    }
+
     @Test void emptyAudienceCompletesWithoutKafkaAndCompletedJobsStaySilent() {
         publisher().publishPending(); assertTrue(complete); publisher().publishPending(); verifyNoInteractions(kafka);
     }

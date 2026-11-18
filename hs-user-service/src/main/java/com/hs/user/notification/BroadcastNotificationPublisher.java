@@ -27,6 +27,12 @@ public class BroadcastNotificationPublisher {
               AND (CAST(? AS varchar) IS NULL OR u.id > ?)
             ORDER BY u.id LIMIT 100
             """;
+    static final String ROLE_RECIPIENTS_SQL = """
+            SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+            WHERE u.active = true AND r.name = ? AND (u.created_at IS NULL OR u.created_at <= ?)
+              AND (CAST(? AS varchar) IS NULL OR u.id > ?)
+            ORDER BY u.id LIMIT 100
+            """;
     static final String ADVANCE_SQL = "UPDATE notification_broadcast_outbox SET recipient_cursor = ?, sent_at = ? WHERE event_id = ?";
     private final JdbcTemplate jdbc;
     private final KafkaTemplate<String, String> kafka;
@@ -55,9 +61,17 @@ public class BroadcastNotificationPublisher {
                 rs.getString("payload"), rs.getTimestamp("recipient_cutoff"), rs.getString("recipient_cursor")));
         if (rows.isEmpty()) return false;
         Pending row = rows.getFirst();
-        var recipients = jdbc.queryForList(RECIPIENTS_SQL, String.class, row.cutoff(), row.cursor(), row.cursor());
+        ObjectNode event = (ObjectNode) BroadcastNotificationService.read(row.payload());
+        java.util.List<String> recipients;
+        if ("ROLE_PERMISSIONS_CHANGED".equals(event.path("eventType").asText())) {
+            String roleName = event.path("data").path("roleName").asText("");
+            // A malformed role event must not wedge the queue: it simply has no audience.
+            recipients = roleName.isEmpty() ? java.util.List.of()
+                    : jdbc.queryForList(ROLE_RECIPIENTS_SQL, String.class, roleName, row.cutoff(), row.cursor(), row.cursor());
+        } else {
+            recipients = jdbc.queryForList(RECIPIENTS_SQL, String.class, row.cutoff(), row.cursor(), row.cursor());
+        }
         if (!recipients.isEmpty()) {
-            ObjectNode event = (ObjectNode) BroadcastNotificationService.read(row.payload());
             event.set("recipients", BroadcastNotificationService.JSON.valueToTree(recipients));
             try {
                 kafka.send(row.topic(), row.eventId(), event.toString()).get(15, TimeUnit.SECONDS);

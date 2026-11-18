@@ -15,6 +15,10 @@ public interface UserRepository extends JpaRepository<User, String> {
     @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
     @org.springframework.data.jpa.repository.Query("SELECT u FROM User u WHERE u.id = :id")
     Optional<User> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") String id);
+    /** Locks every active user of the role (stable id order) so concurrent disable/role changes cannot both remove the last admin. */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("SELECT u FROM User u WHERE u.role.name = :roleName AND u.active = true ORDER BY u.id")
+    java.util.List<User> lockActiveByRoleName(@org.springframework.data.repository.query.Param("roleName") String roleName);
     Optional<User> findByEmail(String email);
 
     boolean existsByRole_Name(String roleName);

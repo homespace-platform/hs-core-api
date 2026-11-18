@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.user.advice.entity.enums.UserErrorCode;
-import com.hs.common.context.UserContextHolder;
+import com.hs.common.context.CurrentUser;
 import com.hs.user.model.User;
 import com.hs.user.repository.UserRepository;
 
@@ -20,7 +20,7 @@ public class CurrentUserUtils {
     UserRepository userRepository;
 
     public String getCurrentUserId() {
-        return UserContextHolder.get().userId();
+        return CurrentUser.requireUserId();
     }
 
     public User getCurrentUser() {

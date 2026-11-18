@@ -35,6 +35,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping({"/contracts", "/api/v1/contracts"})
@@ -122,6 +123,7 @@ public class ContractController {
     public ApiResponse<List<ContractTemplateResponse>> getApplicableTemplates(
             @RequestParam String rentalRequestId
     ) {
+        requireUserId();
         return ApiResponse.<List<ContractTemplateResponse>>builder()
                 .result(templateService.getApplicableTemplates(rentalRequestId))
                 .build();
@@ -130,12 +132,14 @@ public class ContractController {
     @GetMapping("/by-rental-request/{rentalRequestId}")
     public ApiResponse<ContractResponse> getByRentalRequest(@PathVariable String rentalRequestId,
             @RequestParam(defaultValue = "false") boolean includeDepositFallback) {
+        requireUserId();
         return ApiResponse.<ContractResponse>builder()
                 .result(includeDepositFallback ? contractService.findPrimaryByRentalRequestId(rentalRequestId)
                     : contractService.findByRentalRequestId(rentalRequestId))
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('CONTRACT_MANAGE')")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ContractResponse> createDraft(
@@ -167,6 +171,7 @@ public class ContractController {
 
     @GetMapping("/{contractId}")
     public ApiResponse<ContractResponse> getContract(@PathVariable String contractId) {
+        requireUserId();
         return ApiResponse.<ContractResponse>builder()
                 .result(contractService.getContract(contractId))
                 .build();
@@ -174,6 +179,7 @@ public class ContractController {
 
     @GetMapping("/{contractId}/revision")
     public ApiResponse<ContractRevisionResponse> getLatestRevision(@PathVariable String contractId) {
+        requireUserId();
         return ApiResponse.<ContractRevisionResponse>builder()
                 .result(contractService.getLatestRevision(contractId))
                 .build();
@@ -181,15 +187,18 @@ public class ContractController {
 
     @GetMapping("/{contractId}/listing-sync")
     public ApiResponse<com.hs.contract.service.ContractListingSync.Preview> previewListingSync(@PathVariable String contractId) {
+        requireUserId();
         return ApiResponse.<com.hs.contract.service.ContractListingSync.Preview>builder()
                 .result(contractService.previewListingSync(contractId)).build();
     }
 
+    @PreAuthorize("hasAuthority('CONTRACT_MANAGE')")
     @PatchMapping("/{contractId}/revision")
     public ApiResponse<ContractRevisionResponse> updateRevision(
             @PathVariable String contractId,
             @RequestBody UpdateContractRevisionRequest request
     ) {
+        requireUserId();
         return ApiResponse.<ContractRevisionResponse>builder()
                 .message("Cập nhật thỏa thuận hợp đồng thành công")
                 .result(contractService.updateRevision(contractId, request))
@@ -198,14 +207,17 @@ public class ContractController {
 
     @GetMapping("/{contractId}/completeness")
     public ApiResponse<ContractCompletenessResponse> getCompleteness(@PathVariable String contractId) {
+        requireUserId();
         return ApiResponse.<ContractCompletenessResponse>builder()
                 .result(contractService.getCompleteness(contractId))
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('CONTRACT_MANAGE')")
     @PostMapping("/{contractId}/previews")
     public ApiResponse<ContractDocumentResponse> triggerPreview(@PathVariable String contractId,
             @RequestParam(required = false) String expectedRevisionId) {
+        requireUserId();
         return ApiResponse.<ContractDocumentResponse>builder()
                 .message("Đã yêu cầu kết xuất tài liệu hợp đồng")
                 .result(contractService.triggerPreview(contractId, expectedRevisionId))
@@ -214,11 +226,13 @@ public class ContractController {
 
     @GetMapping("/{contractId}/preview-status")
     public ApiResponse<ContractDocumentResponse> getPreviewStatus(@PathVariable String contractId) {
+        requireUserId();
         return ApiResponse.<ContractDocumentResponse>builder()
                 .result(contractService.getPreviewStatus(contractId))
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('CONTRACT_MANAGE')")
     @PostMapping("/{contractId}/send")
     public ApiResponse<ContractResponse> sendToTenant(@PathVariable String contractId) {
         kycGateService.requireVerifiedIdentity(requireUserContext().userId());
@@ -230,6 +244,7 @@ public class ContractController {
 
     @GetMapping("/{contractId}/payment-breakdown")
     public ApiResponse<ContractPaymentBreakdownResponse> getPaymentBreakdown(@PathVariable String contractId) {
+        requireUserId();
         return ApiResponse.<ContractPaymentBreakdownResponse>builder()
                 .result(contractService.getPaymentBreakdown(contractId))
                 .build();
@@ -243,14 +258,17 @@ public class ContractController {
         if (!mockPaymentEnabled) {
             throw new AppException(ErrorCode.UNAUTHORIZED, "Thử nghiệm thanh toán giả lập bị vô hiệu hóa.");
         }
+        requireUserId();
         return ApiResponse.<ContractPaymentBreakdownResponse>builder()
                 .message("Thực hiện thử nghiệm thanh toán giả lập")
                 .result(contractService.payMock(contractId))
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('CONTRACT_SIGN')")
     @PostMapping("/{contractId}/sign")
     public ApiResponse<ContractResponse> sign(@PathVariable String contractId) {
+        requireUserId();
         return ApiResponse.<ContractResponse>builder()
                 .message("Ký hợp đồng thành công")
                 .result(contractService.sign(contractId))
@@ -259,6 +277,7 @@ public class ContractController {
 
     @GetMapping("/{contractId}/documents")
     public ApiResponse<List<ContractDocumentResponse>> getDocuments(@PathVariable String contractId) {
+        requireUserId();
         return ApiResponse.<List<ContractDocumentResponse>>builder()
                 .result(contractService.getDocumentsByContract(contractId))
                 .build();
@@ -266,6 +285,7 @@ public class ContractController {
 
     @GetMapping("/documents/{documentId}")
     public ApiResponse<ContractDocumentResponse> getDocument(@PathVariable String documentId) {
+        requireUserId();
         return ApiResponse.<ContractDocumentResponse>builder()
                 .result(contractService.getDocument(documentId))
                 .build();
@@ -273,6 +293,7 @@ public class ContractController {
 
     @GetMapping("/{contractId}/effective-document")
     public ApiResponse<ContractDocumentResponse> getEffectiveDocument(@PathVariable String contractId) {
+        requireUserId();
         return ApiResponse.<ContractDocumentResponse>builder()
                 .result(contractService.getEffectiveDocument(contractId))
                 .build();

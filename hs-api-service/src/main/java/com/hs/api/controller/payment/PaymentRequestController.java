@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/payment-requests")
@@ -91,6 +92,7 @@ public class PaymentRequestController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('PAYMENT_DISPUTE_CREATE')")
     @PostMapping("/{id}/dispute")
     public ApiResponse<PaymentRequestResponse> dispute(
             @PathVariable String id,

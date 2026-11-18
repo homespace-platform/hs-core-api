@@ -160,7 +160,7 @@ class ComplaintCasePostgresTest {
 
     @AfterEach void clear(){UserContextHolder.clear();SecurityContextHolder.clearContext();}
     void admin(String actor){UserContextHolder.set(new UserContext(actor,null));SecurityContextHolder.getContext().setAuthentication(
-        UsernamePasswordAuthenticationToken.authenticated(actor,"n/a",List.of(new SimpleGrantedAuthority("ADMIN"))));}
+        UsernamePasswordAuthenticationToken.authenticated(actor,"n/a",List.of(new SimpleGrantedAuthority("ADMIN"),new SimpleGrantedAuthority("COMPLAINT_VIEW"),new SimpleGrantedAuthority("COMPLAINT_RESOLVE"))));}
     ComplaintAction action(ComplaintView c){return new ComplaintAction(c.revision(),"Đã đọc và phản hồi đầy đủ hồ sơ",null,null,null,null);}
     ComplaintView open(ComplaintCategory category){return complaints.open(rentalId,"tenant",new ComplaintOpen(category,"Phòng không đúng điều kiện đã cam kết",null,false));}
     ComplaintView escalate(ComplaintView c){complaints.act(c.id(),"owner","COMMENT",action(c));c=complaints.get(c.id(),"tenant");return complaints.act(c.id(),"tenant","ESCALATE",action(c));}

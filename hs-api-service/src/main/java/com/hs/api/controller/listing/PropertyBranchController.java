@@ -14,6 +14,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/branches")
@@ -23,6 +24,7 @@ public class PropertyBranchController {
 
     private final PropertyBranchService branchService;
 
+    @PreAuthorize("hasAuthority('LISTING_POST')")
     @PostMapping
     public ResponseEntity<ApiResponse<PropertyBranchResponse>> createBranch(
             @RequestBody @Valid CreatePropertyBranchRequest request) {
@@ -48,6 +50,7 @@ public class PropertyBranchController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('LISTING_POST')")
     @PutMapping("/{id}")
     public ApiResponse<PropertyBranchResponse> updateBranch(
             @PathVariable String id,
@@ -58,6 +61,7 @@ public class PropertyBranchController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('LISTING_POST')")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteBranch(@PathVariable String id) {
         branchService.deleteBranch(id, currentUserId());

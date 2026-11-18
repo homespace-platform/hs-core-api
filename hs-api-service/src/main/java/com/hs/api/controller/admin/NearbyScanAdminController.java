@@ -9,7 +9,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
 import java.util.*;
 
-@RestController @RequiredArgsConstructor @PreAuthorize("hasAuthority('ADMIN')")
+@RestController @RequiredArgsConstructor @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('NEARBY_SCAN_VIEW')")
 @RequestMapping("/admin")
 public class NearbyScanAdminController {
  private final NearbySettings settings;private final NearbyRepository repository;
@@ -18,6 +18,7 @@ public class NearbyScanAdminController {
   return ApiResponse.<Map<String,Object>>builder().result(Map.of("syncEnabled",settings.runnable(),"queryEnabled",settings.readable(),
    "jobs",settings.runnable()||settings.readable()?repository.jobs(100):List.of())).build();
  }
+ @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('NEARBY_SCAN_MANAGE')")
  @PostMapping("/listings/{id}/nearby-scans")
  public ApiResponse<Map<String,String>> enqueue(@PathVariable String id,@RequestParam(required=false)Integer radiusMeters){
   if(!settings.runnable())throw new ResponseStatusException(HttpStatus.CONFLICT,"Nearby sync is disabled or not licensed");
@@ -25,6 +26,7 @@ public class NearbyScanAdminController {
   catch(IllegalArgumentException e){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,e.getMessage());}
   return ApiResponse.<Map<String,String>>builder().result(Map.of("status","PENDING")).build();
  }
+ @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('NEARBY_SCAN_MANAGE')")
  @PostMapping("/nearby-scans/{id}/cancel")
  public ApiResponse<Map<String,Boolean>> cancel(@PathVariable String id) {
   if(!settings.runnable()&&!settings.readable())throw new ResponseStatusException(HttpStatus.CONFLICT,"Nearby module is disabled");

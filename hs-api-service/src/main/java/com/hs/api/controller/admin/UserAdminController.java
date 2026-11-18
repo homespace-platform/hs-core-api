@@ -32,14 +32,14 @@ import org.springframework.http.HttpStatus;
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 @RequestMapping("/admin/users")
-@PreAuthorize("hasAuthority('ADMIN')")
+@PreAuthorize("hasAuthority('ADMIN') and hasAuthority('USER_VIEW')")
 public class UserAdminController {
 
     UserService userService;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("hasAuthority('USER_CREATE')")
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('USER_CREATE')")
     public ApiResponse<AdminCreateUserResponse> createUser(
             @RequestBody @Valid AdminCreateUserRequest request) {
         return ApiResponse.<AdminCreateUserResponse>builder()
@@ -65,7 +65,7 @@ public class UserAdminController {
     }
 
     @PutMapping("/{userId}")
-    @PreAuthorize("hasAuthority('USER_UPDATE')")
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('USER_UPDATE')")
     public ApiResponse<UserResponse> updateUser(
             @PathVariable String userId,
             @RequestBody @Valid AdminUpdateUserRequest request) {
@@ -75,6 +75,7 @@ public class UserAdminController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('USER_UPDATE')")
     @PatchMapping("/{userId}/disable")
     public ApiResponse<@NonNull Void> disableUser(@PathVariable String userId) {
         userService.updateUserStatus(userId, false);
@@ -83,6 +84,7 @@ public class UserAdminController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('USER_UPDATE')")
     @PatchMapping("/{userId}/enable")
     public ApiResponse<@NonNull Void> enableUser(@PathVariable String userId) {
         userService.updateUserStatus(userId, true);
@@ -92,7 +94,7 @@ public class UserAdminController {
     }
 
     @PostMapping("/{userId}/resend-invitation")
-    @PreAuthorize("hasAuthority('USER_CREATE')")
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('USER_CREATE')")
     public ApiResponse<@NonNull Void> resendInvitation(@PathVariable String userId) {
         userService.resendInvitation(userId);
         return ApiResponse.<Void>builder()

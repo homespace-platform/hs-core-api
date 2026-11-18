@@ -34,7 +34,7 @@ import java.util.List;
 @RequestMapping({"/admin", "/api/v1/admin"})
 @RequiredArgsConstructor
 @Validated
-@PreAuthorize("hasAuthority('ADMIN')")
+@PreAuthorize("hasAuthority('ADMIN') and hasAuthority('CONTRACT_TEMPLATE_VIEW')")
 public class ContractAdminController {
 
     private final ContractTemplateService templateService;
@@ -71,6 +71,7 @@ public class ContractAdminController {
     /**
      * Tạo mới mẫu hợp đồng kèm phiên bản Word đầu tiên
      */
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('CONTRACT_TEMPLATE_MANAGE')")
     @PostMapping("/contract-templates")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ContractTemplateResponse> createTemplate(
@@ -95,6 +96,7 @@ public class ContractAdminController {
     /**
      * Cập nhật thông tin mẫu (tên, mô tả, phạm vi)
      */
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('CONTRACT_TEMPLATE_MANAGE')")
     @PatchMapping("/contract-templates/{templateId}")
     public ApiResponse<ContractTemplateResponse> updateTemplate(
             @PathVariable String templateId,
@@ -109,6 +111,7 @@ public class ContractAdminController {
     /**
      * Thêm phiên bản Word mới cho mẫu
      */
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('CONTRACT_TEMPLATE_MANAGE')")
     @PostMapping("/contract-templates/{templateId}/versions")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ContractTemplateVersionResponse> createVersion(
@@ -147,6 +150,7 @@ public class ContractAdminController {
     /**
      * Xuất bản phiên bản Word (để người dùng có thể áp dụng)
      */
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('CONTRACT_TEMPLATE_PUBLISH')")
     @PostMapping("/contract-templates/{templateId}/versions/{versionId}/publish")
     public ApiResponse<ContractTemplateVersionResponse> publishVersion(
             @PathVariable String templateId,
@@ -189,6 +193,7 @@ public class ContractAdminController {
     /**
      * Lấy toàn bộ danh sách hợp đồng hệ thống (phân trang PageResponse)
      */
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('CONTRACT_VIEW')")
     @GetMapping("/contracts")
     public PageResponse<ContractResponse> getAllContracts(
             @RequestParam(required = false) ContractStatus status,
@@ -203,6 +208,7 @@ public class ContractAdminController {
     /**
      * Chi tiết một hợp đồng
      */
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('CONTRACT_VIEW')")
     @GetMapping("/contracts/{contractId}")
     public ApiResponse<ContractResponse> getContract(@PathVariable String contractId) {
         return ApiResponse.<ContractResponse>builder()
@@ -213,6 +219,7 @@ public class ContractAdminController {
     /**
      * Lấy dữ liệu snapshot revision mới nhất của hợp đồng
      */
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('CONTRACT_VIEW')")
     @GetMapping("/contracts/{contractId}/revision")
     public ApiResponse<ContractRevisionResponse> getContractRevision(@PathVariable String contractId) {
         return ApiResponse.<ContractRevisionResponse>builder()
@@ -223,6 +230,7 @@ public class ContractAdminController {
     /**
      * Lấy danh sách tài liệu DOCX / PDF đã sinh của hợp đồng
      */
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('CONTRACT_VIEW')")
     @GetMapping("/contracts/{contractId}/documents")
     public ApiResponse<List<ContractDocumentResponse>> getContractDocuments(@PathVariable String contractId) {
         return ApiResponse.<List<ContractDocumentResponse>>builder()

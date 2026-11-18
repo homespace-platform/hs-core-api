@@ -69,7 +69,7 @@ class NotificationBroadcastControllerTest {
             UserContextHolder.set(new UserContext("verified-person", null));
             SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("person", "unused", List.of(new SimpleGrantedAuthority("USER"))));
             assertThrows(AccessDeniedException.class, () -> secured.broadcast(request)); verifyNoInteractions(target);
-            SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("person", "unused", List.of(new SimpleGrantedAuthority("ADMIN"))));
+            SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("person", "unused", List.of(new SimpleGrantedAuthority("ADMIN"), new SimpleGrantedAuthority("NOTIFICATION_BROADCAST"))));
             UserContextHolder.clear(); assertThrows(AppException.class, () -> secured.broadcast(request)); verifyNoInteractions(target);
             UserContextHolder.set(new UserContext("verified-admin", null)); secured.broadcast(request); verify(target).enqueueAdmin(request);
         }

@@ -9,6 +9,8 @@ public record PermissionResponse(
         String id,
         String name,
         String description,
+        /** Computed from the code catalog: "ADMIN" or "USER". Not persisted. */
+        String scope,
         Boolean active,
         Instant createdAt,
         Instant updatedAt,

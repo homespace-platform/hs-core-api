@@ -19,6 +19,15 @@ class RequiredEnvironmentConfigurationTest {
     }
 
     @Test
+    void startupRequiresGatewayInternalSecret() {
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class,
+                () -> new RequiredEnvironmentConfiguration(new MockEnvironment()));
+
+        assertTrue(error.getMessage().contains("GATEWAY_INTERNAL_SECRET"));
+    }
+
+    @Test
     void reportsMissingVariablesWithoutTheirValues() {
         Properties properties = new Properties();
         properties.setProperty("first", "${KAFKA_EVENTS_TOPIC}");

@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController @RequiredArgsConstructor
 @RequestMapping("/admin/users/{userId}/kyc")
-@PreAuthorize("hasAuthority('ADMIN')")
+@PreAuthorize("hasAuthority('ADMIN') and hasAuthority('KYC_VIEW')")
 public class AdminKycController {
     private final AdminKycService kyc;
 

@@ -63,6 +63,19 @@ class ContractDocumentIntegrityServiceTest {
         verify(documents).updateIntegrityResult(eq("pdf"), eq("MATCH"), any(), anyString());
         verify(proofs, never()).save(any());
     }
+    @Test void adminPathReadsSignedPdfWithoutStorageAclAndUserPathStillUsesAcl() {
+        when(contracts.getDocumentMetadataForAdmin("pdf")).thenReturn(ContractDocumentResponse.builder()
+                .id("pdf").contractId("contract").revisionId("revision").storageObjectId("storage").build());
+        StorageObjectResponse object = mock(StorageObjectResponse.class);
+        when(object.s3VersionId()).thenReturn("v1");
+        when(storage.getByIdAuthorized("storage")).thenReturn(object);
+        when(storage.getById("storage")).thenThrow(new AppException(StorageErrorCode.STORAGE_ACCESS_DENIED));
+        var content = service.contentForAdmin("pdf");
+        assertEquals("MATCH", content.integrity().status()); assertSame(PDF, content.bytes());
+        verify(storage, never()).getById(anyString());
+        assertEquals("UNAVAILABLE", service.check("pdf").status());
+        verify(storage).getById("storage");
+    }
     @Test void missingAuthenticationCannotUseSystemFallbackOrReadFile() {
         UserContextHolder.clear();
         assertEquals(401, assertThrows(AppException.class, () -> service.check("pdf")).getStatusCode().value());

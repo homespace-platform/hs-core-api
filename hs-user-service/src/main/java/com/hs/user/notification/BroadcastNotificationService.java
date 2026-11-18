@@ -54,6 +54,15 @@ public class BroadcastNotificationService {
                 event.get("data"), Instant.parse(event.get("occurredAt").textValue()), true);
     }
 
+    /** Tells users of one role to refetch their permissions; recipients are restricted to that role by the publisher. */
+    @Transactional
+    public void enqueueRolePermissionsChanged(String roleName) {
+        Instant now = Instant.now();
+        String safe = roleName.replaceAll("[^A-Za-z0-9_-]", "_");
+        String eventId = "role_perms_" + safe.substring(0, Math.min(safe.length(), 150)) + "_" + now.toEpochMilli();
+        enqueue(eventId, "ROLE_PERMISSIONS_CHANGED", TIMESTAMP.format(now), JSON.createObjectNode().put("roleName", roleName), now, false);
+    }
+
     private void enqueue(String eventId, String eventType, String occurredAt, JsonNode data, Instant cutoff, boolean compareTime) {
         var event = JSON.createObjectNode();
         event.put("eventId", eventId).put("eventType", eventType).put("version", 1).put("occurredAt", occurredAt);

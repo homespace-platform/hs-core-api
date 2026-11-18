@@ -13,13 +13,14 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
-@RestController @RequiredArgsConstructor @Validated @PreAuthorize("hasAuthority('ADMIN')")
+@RestController @RequiredArgsConstructor @Validated @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('COMPLAINT_VIEW')")
 @RequestMapping({"/admin/complaints","/api/v1/admin/complaints"})
 public class ComplaintAdminController {
     private final ComplaintCaseService service;
     @GetMapping public PageResponse<ComplaintView> list(@RequestParam(required=false) DisputeCaseStatus status,@RequestParam(required=false) ComplaintCategory category,
         @RequestParam(required=false) Boolean overdue,@RequestParam(defaultValue="1") @Min(1) int page,@RequestParam(defaultValue="20") @Min(1) @Max(50) int size){return service.adminList(actor(),status,category,overdue,page,size);}
     @GetMapping("/{id}") public ApiResponse<ComplaintView> get(@PathVariable String id){return result(service.adminGet(id,actor()));}
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('COMPLAINT_RESOLVE')")
     @PostMapping("/{id}/actions/{action}") public ApiResponse<ComplaintView> act(@PathVariable String id,@PathVariable String action,@Valid @RequestBody ComplaintAction p){return result(service.adminAct(id,actor(),action,p));}
     private ApiResponse<ComplaintView> result(ComplaintView value){return ApiResponse.<ComplaintView>builder().result(value).build();}
     private String actor(){var c=UserContextHolder.get();if(c==null||c.userId()==null||c.userId().isBlank())throw new AppException(ErrorCode.UNAUTHENTICATED);return c.userId();}

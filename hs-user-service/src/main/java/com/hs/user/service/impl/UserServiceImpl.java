@@ -16,6 +16,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
 import com.hs.common.advice.entity.AppException;
+import com.hs.common.advice.entity.enums.ErrorCode;
+import com.hs.common.context.CurrentUser;
+import com.hs.common.security.Permissions;
+import com.hs.user.constant.RoleConstants;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.dto.request.OnboardingRequest;
 import com.hs.user.dto.request.UpdateKeycloakUserRequest;
@@ -72,10 +76,15 @@ public class UserServiceImpl implements UserService {
 
         @Override
         public UserResponse updateUser(String userId, AdminUpdateUserRequest request) {
+                // Lock order is always admin set, then target row, so two admins acting on each other cannot deadlock.
+                List<User> activeAdmins = hasText(request.roleId()) ? lockActiveAdmins() : List.of();
                 User user = userRepository.findByIdForUpdate(userId)
                                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
+                assertActorCoversTarget(user);
 
                 validateUniqueAccountFields(user, request.username(), request.email(), request.phone());
+                // Before the Keycloak call: a rejected role change must not leave Keycloak updated.
+                boolean roleChanged = applyRoleChange(user, request.roleId(), activeAdmins);
 
                 keycloakUserService.updateUserIfChanged(
                                 userId,
@@ -108,8 +117,6 @@ public class UserServiceImpl implements UserService {
                 if (request.gender() != null) {
                         user.setGender(request.gender());
                 }
-
-                boolean roleChanged = applyRoleChange(user, request.roleId());
 
                 userRepository.save(user);
                 if (roleChanged) {
@@ -315,11 +322,17 @@ public class UserServiceImpl implements UserService {
 
         @Override
     public void updateUserStatus(String userId, boolean enabled) {
+        // Same lock order as updateUser: admin set first (only when disabling), then the target row.
+        List<User> activeAdmins = enabled ? List.of() : lockActiveAdmins();
         User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
 
         if (!enabled && userId.equals(currentUserUtils.getCurrentUserId())) {
             throw new AppException(UserErrorCode.USER_CANNOT_DISABLE_SELF);
+        }
+        assertActorCoversTarget(user);
+        if (!enabled && Boolean.TRUE.equals(user.getActive())) {
+            assertAnotherActiveAdminRemains(user, activeAdmins);
         }
 
         // Baseline is read under the row lock, so a repeated or concurrent same-value call sees no transition.
@@ -385,7 +398,7 @@ public class UserServiceImpl implements UserService {
         }
 
         /** Returns true only when the persisted role assignment actually changes (compared by role id). */
-        private boolean applyRoleChange(User user, String roleId) {
+        private boolean applyRoleChange(User user, String roleId, List<User> activeAdmins) {
                 if (!hasText(roleId)) {
                         return false;
                 }
@@ -400,9 +413,50 @@ public class UserServiceImpl implements UserService {
                 if (user.getRole() != null && role.getId().equals(user.getRole().getId())) {
                         return false;
                 }
+                if (!CurrentUser.isAdminWith(Permissions.ROLE_UPDATE)) {
+                        throw new AppException(ErrorCode.UNAUTHORIZED);
+                }
+                // Cannot hand out a role that carries permissions the actor does not hold.
+                if (!actorHoldsAll(role)) {
+                        throw new AppException(UserErrorCode.USER_PRIVILEGE_ESCALATION);
+                }
+                if (user.getRole() != null && RoleConstants.ADMIN.equals(user.getRole().getName())
+                                && !RoleConstants.ADMIN.equals(role.getName())
+                                && Boolean.TRUE.equals(user.getActive())) {
+                        assertAnotherActiveAdminRemains(user, activeAdmins);
+                }
 
                 user.setRole(role);
                 return true;
+        }
+
+        /** An actor may not modify a user whose role holds a permission the actor lacks. */
+        private void assertActorCoversTarget(User target) {
+                if (target.getRole() != null && !actorHoldsAll(target.getRole())) {
+                        throw new AppException(UserErrorCode.USER_PRIVILEGE_ESCALATION);
+                }
+        }
+
+        private boolean actorHoldsAll(Role role) {
+                return role.getPermissions() == null || role.getPermissions().stream()
+                                .filter(permission -> Boolean.TRUE.equals(permission.getActive()))
+                                .allMatch(permission -> CurrentUser.hasAuthority(permission.getName()));
+        }
+
+        private List<User> lockActiveAdmins() {
+                return userRepository.lockActiveByRoleName(RoleConstants.ADMIN);
+        }
+
+        /** Fails if {@code target} is the only active admin in the already locked set. */
+        private void assertAnotherActiveAdminRemains(User target, List<User> activeAdmins) {
+                if (target.getRole() == null || !RoleConstants.ADMIN.equals(target.getRole().getName())) {
+                        return;
+                }
+                boolean otherAdmin = activeAdmins.stream()
+                                .anyMatch(admin -> !admin.getId().equals(target.getId()));
+                if (!otherAdmin) {
+                        throw new AppException(UserErrorCode.USER_LAST_ADMIN);
+                }
         }
 
         private boolean hasText(String value) {

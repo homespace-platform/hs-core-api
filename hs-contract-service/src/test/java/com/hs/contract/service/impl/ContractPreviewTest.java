@@ -111,6 +111,7 @@ class ContractPreviewTest {
         // Rendering tests isolate term validation; ContractDraftIntegrityTest covers the real policy.
         ReflectionTestUtils.setField(service,"draftIntegrity",mock(com.hs.contract.service.ContractDraftIntegrity.class));
         ReflectionTestUtils.setField(service,"entityManager",mock(jakarta.persistence.EntityManager.class));
+        ReflectionTestUtils.setField(service,"signingNotices",mock(com.hs.contract.notification.AgreementSigningNotificationWriter.class));
         UserContextHolder.set(new UserContext("landlord", "landlord@test.invalid"));
         ReflectionTestUtils.setField(service, "signatureMode", "INTERNAL");
         when(contracts.findById("contract")).thenReturn(Optional.of(contract));

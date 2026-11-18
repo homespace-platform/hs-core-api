@@ -2,7 +2,9 @@ package com.hs.payment.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.common.advice.entity.AppException;
+import com.hs.common.context.CurrentUser;
 import com.hs.common.context.UserContextHolder;
+import com.hs.common.security.Permissions;
 import com.hs.common.dto.PageResponse;
 import com.hs.common.time.BillingTime;
 import com.hs.payment.advice.PaymentErrorCode;
@@ -142,7 +144,7 @@ public class PaymentDisputeService {
 
     @Transactional(readOnly=true)
     public PageResponse<DisputeCaseView> adminList(String actor,DisputeCaseStatus status,int page,int size) {
-        admin(actor);
+        admin(actor,Permissions.DISPUTE_VIEW);
         var pageable=PageRequest.of(Math.max(0,page-1),Math.min(50,Math.max(1,size)),Sort.by(Sort.Direction.ASC,"openedAt","id"));
         var result=status==null?cases.findBySubjectType("PAYMENT",pageable):cases.findBySubjectTypeAndStatus("PAYMENT",status,pageable);
         return new PageResponse<>(result.map(c->view(c,payments.findById(c.getSubjectId()).orElseThrow(this::missing),actor,true,false)));
@@ -150,14 +152,14 @@ public class PaymentDisputeService {
 
     @Transactional(readOnly=true)
     public DisputeCaseView adminGet(String id,String actor) {
-        admin(actor);var c=cases.findById(id).orElseThrow(this::caseMissing);
+        admin(actor,Permissions.DISPUTE_VIEW);var c=cases.findById(id).orElseThrow(this::caseMissing);
         if(!"PAYMENT".equals(c.getSubjectType()))throw caseMissing();
         return view(c,payments.findById(c.getSubjectId()).orElseThrow(this::missing),actor,true,true);
     }
 
     @Transactional
     public DisputeCaseView adminAct(String id,String actor,String action,DisputeCaseAction request) {
-        admin(actor);
+        admin(actor,Permissions.DISPUTE_RESOLVE);
         var before=cases.findById(id).orElseThrow(this::caseMissing);
         if(!"PAYMENT".equals(before.getSubjectType()))throw caseMissing();
         var p=lockPayment(before.getSubjectId(),actor,true);
@@ -324,10 +326,9 @@ public class PaymentDisputeService {
                 audit.stream().map(e->new DisputeCaseView.Event(e.getRevision(),e.getAction(),e.getActorId(),e.getActorRole(),e.getReason(),e.getEvidenceStorageId(),e.getMetadataJson(),e.getOccurredAt())).toList(),
                 details?evidence.findByPaymentRequestIdOrderByCreatedAtDesc(p.getId()).stream().filter(e->capturedEvidence.contains(e.getStorageObjectId())).map(e->new DisputeCaseView.Evidence(e.getStorageObjectId(),e.getUploadedBy(),e.getNote(),e.getCreatedAt())).toList():List.of());
     }
-    private void admin(String actor) {
-        var auth=SecurityContextHolder.getContext().getAuthentication();var ctx=UserContextHolder.get();
-        if(actor==null||ctx==null||!actor.equals(ctx.userId())||auth==null||!auth.isAuthenticated()
-                ||auth.getAuthorities().stream().noneMatch(a->"ADMIN".equals(a.getAuthority())))throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);
+    private void admin(String actor,String permission) {
+        var ctx=UserContextHolder.get();
+        if(actor==null||ctx==null||!actor.equals(ctx.userId())||!CurrentUser.isAdminWith(permission))throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);
     }
     private void party(PaymentRequest p,String actor){if(actor==null||!actor.equals(p.getPayerId())&&!actor.equals(p.getPayeeId()))throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);}
     private String role(PaymentRequest p,String actor){return actor.equals(p.getPayerId())?(p.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"LANDLORD":"TENANT"):(p.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"TENANT":"LANDLORD");}

@@ -16,6 +16,22 @@ public interface StorageService {
 
     StorageObjectResponse getById(String storageId);
 
+    /** Admin-only (ADMIN + STORAGE_VIEW): skips ownership, keeps existence/status/verified-access rules. */
+    StorageObjectResponse adminGetById(String storageId);
+
+    StorageUrlResponse adminCreateDownloadUrl(String storageId);
+
+    /**
+     * Internal, ACL-free reads for a caller that has ALREADY authorized the request (e.g. contract admin
+     * path after CONTRACT_VIEW). Requires an authenticated caller; keeps existence/status/verified-access rules.
+     * Never expose these directly from a controller.
+     */
+    StorageObjectResponse getByIdAuthorized(String storageId);
+
+    StorageUrlResponse createViewUrlAuthorized(String storageId);
+
+    StorageUrlResponse createDownloadUrlAuthorized(String storageId);
+
     StorageUrlResponse createViewUrl(String storageId);
 
     StorageUrlResponse createDownloadUrl(String storageId);

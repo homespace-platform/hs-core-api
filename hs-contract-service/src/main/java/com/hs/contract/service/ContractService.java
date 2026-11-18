@@ -63,6 +63,8 @@ public interface ContractService {
 
     /** Cùng quyền đọc tài liệu, không tạo URL S3 trước khi kiểm tra tính toàn vẹn. */
     ContractDocumentResponse getDocumentMetadata(String documentId);
+    /** Admin-only: same as {@link #getDocumentMetadata} without the party check; requires ADMIN + CONTRACT_VIEW. */
+    ContractDocumentResponse getDocumentMetadataForAdmin(String documentId);
 
     /** Fully signed PDF for the terms effective on the server's business date; never a draft fallback. */
     ContractDocumentResponse getEffectiveDocument(String contractId);

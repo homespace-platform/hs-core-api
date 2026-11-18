@@ -21,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping({"/membership", "/api/v1/membership"})
@@ -48,6 +49,7 @@ public class MembershipController {
         return ApiResponse.<MembershipService.Quote>builder().result(memberships.quote(requireUserId(), tier)).build();
     }
 
+    @PreAuthorize("hasAuthority('MEMBERSHIP_PURCHASE')")
     @PostMapping("/checkout")
     public ApiResponse<MembershipCheckoutService.Checkout> checkout(@RequestBody @Valid CheckoutRequest request) {
         return ApiResponse.<MembershipCheckoutService.Checkout>builder()
@@ -72,6 +74,7 @@ public class MembershipController {
                 .result(ethPayment.challenge(id, requireUserId(), wallet)).build();
     }
 
+    @PreAuthorize("hasAuthority('MEMBERSHIP_PURCHASE')")
     @PostMapping("/orders/{id}/eth/quote")
     public ApiResponse<EthPaymentDtos.Quote> ethQuote(@PathVariable String id,
             @RequestBody @Valid EthPaymentDtos.CreateQuote request) {

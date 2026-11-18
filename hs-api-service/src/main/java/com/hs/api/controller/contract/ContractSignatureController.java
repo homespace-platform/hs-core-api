@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 /**
  * API endpoints cho ký số SmartCA.
@@ -57,6 +58,7 @@ public class ContractSignatureController {
      * POST /contracts/{contractId}/signatures/initiate
      * Khởi tạo yêu cầu ký số. Idempotent khi request còn hiệu lực.
      */
+    @PreAuthorize("hasAuthority('CONTRACT_SIGN')")
     @PostMapping("/initiate")
     public ApiResponse<SignatureRequestDto> initiateSignature(
             @PathVariable String contractId,
@@ -100,6 +102,7 @@ public class ContractSignatureController {
      * POST /contracts/{contractId}/signatures/{requestId}/retry
      * Thử lại sau khi bị từ chối/hết hạn/lỗi.
      */
+    @PreAuthorize("hasAuthority('CONTRACT_SIGN')")
     @PostMapping("/{requestId}/retry")
     public ApiResponse<SignatureRequestDto> retrySignature(
             @PathVariable String contractId,

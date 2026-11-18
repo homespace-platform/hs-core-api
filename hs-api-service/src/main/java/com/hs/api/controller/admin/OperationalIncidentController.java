@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController @RequiredArgsConstructor
-@PreAuthorize("hasAuthority('ADMIN')")
+@PreAuthorize("hasAuthority('ADMIN') and hasAuthority('INCIDENT_VIEW')")
 @RequestMapping("/admin/operational-incidents")
 public class OperationalIncidentController {
     private final OperationalIncidentService service;

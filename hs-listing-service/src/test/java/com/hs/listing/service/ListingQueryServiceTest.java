@@ -82,6 +82,32 @@ class ListingQueryServiceTest {
             assertEquals(404,assertThrows(com.hs.common.advice.entity.AppException.class,
                 ()->service.getById(viewer,"missing")).getStatusCode().value());
     }
+    @Test void nonOwnersNeverSeeAuditFieldsAndAnonymousNeverSeesPhoneButOwnerSeesAll() {
+        var repository=mock(ListingRepository.class);
+        var users=mock(UserRepository.class);
+        var listing=listing();
+        listing.setStatusReason("moderation note");listing.setStatusChangedBy("admin-9");
+        listing.setCreatedBy("admin-1");listing.setUpdatedBy("admin-2");
+        var user=new com.hs.user.model.User();user.setId("owner-1");user.setPhone("0900000000");
+        when(repository.findByIdAndActiveTrue("listing-1")).thenReturn(Optional.of(listing));
+        when(repository.findIdBySlugAndActiveTrue("slug")).thenReturn(Optional.of("listing-1"));
+        when(users.findById("owner-1")).thenReturn(Optional.of(user));
+        var service=new ListingQueryService(repository,mock(ListingAddressRepository.class),users,properties(),
+            mock(com.hs.listing.repository.RentalRequestRepository.class),mock(com.hs.listing.repository.PropertyBranchRepository.class));
+        for(var anonymous:List.of(service.getById(null,"listing-1"),service.getBySlug(null,"slug"))) {
+            assertNull(anonymous.owner().phone());
+            assertNull(anonymous.statusReason());assertNull(anonymous.statusChangedBy());
+            assertNull(anonymous.createdBy());assertNull(anonymous.updatedBy());
+        }
+        var stranger=service.getById("stranger","listing-1");
+        assertEquals("0900000000",stranger.owner().phone());
+        assertNull(stranger.statusReason());assertNull(stranger.statusChangedBy());
+        assertNull(stranger.createdBy());assertNull(stranger.updatedBy());
+        var owner=service.getById("owner-1","listing-1");
+        assertEquals("0900000000",owner.owner().phone());
+        assertEquals("moderation note",owner.statusReason());assertEquals("admin-9",owner.statusChangedBy());
+        assertEquals("admin-1",owner.createdBy());assertEquals("admin-2",owner.updatedBy());
+    }
     private ListingQueryService accessService(ListingRepository listings,com.hs.listing.repository.RentalRequestRepository rentals) {
         return new ListingQueryService(listings,mock(ListingAddressRepository.class),mock(UserRepository.class),properties(),rentals,
             mock(com.hs.listing.repository.PropertyBranchRepository.class));

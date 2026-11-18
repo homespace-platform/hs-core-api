@@ -112,7 +112,7 @@ class PaymentDisputePostgresTest {
     void resolve(DisputeResolution resolution){var c=open();casesService.act(c.getId(),"tenant","PROPOSE",payload(c,resolution));c=active();casesService.act(c.getId(),"owner","ACCEPT",payload(c,null));}
     void tx(Runnable action){new TransactionTemplate(transactions).executeWithoutResult(t->action.run());}
     void admin(String actor){UserContextHolder.set(new UserContext(actor,null));SecurityContextHolder.getContext().setAuthentication(
-        UsernamePasswordAuthenticationToken.authenticated(actor,"n/a",List.of(new SimpleGrantedAuthority("ADMIN"))));}
+        UsernamePasswordAuthenticationToken.authenticated(actor,"n/a",List.of(new SimpleGrantedAuthority("ADMIN"),new SimpleGrantedAuthority("DISPUTE_VIEW"),new SimpleGrantedAuthority("DISPUTE_RESOLVE"))));}
 
     @Test void openingExistingApiCreatesCaseAndHistoryInSameTransaction(){
         var c=open();assertEquals(PaymentStatus.TRANSFER_REPORTED,c.getPreviousPaymentStatus());assertEquals(PaymentStatus.DISPUTED,payments.findById(paymentId).orElseThrow().getStatus());

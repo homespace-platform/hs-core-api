@@ -56,7 +56,7 @@ class PaymentDisputeControllerTest {
             UserContextHolder.set(new UserContext("person",null));
             SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("person","n/a",List.of(new SimpleGrantedAuthority("TENANT"))));
             assertThrows(AccessDeniedException.class,()->secured.list(DisputeCaseStatus.ESCALATED,1,20));verifyNoInteractions(target);
-            SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("person","n/a",List.of(new SimpleGrantedAuthority("ADMIN"))));
+            SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("person","n/a",List.of(new SimpleGrantedAuthority("ADMIN"),new SimpleGrantedAuthority("DISPUTE_VIEW"))));
             when(target.adminList("person",DisputeCaseStatus.ESCALATED,1,20)).thenReturn(new PageResponse<>());
             assertNotNull(secured.list(DisputeCaseStatus.ESCALATED,1,20));verify(target).adminList("person",DisputeCaseStatus.ESCALATED,1,20);
         }

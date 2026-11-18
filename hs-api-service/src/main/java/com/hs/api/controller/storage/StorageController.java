@@ -1,6 +1,8 @@
 package com.hs.api.controller.storage;
 
+import com.hs.common.context.CurrentUser;
 import com.hs.common.dto.ApiResponse;
+import com.hs.common.security.Permissions;
 import com.hs.common.dto.PageResponse;
 import com.hs.storage.dto.request.CompleteUploadRequest;
 import com.hs.storage.dto.request.CreateUploadRequest;
@@ -17,8 +19,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.security.access.AccessDeniedException;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 
 @RestController
 @RequestMapping("/storage")
@@ -31,9 +31,7 @@ public class StorageController {
     public ApiResponse<CreateUploadResponse> createUpload(@RequestBody @Valid CreateUploadRequest request) {
         if (request.referenceType() != null
                 && "CONTRACT_TEMPLATE".equalsIgnoreCase(request.referenceType().trim())) {
-            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            boolean admin = authentication != null && authentication.getAuthorities().stream()
-                    .anyMatch(authority -> "ADMIN".equals(authority.getAuthority()));
+            boolean admin = CurrentUser.isAdminWith(Permissions.CONTRACT_TEMPLATE_MANAGE);
             if (!admin) {
                 throw new AccessDeniedException("Chỉ quản trị viên được tải mẫu hợp đồng lên hệ thống");
             }

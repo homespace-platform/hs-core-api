@@ -8,7 +8,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.hs.common.context.CurrentUser;
 import com.hs.common.dto.ApiResponse;
+import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.api.facade.UserAvatarFacade;
 import com.hs.user.dto.request.OnboardingRequest;
 import com.hs.user.dto.request.UpdateAvatarRequest;
@@ -38,6 +40,13 @@ public class UserController {
     public ApiResponse<com.hs.api.dto.OnboardingStatusResponse> getOnboardingStatus() {
         return ApiResponse.<com.hs.api.dto.OnboardingStatusResponse>builder()
                 .result(onboardingFacade.getOnboardingStatus())
+                .build();
+    }
+
+    @GetMapping("/me/permissions")
+    public ApiResponse<UserPermissionsResponse> getMyPermissions() {
+        return ApiResponse.<UserPermissionsResponse>builder()
+                .result(userService.getUserPermissions(CurrentUser.requireUserId()))
                 .build();
     }
 

@@ -141,6 +141,9 @@ public class RentalRequestService {
         validateMoveIn(req.moveInDate(),calculatedAt);
         Listing listing = listingRepository.findByIdAndActiveTrue(req.listingId())
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
+        boolean estimable = listing.getStatus() == ListingStatus.PUBLISHED || listing.getStatus() == ListingStatus.RESERVED
+                || com.hs.common.context.CurrentUser.optionalUserId().filter(listing.getOwnerId()::equals).isPresent();
+        if (!estimable) throw new AppException(ListingErrorCode.LISTING_NOT_FOUND);
 
         int leaseMonths = req.leaseMonths() != null ? req.leaseMonths() : 1;
         int occupants = req.occupantCount() != null ? req.occupantCount() : 1;

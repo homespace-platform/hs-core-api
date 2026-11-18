@@ -64,20 +64,70 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 class ContractServiceImplTest {
-    @Test void authenticatedAdminCanReadMetadataWithoutPresignedUrlsOrPartyMutationRights() {
+    private static void signInAs(String id, String... authorities) {
+        UserContextHolder.set(new UserContext(id,id+"@example.com"));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+            new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(id+"@example.com",null,
+                java.util.Arrays.stream(authorities).map(org.springframework.security.core.authority.SimpleGrantedAuthority::new).toList()));
+    }
+
+    @Test void adminWithPermissionStillCannotUseThePartyOnlyUserDocumentRoute() {
         var f=new EffectiveDocumentFixture();
         var file=f.files.getFirst();when(f.documents.findById(file.getId())).thenReturn(Optional.of(file));
-        UserContextHolder.set(new UserContext("admin","admin@example.com"));
-        var auth=new org.springframework.security.authentication.UsernamePasswordAuthenticationToken("admin@example.com",null,
-            List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ADMIN")));
-        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(auth);
+        signInAs("admin","ADMIN","ROLE_ADMIN","CONTRACT_VIEW");
         try {
-            var metadata=f.service.getDocumentMetadata(file.getId());
-            assertEquals(file.getId(),metadata.getId());assertNull(metadata.getViewUrl());assertNull(metadata.getDownloadUrl());
-            verifyNoInteractions(f.storage);
+            assertThrows(AppException.class,()->f.service.getDocumentMetadata(file.getId()));
             assertThrows(AppException.class,()->f.service.getContract("root"));
             assertThrows(AppException.class,()->f.service.getDocument(file.getId()));
+            verifyNoInteractions(f.storage);
         } finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+    }
+
+    @Test void adminDocumentMetadataNeedsAdminRoleAndContractViewAndReturnsNoPresignedUrls() {
+        var f=new EffectiveDocumentFixture();
+        var file=f.files.getFirst();when(f.documents.findById(file.getId())).thenReturn(Optional.of(file));
+        try {
+            signInAs("admin","ADMIN","CONTRACT_VIEW");
+            var metadata=f.service.getDocumentMetadataForAdmin(file.getId());
+            assertEquals(file.getId(),metadata.getId());assertNull(metadata.getViewUrl());assertNull(metadata.getDownloadUrl());
+            verifyNoInteractions(f.storage);
+            signInAs("admin","ADMIN");
+            assertThrows(AppException.class,()->f.service.getDocumentMetadataForAdmin(file.getId()));
+            signInAs("owner","CONTRACT_VIEW");
+            assertThrows(AppException.class,()->f.service.getDocumentMetadataForAdmin(file.getId()));
+        } finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+    }
+
+    @Test void adminDocumentListGetsWorkingUrlsFromAuthorizedStorageMethodsAndNeedsContractView() {
+        var f=new EffectiveDocumentFixture();
+        var preview=ContractDocument.builder().id("p").contractId("root").revisionId("root-revision").documentType(ContractDocumentType.PDF)
+                .purpose(DocumentPurpose.PREVIEW).status(DocumentGenerationStatus.READY).storageObjectId("preview-object").fileName("p.pdf").build();
+        when(f.documents.findByContractIdOrderByGeneratedAtDesc("root")).thenReturn(List.of(preview));
+        when(f.storage.createViewUrlAuthorized("preview-object")).thenReturn(new com.hs.storage.dto.response.StorageUrlResponse("https://files.example/admin-view",java.time.Instant.now()));
+        when(f.storage.createDownloadUrlAuthorized("preview-object")).thenReturn(new com.hs.storage.dto.response.StorageUrlResponse("https://files.example/admin-download",java.time.Instant.now()));
+        try {
+            signInAs("admin","ADMIN","CONTRACT_VIEW");
+            var list=f.service.getDocumentsForAdmin("root");
+            assertEquals("https://files.example/admin-view",list.getFirst().getViewUrl());
+            assertEquals("https://files.example/admin-download",list.getFirst().getDownloadUrl());
+            verify(f.storage,never()).createViewUrl(anyString());verify(f.storage,never()).createDownloadUrl(anyString());
+            signInAs("admin","ADMIN");
+            assertThrows(AppException.class,()->f.service.getDocumentsForAdmin("root"));
+        } finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+    }
+
+    @Test void requestWithoutIdentityIsUnauthenticatedNotTreatedAsSystem() {
+        var f=new EffectiveDocumentFixture();
+        var file=f.files.getFirst();when(f.documents.findById(file.getId())).thenReturn(Optional.of(file));
+        UserContextHolder.clear();
+        for (org.junit.jupiter.api.function.Executable call : List.<org.junit.jupiter.api.function.Executable>of(
+                ()->f.service.getContract("root"),()->f.service.getDocumentsByContract("root"),()->f.service.getDocument(file.getId()),
+                ()->f.service.getDocumentMetadata(file.getId()),()->f.service.getEffectiveDocument("root"),
+                ()->f.service.triggerPreview("root"),()->f.service.findByRentalRequestId("rental"),()->f.service.getPreviewStatus("root"))) {
+            var failure=assertThrows(AppException.class,call);
+            assertEquals(com.hs.common.advice.entity.enums.ErrorCode.UNAUTHENTICATED.getCode(),failure.getCode());
+        }
+        verifyNoInteractions(f.storage);
     }
 
     @Test void nonAdminOrUnauthenticatedAdminCannotReadAnotherPartysDocumentMetadata() {

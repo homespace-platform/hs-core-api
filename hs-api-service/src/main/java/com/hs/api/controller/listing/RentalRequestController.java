@@ -23,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping({"/rental-requests", "/api/v1/rental-requests"})
@@ -61,6 +62,7 @@ public class RentalRequestController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('RENTAL_REQUEST_CREATE')")
     @PostMapping
     public ApiResponse<RentalRequestResponse> createRentalRequest(@RequestBody @Valid CreateRentalRequest req) {
         UserContext context = requireUserContext();
@@ -139,6 +141,7 @@ public class RentalRequestController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('RENTAL_REQUEST_MANAGE')")
     @PutMapping("/{id}/accept")
     public ApiResponse<RentalRequestResponse> acceptRentalRequest(@PathVariable String id) {
         String ownerId = requireUserId();
@@ -149,6 +152,7 @@ public class RentalRequestController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('RENTAL_REQUEST_MANAGE')")
     @PutMapping("/{id}/reject")
     public ApiResponse<RentalRequestResponse> rejectRentalRequest(
             @PathVariable String id,

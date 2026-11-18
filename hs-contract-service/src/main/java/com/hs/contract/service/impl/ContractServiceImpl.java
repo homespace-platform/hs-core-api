@@ -7,6 +7,8 @@ import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.dto.PageResponse;
 import com.hs.common.context.UserContext;
 import com.hs.common.context.UserContextHolder;
+import com.hs.common.context.CurrentUser;
+import com.hs.common.security.Permissions;
 import com.hs.contract.advice.ContractErrorCode;
 import com.hs.contract.dto.request.CreateContractDraftRequest;
 import com.hs.contract.dto.request.UpdateContractRevisionRequest;
@@ -325,6 +327,7 @@ public class ContractServiceImpl implements ContractService {
         if (rentalRequestId == null || rentalRequestId.isBlank()) {
             throw new AppException(ErrorCode.INVALID_REQUEST);
         }
+        CurrentUser.requireUserId();
         Optional<Contract> existing = contractRepository.findByRentalRequestId(rentalRequestId);
         if (existing.isEmpty()) {
             return null;
@@ -332,8 +335,7 @@ public class ContractServiceImpl implements ContractService {
         Contract contract = existing.get();
         String currentUserId = getCurrentUserId();
         if (!currentUserId.equals(contract.getLandlordId())
-                && !currentUserId.equals(contract.getTenantId())
-                && !"system".equals(currentUserId)) {
+                && !currentUserId.equals(contract.getTenantId())) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
         if (!currentUserId.equals(contract.getLandlordId()) && currentUserId.equals(contract.getTenantId())
@@ -367,7 +369,7 @@ public class ContractServiceImpl implements ContractService {
     @Transactional(readOnly = true)
     public PageResponse<ContractResponse> getContractsForCurrentUser(String userId, ContractStatus status, ContractPartyRole role, boolean billableOnly, int page, int size, boolean includeDepositFallback, com.hs.contract.model.constant.ContractAgreementKind agreementKind) {
         String currentUserId = (userId != null && !userId.isBlank()) ? userId : getCurrentUserId();
-        if (currentUserId == null || currentUserId.isBlank() || "system".equals(currentUserId)) {
+        if (currentUserId == null || currentUserId.isBlank()) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
 
@@ -512,7 +514,11 @@ public class ContractServiceImpl implements ContractService {
     @Override
     @Transactional(readOnly = true)
     public List<ContractDocumentResponse> getDocumentsForAdmin(String contractId) {
-        return getDocumentsByContract(contractId);
+        CurrentUser.requireAdminWith(Permissions.CONTRACT_VIEW);
+        contractRepository.findById(contractId).orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+        return documentRepository.findByContractIdOrderByGeneratedAtDesc(contractId).stream()
+                .map(d -> toDocumentResponse(d, true, true))
+                .toList();
     }
 
     @Override
@@ -1338,21 +1344,20 @@ public class ContractServiceImpl implements ContractService {
     public ContractDocumentResponse getDocumentMetadata(String documentId) {
         ContractDocument document = documentRepository.findById(documentId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_DOCUMENT_NOT_FOUND));
-        var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
-        var user = UserContextHolder.get();
-        boolean adminReader = user != null && user.userId() != null && !user.userId().isBlank()
-                && !"system".equals(user.userId()) && authentication != null && authentication.isAuthenticated()
-                && !(authentication instanceof org.springframework.security.authentication.AnonymousAuthenticationToken)
-                && authentication.getAuthorities().stream().anyMatch(authority ->
-                    "ROLE_ADMIN".equals(authority.getAuthority()) || "ADMIN".equals(authority.getAuthority()));
-        // Admins already read documents through the admin API; verified bytes must grant the same read access.
-        // Keep party-only access for signing, edits and every other contract operation.
-        if (adminReader) {
-            contractRepository.findById(document.getContractId())
-                    .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
-        } else {
-            findContractAndCheckAccess(document.getContractId());
-        }
+        // Party-only. Admins read through the admin route (getDocumentMetadataForAdmin).
+        findContractAndCheckAccess(document.getContractId());
+        return toDocumentResponse(document, false);
+    }
+
+    /** Admin-only entry; the caller (admin controller) must enforce ADMIN + CONTRACT_VIEW. No party check. */
+    @Override
+    @Transactional(readOnly = true)
+    public ContractDocumentResponse getDocumentMetadataForAdmin(String documentId) {
+        CurrentUser.requireAdminWith(Permissions.CONTRACT_VIEW);
+        ContractDocument document = documentRepository.findById(documentId)
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_DOCUMENT_NOT_FOUND));
+        contractRepository.findById(document.getContractId())
+                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
         return toDocumentResponse(document, false);
     }
 
@@ -1474,7 +1479,7 @@ public class ContractServiceImpl implements ContractService {
         String userId = getCurrentUserId();
         boolean landlord = contract.getLandlordId().equals(userId);
         boolean tenant = contract.getTenantId().equals(userId);
-        if (!landlord && !tenant && !"system".equals(userId)) {
+        if (!landlord && !tenant) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
         if (!landlord && tenant && contract.getStatus() == ContractStatus.DRAFT
@@ -1489,7 +1494,7 @@ public class ContractServiceImpl implements ContractService {
 
     private void requireLandlord(Contract contract) {
         String userId = getCurrentUserId();
-        if (!contract.getLandlordId().equals(userId) && !"system".equals(userId)) {
+        if (!contract.getLandlordId().equals(userId)) {
             throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
         }
     }
@@ -1506,9 +1511,7 @@ public class ContractServiceImpl implements ContractService {
     }
 
     private String getCurrentUserId() {
-        return Optional.ofNullable(UserContextHolder.get())
-                .map(UserContext::userId)
-                .orElse("system");
+        return CurrentUser.requireUserId();
     }
 
     private byte[] downloadStorageFile(String storageObjectId) {
@@ -1588,6 +1591,11 @@ public class ContractServiceImpl implements ContractService {
     }
 
     private ContractDocumentResponse toDocumentResponse(ContractDocument d, boolean createUrls) {
+        return toDocumentResponse(d, createUrls, false);
+    }
+
+    /** authorizedAdmin: caller already passed ADMIN + CONTRACT_VIEW, so URLs skip the storage party ACL. */
+    private ContractDocumentResponse toDocumentResponse(ContractDocument d, boolean createUrls, boolean authorizedAdmin) {
         String viewUrl = null;
         String downloadUrl = null;
         // Superseded previews remain readable history, but never become signable again.
@@ -1595,9 +1603,11 @@ public class ContractServiceImpl implements ContractService {
                 && d.getStorageObjectId() != null && (d.getStatus() == DocumentGenerationStatus.READY
                 || d.getStatus() == DocumentGenerationStatus.STALE)) {
             try {
-                StorageUrlResponse v = storageService.createViewUrl(d.getStorageObjectId());
+                StorageUrlResponse v = authorizedAdmin ? storageService.createViewUrlAuthorized(d.getStorageObjectId())
+                        : storageService.createViewUrl(d.getStorageObjectId());
                 if (v != null) viewUrl = v.url();
-                StorageUrlResponse dl = storageService.createDownloadUrl(d.getStorageObjectId());
+                StorageUrlResponse dl = authorizedAdmin ? storageService.createDownloadUrlAuthorized(d.getStorageObjectId())
+                        : storageService.createDownloadUrl(d.getStorageObjectId());
                 if (dl != null) downloadUrl = dl.url();
             } catch (Exception e) {
                 log.warn("Could not generate presigned URLs for document id={}: {}", d.getId(), e.getMessage());

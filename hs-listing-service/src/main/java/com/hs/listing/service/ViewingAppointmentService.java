@@ -87,6 +87,9 @@ public class ViewingAppointmentService {
     public ListingAvailabilityResponse getAvailability(String listingId, LocalDate date, String currentUserId) {
         Listing listing = listingRepository.findByIdAndActiveTrue(listingId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_NOT_FOUND));
+        if (listing.getStatus() != ListingStatus.PUBLISHED && !listing.getOwnerId().equals(currentUserId)) {
+            throw new AppException(ListingErrorCode.LISTING_NOT_FOUND);
+        }
 
         LocalDate today = LocalDate.now(VIETNAM_ZONE);
         LocalTime now = LocalTime.now(VIETNAM_ZONE);

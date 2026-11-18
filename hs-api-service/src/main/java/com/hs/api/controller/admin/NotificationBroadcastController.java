@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequiredArgsConstructor
-@PreAuthorize("hasAuthority('ADMIN')")
+@PreAuthorize("hasAuthority('ADMIN') and hasAuthority('NOTIFICATION_BROADCAST')")
 @RequestMapping("/notifications/admin/broadcast")
 public class NotificationBroadcastController {
     private final BroadcastNotificationService service;

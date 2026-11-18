@@ -1,8 +1,10 @@
 package com.hs.storage.service.impl;
 
+import com.hs.common.context.CurrentUser;
 import com.hs.common.context.UserContext;
 import com.hs.common.context.UserContextHolder;
 import com.hs.common.dto.PageResponse;
+import com.hs.common.security.Permissions;
 import com.hs.common.advice.entity.AppException;
 import com.hs.storage.config.StorageProperties;
 import com.hs.storage.advice.entity.enums.StorageErrorCode;
@@ -30,7 +32,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import software.amazon.awssdk.core.exception.SdkException;
@@ -193,6 +194,60 @@ public class StorageServiceImpl implements StorageService {
     @Transactional(readOnly = true)
     public StorageObjectResponse getById(String storageId) {
         return toResponse(getAccessibleObject(storageId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public StorageObjectResponse adminGetById(String storageId) {
+        CurrentUser.requireAdminWith(Permissions.STORAGE_VIEW);
+        return toResponse(findActive(storageId));
+    }
+
+    @Override
+    @Transactional(readOnly = true, noRollbackFor = AppException.class)
+    public StorageUrlResponse adminCreateDownloadUrl(String storageId) {
+        CurrentUser.requireAdminWith(Permissions.STORAGE_VIEW);
+        StorageObject object = findActive(storageId);
+        if (object.getStatus() != StorageStatus.READY) {
+            throw new AppException(StorageErrorCode.STORAGE_NOT_READY);
+        }
+        return createGetUrl(object, false);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public StorageObjectResponse getByIdAuthorized(String storageId) {
+        requireAdminRole();
+        return toResponse(findActive(storageId));
+    }
+
+    @Override
+    @Transactional(readOnly = true, noRollbackFor = AppException.class)
+    public StorageUrlResponse createViewUrlAuthorized(String storageId) {
+        return createGetUrl(findReadyForAuthorizedCaller(storageId), true);
+    }
+
+    @Override
+    @Transactional(readOnly = true, noRollbackFor = AppException.class)
+    public StorageUrlResponse createDownloadUrlAuthorized(String storageId) {
+        return createGetUrl(findReadyForAuthorizedCaller(storageId), false);
+    }
+
+    // ACL-free reads are only for admin paths that already checked a permission; never let a USER call reach them.
+    private void requireAdminRole() {
+        currentUserId();
+        if (!com.hs.common.context.CurrentUser.hasAuthority(com.hs.common.security.Permissions.ROLE_ADMIN)) {
+            throw new AppException(com.hs.common.advice.entity.enums.ErrorCode.UNAUTHORIZED);
+        }
+    }
+
+    private StorageObject findReadyForAuthorizedCaller(String storageId) {
+        requireAdminRole();
+        StorageObject object = findActive(storageId);
+        if (object.getStatus() != StorageStatus.READY) {
+            throw new AppException(StorageErrorCode.STORAGE_NOT_READY);
+        }
+        return object;
     }
 
     @Override
@@ -567,7 +622,6 @@ public class StorageServiceImpl implements StorageService {
         String userId = currentUserId();
         if (object.getVisibility() == StorageVisibility.AUTHENTICATED
                 || object.getOwnerId().equals(userId)
-                || isAdmin()
                 || accessCheckers.stream().anyMatch(checker -> checker.canAccess(userId, object))) {
             return object;
         }
@@ -576,7 +630,7 @@ public class StorageServiceImpl implements StorageService {
 
     private StorageObject getOwnedObject(String storageId) {
         StorageObject object = findActive(storageId);
-        if (!object.getOwnerId().equals(currentUserId()) && !isAdmin()) {
+        if (!object.getOwnerId().equals(currentUserId())) {
             throw new AppException(StorageErrorCode.STORAGE_ACCESS_DENIED);
         }
         return object;
@@ -597,13 +651,6 @@ public class StorageServiceImpl implements StorageService {
             throw new AppException(StorageErrorCode.STORAGE_UNAUTHENTICATED);
         }
         return context.userId();
-    }
-
-    private boolean isAdmin() {
-        var authentication = SecurityContextHolder.getContext().getAuthentication();
-        return authentication != null && authentication.getAuthorities().stream()
-                .anyMatch(authority -> authority.getAuthority().equals("ADMIN")
-                        || authority.getAuthority().equals("ROLE_ADMIN"));
     }
 
     private void validateFile(StoragePurpose purpose, String contentType, long size) {

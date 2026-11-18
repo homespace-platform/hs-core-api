@@ -110,11 +110,29 @@ class ComplaintCaseServiceTest {
     private void admin(String id) {
         UserContextHolder.set(new UserContext(id, null));
         SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
-                id, "n/a", List.of(new SimpleGrantedAuthority("ADMIN"))));
+                id, "n/a", List.of(new SimpleGrantedAuthority("ADMIN"),new SimpleGrantedAuthority("COMPLAINT_VIEW"),new SimpleGrantedAuthority("COMPLAINT_RESOLVE"))));
     }
 
     private ComplaintAction action(long revision) {
         return new ComplaintAction(revision, "Đã đọc hồ sơ và tiếp nhận xử lý", null, null, null, null);
+    }
+
+    @Test void adminRoleNeedsComplaintPermissionToReadAndResolve() {
+        withAuthorities("ADMIN");
+        assertThrows(AppException.class, () -> service.adminList("admin", null, null, null, 1, 10));
+        assertThrows(AppException.class, () -> service.adminGet("case", "admin"));
+        assertThrows(AppException.class, () -> service.adminAct("case", "admin", "CLAIM", action(7)));
+        withAuthorities("ADMIN", "COMPLAINT_VIEW");
+        assertDoesNotThrow(() -> service.adminGet("case", "admin"));
+        assertThrows(AppException.class, () -> service.adminAct("case", "admin", "CLAIM", action(7)));
+        withAuthorities("COMPLAINT_VIEW", "COMPLAINT_RESOLVE");
+        assertThrows(AppException.class, () -> service.adminGet("case", "admin"));
+    }
+
+    private void withAuthorities(String... authorities) {
+        UserContextHolder.set(new UserContext("admin", null));
+        SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
+                "admin", "n/a", java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toList()));
     }
 
     @Test void firstClaimAssignsAdminAndStartsReviewWithAudit() {

@@ -70,7 +70,7 @@ class RentalWorkflowHttpSystemTest {
                     if(req.getRequestURI().equals("/test-harness/ready")){chain.doFilter(req,res);return;}
                     var token=req.getHeader("Authorization");String actor=token!=null&&token.startsWith("Bearer hs-workflow-test-")?token.substring("Bearer hs-workflow-test-".length()):"";
                     if(!Set.of("owner","tenant","tenant2","admin").contains(actor)){res.sendError(401);return;}
-                    UserContextHolder.set(new UserContext(actor,null));SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(actor,"test only",List.of(new SimpleGrantedAuthority(actor.equals("admin")?"ADMIN":"USER"))));
+                    UserContextHolder.set(new UserContext(actor,null));SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated(actor,"test only",java.util.Arrays.stream(actor.equals("admin")?new String[]{"ADMIN","COMPLAINT_VIEW","COMPLAINT_RESOLVE"}:new String[]{"USER","COMPLAINT_CREATE"}).map(SimpleGrantedAuthority::new).toList()));
                     try{chain.doFilter(req,res);}finally{UserContextHolder.clear();SecurityContextHolder.clearContext();}
                 }
             },AnonymousAuthenticationFilter.class).build();

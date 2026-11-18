@@ -9,6 +9,10 @@ public record ListingOwnerResponse(
         String avatarUrl
 ) {
 
+    public ListingOwnerResponse withoutPhone() {
+        return new ListingOwnerResponse(id, displayName, null, avatarUrl);
+    }
+
     public static ListingOwnerResponse from(User user) {
         if (user == null) {
             return null;

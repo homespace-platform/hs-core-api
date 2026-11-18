@@ -51,6 +51,21 @@ class BroadcastNotificationServiceTest {
         assertThrows(BroadcastNotificationService.IdConflict.class, () -> service.enqueueNews(NEWS.replace("00:00:00.000", "00:00:01.000")));
     }
 
+    @Test void rolePermissionsChangedPayloadHasOnlyRoleNameAndSafeUniqueId() {
+        database(); service.enqueueRolePermissionsChanged("USER");
+        assertEquals(1, stored.size());
+        String id = stored.keySet().iterator().next();
+        assertTrue(id.matches("role_perms_USER_\\d{13}"), id);
+        var event = BroadcastNotificationService.read(stored.get(id));
+        assertEquals("ROLE_PERMISSIONS_CHANGED", event.get("eventType").asText());
+        assertEquals(1, event.get("version").asInt()); assertEquals(0, event.get("recipients").size());
+        assertEquals(Set.of("roleName"), new HashSet<>(event.get("data").properties().stream().map(Map.Entry::getKey).toList()));
+        assertEquals("USER", event.get("data").get("roleName").asText());
+        service.enqueueRolePermissionsChanged("we!rd name/" + "x".repeat(300));
+        assertEquals(2, stored.size());
+        for (String key : stored.keySet()) assertTrue(key.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,199}"), key);
+    }
+
     @Test void adminIdempotencyComparesNormalizedContentAndConflictsAre409() {
         database(); String id = UUID.randomUUID().toString();
         var request = new AdminBroadcastRequest(id, " Title ", "Body\nsecond line", AdminBroadcastRequest.Priority.URGENT, null);

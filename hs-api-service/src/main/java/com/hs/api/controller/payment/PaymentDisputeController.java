@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController @RequiredArgsConstructor
 public class PaymentDisputeController {
@@ -16,6 +17,7 @@ public class PaymentDisputeController {
     public record Adopt(@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(min=10,max=500) String reason) {}
     @GetMapping("/payment-requests/{id}/dispute-cases")
     public ApiResponse<List<DisputeCaseView>> cases(@PathVariable String id){return ApiResponse.<List<DisputeCaseView>>builder().result(service.forPayment(id,actor())).build();}
+    @PreAuthorize("hasAuthority('PAYMENT_DISPUTE_CREATE')")
     @PostMapping("/payment-requests/{id}/dispute-cases/adopt")
     public ApiResponse<DisputeCaseView> adopt(@PathVariable String id,@Valid @RequestBody Adopt request){return result(service.adoptLegacy(id,actor(),request.reason()));}
     @PostMapping("/payment-disputes/{id}/actions/{action}")

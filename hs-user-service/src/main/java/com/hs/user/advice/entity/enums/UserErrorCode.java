@@ -28,6 +28,8 @@ public enum UserErrorCode implements AppException.ErrorCode {
     USER_ALREADY_ACTIVATED(2016, "User already completed invitation actions", HttpStatus.CONFLICT),
     USER_CANNOT_DISABLE_SELF(2017, "You cannot disable your own account", HttpStatus.CONFLICT),
     USER_CANNOT_UPDATE_OWN_ROLE(2018, "You cannot update your own role", HttpStatus.CONFLICT),
+    USER_LAST_ADMIN(2019, "At least one active administrator must remain", HttpStatus.CONFLICT),
+    USER_PRIVILEGE_ESCALATION(2020, "You cannot modify a user who holds permissions you do not have", HttpStatus.FORBIDDEN),
 
     // 24xx address
     ADDRESS_NOT_EXISTED(2401, "Address not existed", HttpStatus.NOT_FOUND),
@@ -35,10 +37,13 @@ public enum UserErrorCode implements AppException.ErrorCode {
     // 21xx role
     ROLE_EXISTED(2101, "Role existed", HttpStatus.BAD_REQUEST),
     ROLE_NOT_EXISTED(2102, "Role not existed", HttpStatus.NOT_FOUND),
+    ROLE_PERMISSIONS_LOCKED(2103, "Permissions of this role cannot be changed", HttpStatus.FORBIDDEN),
+    ROLE_PERMISSION_SCOPE_INVALID(2104, "Only user-scope permissions can be granted to the USER role", HttpStatus.BAD_REQUEST),
 
     // 22xx permission
     PERMISSION_EXISTED(2201, "Permission existed", HttpStatus.BAD_REQUEST),
     PERMISSION_NOT_EXISTED(2202, "Permission not existed", HttpStatus.NOT_FOUND),
+    PERMISSION_NOT_HELD(2203, "You cannot grant a permission you do not hold", HttpStatus.FORBIDDEN),
 
     // 23xx keycloak integration
     KEYCLOAK_USER_UPDATE_FAILED(2301, "Keycloak user update failed", HttpStatus.BAD_GATEWAY),

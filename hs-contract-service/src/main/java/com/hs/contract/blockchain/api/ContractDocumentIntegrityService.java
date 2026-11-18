@@ -36,11 +36,19 @@ public class ContractDocumentIntegrityService {
     private final RegistryClient registry;
 
     public DocumentIntegrityResponse check(String documentId) {
-        return inspect(documentId).integrity();
+        return inspect(documentId, false).integrity();
     }
 
     public VerifiedPdf content(String documentId) {
-        Inspection checked = inspect(documentId);
+        return verified(inspect(documentId, false));
+    }
+
+    /** Admin route only (ADMIN + CONTRACT_VIEW): same verification, no contract-party check. */
+    public VerifiedPdf contentForAdmin(String documentId) {
+        return verified(inspect(documentId, true));
+    }
+
+    private VerifiedPdf verified(Inspection checked) {
         return switch (checked.integrity().status()) {
             case "MATCH", "PENDING", "NOT_AVAILABLE" -> new VerifiedPdf(checked.bytes(), checked.fileName(), checked.integrity());
             case "MISMATCH" -> throw new AppException(BlockchainProofError.DOCUMENT_INTEGRITY_MISMATCH);
@@ -49,12 +57,12 @@ public class ContractDocumentIntegrityService {
         };
     }
 
-    private Inspection inspect(String documentId) {
+    private Inspection inspect(String documentId, boolean admin) {
         var user = UserContextHolder.get();
         if (user == null || user.userId() == null || user.userId().isBlank()) {
             throw new AppException(ErrorCode.UNAUTHENTICATED);
         }
-        var authorized = contracts.getDocumentMetadata(documentId);
+        var authorized = admin ? contracts.getDocumentMetadataForAdmin(documentId) : contracts.getDocumentMetadata(documentId);
         ContractDocument document = documents.findById(documentId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_DOCUMENT_NOT_FOUND));
         if (!Objects.equals(document.getContractId(), authorized.getContractId())
@@ -76,7 +84,9 @@ public class ContractDocumentIntegrityService {
         byte[] bytes;
         try {
             if (document.getSignedS3VersionId() != null) {
-                var object = storage.getById(document.getStorageObjectId());
+                // Admin path was already authorized by getDocumentMetadataForAdmin (ADMIN + CONTRACT_VIEW); users keep the storage ACL.
+                var object = admin ? storage.getByIdAuthorized(document.getStorageObjectId())
+                        : storage.getById(document.getStorageObjectId());
                 if (!document.getSignedS3VersionId().equals(object.s3VersionId())) {
                     return outcome(document, "MISMATCH", null, null, null, "Phiên bản lưu trữ khác bản đã ký.");
                 }

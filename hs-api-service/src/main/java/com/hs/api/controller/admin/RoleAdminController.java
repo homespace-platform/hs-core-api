@@ -21,7 +21,7 @@ import java.util.List;
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 @RequestMapping("/admin/roles")
-@PreAuthorize("hasAuthority('ADMIN')")
+@PreAuthorize("hasAuthority('ADMIN') and hasAuthority('ROLE_VIEW')")
 public class RoleAdminController {
 
     RoleService roleService;
@@ -52,6 +52,7 @@ public class RoleAdminController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('ROLE_UPDATE')")
     @PostMapping("/{id}")
     public ApiResponse<RoleResponse> updateRole(
             @RequestBody @Valid UpdateRoleRequest updateRoleRequest,

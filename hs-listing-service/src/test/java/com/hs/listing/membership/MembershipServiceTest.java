@@ -103,6 +103,31 @@ class MembershipServiceTest {
         assertEquals(0, m.getFreeReserved());
     }
 
+    @Test
+    void ambientAdminAuthorityNoLongerExemptsQuotaButAdminActorStillDoes() {
+        ListingMembership m = new ListingMembership(); m.setOwnerId("owner"); m.setFreeUsed(2);
+        when(users.lockMembershipOwner("owner")).thenReturn(Optional.of(new User()));
+        when(repository.findById("owner")).thenReturn(Optional.of(m));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken("owner", "n/a",
+                        java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ADMIN"))));
+        try {
+            Listing own = new Listing(); own.setOwnerId("owner");
+            service.reserve(own, false);
+            assertEquals("FREE", own.getPublicationReservation());
+            assertEquals(1, m.getFreeReserved());
+            assertFalse(service.view("owner").unlimited());
+            assertEquals(0, service.view("owner").remainingUses());
+            Listing second = new Listing(); second.setOwnerId("owner");
+            assertThrows(AppException.class, () -> service.reserve(second, false));
+            Listing moderated = new Listing(); moderated.setOwnerId("owner");
+            service.reserve(moderated, true);
+            assertEquals("ADMIN", moderated.getPublicationReservation());
+        } finally {
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
+        }
+    }
+
     private ListingMembership membership(MembershipTier tier, int used, int reserved) {
         ListingMembership m = new ListingMembership();
         m.setOwnerId("owner"); m.setTier(tier); m.setPaidUsed(used); m.setPaidReserved(reserved);

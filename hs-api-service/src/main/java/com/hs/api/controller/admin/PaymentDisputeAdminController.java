@@ -15,12 +15,13 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController @RequiredArgsConstructor @Validated
 @RequestMapping({"/admin/payment-disputes","/api/v1/admin/payment-disputes"})
-@PreAuthorize("hasAuthority('ADMIN')")
+@PreAuthorize("hasAuthority('ADMIN') and hasAuthority('DISPUTE_VIEW')")
 public class PaymentDisputeAdminController {
     private final PaymentDisputeService service;
     @GetMapping public PageResponse<DisputeCaseView> list(@RequestParam(required=false) DisputeCaseStatus status,
             @RequestParam(defaultValue="1") @Min(1) int page,@RequestParam(defaultValue="20") @Min(1) @Max(50) int size){return service.adminList(actor(),status,page,size);}
     @GetMapping("/{id}") public ApiResponse<DisputeCaseView> get(@PathVariable String id){return result(service.adminGet(id,actor()));}
+    @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('DISPUTE_RESOLVE')")
     @PostMapping("/{id}/actions/{action}") public ApiResponse<DisputeCaseView> act(@PathVariable String id,@PathVariable String action,
             @Valid @RequestBody DisputeCaseAction request){return result(service.adminAct(id,actor(),action,request));}
     private ApiResponse<DisputeCaseView> result(DisputeCaseView value){return ApiResponse.<DisputeCaseView>builder().result(value).build();}

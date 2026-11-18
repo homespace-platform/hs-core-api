@@ -2,6 +2,7 @@ package com.hs.user.mapper;
 
 import java.util.Map;
 
+import com.hs.common.security.Permissions;
 import com.hs.user.dto.request.UpdatePermissionRequest;
 import com.hs.user.dto.response.PermissionResponse;
 import com.hs.user.model.Permission;
@@ -19,6 +20,7 @@ public class PermissionMapper {
                                 .id(permission.getId())
                                 .name(permission.getName())
                                 .description(permission.getDescription())
+                                .scope(Permissions.isUserScope(permission.getName()) ? "USER" : "ADMIN")
                                 .active(permission.getActive())
                                 .createdAt(permission.getCreatedAt())
                                 .updatedAt(permission.getUpdatedAt())

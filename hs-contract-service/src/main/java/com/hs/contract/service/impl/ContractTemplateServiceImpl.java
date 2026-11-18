@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.context.UserContext;
+import com.hs.common.context.CurrentUser;
 import com.hs.common.context.UserContextHolder;
 import com.hs.common.dto.PageResponse;
 import com.hs.contract.advice.ContractErrorCode;
@@ -144,7 +145,7 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     @Transactional(readOnly = true)
     public ContractTemplateResponse getTemplateForLandlord(String userId, String templateId) {
         ContractTemplate template = requireReadableByLandlord(userId, templateId);
-        int count = versionRepository.findByTemplateIdOrderByVersionNumberDesc(templateId).size();
+        int count = (int) visibleVersions(template, userId).count();
         return toTemplateResponse(template, count);
     }
 
@@ -225,6 +226,10 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     public List<ContractTemplateResponse> getApplicableTemplates(String rentalRequestId) {
         RentalRequest request = rentalRequestRepository.findById(rentalRequestId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.RENTAL_REQUEST_NOT_APPROVED));
+        String caller = CurrentUser.requireUserId();
+        if (!caller.equals(request.getOwnerId()) && !caller.equals(request.getRenterId())) {
+            throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+        }
 
         Listing listing = request.getListing();
         ListingCategory category = listing != null ? listing.getCategory() : null;
@@ -387,6 +392,9 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     public byte[] testPreviewVersion(String templateId, String versionId) {
         ContractTemplateVersion version = versionRepository.findById(versionId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
+        if (!version.getTemplate().getId().equals(templateId)) {
+            throw new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND);
+        }
 
         byte[] templateDocxBytes = downloadStorageFile(version.getStorageObjectId());
         Map<String, Object> dummyData = renderService.buildDummyDataModel();
@@ -444,8 +452,8 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
     @Override
     @Transactional(readOnly = true)
     public List<ContractTemplateVersionResponse> getVersionsForLandlord(String userId, String templateId) {
-        requireReadableByLandlord(userId, templateId);
-        return getVersions(templateId);
+        ContractTemplate template = requireReadableByLandlord(userId, templateId);
+        return visibleVersions(template, userId).map(this::toVersionResponse).toList();
     }
 
     @Override
@@ -457,8 +465,26 @@ public class ContractTemplateServiceImpl implements ContractTemplateService {
 
     @Override
     public byte[] testPreviewForLandlord(String userId, String templateId, String versionId) {
-        requireReadableByLandlord(userId, templateId);
+        ContractTemplate template = requireReadableByLandlord(userId, templateId);
+        if (!ownedBy(template, userId)) {
+            // Non-owners see only PUBLISHED system versions; never preview a draft/deprecated one.
+            var version = versionRepository.findById(versionId)
+                    .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND));
+            if (version.getStatus() != TemplateVersionStatus.PUBLISHED) {
+                throw new AppException(ContractErrorCode.CONTRACT_TEMPLATE_VERSION_NOT_FOUND);
+            }
+        }
         return testPreviewVersion(templateId, versionId);
+    }
+
+    private boolean ownedBy(ContractTemplate template, String userId) {
+        return template.getSource() == ContractTemplateSource.LANDLORD && userId != null && userId.equals(template.getOwnerUserId());
+    }
+
+    /** Owner sees every version; anyone else (system templates) only PUBLISHED ones. */
+    private java.util.stream.Stream<ContractTemplateVersion> visibleVersions(ContractTemplate template, String userId) {
+        var all = versionRepository.findByTemplateIdOrderByVersionNumberDesc(template.getId()).stream();
+        return ownedBy(template, userId) ? all : all.filter(v -> v.getStatus() == TemplateVersionStatus.PUBLISHED);
     }
 
     /** Mẫu hệ thống (hoặc bản ghi cũ) hoặc mẫu thuộc sở hữu của user. */

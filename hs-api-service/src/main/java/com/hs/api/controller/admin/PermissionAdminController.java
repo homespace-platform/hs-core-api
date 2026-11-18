@@ -21,7 +21,7 @@ import java.util.List;
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 @RequestMapping("/admin/permissions")
-@PreAuthorize("hasAuthority('ADMIN')")
+@PreAuthorize("hasAuthority('ADMIN') and hasAuthority('PERMISSION_VIEW')")
 public class PermissionAdminController {
 
         PermissionService permissionService;
@@ -51,6 +51,7 @@ public class PermissionAdminController {
                                 .build();
         }
 
+        @PreAuthorize("hasAuthority('ADMIN') and hasAuthority('PERMISSION_UPDATE')")
         @PostMapping("/{id}")
         public ApiResponse<PermissionResponse> updatePermission(
                         @RequestBody @Valid UpdatePermissionRequest updatePermissionRequest,

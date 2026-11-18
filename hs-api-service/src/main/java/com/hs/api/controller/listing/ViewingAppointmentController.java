@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.Map;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 @RestController
 @RequestMapping("/appointments")
@@ -53,6 +54,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('APPOINTMENT_BOOK')")
     @PostMapping
     public ApiResponse<AppointmentResponse> createAppointment(@RequestBody @Valid CreateAppointmentRequest req) {
         UserContext context = requireUserContext();
@@ -81,6 +83,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('APPOINTMENT_BOOK')")
     @PutMapping("/{id}/reschedule")
     public ApiResponse<AppointmentResponse> requestReschedule(
             @PathVariable String id,
@@ -126,6 +129,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/approve")
     public ApiResponse<AppointmentResponse> approveAppointment(
             @PathVariable String id,
@@ -137,6 +141,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/reject")
     public ApiResponse<AppointmentResponse> rejectAppointment(
             @PathVariable String id,
@@ -148,6 +153,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/reschedule/approve")
     public ApiResponse<AppointmentResponse> approveReschedule(@PathVariable String id) {
         String ownerId = requireUserId();
@@ -157,6 +163,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/reschedule/reject")
     public ApiResponse<AppointmentResponse> rejectReschedule(
             @PathVariable String id,
@@ -168,6 +175,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/owner-cancel")
     public ApiResponse<AppointmentResponse> cancelByOwner(
             @PathVariable String id,
@@ -179,6 +187,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/complete")
     public ApiResponse<AppointmentResponse> completeAppointment(@PathVariable String id) {
         String ownerId = requireUserId();

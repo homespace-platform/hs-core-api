@@ -3,7 +3,9 @@ package com.hs.contract.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.common.advice.entity.AppException;
+import com.hs.common.context.CurrentUser;
 import com.hs.common.context.UserContextHolder;
+import com.hs.common.security.Permissions;
 import com.hs.common.dto.PageResponse;
 import com.hs.common.time.BillingTime;
 import com.hs.contract.advice.ContractErrorCode;
@@ -207,7 +209,7 @@ public class ComplaintCaseService {
     }
 
     @Transactional(readOnly=true) public PageResponse<ComplaintView> adminList(String actor,DisputeCaseStatus status,ComplaintCategory category,Boolean overdue,int page,int size){
-        admin(actor);
+        admin(actor,Permissions.COMPLAINT_VIEW);
         Specification<DisputeCase> spec=(root,q,cb)->{
             var filters=new ArrayList<jakarta.persistence.criteria.Predicate>();filters.add(cb.equal(root.get("subjectType"),"RENTAL"));
             if(status!=null)filters.add(cb.equal(root.get("status"),status));if(category!=null)filters.add(cb.equal(root.get("complaintCategory"),category.name()));
@@ -217,11 +219,11 @@ public class ComplaintCaseService {
         return new PageResponse<>(cases.findAll(spec,PageRequest.of(Math.max(0,page-1),Math.min(50,Math.max(1,size)),Sort.by("openedAt","id")))
             .map(d->view(d,actor,true,false)));
     }
-    @Transactional public ComplaintView adminGet(String id,String actor){admin(actor);var before=complaint(id);lockSource(before.getRentalRequestId(),before.getContractId());var d=lockCase(id,null);return view(d,actor,true,true);}
+    @Transactional public ComplaintView adminGet(String id,String actor){admin(actor,Permissions.COMPLAINT_VIEW);var before=complaint(id);lockSource(before.getRentalRequestId(),before.getContractId());var d=lockCase(id,null);return view(d,actor,true,true);}
     @Transactional public ComplaintView adminAct(String id,String actor,String action,ComplaintAction p){
         if(p==null)throw invalid("Thiếu nội dung thao tác.");
         if(p.settlement()!=null||p.outcome()!=null&&!"RECORD_FINDING".equals(p.outcome()))throw invalid("Khiếu nại chỉ trao đổi và ghi kết luận; không sửa hợp đồng hoặc quyết toán.");
-        admin(actor);var before=complaint(id);lockSource(before.getRentalRequestId(),before.getContractId());var d=lockCase(id,p);
+        admin(actor,Permissions.COMPLAINT_RESOLVE);var before=complaint(id);lockSource(before.getRentalRequestId(),before.getContractId());var d=lockCase(id,p);
         if(actor.equals(d.getPayerId())||actor.equals(d.getPayeeId()))throw forbidden("Admin không tự phân xử vụ việc của mình.");
         if(d.getStatus()!=DisputeCaseStatus.ESCALATED)throw forbidden("Chỉ tiếp nhận hồ sơ đã chuyển HomeSpace.");
         int reviews=adminReviewCount(events.findByCaseIdOrderByRevisionAsc(d.getId()));
@@ -326,7 +328,7 @@ public class ComplaintCaseService {
     private void bilateral(DisputeCase d){if(d.getStatus()!=DisputeCaseStatus.OPEN)throw forbidden("Hồ sơ đã chuyển HomeSpace; tiếp tục trao đổi với admin.");}
     private void party(RentalRequest r,String actor){if(actor==null||!actor.equals(r.getRenterId())&&!actor.equals(r.getOwnerId()))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);}
     private void party(DisputeCase d,String actor){if(actor==null||!actor.equals(d.getPayerId())&&!actor.equals(d.getPayeeId()))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);}
-    private void admin(String actor){var auth=SecurityContextHolder.getContext().getAuthentication();var c=UserContextHolder.get();if(actor==null||c==null||!actor.equals(c.userId())||auth==null||!auth.isAuthenticated()||auth.getAuthorities().stream().noneMatch(a->"ADMIN".equals(a.getAuthority())))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);}
+    private void admin(String actor,String permission){var c=UserContextHolder.get();if(actor==null||c==null||!actor.equals(c.userId())||!CurrentUser.isAdminWith(permission))throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);}
     private String text(String s,int max){if(s==null||s.trim().length()<10||s.trim().length()>max)throw invalid("Nội dung cần 10–"+max+" ký tự.");return s.trim();}
     private String json(Object value){try{return mapper.writeValueAsString(value);}catch(Exception e){throw new IllegalStateException("Cannot write complaint audit",e);}}
     private AppException missing(){return new AppException(ContractErrorCode.COMPLAINT_NOT_FOUND);}

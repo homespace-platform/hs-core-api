@@ -100,9 +100,25 @@ class RentalRequestServiceTest {
         org.springframework.test.util.ReflectionTestUtils.setField(rentalRequestService,"businessTime",clock);
         var listing=Listing.builder().id("quote").ownerId("owner").category(com.hs.listing.model.constant.ListingCategory.HOUSE)
             .priceUnit(com.hs.listing.model.constant.PriceUnit.MONTH).priceAmount(new BigDecimal("19660000"))
+            .status(com.hs.listing.model.constant.ListingStatus.PUBLISHED)
             .depositType(freeDeposit?DepositType.NONE:DepositType.MONTH_COUNT).depositMonths(freeDeposit?null:2).build();
         when(listingRepository.findByIdAndActiveTrue("quote")).thenReturn(Optional.of(listing));
         return rentalRequestService.estimateRentalCost(new com.hs.listing.dto.estimate.RentalEstimateRequest("quote",startsOn,12,1,0,0,null));
+    }
+    @Test void estimateOfAnotherOwnersDraftIsNotFoundButOwnerMayEstimateIt() {
+        var draft=Listing.builder().id("draft").ownerId("owner").status(com.hs.listing.model.constant.ListingStatus.DRAFT).build();
+        when(listingRepository.findByIdAndActiveTrue("draft")).thenReturn(Optional.of(draft));
+        var request=new com.hs.listing.dto.estimate.RentalEstimateRequest("draft",LocalDate.now().plusDays(10),12,1,0,0,null);
+        com.hs.common.context.UserContextHolder.set(new com.hs.common.context.UserContext("stranger","s@example.com"));
+        try {
+            var failure=assertThrows(AppException.class,()->rentalRequestService.estimateRentalCost(request));
+            assertEquals(com.hs.listing.advice.ListingErrorCode.LISTING_NOT_FOUND.getCode(),failure.getCode());
+            com.hs.common.context.UserContextHolder.set(new com.hs.common.context.UserContext("owner","o@example.com"));
+            // Owner passes the visibility gate; later failures (missing pricing data) are not NOT_FOUND.
+            try { rentalRequestService.estimateRentalCost(request); }
+            catch(AppException e) { assertNotEquals(com.hs.listing.advice.ListingErrorCode.LISTING_NOT_FOUND.getCode(),e.getCode()); }
+            catch(RuntimeException ignored) { }
+        } finally { com.hs.common.context.UserContextHolder.clear(); }
     }
     @Test void futureMoveInQuotesOnlyDepositNowAndNamesTheFirstRentOpeningDate() {
         var estimate=quoteAt("2026-10-21T03:00:00Z",LocalDate.of(2026,11,1),false);

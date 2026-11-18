@@ -104,7 +104,7 @@ public class ListingQueryService {
                 && (listing.getStatus() == ListingStatus.PUBLISHED || listing.getStatus() == ListingStatus.RESERVED);
         boolean hasRentalRequest = viewerId != null && rentalRequestRepository.existsByListingIdAndRenterId(listing.getId(), viewerId);
         if (!owner && !visibleListing && !hasRentalRequest) throw new AppException(ErrorCode.ROUTE_NOT_FOUND);
-        return toDetail(listing, owner);
+        return toDetail(listing, owner, owner, viewerId == null || viewerId.isBlank());
     }
 
     private MyListingSummaryResponse toSummary(Listing listing,com.hs.listing.model.ListingAddress address) {
@@ -130,21 +130,24 @@ public class ListingQueryService {
                 listing.getViewCount() != null ? listing.getViewCount() : 0L, listing.getPendingEditId(), listing.getOperationalStatus());
     }
 
+    /** Admin moderation view: audit fields and phone included. */
     public ListingDetailResponse toDetail(Listing listing) {
-        return toDetail(listing, false);
+        return toDetail(listing, false, true, false);
     }
 
-    private ListingDetailResponse toDetail(Listing listing, boolean owner) {
+    private ListingDetailResponse toDetail(Listing listing, boolean owner, boolean privileged, boolean anonymous) {
         var address = addressRepository.findByListingIdAndActiveTrue(listing.getId())
                 .map(ListingAddressResponse::from).orElse(null);
-        return toDetail(listing, owner, address);
+        return toDetail(listing, owner, privileged, anonymous, address);
     }
 
     public ListingDetailResponse toDetail(Listing listing, ListingAddressResponse address) {
-        return toDetail(listing, false, address);
+        return toDetail(listing, false, true, false, address);
     }
 
-    private ListingDetailResponse toDetail(Listing listing, boolean owner, ListingAddressResponse address) {
+    /** privileged = owner or admin view (status reason and audit ids); anonymous viewers never get the owner phone. */
+    private ListingDetailResponse toDetail(Listing listing, boolean owner, boolean privileged, boolean anonymous,
+                                           ListingAddressResponse address) {
         var amenities = listing.getAmenities().stream()
                 .filter(item -> !"PETS_ALLOWED".equals(item.getCode()))
                 .sorted(Comparator.comparing(Amenity::getSortOrder).thenComparing(Amenity::getCode))
@@ -170,7 +173,7 @@ public class ListingQueryService {
                 ? List.<com.hs.listing.model.constant.ListingEnums.ViewingSlot>of()
                 : listing.getViewingSlots().stream().sorted().toList();
         var listingOwner = userRepository.findById(listing.getOwnerId())
-                .map(ListingOwnerResponse::from)
+                .map(user -> anonymous ? ListingOwnerResponse.from(user).withoutPhone() : ListingOwnerResponse.from(user))
                 .orElse(null);
         String branchName = listing.getBranchId() != null
                 ? branchRepository.findByIdAndActiveTrue(listing.getBranchId()).map(PropertyBranch::getName).orElse(null)
@@ -185,10 +188,11 @@ public class ListingQueryService {
                 toOffice(listing.getOfficeDetail()), toCommercial(listing.getCommercialDetail()),
                 toRoom(listing.getRoomDetail()), amenities, customAmenities, furnishings, charges,
                 address, listingOwner, media, viewingDays, viewingSlots,
-                Boolean.TRUE.equals(listing.getActive()), listing.getStatusReason(), listing.getSubmittedAt(),
+                Boolean.TRUE.equals(listing.getActive()), privileged ? listing.getStatusReason() : null, listing.getSubmittedAt(),
                 listing.getPublishedAt(), listing.getExpiresAt(), listing.getStatusChangedAt(),
-                listing.getStatusChangedBy(), listing.getVersion(),
-                listing.getCreatedAt(), listing.getUpdatedAt(), listing.getCreatedBy(), listing.getUpdatedBy(),
+                privileged ? listing.getStatusChangedBy() : null, listing.getVersion(),
+                listing.getCreatedAt(), listing.getUpdatedAt(),
+                privileged ? listing.getCreatedBy() : null, privileged ? listing.getUpdatedBy() : null,
                 listing.getViewCount() != null ? listing.getViewCount() : 0L,ListingPolicyService.snapshot(listing),
                 owner ? listing.getPendingEditId() : null, owner ? listing.getEditRejectionReason() : null, listing.getOperationalStatus());
     }

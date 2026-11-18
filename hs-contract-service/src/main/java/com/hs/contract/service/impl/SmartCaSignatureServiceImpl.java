@@ -209,8 +209,8 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     public SignatureRequestDto getSignatureRequest(String contractId, String requestId, String currentUserId) {
         SignatureRequest req = requestRepository.findById(requestId)
                 .orElseThrow(() -> new AppException(ContractErrorCode.SIGNATURE_REQUEST_NOT_FOUND));
-        requireContractAccess(contractId, currentUserId);
-        if (!contractId.equals(req.getContractId())) {
+        Contract contract = requireContractAccess(contractId, currentUserId);
+        if (!contractId.equals(req.getContractId()) || resolveSignerRole(contract, currentUserId) != req.getSignerRole()) {
             throw new AppException(ContractErrorCode.SIGNATURE_REQUEST_NOT_FOUND);
         }
         return toDto(req);
@@ -1058,9 +1058,10 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
     }
 
     private SignatureRequest loadRequest(String requestId, String contractId, String currentUserId) {
-        requireContractAccess(contractId, currentUserId);
+        Contract contract = requireContractAccess(contractId, currentUserId);
+        SignerRole callerRole = resolveSignerRole(contract, currentUserId);
         return requestRepository.findById(requestId)
-                .filter(req -> contractId.equals(req.getContractId()))
+                .filter(req -> contractId.equals(req.getContractId()) && callerRole == req.getSignerRole())
                 .orElseThrow(() -> new AppException(ContractErrorCode.SIGNATURE_REQUEST_NOT_FOUND));
     }
 

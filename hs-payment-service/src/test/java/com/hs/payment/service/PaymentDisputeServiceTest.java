@@ -77,7 +77,7 @@ class PaymentDisputeServiceTest {
     StorageObject file(String actor){return StorageObject.builder().id("proof").ownerId(actor).referenceType("PAYMENT_REQUEST").referenceId("payment")
         .purpose(StoragePurpose.PAYMENT_PROOF).visibility(StorageVisibility.PRIVATE).status(StorageStatus.READY).build();}
     void admin(String actor){UserContextHolder.set(new UserContext(actor,null));SecurityContextHolder.getContext().setAuthentication(
-        UsernamePasswordAuthenticationToken.authenticated(actor,"n/a",List.of(new SimpleGrantedAuthority("ADMIN"))));}
+        UsernamePasswordAuthenticationToken.authenticated(actor,"n/a",List.of(new SimpleGrantedAuthority("ADMIN"),new SimpleGrantedAuthority("DISPUTE_VIEW"),new SimpleGrantedAuthority("DISPUTE_RESOLVE"))));}
     /** Saved rental-request notices as "EVENT:SIDE:recipient" in enqueue order. */
     List<String> notices(){
         var saved=org.mockito.ArgumentCaptor.forClass(com.hs.listing.notification.RentalRequestNotificationOutbox.class);
@@ -187,6 +187,19 @@ class PaymentDisputeServiceTest {
         assertEquals(DisputeCaseStatus.RESOLVED,c.getStatus());assertEquals("admin",c.getResolvedBy());assertNull(p.getConfirmedAt());
         assertEquals("ADMIN",history.getLast().getActorRole());
     }
+    @Test void adminRoleAloneIsNotEnoughAndViewPermissionDoesNotAllowActing(){
+        var c=open();act(c,"tenant","ESCALATE",null);
+        withAuthorities("admin","ADMIN");
+        code(7005,()->service.adminList("admin",null,1,10));code(7005,()->service.adminGet(c.getId(),"admin"));
+        code(7005,()->service.adminAct(c.getId(),"admin","CLAIM",action(c,null)));
+        withAuthorities("admin","ADMIN","DISPUTE_VIEW");
+        service.adminGet(c.getId(),"admin");
+        code(7005,()->service.adminAct(c.getId(),"admin","CLAIM",action(c,null)));
+        withAuthorities("admin","DISPUTE_VIEW","DISPUTE_RESOLVE");
+        code(7005,()->service.adminGet(c.getId(),"admin"));
+    }
+    void withAuthorities(String actor,String... authorities){UserContextHolder.set(new UserContext(actor,null));SecurityContextHolder.getContext().setAuthentication(
+        UsernamePasswordAuthenticationToken.authenticated(actor,"n/a",java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toList()));}
     @Test void adminsCannotAdjudicateTheirOwnRentalOrUseAnotherAdminsIdentity(){
         var c=open();act(c,"tenant","ESCALATE",null);admin("tenant");
         code(7027,()->service.adminAct(c.getId(),"tenant","CLAIM",action(c,null)));
