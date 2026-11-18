@@ -1,0 +1,14 @@
+# Only Maven inputs enter the build context; local credentials and build output stay out.
+**
+!pom.xml
+!mvnw
+!.mvn/
+!.mvn/wrapper/
+!.mvn/wrapper/maven-wrapper.properties
+!hs-*-service/
+!hs-*-service/pom.xml
+!hs-*-service/src/
+!hs-*-service/src/**
+**/.env*
+**/*.pem
+**/*.key

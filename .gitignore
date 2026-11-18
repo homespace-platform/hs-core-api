@@ -39,5 +39,6 @@ build/
 ### Environment Variables ###
 .env
 .env.dev
+.env.dokploy
 !.env.example
 !.env.dev.example

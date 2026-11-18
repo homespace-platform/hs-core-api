@@ -2,7 +2,10 @@ package com.hs.contract.blockchain.client;
 
 import com.hs.contract.blockchain.api.ContractDocumentProofQueryService;
 import com.hs.contract.blockchain.config.BlockchainProperties;
+import com.hs.contract.blockchain.persistence.ContractDocumentProofEnqueuer;
 import com.hs.contract.blockchain.persistence.ContractDocumentProofRepository;
+import com.hs.contract.repository.ContractDocumentRepository;
+import com.hs.contract.repository.ContractRepository;
 import com.hs.contract.service.ContractService;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -16,6 +19,9 @@ class Web3jRegistryClientContextTest {
         try (var context = new AnnotationConfigApplicationContext()) {
             context.registerBean(ContractService.class, () -> mock(ContractService.class));
             context.registerBean(ContractDocumentProofRepository.class, () -> mock(ContractDocumentProofRepository.class));
+            context.registerBean(ContractRepository.class, () -> mock(ContractRepository.class));
+            context.registerBean(ContractDocumentRepository.class, () -> mock(ContractDocumentRepository.class));
+            context.registerBean(ContractDocumentProofEnqueuer.class, () -> mock(ContractDocumentProofEnqueuer.class));
             context.register(BlockchainProperties.class, Web3jRegistryClient.class, ContractDocumentProofQueryService.class);
             // Khởi tạo bằng Spring thật để phát hiện constructor ambiguity mà test dùng new() không bắt được.
             context.refresh();
