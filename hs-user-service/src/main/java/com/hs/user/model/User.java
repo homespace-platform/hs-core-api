@@ -1,15 +1,11 @@
 package com.hs.user.model;
 
 import java.time.Instant;
-import java.time.LocalDate;
 
 import com.hs.common.persistence.BaseEntity;
-import com.hs.user.model.constant.Gender;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
@@ -62,11 +58,6 @@ public class User extends BaseEntity {
     @org.hibernate.annotations.Formula("(select k.cccd from user_kyc_details k where k.user_id = id)")
     @Setter(AccessLevel.NONE)
     String cccd;
-
-    LocalDate dob;
-
-    @Enumerated(EnumType.STRING)
-    Gender gender;
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "role_id")

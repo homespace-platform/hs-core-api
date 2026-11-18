@@ -3,6 +3,7 @@ package com.hs.contract.deposit;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.common.advice.entity.AppException;
+import com.hs.common.context.CurrentUser;
 import com.hs.common.payment.ReservationPolicy;
 import com.hs.common.time.BillingTime;
 import com.hs.contract.advice.ContractErrorCode;
@@ -39,6 +40,7 @@ public class DepositAgreementService {
     private final PaymentLineItemRepository lines;
     private final ContractDataBuilder builder;
     private final ContractFieldCatalog catalog;
+    private final com.hs.contract.service.ContractPartyKycGuard partyKyc;
     private final ObjectMapper mapper;
     private final BillingTime time;
     private final com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
@@ -158,6 +160,7 @@ public class DepositAgreementService {
         var template=published.getFirst();
         String number="DC-"+time.today().format(DateTimeFormatter.BASIC_ISO_DATE)+"-"+UUID.randomUUID().toString().substring(0,8).toUpperCase();
         if(r.getListingSnapshot()==null || r.getListingSnapshot().isBlank())throw invalid("Thiếu bản chụp tài sản tại thời điểm chấp nhận yêu cầu thuê; không dùng bài đăng hiện tại để thay lịch sử.");
+        partyKyc.require(r.getOwnerId(),r.getRenterId(),CurrentUser.optionalUserId().orElse(null));
         var snapshots=builder.build(r,r.getListing(),payment);
         var frozen=build(r,payment,allocation,snapshots,number);
         var missing=DepositDataModel.missing(frozen,new DepositFieldCatalog(catalog),r.getListing().getCategory());
@@ -254,6 +257,7 @@ public class DepositAgreementService {
             throw invalid("Hồ sơ không còn cho phép mở lại hạn ký cọc.");
         var c=find(rentalId).orElseThrow();c=contracts.findByIdForUpdate(c.getId()).orElseThrow();
         if(c.getStatus()!=ContractStatus.TENANT_SIGNATURE_PENDING)throw invalid("Không có bước ký cọc cần mở lại.");
+        partyKyc.require(r.getOwnerId(),r.getRenterId(),actor);
         c.setTenantSigningDueAt(time.now().plus(Duration.ofHours(signingHours)));contracts.save(c);
         signingNotices.signingTurn(c);
         audit(rentalId,actor,"DEPOSIT_SIGNING_REOPENED","Chủ nhà mở lại hạn khách ký hợp đồng cọc; không thay đổi xác nhận tiền.");

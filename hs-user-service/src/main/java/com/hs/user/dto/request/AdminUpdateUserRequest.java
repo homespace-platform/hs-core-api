@@ -2,11 +2,6 @@ package com.hs.user.dto.request;
 
 import static com.hs.user.validation.UserValidationPatterns.VIETNAMESE_PHONE;
 
-import java.time.LocalDate;
-
-import com.hs.user.model.constant.Gender;
-import com.hs.user.validation.Adult;
-
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -28,11 +23,6 @@ public record AdminUpdateUserRequest(
 
         @Pattern(regexp = VIETNAMESE_PHONE, message = "Vietnamese phone number format is invalid")
         String phone,
-
-        @Adult(message = "User must be at least 18 years old")
-        LocalDate dob,
-
-        Gender gender,
 
         String roleId
 ) {

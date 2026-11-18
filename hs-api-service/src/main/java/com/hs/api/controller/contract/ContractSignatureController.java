@@ -1,5 +1,6 @@
 package com.hs.api.controller.contract;
 
+import com.hs.api.profile.RequiresCompleteProfile;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.context.UserContext;
@@ -58,6 +59,7 @@ public class ContractSignatureController {
      * POST /contracts/{contractId}/signatures/initiate
      * Khởi tạo yêu cầu ký số. Idempotent khi request còn hiệu lực.
      */
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('CONTRACT_SIGN')")
     @PostMapping("/initiate")
     public ApiResponse<SignatureRequestDto> initiateSignature(
@@ -102,6 +104,7 @@ public class ContractSignatureController {
      * POST /contracts/{contractId}/signatures/{requestId}/retry
      * Thử lại sau khi bị từ chối/hết hạn/lỗi.
      */
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('CONTRACT_SIGN')")
     @PostMapping("/{requestId}/retry")
     public ApiResponse<SignatureRequestDto> retrySignature(

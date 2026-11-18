@@ -411,7 +411,7 @@ class ContractDataBuilderTest {
         when(kyc.getVerifiedDetails(org.mockito.ArgumentMatchers.anyString())).thenReturn(identity.toResponse());
         var request = RentalRequest.builder().ownerId("landlord").renterId("tenant")
                 .renterName("Self entered renter name").occupantCount(1).build();
-        var source = new com.hs.user.model.User();source.setFirstName("Self entered profile name");source.setDob(java.time.LocalDate.of(2008, 1, 1));
+        var source = new com.hs.user.model.User();source.setFirstName("Self entered profile name");
         var users = mock(UserRepository.class);
         when(users.findById(org.mockito.ArgumentMatchers.anyString())).thenReturn(Optional.of(source));
         var builder = new ContractDataBuilder(users, kyc);

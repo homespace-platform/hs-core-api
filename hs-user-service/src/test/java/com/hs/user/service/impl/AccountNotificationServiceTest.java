@@ -7,7 +7,12 @@ import com.hs.user.notification.AccountNotificationWriter;
 import com.hs.user.repository.*;
 import com.hs.user.service.KeycloakUserService;
 import com.hs.user.utils.CurrentUserUtils;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -30,8 +35,12 @@ class AccountNotificationServiceTest {
         target.setRole(Role.builder().id("old-role").name("OLD_PRIVATE_ROLE").build());
         when(identity.getCurrentUserId()).thenReturn("verified-admin");
         when(users.findByIdForUpdate("target")).thenReturn(Optional.of(target));
+        // Role changes now require an ADMIN holding ROLE_UPDATE.
+        SecurityContextHolder.getContext().setAuthentication(UsernamePasswordAuthenticationToken.authenticated("verified-admin","n/a",
+                List.of(new SimpleGrantedAuthority("ADMIN"),new SimpleGrantedAuthority("ROLE_UPDATE"),new SimpleGrantedAuthority("USER_UPDATE"))));
     }
-    AdminUpdateUserRequest update(String roleId) { return new AdminUpdateUserRequest(null,null,null,null,null,null,null,roleId); }
+    @AfterEach void clear() { SecurityContextHolder.clearContext(); }
+    AdminUpdateUserRequest update(String roleId) { return new AdminUpdateUserRequest(null,null,null,null,null,roleId); }
 
     @ParameterizedTest @ValueSource(booleans={true,false})
     void changedStatusEnqueuesOnlyAfterKeycloakReturns(boolean enabled) {
@@ -65,7 +74,7 @@ class AccountNotificationServiceTest {
     @Test void sameRoleBlankRoleAndProfileOnlyDoNotNotify() {
         when(roles.findByIdAndActiveTrue("old-role")).thenReturn(Optional.of(target.getRole()));
         for(String roleId:new String[]{"old-role",null,""," "}) service.updateUser("target",update(roleId));
-        service.updateUser("target",new AdminUpdateUserRequest(null,null,"New name",null,null,null,null,null));
+        service.updateUser("target",new AdminUpdateUserRequest(null,null,"New name",null,null,null));
         verifyNoInteractions(notices);
     }
     @Test void ownRoleUnknownRoleAndFailedProfileSyncDoNotNotify() {
@@ -73,6 +82,8 @@ class AccountNotificationServiceTest {
         assertThrows(RuntimeException.class,()->service.updateUser("target",update("new-role")));
         when(identity.getCurrentUserId()).thenReturn("verified-admin");
         assertThrows(RuntimeException.class,()->service.updateUser("target",update("missing-role")));
+        // Role is resolved before the Keycloak sync, so the sync-failure case needs a real target role.
+        when(roles.findByIdAndActiveTrue("new-role")).thenReturn(Optional.of(Role.builder().id("new-role").name("NEW_ROLE").build()));
         doThrow(new IllegalStateException("test sync failure")).when(keycloak).updateUserIfChanged(anyString(),any());
         assertThrows(IllegalStateException.class,()->service.updateUser("target",update("new-role")));verifyNoInteractions(notices);
     }

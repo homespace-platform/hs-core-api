@@ -1,5 +1,6 @@
 package com.hs.api.controller.listing;
 
+import com.hs.api.profile.RequiresCompleteProfile;
 import com.hs.common.context.UserContext;
 import com.hs.common.context.UserContextHolder;
 import com.hs.common.dto.ApiResponse;
@@ -24,6 +25,7 @@ public class PropertyBranchController {
 
     private final PropertyBranchService branchService;
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('LISTING_POST')")
     @PostMapping
     public ResponseEntity<ApiResponse<PropertyBranchResponse>> createBranch(
@@ -50,6 +52,7 @@ public class PropertyBranchController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('LISTING_POST')")
     @PutMapping("/{id}")
     public ApiResponse<PropertyBranchResponse> updateBranch(
@@ -61,6 +64,7 @@ public class PropertyBranchController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('LISTING_POST')")
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteBranch(@PathVariable String id) {

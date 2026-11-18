@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import com.hs.api.profile.ProfileIncompleteException;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.dto.ApiResponse;
@@ -62,6 +63,16 @@ public class GlobalException {
     ResponseEntity<ApiResponse<Void>> handlingAppException(AppException exception) {
         return ResponseEntity.status(exception.getStatusCode())
                 .body(buildErrorResponse(exception.getCode(), exception.getErrorMessage()));
+    }
+
+    /** Carries the missing requirement codes in result.missing; more specific than the AppException handler. */
+    @ExceptionHandler(ProfileIncompleteException.class)
+    ResponseEntity<ApiResponse<java.util.Map<String, java.util.List<String>>>> handlingProfileIncomplete(
+            ProfileIncompleteException exception) {
+        return ResponseEntity.status(exception.getStatusCode()).body(
+                ApiResponse.<java.util.Map<String, java.util.List<String>>>builder()
+                        .code(exception.getCode()).message(exception.getErrorMessage())
+                        .result(java.util.Map.of("missing", exception.getMissing())).build());
     }
 
     @ExceptionHandler(NoResourceFoundException.class)

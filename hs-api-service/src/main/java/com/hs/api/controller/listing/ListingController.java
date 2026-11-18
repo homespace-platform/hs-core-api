@@ -1,5 +1,6 @@
 package com.hs.api.controller.listing;
 
+import com.hs.api.profile.RequiresCompleteProfile;
 import com.hs.common.context.*;
 import com.hs.common.dto.ApiResponse;
 import com.hs.common.dto.PageResponse;
@@ -32,6 +33,7 @@ public class ListingController {
     private final ListingStatusService listingStatusService;
     private final KycGateService kycGateService;
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('LISTING_POST')")
     @PostMapping({"", "/upsert"})
     public ResponseEntity<ApiResponse<CreateListingResponse>> upsert(
@@ -78,6 +80,7 @@ public class ListingController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('LISTING_POST')")
     @PatchMapping("/{listingId}/status")
     public ApiResponse<ListingDetailResponse> changeStatus(
@@ -89,6 +92,7 @@ public class ListingController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('LISTING_POST')")
     @PatchMapping("/{listingId}/hide")
     public ApiResponse<ListingDetailResponse> hide(@PathVariable String listingId) {

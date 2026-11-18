@@ -1,9 +1,6 @@
 package com.hs.user.dto.response;
 
 import java.time.Instant;
-import java.time.LocalDate;
-
-import com.hs.user.model.constant.Gender;
 
 import lombok.Builder;
 
@@ -18,8 +15,6 @@ public record UserProfileResponse(
         String avatarStorageId,
         String phone,
         String cccd,
-        LocalDate dob,
-        Gender gender,
         String roleId,
         String role,
         Boolean onBoarded,

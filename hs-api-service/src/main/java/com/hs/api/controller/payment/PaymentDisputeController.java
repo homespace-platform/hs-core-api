@@ -1,4 +1,5 @@
 package com.hs.api.controller.payment;
+import com.hs.api.profile.RequiresCompleteProfile;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.context.UserContextHolder;
@@ -17,6 +18,7 @@ public class PaymentDisputeController {
     public record Adopt(@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(min=10,max=500) String reason) {}
     @GetMapping("/payment-requests/{id}/dispute-cases")
     public ApiResponse<List<DisputeCaseView>> cases(@PathVariable String id){return ApiResponse.<List<DisputeCaseView>>builder().result(service.forPayment(id,actor())).build();}
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('PAYMENT_DISPUTE_CREATE')")
     @PostMapping("/payment-requests/{id}/dispute-cases/adopt")
     public ApiResponse<DisputeCaseView> adopt(@PathVariable String id,@Valid @RequestBody Adopt request){return result(service.adoptLegacy(id,actor(),request.reason()));}

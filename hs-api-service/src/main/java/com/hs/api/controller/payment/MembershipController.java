@@ -1,5 +1,6 @@
 package com.hs.api.controller.payment;
 
+import com.hs.api.profile.RequiresCompleteProfile;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.context.UserContextHolder;
@@ -49,6 +50,7 @@ public class MembershipController {
         return ApiResponse.<MembershipService.Quote>builder().result(memberships.quote(requireUserId(), tier)).build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('MEMBERSHIP_PURCHASE')")
     @PostMapping("/checkout")
     public ApiResponse<MembershipCheckoutService.Checkout> checkout(@RequestBody @Valid CheckoutRequest request) {
@@ -74,6 +76,7 @@ public class MembershipController {
                 .result(ethPayment.challenge(id, requireUserId(), wallet)).build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('MEMBERSHIP_PURCHASE')")
     @PostMapping("/orders/{id}/eth/quote")
     public ApiResponse<EthPaymentDtos.Quote> ethQuote(@PathVariable String id,

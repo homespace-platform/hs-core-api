@@ -1,5 +1,6 @@
 package com.hs.api.controller.listing;
 
+import com.hs.api.profile.RequiresCompleteProfile;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.context.UserContext;
@@ -54,6 +55,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('APPOINTMENT_BOOK')")
     @PostMapping
     public ApiResponse<AppointmentResponse> createAppointment(@RequestBody @Valid CreateAppointmentRequest req) {
@@ -83,6 +85,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('APPOINTMENT_BOOK')")
     @PutMapping("/{id}/reschedule")
     public ApiResponse<AppointmentResponse> requestReschedule(
@@ -129,6 +132,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/approve")
     public ApiResponse<AppointmentResponse> approveAppointment(
@@ -141,6 +145,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/reject")
     public ApiResponse<AppointmentResponse> rejectAppointment(
@@ -153,6 +158,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/reschedule/approve")
     public ApiResponse<AppointmentResponse> approveReschedule(@PathVariable String id) {
@@ -163,6 +169,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/reschedule/reject")
     public ApiResponse<AppointmentResponse> rejectReschedule(
@@ -187,6 +194,7 @@ public class ViewingAppointmentController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('APPOINTMENT_MANAGE')")
     @PutMapping("/{id}/complete")
     public ApiResponse<AppointmentResponse> completeAppointment(@PathVariable String id) {

@@ -281,7 +281,7 @@ class RentalWorkflowPostgresTest {
             }
         });
         var realDeposits=new com.hs.contract.deposit.DepositAgreementService(depositAgreementRecords,contracts,signatures,revisions,mock(ContractTemplateVersionRepository.class),rentals,onboardingEvents,deposits,paymentRepo,lines,contractDataBuilder,
-                new com.hs.contract.service.engine.ContractFieldCatalog(),new ObjectMapper(),time,mock(com.hs.contract.notification.AgreementSigningNotificationWriter.class));
+                new com.hs.contract.service.engine.ContractFieldCatalog(),mock(ContractPartyKycGuard.class),new ObjectMapper(),time,mock(com.hs.contract.notification.AgreementSigningNotificationWriter.class));
         org.springframework.test.util.ReflectionTestUtils.setField(onboarding,"depositAgreements",realDeposits);
         try {
             onboarding.processDue(rentalId);

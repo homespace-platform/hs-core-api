@@ -1,5 +1,6 @@
 package com.hs.api.controller.contract;
 
+import com.hs.api.profile.RequiresCompleteProfile;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.context.UserContext;
@@ -139,6 +140,7 @@ public class ContractController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('CONTRACT_MANAGE')")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -192,6 +194,7 @@ public class ContractController {
                 .result(contractService.previewListingSync(contractId)).build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('CONTRACT_MANAGE')")
     @PatchMapping("/{contractId}/revision")
     public ApiResponse<ContractRevisionResponse> updateRevision(
@@ -213,6 +216,7 @@ public class ContractController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('CONTRACT_MANAGE')")
     @PostMapping("/{contractId}/previews")
     public ApiResponse<ContractDocumentResponse> triggerPreview(@PathVariable String contractId,
@@ -232,6 +236,7 @@ public class ContractController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('CONTRACT_MANAGE')")
     @PostMapping("/{contractId}/send")
     public ApiResponse<ContractResponse> sendToTenant(@PathVariable String contractId) {
@@ -265,6 +270,7 @@ public class ContractController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('CONTRACT_SIGN')")
     @PostMapping("/{contractId}/sign")
     public ApiResponse<ContractResponse> sign(@PathVariable String contractId) {

@@ -1,5 +1,6 @@
 package com.hs.api.controller.listing;
 
+import com.hs.api.profile.RequiresCompleteProfile;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.context.UserContext;
@@ -62,6 +63,7 @@ public class RentalRequestController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('RENTAL_REQUEST_CREATE')")
     @PostMapping
     public ApiResponse<RentalRequestResponse> createRentalRequest(@RequestBody @Valid CreateRentalRequest req) {
@@ -141,6 +143,7 @@ public class RentalRequestController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('RENTAL_REQUEST_MANAGE')")
     @PutMapping("/{id}/accept")
     public ApiResponse<RentalRequestResponse> acceptRentalRequest(@PathVariable String id) {
@@ -152,6 +155,7 @@ public class RentalRequestController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('RENTAL_REQUEST_MANAGE')")
     @PutMapping("/{id}/reject")
     public ApiResponse<RentalRequestResponse> rejectRentalRequest(

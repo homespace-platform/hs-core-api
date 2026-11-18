@@ -111,12 +111,6 @@ public class UserServiceImpl implements UserService {
                 if (hasText(request.phone())) {
                         user.setPhone(request.phone().trim());
                 }
-                if (request.dob() != null) {
-                        user.setDob(request.dob());
-                }
-                if (request.gender() != null) {
-                        user.setGender(request.gender());
-                }
 
                 userRepository.save(user);
                 if (roleChanged) {
@@ -179,12 +173,6 @@ public class UserServiceImpl implements UserService {
                 }
                 if (hasText(onboardingRequest.phone())) {
                         user.setPhone(onboardingRequest.phone().trim());
-                }
-                if (onboardingRequest.dob() != null) {
-                        user.setDob(onboardingRequest.dob());
-                }
-                if (onboardingRequest.gender() != null) {
-                        user.setGender(onboardingRequest.gender());
                 }
                 // Personal profile info saved. Onboarding completion requires bank account step.
                 userRepository.save(user);
@@ -292,12 +280,6 @@ public class UserServiceImpl implements UserService {
 
                 if (request.phone() != null) {
                         user.setPhone(request.phone());
-                }
-                if (request.dob() != null) {
-                        user.setDob(request.dob());
-                }
-                if (request.gender() != null) {
-                        user.setGender(request.gender());
                 }
 
                 userRepository.save(user);

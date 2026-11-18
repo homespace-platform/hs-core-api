@@ -9,6 +9,9 @@ public record OnboardingStatusResponse(
         int version,
         List<String> requiredSteps,
         List<String> completedSteps,
-        String nextStep
+        String nextStep,
+        boolean passwordSet,
+        List<String> missingRequirements,
+        boolean serviceReady
 ) {
 }

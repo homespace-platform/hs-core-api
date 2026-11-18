@@ -94,7 +94,7 @@ class UserServiceImplAdminGuardsTest {
         login("ADMIN", "USER_UPDATE");
 
         assertCode(ErrorCode.UNAUTHORIZED, () -> service.updateUser("target",
-                new AdminUpdateUserRequest(null, null, null, null, null, null, null, "role-x")));
+                new AdminUpdateUserRequest(null, null, null, null, null, "role-x")));
         verifyNoInteractions(keycloak);
         verify(users, never()).save(any());
     }
@@ -106,7 +106,7 @@ class UserServiceImplAdminGuardsTest {
 
         // Same roleId as the current one is not a role change; the response mapping is out of scope here.
         try {
-            service.updateUser("target", new AdminUpdateUserRequest(null, null, null, null, null, null, null, "role-user"));
+            service.updateUser("target", new AdminUpdateUserRequest(null, null, null, null, null, "role-user"));
         } catch (RuntimeException ignored) {
             // mapper may reject the bare fixture; the guard is what matters
         }
@@ -121,7 +121,7 @@ class UserServiceImplAdminGuardsTest {
 
         assertCode(UserErrorCode.USER_LAST_ADMIN, () -> service.updateUserStatus("a1", false));
         assertCode(UserErrorCode.USER_LAST_ADMIN, () -> service.updateUser("a1",
-                new AdminUpdateUserRequest(null, null, null, null, null, null, null, "role-user")));
+                new AdminUpdateUserRequest(null, null, null, null, null, "role-user")));
         assertEquals(true, onlyAdmin.getActive());
         assertEquals(adminRole, onlyAdmin.getRole());
         verifyNoInteractions(keycloak);
@@ -155,7 +155,7 @@ class UserServiceImplAdminGuardsTest {
         a1.setActive(true);
         org.mockito.Mockito.clearInvocations(users);
         try {
-            service.updateUser("a1", new AdminUpdateUserRequest(null, null, null, null, null, null, null, "role-user"));
+            service.updateUser("a1", new AdminUpdateUserRequest(null, null, null, null, null, "role-user"));
         } catch (RuntimeException ignored) {
             // response mapping of the bare fixture is out of scope; lock order is what matters
         }
@@ -178,7 +178,7 @@ class UserServiceImplAdminGuardsTest {
 
         assertCode(UserErrorCode.USER_PRIVILEGE_ESCALATION, () -> service.updateUserStatus("a1", false));
         assertCode(UserErrorCode.USER_PRIVILEGE_ESCALATION, () -> service.updateUser("a1",
-                new AdminUpdateUserRequest(null, null, null, null, null, null, null, null)));
+                new AdminUpdateUserRequest(null, null, null, null, null, null)));
         verifyNoInteractions(keycloak);
     }
 
@@ -188,7 +188,7 @@ class UserServiceImplAdminGuardsTest {
 
         assertCode(UserErrorCode.USER_CANNOT_DISABLE_SELF, () -> service.updateUserStatus("actor", false));
         assertCode(UserErrorCode.USER_CANNOT_UPDATE_OWN_ROLE, () -> service.updateUser("actor",
-                new AdminUpdateUserRequest(null, null, null, null, null, null, null, "role-admin")));
+                new AdminUpdateUserRequest(null, null, null, null, null, "role-admin")));
         assertEquals(userRole, self.getRole());
     }
 }

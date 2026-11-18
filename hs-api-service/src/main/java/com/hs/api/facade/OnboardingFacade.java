@@ -2,6 +2,7 @@ package com.hs.api.facade;
 
 import com.hs.api.dto.OnboardingStatusResponse;
 import com.hs.common.context.UserContext;
+import com.hs.api.profile.ProfileRequirementService;
 import com.hs.common.context.UserContextHolder;
 import com.hs.payment.service.BankAccountService;
 import com.hs.user.dto.response.UserProfileResponse;
@@ -20,6 +21,7 @@ public class OnboardingFacade {
 
     private final UserService userService;
     private final BankAccountService bankAccountService;
+    private final ProfileRequirementService requirements;
 
     public OnboardingStatusResponse getOnboardingStatus() {
         UserContext ctx = UserContextHolder.get();
@@ -30,21 +32,20 @@ public class OnboardingFacade {
                     .requiredSteps(List.of("PROFILE", "ADDRESS", "PASSWORD", "BANK_ACCOUNT"))
                     .completedSteps(List.of())
                     .nextStep("PROFILE")
+                    .passwordSet(false)
+                    .missingRequirements(List.of("PROFILE", "ADDRESS", "BANK_ACCOUNT", "KYC"))
+                    .serviceReady(false)
                     .build();
         }
 
         String userId = ctx.userId();
-        UserProfileResponse profile = userService.getUserProfile();
+        var req = requirements.evaluate();
+        UserProfileResponse profile = req.user();
 
-        boolean profileComplete = hasText(profile.firstName()) && hasText(profile.lastName())
-                && hasText(profile.phone()) && profile.dob() != null && profile.gender() != null;
-
-        boolean addressComplete = profile.address() != null && hasText(profile.address().refId())
-                && (hasText(profile.address().street()) || hasText(profile.address().name()))
-                && hasText(profile.address().cityId()) && hasText(profile.address().wardId())
-                && profile.address().latitude() != null && profile.address().longitude() != null;
+        boolean profileComplete = req.profile();
+        boolean addressComplete = req.address();
         boolean passwordComplete = userService.hasPassword();
-        boolean bankComplete = bankAccountService.hasActiveBankAccount(userId);
+        boolean bankComplete = req.bankAccount();
 
         List<String> completedSteps = new ArrayList<>();
         if (profileComplete) completedSteps.add("PROFILE");
@@ -73,12 +74,16 @@ public class OnboardingFacade {
             userService.completeOnboarding(userId);
         }
 
+        List<String> missing = req.missing();
         return OnboardingStatusResponse.builder()
                 .completed(allDone)
                 .version(2)
                 .requiredSteps(requiredSteps)
                 .completedSteps(completedSteps)
                 .nextStep(nextStep)
+                .passwordSet(passwordComplete)
+                .missingRequirements(missing)
+                .serviceReady(missing.isEmpty())
                 .build();
     }
 
@@ -86,9 +91,5 @@ public class OnboardingFacade {
         if (bankAccountService.hasActiveBankAccount(userId)) {
             userService.completeOnboarding(userId);
         }
-    }
-
-    private boolean hasText(String str) {
-        return str != null && !str.isBlank();
     }
 }

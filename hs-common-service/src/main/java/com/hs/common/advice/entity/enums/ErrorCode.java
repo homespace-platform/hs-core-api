@@ -17,6 +17,8 @@ public enum ErrorCode implements AppException.ErrorCode {
     ROUTE_NOT_FOUND(1004, "Route not found", HttpStatus.NOT_FOUND),
     // Method-security denial (missing permission). 1003 stays for ownership/business denials; gateway owns 1005-1008.
     PERMISSION_DENIED(1009, "Permission denied", HttpStatus.FORBIDDEN),
+    // Service gate: PROFILE/ADDRESS/BANK_ACCOUNT/KYC requirements missing (message and result.missing carry details).
+    PROFILE_INCOMPLETE(1010, "Profile incomplete", HttpStatus.FORBIDDEN),
     UNCATEGORIZED_EXCEPTION(1999, "Uncategorized error", HttpStatus.INTERNAL_SERVER_ERROR);
 
     ErrorCode(int code, String message, HttpStatusCode statusCode) {

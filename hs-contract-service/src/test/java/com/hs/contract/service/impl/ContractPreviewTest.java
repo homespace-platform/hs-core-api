@@ -54,6 +54,8 @@ class ContractPreviewTest {
     private final ContractServiceImpl service = new ContractServiceImpl(contracts, revisions, documents, templates,
             rentals, mock(ListingStatusService.class), mock(ContractDataBuilder.class),
             new ContractFieldCatalog(), new ContractRenderService(new ObjectMapper()), converter, storage, new ObjectMapper(),null,payments);
+    private final com.hs.contract.service.ContractPartyKycGuard partyKyc = mock(com.hs.contract.service.ContractPartyKycGuard.class);
+    { ReflectionTestUtils.setField(service,"partyKyc",partyKyc); }
 
     private RentalRequest automaticRental() {
         var rental=RentalRequest.builder().id("rental").ownerId("landlord").renterId("tenant")
@@ -90,6 +92,16 @@ class ContractPreviewTest {
         assertTrue(saved.isEmpty());assertEquals(ContractStatus.DRAFT,contract.getStatus());
         assertEquals(ContractDocumentType.PDF,service.prepareDraftPreviewAutomatically("rental","contract").getDocumentType());
         verify(converter,times(2)).convertDocxToPdf(any(),anyString());
+    }
+    @Test void lapsedKycOfEitherPartyBlocksEveryPreviewBeforeAnyRenderOrDocument() {
+        automaticRental();UserContextHolder.set(new UserContext("landlord","landlord@test.invalid")); // automaticRental clears the caller
+        doThrow(new AppException(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED)).when(partyKyc).require("landlord","tenant","landlord");
+        var manual=assertThrows(AppException.class,()->service.triggerPreview("contract"));
+        assertEquals(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED.getCode(),manual.getCode());
+        UserContextHolder.clear();
+        doThrow(new AppException(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED)).when(partyKyc).require("landlord","tenant",null);
+        assertThrows(AppException.class,()->service.prepareDraftPreviewAutomatically("rental","contract"));
+        assertTrue(saved.isEmpty());verifyNoInteractions(converter);
     }
     @Test void incompleteDraftRemainsEditableAndExportsAfterMissingDataIsCompleted() {
         automaticRental();revision.setSpecialTerms(null);revision.setPoliciesSnapshot(null);template.setPlaceholdersJson("[\"tenant.fullName\"]");

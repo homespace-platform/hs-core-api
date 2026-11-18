@@ -814,6 +814,35 @@ class ContractServiceImplTest {
     }
 
     @Test
+    void sendToTenantIsBlockedWhenEitherPartyLostKycAndChangesNothing() {
+        ContractRepository contractRepository = mock(ContractRepository.class);
+        ContractDocumentRepository documentRepository = mock(ContractDocumentRepository.class);
+        ContractServiceImpl service = createService(contractRepository, mock(ContractRevisionRepository.class),
+                documentRepository, mock(ContractTemplateVersionRepository.class));
+        var guard = mock(com.hs.contract.service.ContractPartyKycGuard.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "partyKyc", guard);
+        Contract contract = Contract.builder().id("c-1").landlordId("landlord-1").tenantId("tenant-1")
+                .currentRevisionId("rev-1").status(ContractStatus.DRAFT).build();
+        UserContextHolder.set(new UserContext("landlord-1", "landlord@example.com"));
+        when(contractRepository.findById("c-1")).thenReturn(Optional.of(contract));
+        when(contractRepository.findByIdForUpdate("c-1")).thenReturn(Optional.of(contract));
+
+        org.mockito.Mockito.doThrow(new AppException(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED))
+                .when(guard).require("landlord-1", "tenant-1", "landlord-1");
+        assertEquals(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED.getCode(),
+                assertThrows(AppException.class, () -> service.sendToTenant("c-1")).getCode());
+
+        org.mockito.Mockito.doThrow(new AppException(com.hs.user.advice.entity.enums.UserErrorCode.KYC_REQUIRED))
+                .when(guard).require("landlord-1", "tenant-1", "landlord-1");
+        assertEquals(com.hs.user.advice.entity.enums.UserErrorCode.KYC_REQUIRED.getCode(),
+                assertThrows(AppException.class, () -> service.sendToTenant("c-1")).getCode());
+
+        assertEquals(ContractStatus.DRAFT, contract.getStatus());
+        verify(contractRepository, never()).save(any(Contract.class));
+        verifyNoInteractions(documentRepository);
+    }
+
+    @Test
     void createDraft_failsWhenInitialPaymentNotPaid() {
         ContractRepository contractRepository = mock(ContractRepository.class);
         RentalRequestRepository rentalRequestRepository = mock(RentalRequestRepository.class);
@@ -858,6 +887,7 @@ class ContractServiceImplTest {
         ContractRevisionRepository revisionRepository = mock(ContractRevisionRepository.class);
         ContractDataBuilder dataBuilder = mock(ContractDataBuilder.class);
 
+        var guard = mock(com.hs.contract.service.ContractPartyKycGuard.class);
         ContractServiceImpl service = new ContractServiceImpl(
                 contractRepository,
                 revisionRepository,
@@ -874,6 +904,7 @@ class ContractServiceImplTest {
                 mock(com.hs.listing.service.ParkingReservationService.class),
                 paymentRequestRepository
         );
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"partyKyc",guard);
 
         Listing listing = Listing.builder().id("listing-1").ownerId("landlord-1")
                 .category(com.hs.listing.model.constant.ListingCategory.ROOM).build();
@@ -926,6 +957,13 @@ class ContractServiceImplTest {
 
         req.setMonthlyRentPrice(payment.getTotalAmount());req.setDepositAmount(BigDecimal.ZERO);listing.setStatus(ListingStatus.RESERVED);
         org.springframework.test.util.ReflectionTestUtils.setField(service,"billingTime",new com.hs.common.time.BillingTime("",mock(org.springframework.core.env.Environment.class)));
+        org.mockito.Mockito.doThrow(new AppException(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED))
+                .when(guard).require("landlord-1", "tenant-1", "landlord-1");
+        var blocked = assertThrows(AppException.class, () -> service.createDraft(new CreateContractDraftRequest("req-1")));
+        assertEquals(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED.getCode(), blocked.getCode());
+        verify(contractRepository, never()).save(any(Contract.class));
+        verifyNoInteractions(dataBuilder, revisionRepository);
+        reset(guard);
         var response = service.createDraft(new CreateContractDraftRequest("req-1"));
         org.junit.jupiter.api.Assertions.assertNotNull(response);
         assertEquals("pay-1", response.getRentalPaymentId());
@@ -1090,6 +1128,7 @@ class ContractServiceImplTest {
                 mock(com.hs.listing.service.ParkingReservationService.class),
                 paymentRequestRepository
         );
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"partyKyc",mock(com.hs.contract.service.ContractPartyKycGuard.class));
 
         Listing listing = Listing.builder().id("listing-1").ownerId("landlord-1")
                 .category(com.hs.listing.model.constant.ListingCategory.ROOM).build();
@@ -1170,6 +1209,7 @@ class ContractServiceImplTest {
                 null,
                 null
         );
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"partyKyc",mock(com.hs.contract.service.ContractPartyKycGuard.class));
 
         Contract contract = Contract.builder()
                 .id("contract-complete-1")
@@ -1381,6 +1421,7 @@ class ContractServiceImplTest {
                 mock(com.hs.listing.service.ParkingReservationService.class),
                 paymentRequestRepository
         );
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"partyKyc",mock(com.hs.contract.service.ContractPartyKycGuard.class));
         var integrity = mock(com.hs.contract.service.ContractDraftIntegrity.class);
         when(integrity.prepareUpdate(any(),any(),any())).thenAnswer(i -> i.getArgument(2));
         org.springframework.test.util.ReflectionTestUtils.setField(service,"draftIntegrity",integrity);

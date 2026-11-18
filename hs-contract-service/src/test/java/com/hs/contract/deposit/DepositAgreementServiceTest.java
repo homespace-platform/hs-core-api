@@ -41,6 +41,7 @@ class DepositAgreementServiceTest {
     @Mock PaymentLineItemRepository lines;
     @Mock ContractDataBuilder builder;
     @Spy ContractFieldCatalog catalog = new ContractFieldCatalog();
+    @Mock com.hs.contract.service.ContractPartyKycGuard partyKyc;
     @Spy ObjectMapper mapper = new ObjectMapper();
     @Mock BillingTime time;
     @Mock com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
@@ -186,6 +187,21 @@ class DepositAgreementServiceTest {
         rental.setMoveInDate(LocalDate.of(2026,12,1));payment.setTransferReference("CHANGED-LIVE");
         assertEquals("HS-DEPOSIT",group(service.dataModel(c),"depositPayment").get("transferReference"));
         d.setSnapshotJson(d.getSnapshotJson()+" ");assertThrows(AppException.class,()->service.dataModel(c));
+    }
+    @Test void counterpartyWithoutKycBlocksDepositPrepareBeforeAnySnapshotOrEnvelopeIsCreated() {
+        doThrow(new AppException(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED)).when(partyKyc).require("owner","tenant",null);
+        var error=assertThrows(AppException.class,()->service.createAutomatically("rental"));
+        assertEquals(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED.getCode(),error.getCode());
+        verifyNoInteractions(builder);verify(contracts,never()).save(any());verify(agreements,never()).save(any());
+    }
+    @Test void bothPartiesVerifiedAllowsDepositPrepare() {
+        assertEquals("DEPOSIT",service.createAutomatically("rental").getAgreementKind());verify(partyKyc).require("owner","tenant",null);
+    }
+    @Test void reopenRequiresBothPartiesKycAndKeepsTheSigningWindowUntouched() {
+        var c=depositDocument(ContractStatus.TENANT_SIGNATURE_PENDING);
+        doThrow(new AppException(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED)).when(partyKyc).require("owner","tenant","owner");
+        assertThrows(AppException.class,()->service.reopen("rental","owner"));
+        assertNull(c.getTenantSigningDueAt());verify(contracts,never()).save(any());
     }
     @Test void repeatedReceiptOrRetryReturnsExistingDocumentWithoutRebuildingSnapshot() {
         var c=Contract.builder().id("existing").agreementKind("DEPOSIT").build();var d=new DepositAgreement();d.setSigningContractId(c.getId());

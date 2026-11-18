@@ -123,6 +123,8 @@ public class ContractServiceImpl implements ContractService {
     private com.hs.contract.service.ContractTermsResolver termsResolver;
     @Autowired
     private com.hs.common.time.BillingTime billingTime;
+    @Autowired
+    private com.hs.contract.service.ContractPartyKycGuard partyKyc;
 
     @Value("${homespace.signature.mode:INTERNAL}")
     private String signatureMode;
@@ -235,6 +237,9 @@ public class ContractServiceImpl implements ContractService {
             if (currentUserId == null) return null;
             throw new AppException(ContractErrorCode.RENTAL_PAYMENT_REQUIRED_BEFORE_CONTRACT);
         }
+
+        // Party identity is printed from verified KYC; either side's KYC may have lapsed since the request.
+        partyKyc.require(rentalRequest.getOwnerId(), rentalRequest.getRenterId(), currentUserId);
 
         Listing listing = rentalRequest.getListing();
         if (listing == null || listing.getCategory() == null) {
@@ -912,6 +917,7 @@ public class ContractServiceImpl implements ContractService {
 
     private ContractDocumentResponse renderPreview(Contract contract, boolean requirePdf) {
         if(com.hs.contract.service.WorkflowDocumentService.applies(contract))throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED,"Văn bản này được kết xuất từ biên bản/thỏa thuận nguồn; không dựng lại bằng mẫu HĐ thuê.");
+        requirePartiesKyc(contract);
         String contractId = contract.getId();
         ContractRevision revision = requireCurrentRevision(contract);
         if(!com.hs.contract.deposit.DepositAgreementService.isDeposit(contract) && contract.getParentContractId()==null && onboarding!=null) {
@@ -1075,6 +1081,7 @@ public class ContractServiceImpl implements ContractService {
         }
         Contract contract = findContractForUpdateAndCheckAccess(contractId);
         requireLandlord(contract);
+        requirePartiesKyc(contract);
         if (contract.getStatus() != ContractStatus.DRAFT) {
             throw new AppException(ContractErrorCode.INVALID_CONTRACT_STATUS);
         }
@@ -1490,6 +1497,11 @@ public class ContractServiceImpl implements ContractService {
 
     private boolean canTenantReviewRootDraft(Contract contract) {
         return ContractDraftVisibility.tenantMayReview(contract,rentalRequestRepository,paymentRequestRepository);
+    }
+
+    /** Caller may be null for system-initiated renders; then both parties are treated as counterparties. */
+    private void requirePartiesKyc(Contract contract) {
+        partyKyc.require(contract.getLandlordId(), contract.getTenantId(), CurrentUser.optionalUserId().orElse(null));
     }
 
     private void requireLandlord(Contract contract) {

@@ -1,5 +1,6 @@
 package com.hs.api.controller.payment;
 
+import com.hs.api.profile.RequiresCompleteProfile;
 import com.hs.common.advice.entity.AppException;
 import com.hs.common.advice.entity.enums.ErrorCode;
 import com.hs.common.context.UserContext;
@@ -92,6 +93,7 @@ public class PaymentRequestController {
                 .build();
     }
 
+    @RequiresCompleteProfile
     @PreAuthorize("hasAuthority('PAYMENT_DISPUTE_CREATE')")
     @PostMapping("/{id}/dispute")
     public ApiResponse<PaymentRequestResponse> dispute(
