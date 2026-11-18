@@ -55,9 +55,8 @@ class ContractAmenitiesFidelityTest {
     @ParameterizedTest
     @ValueSource(strings={"HomeSpace_01_Hop_Dong_Thue_Nha_Nguyen_Can.docx", "HomeSpace_02_Hop_Dong_Thue_Can_Ho_Chung_Cu.docx", "HomeSpace_03_Hop_Dong_Thue_Phong_Tro.docx"})
     void realTemplatesRenderOnlyTwoAmenityColumnsAndExactNames(String filename) throws Exception {
-        Path root=Path.of("").toAbsolutePath();
-        while (root != null && !Files.isDirectory(root.resolve("hs-infra/documents/contract-template"))) root=root.getParent();
-        assertNotNull(root,"Cannot locate the real contract templates");
+        var template=getClass().getResource("/contract-template/"+filename);
+        assertNotNull(template,"Missing contract template fixture: "+filename);
         var renderer = new ContractRenderService(mapper);
         for (boolean empty:List.of(false,true)) {
             var rows=new ArrayList<Map<String,Object>>();
@@ -69,7 +68,7 @@ class ContractAmenitiesFidelityTest {
             var model=renderer.buildDummyDataModel(); model.put("amenitiesTable",tables.get("amenitiesTable"));
             model.put("propertyFeaturesTable",tables.get("propertyFeaturesTable"));
             byte[] bytes;
-            try (var input=Files.newInputStream(root.resolve("hs-infra/documents/contract-template").resolve(filename))) {
+            try (var input=template.openStream()) {
                 bytes=renderer.renderDocx(input,model);
             }
             try (var document=new XWPFDocument(new ByteArrayInputStream(bytes))) {

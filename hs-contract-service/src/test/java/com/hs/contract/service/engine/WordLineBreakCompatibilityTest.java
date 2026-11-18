@@ -30,12 +30,11 @@ class WordLineBreakCompatibilityTest {
 
     @ParameterizedTest @MethodSource("templates")
     void realLeaseAndDepositTemplatesKeepTheirLayoutAndMultilineText(String filename) throws Exception {
-        Path root=Path.of("").toAbsolutePath();
-        while(root!=null && !Files.isDirectory(root.resolve("hs-infra/documents"))) root=root.getParent();
-        assertNotNull(root,"Cannot locate the real Word templates");
         boolean deposit=filename.contains("Dat_Coc");
-        Path path=root.resolve("hs-infra/documents/"+(deposit?"deposit-contract-template/":"contract-template/")+filename);
-        byte[] source=Files.readAllBytes(path);
+        var template=getClass().getResource("/"+(deposit?"deposit-contract-template/":"contract-template/")+filename);
+        assertNotNull(template,"Missing Word template fixture: "+filename);
+        byte[] source;
+        try(var input=template.openStream()) { source=input.readAllBytes(); }
         Map<String,Object> model=renderer.buildDummyDataModel();
         if(deposit) model=DepositDataModel.dummy(model);
         String type=filename.contains("Nha_Nguyen_Can")?"Nhà nguyên căn":filename.contains("Can_Ho")?"Căn hộ chung cư":"Phòng trọ";
@@ -62,7 +61,9 @@ class WordLineBreakCompatibilityTest {
         byte[] second=WordLineBreakCompatibility.normalize(rendered);
         assertArrayEquals(parts.get("word/document.xml"),parts(second).get("word/document.xml"));
         assertArrayEquals(parts.get("word/styles.xml"),parts(second).get("word/styles.xml"));
-        assertArrayEquals(source,Files.readAllBytes(path),"Rendering must not modify source templates");
+        try(var input=template.openStream()) {
+            assertArrayEquals(source,input.readAllBytes(),"Rendering must not modify source templates");
+        }
         String qa=System.getProperty("hs.layout.qa");
         if(qa!=null) {
             Path output=Path.of(qa); Files.createDirectories(output);
