@@ -36,7 +36,7 @@ public class RequiredEnvironmentConfiguration {
             while (matcher.find()) {
                 String variable = matcher.group(1);
                 String configuredValue = environment.getProperty(variable);
-                if (configuredValue == null || (configuredValue.isBlank() && !OPTIONAL_EMPTY.contains(variable))) {
+                if ((configuredValue == null || configuredValue.isBlank()) && !OPTIONAL_EMPTY.contains(variable)) {
                     missing.add(variable);
                 }
             }
