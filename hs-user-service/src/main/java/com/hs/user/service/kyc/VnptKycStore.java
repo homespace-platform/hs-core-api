@@ -46,7 +46,7 @@ public class VnptKycStore {
             }
             return new Session(v.getId(),v.getExpiresAt(),config.maxImageMb());
         }
-        if(verifications.countByUserIdAndProviderAndCreatedAtAfter(userId,KycProvider.VNPT,Instant.now().minus(Duration.ofDays(1)))>=config.dailyAttempts())
+        if(config.dailyAttempts()>0 && verifications.countByUserIdAndProviderAndCreatedAtAfter(userId,KycProvider.VNPT,Instant.now().minus(Duration.ofDays(1)))>=config.dailyAttempts())
             throw new AppException(UserErrorCode.KYC_ATTEMPT_LIMIT);
         String id=UUID.randomUUID().toString();
         KycVerification v=KycVerification.builder().id(id).userId(userId).provider(KycProvider.VNPT)

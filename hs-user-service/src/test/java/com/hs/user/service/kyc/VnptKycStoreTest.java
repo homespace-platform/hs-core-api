@@ -36,6 +36,23 @@ class VnptKycStoreTest {
     @Test void verifiedFinalizeIsIdempotent() {
         attempt.setStatus(KycStatus.VERIFIED);assertEquals(KycStatus.VERIFIED,store.finalizeAttempt("alice","attempt"));verifyNoInteractions(steps,notices);verify(claims,never()).claimInCurrentTransaction(anyString(),anyString());
     }
+    @Test void disabledDailyLimitAllowsAnotherSessionWithoutCountingPastAttempts() {
+        User user=new User();user.setId("alice");user.setActive(true);
+        when(users.findByIdForUpdate("alice")).thenReturn(Optional.of(user));
+        when(verifications.countByUserIdAndProviderAndCreatedAtAfter(eq("alice"),eq(KycProvider.VNPT),any())).thenReturn(100L);
+        var unlimitedStore=new VnptKycStore(users,verifications,details,steps,
+                new VnptKycProperties(true,"https://example.test","test","test",15,0,1),claims,mapper,notices);
+        assertNotNull(unlimitedStore.start("alice").sessionId());
+        verify(verifications,never()).countByUserIdAndProviderAndCreatedAtAfter(anyString(),any(),any());
+        verify(verifications).save(argThat(v->v.getProvider()==KycProvider.VNPT && v.getStatus()==KycStatus.PENDING));
+    }
+    @Test void positiveDailyLimitStillBlocksExcessAttempts() {
+        User user=new User();user.setId("alice");user.setActive(true);
+        when(users.findByIdForUpdate("alice")).thenReturn(Optional.of(user));
+        when(verifications.countByUserIdAndProviderAndCreatedAtAfter(eq("alice"),eq(KycProvider.VNPT),any())).thenReturn(5L);
+        assertThrows(AppException.class,()->store.start("alice"));
+        verify(verifications,never()).save(any());
+    }
     @Test void retiredPendingAttemptDoesNotBlockVnptAndItsHistoryIsKept() {
         User user=new User();user.setId("alice");user.setActive(true);
         when(users.findByIdForUpdate("alice")).thenReturn(Optional.of(user));
