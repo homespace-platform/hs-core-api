@@ -74,8 +74,8 @@ Chỉ mở `public/*`; không thêm public Allow toàn bucket hoặc Deny vô đ
       "http://localhost:5000",
       "http://127.0.0.1:3000",
       "http://127.0.0.1:5000",
-      "https://app.your-domain.com",
-      "https://admin.your-domain.com"
+      "https://homespace.id.vn",
+      "https://admin.homespace.id.vn"
     ],
     "ExposeHeaders": ["ETag", "x-amz-checksum-sha256", "x-amz-version-id"],
     "MaxAgeSeconds": 3600
