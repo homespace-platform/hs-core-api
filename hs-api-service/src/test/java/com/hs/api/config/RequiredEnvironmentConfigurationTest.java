@@ -4,11 +4,40 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Properties;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.env.MockEnvironment;
 
 class RequiredEnvironmentConfigurationTest {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void discoveryFlagsAreReadFromEnvironment(boolean enabled) throws IOException {
+        Properties properties = applicationProperties();
+        String value = Boolean.toString(enabled);
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("SPRING_CLOUD_DISCOVERY_ENABLED", value)
+                .withProperty("EUREKA_CLIENT_ENABLED", value);
+
+        assertEquals(value, environment.resolveRequiredPlaceholders(
+                properties.getProperty("spring.cloud.discovery.enabled")));
+        assertEquals(value, environment.resolveRequiredPlaceholders(
+                properties.getProperty("eureka.client.enabled")));
+    }
+
+    @Test
+    void discoveryFlagsAreRequiredAndCannotBeBlank() throws IOException {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("SPRING_CLOUD_DISCOVERY_ENABLED", "");
+
+        assertTrue(RequiredEnvironmentConfiguration.missingVariables(applicationProperties(), environment)
+                .containsAll(Set.of("SPRING_CLOUD_DISCOVERY_ENABLED", "EUREKA_CLIENT_ENABLED")));
+    }
+
     @Test
     void startupFailsWhenApplicationVariableIsMissing() {
         IllegalStateException error = assertThrows(
@@ -42,5 +71,16 @@ class RequiredEnvironmentConfigurationTest {
         assertEquals(
                 java.util.Set.of("VNPT_EKYC_CLIENT_SECRET"),
                 RequiredEnvironmentConfiguration.missingVariables(properties, environment));
+    }
+
+    private Properties applicationProperties() throws IOException {
+        Properties properties = new Properties();
+        try (InputStream input = getClass().getResourceAsStream("/application.properties")) {
+            if (input == null) {
+                throw new IllegalStateException("Missing application.properties");
+            }
+            properties.load(input);
+        }
+        return properties;
     }
 }

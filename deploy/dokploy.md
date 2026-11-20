@@ -11,6 +11,8 @@ Core dùng cùng cách với Discovery/Gateway: service name `hs-core-api`, exte
 
 Compose yêu cầu đủ **68 biến runtime** từ `.env.dokploy`, không có fallback. Các cờ `SPRING_CLOUD_DISCOVERY_ENABLED`, `EUREKA_CLIENT_ENABLED` đặt cạnh `EUREKA_CLIENT_SERVICE_URL` trong nhóm Eureka. Mọi biến dùng `${VARIABLE:?}` để chặn thiếu/rỗng, trừ `HOMESPACE_TIME_SIMULATED_AT` và `SMARTCA_WEBHOOK_PUBLIC_URL` dùng `${VARIABLE?}`: bắt buộc khai báo nhưng được phép rỗng như cấu hình hiện tại. Không điền thời gian giả lập/callback giả để vượt validation.
 
+`application.properties` đọc hai cờ Eureka từ env cho cả dev/prod, không ghi cứng `true`. Dev đặt biến trong nhóm **EUREKA SERVER** của `.env` theo `.env.example`; production dùng `.env.dokploy` rồi truyền qua Compose. Đặt cả hai `true` khi dùng Eureka; nếu chủ đích chạy standalone thì đặt cả hai `false`. Không lấy URL/credential production đưa vào file dev.
+
 `KEY='value'` là cú pháp dotenv hợp lệ của Dokploy. Giữ quote quanh secret có ký tự đặc biệt; không đưa env, private key hoặc webhook token lên Git/chat.
 
 ## 2. Kiểm tra infra hiện tại
