@@ -1,6 +1,6 @@
 services:
     hs-core-api:
-        image: ${CORE_IMAGE:?}
+        image: nvminh162/hs-core-api:latest
         pull_policy: always
         restart: unless-stopped
         mem_limit: 1536m
@@ -9,6 +9,8 @@ services:
             SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:?}
             GATEWAY_INTERNAL_SECRET: ${GATEWAY_INTERNAL_SECRET:?}
             EUREKA_CLIENT_SERVICE_URL: ${EUREKA_CLIENT_SERVICE_URL:?}
+            SPRING_CLOUD_DISCOVERY_ENABLED: ${SPRING_CLOUD_DISCOVERY_ENABLED:?}
+            EUREKA_CLIENT_ENABLED: ${EUREKA_CLIENT_ENABLED:?}
             DATASOURCE_URL: ${DATASOURCE_URL:?}
             DATASOURCE_USERNAME: ${DATASOURCE_USERNAME:?}
             DATASOURCE_PASSWORD: ${DATASOURCE_PASSWORD:?}
@@ -71,8 +73,6 @@ services:
             VNPT_EKYC_BASE_URL: ${VNPT_EKYC_BASE_URL:?}
             VNPT_EKYC_CLIENT_ID: ${VNPT_EKYC_CLIENT_ID:?}
             VNPT_EKYC_CLIENT_SECRET: ${VNPT_EKYC_CLIENT_SECRET:?}
-            SPRING_CLOUD_DISCOVERY_ENABLED: ${SPRING_CLOUD_DISCOVERY_ENABLED:?}
-            EUREKA_CLIENT_ENABLED: ${EUREKA_CLIENT_ENABLED:?}
 
 networks:
     default:
