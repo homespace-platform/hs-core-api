@@ -1,6 +1,6 @@
 services:
     hs-core-api:
-        image: nvminh162/hs-core-api:latest
+        image: ${CORE_IMAGE:?}
         pull_policy: always
         restart: unless-stopped
         mem_limit: 1536m

@@ -4,12 +4,12 @@ Core dùng cùng cách với Discovery/Gateway: service name `hs-core-api`, exte
 
 ## 1. File build và Environment
 
-- [compose.production.yml](../compose.production.yml): image `nvminh162/hs-core-api:latest` ghi trực tiếp trong YAML, restart `unless-stopped`, memory limit 1536 MiB, không publish port host hoặc mount dữ liệu. Không cần biến image trong env; nếu pin SHA, sửa tag trong YAML triển khai.
+- [compose.production.yml](../compose.production.yml): image đọc từ `${CORE_IMAGE:?}`, restart `unless-stopped`, memory limit 1536 MiB, không publish port host hoặc mount dữ liệu. Đặt `CORE_IMAGE=nvminh162/hs-core-api:latest` ở dòng đầu `.env.dokploy`; nếu pin SHA, đổi tag trong biến này. Không thêm biến image vào `.env` hoặc `.env.example` của dev.
 - Dockerfile hiện có: Java 21, Maven build/test assembly `hs-api-service`, runtime non-root, healthcheck `http://127.0.0.1:8081/actuator/health`, start period 180 giây.
 - Workflow `publish-image.yml` giữ nguyên: GitHub Actions test/build/push tag SHA và `latest`, không gọi Dokploy API.
 - `.env.dokploy`: env production riêng tư, Git ignore. Không dán env infra/Gateway thay cho Core. `.env` và `.env.example` dành cho local, không dùng để triển khai production.
 
-Compose yêu cầu đủ **68 biến runtime** từ `.env.dokploy`, không có fallback. Các cờ `SPRING_CLOUD_DISCOVERY_ENABLED`, `EUREKA_CLIENT_ENABLED` đặt cạnh `EUREKA_CLIENT_SERVICE_URL` trong nhóm Eureka. Mọi biến dùng `${VARIABLE:?}` để chặn thiếu/rỗng, trừ `HOMESPACE_TIME_SIMULATED_AT` và `SMARTCA_WEBHOOK_PUBLIC_URL` dùng `${VARIABLE?}`: bắt buộc khai báo nhưng được phép rỗng như cấu hình hiện tại. Không điền thời gian giả lập/callback giả để vượt validation.
+Compose yêu cầu `CORE_IMAGE` và đủ **68 biến runtime** từ `.env.dokploy`, không có fallback. Các cờ `SPRING_CLOUD_DISCOVERY_ENABLED`, `EUREKA_CLIENT_ENABLED` đặt cạnh `EUREKA_CLIENT_SERVICE_URL` trong nhóm Eureka. Mọi biến dùng `${VARIABLE:?}` để chặn thiếu/rỗng, trừ `HOMESPACE_TIME_SIMULATED_AT` và `SMARTCA_WEBHOOK_PUBLIC_URL` dùng `${VARIABLE?}`: bắt buộc khai báo nhưng được phép rỗng như cấu hình hiện tại. Không điền thời gian giả lập/callback giả để vượt validation.
 
 `application.properties` đọc hai cờ Eureka từ env cho cả dev/prod, không ghi cứng `true`. Dev đặt biến trong nhóm **EUREKA SERVER** của `.env` theo `.env.example`; production dùng `.env.dokploy` rồi truyền qua Compose. Đặt cả hai `true` khi dùng Eureka; nếu chủ đích chạy standalone thì đặt cả hai `false`. Không lấy URL/credential production đưa vào file dev.
 
@@ -61,7 +61,7 @@ Luồng như Discovery/Gateway Raw: **push code → Actions test/build/push → 
 
 1. **Projects → homespace → production → Create Service → Docker Compose**, tên `hs-core-api`, cùng server với infra. Không tạo Application/Nixpacks.
 2. General → **Raw**, dán toàn bộ [compose.production.yml](../compose.production.yml), Compose Type **Docker Compose**, không chọn Stack → Save.
-3. **Environment**: dán đầy đủ `hs-core-api/.env.dokploy` → Save. File local không tự cập nhật Dokploy; YAML đã ánh xạ đủ biến vào container. Không thêm biến image vào Environment.
+3. **Environment**: dán đầy đủ `hs-core-api/.env.dokploy`, có `CORE_IMAGE` ở dòng đầu → Save. File local không tự cập nhật Dokploy; YAML đã ánh xạ đủ biến runtime vào container.
 4. **Preview Compose**: service `hs-core-api`, default network external tên `hs-network`, đúng image, đầy đủ env; không có host `ports:`. Giữ tắt Isolated Deployment, xác nhận Preview giữ `hs-network`. Không cần network/alias ở Advanced.
 5. **Không tạo domain public cho Core**, không mở cổng `8081` trên EC2. Gateway gọi `lb://hs-core-api` qua Eureka.
 6. Core không cần File Mount SQL/pgAdmin hoặc volume database; chúng thuộc infra.
