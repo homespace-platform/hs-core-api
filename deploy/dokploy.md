@@ -1,137 +1,112 @@
-# Deploy Core API thành Application riêng trên Dokploy
+# Core API — Compose riêng trên Dokploy
 
-Mỗi backend là một **Application riêng**, có image, Environment, deployment history, webhook và CI/CD riêng. `homespace-infra` chỉ quản lý 11 service hạ tầng. Core dùng image `nvminh162/hs-core-api:latest`, cổng nội bộ 8081; không gộp vào Compose infra.
+Core dùng cùng cách với Discovery/Gateway: service name `hs-core-api`, external network `hs-network`. Không gộp Core vào infra, không chỉnh Advanced → Networks hoặc thêm alias trùng tên. Domain API vẫn thuộc Gateway: `api.homespace.id.vn`.
 
-## 1. File và secret đã chuẩn bị
+## 1. File build và Environment
 
-- `Dockerfile`: Java 21, Maven Wrapper build/test toàn bộ assembly `hs-api-service`, JAR thực thi, runtime non-root, health check `/actuator/health` cổng 8081.
-- `.dockerignore`: chỉ đưa Maven inputs vào build; không đưa env/private keys/output local vào image.
-- `.github/workflows/publish-image.yml`: pull request build/test; push `master` publish tag SHA và `latest`; Docker Hub gửi webhook tới Application Core khi tag `latest` được push.
-- `.env.dokploy`: Environment riêng của Core, giữ secret tích hợp, khóa mã hóa, secret Gateway và mật khẩu bootstrap cũ. Địa chỉ/credential PostgreSQL, Redis, Kafka, Keycloak và Gotenberg đã đổi sang infra production. `.env` local giữ nguyên.
+- [compose.production.yml](../compose.production.yml): pull image `${CORE_IMAGE:?}`, restart `unless-stopped`, memory limit 1536 MiB, không publish port host hoặc mount dữ liệu.
+- Dockerfile hiện có: Java 21, Maven build/test assembly `hs-api-service`, runtime non-root, healthcheck `http://127.0.0.1:8081/actuator/health`, start period 180 giây.
+- Workflow `publish-image.yml` giữ nguyên: GitHub Actions test/build/push tag SHA và `latest`, không gọi Dokploy API.
+- `.env.dokploy`: env production riêng tư, Git ignore. Không dán env infra/Gateway thay cho Core. [.env.example](../.env.example) chỉ là mẫu, không dùng credential mẫu để deploy production.
 
-Dán file **`D:/Workspace/homespace/hs-core-api/.env.dokploy`** vào Application Core. File `hs-infra/.env.dokploy` chỉ dành cho infra. Cả hai được Git ignore.
+Compose yêu cầu đủ **68 biến runtime và CORE_IMAGE**, không có fallback. Mọi biến dùng `${VARIABLE:?}` để chặn thiếu/rỗng, trừ `HOMESPACE_TIME_SIMULATED_AT` và `SMARTCA_WEBHOOK_PUBLIC_URL` dùng `${VARIABLE?}`: bắt buộc khai báo nhưng được phép rỗng như cấu hình hiện tại. Không điền thời gian giả lập/callback giả để vượt validation.
 
-`KEY='value'` là cú pháp env hợp lệ; Dokploy dùng dotenv để bỏ quote và giữ nguyên `$`. `KEY=''` là giá trị rỗng. Chỉ `HOMESPACE_TIME_SIMULATED_AT` và `SMARTCA_WEBHOOK_PUBLIC_URL` được phép rỗng theo cấu hình Core. Không bỏ quote quanh secret có `$`.
+`KEY='value'` là cú pháp dotenv hợp lệ của Dokploy. Giữ quote quanh secret có ký tự đặc biệt; không đưa env, private key hoặc webhook token lên Git/chat.
 
-## 2. Nối mạng Application với infra một lần
+## 2. Kiểm tra infra hiện tại
 
-Production dùng chung mạng **overlay attachable `hs-network`**. Compose infra tạo mạng trong lần deploy đầu; giữ infra hiện tại khi thêm Core. Không tạo lại mạng hoặc mở database/Kafka ra public IP. File `docker-compose.yml` dành cho local; trên Dokploy infra dùng `compose.production.yml`.
-
-Kiểm tra trên EC2 trước khi deploy Core:
+Giữ nguyên infra, volumes, Discovery và Gateway. Core chỉ tham gia mạng đã có:
 
 ```bash
-sudo docker network inspect hs-network \
-  --format 'driver={{.Driver}} attachable={{.Attachable}}'
+sudo docker network inspect hs-network --format 'driver={{.Driver}} attachable={{.Attachable}}'
 ```
 
-Kết quả cần `driver=overlay attachable=true`. Nếu mạng chưa có, deploy infra trước; nếu sai loại, kiểm tra cấu hình hiện có, không xóa mạng đang dùng.
+Cần `driver=overlay attachable=true`. Nếu chưa có mạng, hoàn tất infra trước, không tạo mạng khác cùng tên.
 
-Infra có 11 service, không chứa Core; các named volumes phải giữ nguyên. Không cần deploy lại infra chỉ để thêm Application Core. Discovery dùng Compose riêng với DNS `hs-discovery-server`; Gateway đang thử nghiệm Compose riêng, Core vẫn giữ Application.
-
-1. Xác nhận infra và Discovery healthy.
-2. Giữ nguyên App Name, Environment, domains và volumes của infra; không tạo stack infra thứ hai.
-3. Gắn Application Core vào `hs-network` theo mục 4. Giữ `dokploy-network` cho routing của Dokploy nếu đang dùng.
-4. Nếu đã có Core trong một Compose cũ, dừng đúng Core cũ trước khi chạy Application Core mới; không dừng database hoặc xóa volume.
-
-Sau lần nối mạng này, cập nhật Core không cần deploy lại infra.
-
-## 3. GitHub secrets và image đầu tiên
-
-Trong Docker Hub tạo repository **`nvminh162/hs-core-api`**.
-
-Trong GitHub repo `homespace-platform/hs-core-api` → **Settings → Secrets and variables → Actions**:
-
-| Secret | Nguồn |
+| Biến | Giá trị/điều kiện |
 | --- | --- |
-| `DOCKERHUB_USERNAME` | Organization secret hiện có, username `nvminh162`. |
-| `DOCKERHUB_TOKEN` | Organization secret hiện có, PAT có quyền push. |
+| `CORE_IMAGE` | `nvminh162/hs-core-api:latest` hoặc tag SHA đã publish |
+| `SPRING_PROFILES_ACTIVE` | `prod` |
+| `EUREKA_CLIENT_SERVICE_URL` | `http://hs-discovery-server:8761/eureka/` |
+| `SPRING_CLOUD_DISCOVERY_ENABLED`, `EUREKA_CLIENT_ENABLED` | `true` |
+| `DATASOURCE_URL` | `jdbc:postgresql://postgres:5432/homespace_core` |
+| `DATASOURCE_USERNAME`, `DATASOURCE_PASSWORD` | Khớp PostgreSQL infra |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | `redis`, `6379`, password khớp infra |
+| `KAFKA_BOOTSTRAP_SERVERS` | `kafka:19092` |
+| `KEYCLOAK_SERVER_URL` | `http://keycloak:8080` |
+| `KEYCLOAK_ADMIN_USERNAME` | `homespace` theo env infra hiện tại; phải là tài khoản có thật và có quyền |
+| `KEYCLOAK_ADMIN_PASSWORD` | Mật khẩu thật của tài khoản quản trị Keycloak đang tồn tại |
+| `KEYCLOAK_CURRENT_REALM` | `homespace-platform` |
+| `CONTRACT_GOTENBERG_URL` | `http://gotenberg:3000` |
+| `GATEWAY_INTERNAL_SECRET` | Giống Gateway; không đổi để vượt lỗi auth |
+| `PAYMENT_PROOF_UPLOAD_PUBLIC_BASE_URL` | `https://api.homespace.id.vn` |
+| `SEPAY_RETURN_URL` | `https://homespace.id.vn/dashboard/membership/return` |
 
-Org secrets phải cấp quyền cho repo Core. Nếu repo private và gói GitHub không cho dùng org secrets, thêm hai Docker Hub secrets trực tiếp vào repo.
+Database `homespace_core` phải tồn tại. Init SQL chỉ chạy khi volume trống; nếu thiếu DB, kiểm tra bằng pgAdmin và xử lý có chủ đích, không reset/xóa volume để ép init.
 
-Commit/push các file Core đã chuẩn bị lên `master`. Mở **GitHub → Actions → Build and publish Core API** và chờ `publish` thành công. Workflow chạy Maven tests trước khi publish:
+Giữ `JPA_DDL_AUTO` hiện có. Env đang dùng `update`, Core có thể thay đổi schema khi khởi động; sao lưu database đã có dữ liệu trước khi deploy image/schema mới. Không tự chọn chế độ tạo lại/xóa schema để vượt lỗi.
 
-```text
-nvminh162/hs-core-api:latest
-nvminh162/hs-core-api:<git-sha>
-```
+Bootstrap username Keycloak không đổi tên user trong database cũ. Nếu hệ thống thực tế vẫn dùng `homespace-admin`, dùng đúng tài khoản đã tồn tại; không reset Keycloak/realm để khớp file env. `BOOTSTRAP_ADMIN_*` của Core là tài khoản ứng dụng, khác tài khoản quản trị Keycloak.
 
-GitHub Actions chỉ build/test/push; không có job deploy và không cần secret webhook. Các PostgreSQL integration tests có điều kiện trong repo vẫn skip khi chưa cấp DB test; không dùng DB production để chạy CI.
+## 3. Chuẩn bị image
 
-## 4. Tạo Application Core trên Dokploy
+1. GitHub `homespace-platform/hs-core-api` → Settings → Secrets and variables → Actions: repo cần `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` có quyền push.
+2. Chạy **Actions → Build and publish Core API → Run workflow → master**, hoặc push thay đổi được review; chờ thành công, kiểm tra image/tag trên Docker Hub. Không cần rebuild chỉ vì thêm YAML nếu dùng image đã publish.
+3. Nếu image private, cấu hình registry pull credential riêng trên Dokploy; không đưa Docker Hub token vào Environment của Core.
 
-Vào **Projects → homespace → production → Create Service → Application**.
+## 4. Tạo Compose Core — Raw
 
-- Name: **`hs-core-api`**.
-- Server: cùng Dokploy Server với infra.
-- Create, sau đó mở Application vừa tạo.
+Luồng như Discovery/Gateway Raw: **push code → Actions test/build/push → Docker Hub webhook → Dokploy deploy riêng Core**. Infra vẫn Git và deploy thủ công.
 
-Trong **General → Provider**, chọn **Docker**:
+1. **Projects → homespace → production → Create Service → Docker Compose**, tên `hs-core-api`, cùng server với infra. Không tạo Application/Nixpacks.
+2. General → **Raw**, dán toàn bộ [compose.production.yml](../compose.production.yml), Compose Type **Docker Compose**, không chọn Stack → Save.
+3. **Environment**: dán đầy đủ `hs-core-api/.env.dokploy`, gồm `CORE_IMAGE=nvminh162/hs-core-api:latest` → Save. File local không tự cập nhật Dokploy; YAML đã ánh xạ đủ biến vào container.
+4. **Preview Compose**: service `hs-core-api`, default network external tên `hs-network`, đúng image, đầy đủ env; không có host `ports:`. Giữ tắt Isolated Deployment, xác nhận Preview giữ `hs-network`. Không cần network/alias ở Advanced.
+5. **Không tạo domain public cho Core**, không mở cổng `8081` trên EC2. Gateway gọi `lb://hs-core-api` qua Eureka.
+6. Core không cần File Mount SQL/pgAdmin hoặc volume database; chúng thuộc infra.
+7. Nếu có Core cũ, ghi lại image/tag/config, tắt Autodeploy và vô hiệu hóa webhook của bản cũ rồi Stop đúng Core cũ trước khi chạy bản mới. Không dừng database/infra và không chạy song song hai Core ngoài kế hoạch.
+8. **General → Deploy**, chờ container healthy. Xem Logs nếu thiếu env hoặc lỗi DB/Redis/Kafka/Keycloak; không đổi JPA/auth hoặc bỏ secret để vượt lỗi.
 
-| Trường | Giá trị |
-| --- | --- |
-| Docker Image / Image | `nvminh162/hs-core-api:latest` |
-| Registry URL, nếu được yêu cầu | `docker.io` |
-| Credentials, nếu image private | Docker Hub username và token có quyền pull |
+## 5. Kiểm tra Core, Eureka và Gateway
 
-Bấm Save. Dockerfile đã được GitHub Actions build; Dokploy chỉ pull image này. Không chọn build GitHub/Dockerfile thêm lần nữa trên EC2.
-
-Trong **Environment**, dán toàn bộ `hs-core-api/.env.dokploy` rồi Save. Không dán env infra hoặc biến `CORE_*`.
-
-Trong **Advanced → Networks**, chọn `hs-network`, đặt alias `core-api` nếu giao diện có trường Aliases, Save. Nếu dùng **Advanced → Swarm Settings → Network**, thêm Target `hs-network`, Aliases `core-api`, rồi Save Networks. Giữ kết nối mặc định `dokploy-network`; không bật Detach from dokploy-network trong bước này. Nếu mạng vừa tạo bằng CLI chưa hiện, vào Docker → Networks → Sync rồi quay lại.
-
-Trong **Advanced → Resources**, đặt Memory Limit **`1610612736`** bytes (1536 MiB), replica **1**. Nếu UI cho nhập đơn vị trực tiếp, chọn tương đương 1536 MiB. Không điền `1536m` vào trường chỉ nhận số byte.
-
-Trong **Domains**, chưa tạo domain riêng cho Core. Cổng container là **8081**, health check lấy từ image. Gateway sau này dùng Eureka để gọi `hs-core-api`; domain public `api.homespace.id.vn` sẽ trỏ tới Gateway cổng 8080.
-
-Triển khai **Discovery → Core → Gateway**. Core đã đặt `SPRING_CLOUD_DISCOVERY_ENABLED=true` và `EUREKA_CLIENT_ENABLED=true`, URL `http://hs-discovery-server:8761/eureka/`. Deploy Compose Discovery và xác nhận healthy trước Core. Nếu cần chạy Core riêng trước Discovery, tạm đổi cả hai cờ thành `false` trong Environment rồi bật lại khi Discovery sẵn sàng.
-
-## 5. Deploy lần đầu và kiểm tra
-
-Application `hs-core-api` → **General → Deploy**, mở **Deployments → View** và chờ hoàn tất. Trong **Logs**, cần thấy Spring Boot khởi động, không lặp lỗi thiếu env, kết nối DB/Redis/Kafka hoặc Keycloak.
-
-Trong **Docker → Swarm / Containers**, Core cần running và healthy. Application App Name trên Dokploy có hậu tố riêng; copy tên đó để kiểm tra qua Ubuntu:
+Trên EC2:
 
 ```bash
-CORE_SERVICE='DAN_APP_NAME_CUA_APPLICATION_CORE'
-sudo docker service ps "$CORE_SERVICE" --no-trunc
-CORE_CONTAINER=$(sudo docker ps -q \
-  --filter "label=com.docker.swarm.service.name=$CORE_SERVICE")
-if [ -n "$CORE_CONTAINER" ]; then
-  sudo docker exec "$CORE_CONTAINER" curl --fail --silent --show-error \
-    http://127.0.0.1:8081/actuator/health
-  sudo docker exec "$CORE_CONTAINER" curl --fail --silent --show-error \
-    http://127.0.0.1:8081/actuator/health/readiness
-  sudo docker exec "$CORE_CONTAINER" curl --fail --silent --show-error \
-    http://keycloak:8080/realms/homespace-platform/.well-known/openid-configuration \
-    --output /dev/null --write-out 'Internal Keycloak: %{http_code}\n'
-else
-  echo 'Core has no running task; inspect docker service ps and Dokploy deployment logs.'
-fi
+sudo docker ps --filter label=com.docker.compose.service=hs-core-api --format 'table {{.ID}}\t{{.Names}}\t{{.Status}}'
+CORE_CONTAINER='DAN_CONTAINER_ID_CORE_DANG_CHAY_O_TREN'
+sudo docker exec "$CORE_CONTAINER" getent hosts postgres redis kafka keycloak hs-discovery-server
+sudo docker exec "$CORE_CONTAINER" curl -fsS --max-time 5 http://127.0.0.1:8081/actuator/health
+sudo docker exec "$CORE_CONTAINER" curl -fsS --max-time 5 http://127.0.0.1:8081/actuator/health/readiness
+sudo docker exec "$CORE_CONTAINER" curl -fsS --max-time 5 -H 'Accept: application/json' http://hs-discovery-server:8761/eureka/apps/HS-CORE-API
 ```
 
-Kết quả cần health/readiness `UP`, Keycloak 200. Nếu không kết nối `postgres`, `redis`, `kafka` hoặc `keycloak`, kiểm tra cả Application và container infra đã vào `hs-network`.
+Health/readiness cần `UP`; Eureka cần **HS-CORE-API — UP** bên cạnh HS-GATEWAY-SERVER. Chờ client đăng ký/Gateway cập nhật registry; không tắt self-preservation hoặc kiểm tra auth để che lỗi.
 
-Database của Core là `homespace_core`. Nếu thiếu DB, kiểm tra trạng thái hiện tại rồi tạo có chủ đích; không reset volume để chạy lại init. Core có thể tạo/cập nhật schema theo `JPA_DDL_AUTO` và chạy initializer trong lần đầu. Trong Keycloak realm `homespace-platform` → Users, kiểm tra hai tài khoản bootstrap và quyền; health UP không tự chứng minh admin bootstrap thành công.
+Trên máy cá nhân:
 
-## 6. Gắn webhook trên Docker Hub
-
-1. Application **`hs-core-api` → General**: bật **Autodeploy**, Save. Provider phải là **Docker**, image `nvminh162/hs-core-api:latest`.
-2. Trong **Deployments**, copy Webhook URL của chính Application Core: `https://dokploy.homespace.id.vn/api/deploy/TOKEN`.
-3. Mở **Docker Hub → Repositories → nvminh162/hs-core-api → Webhooks**.
-4. Name: **`dokploy-core-api`**. Webhook URL: dán URL Application Core vừa copy. Bấm **Create / Add webhook**.
-5. GitHub → **Actions → Build and publish Core API → Run workflow → master** hoặc push commit mới.
-6. Chờ job `publish` thành công, kiểm tra **Docker Hub → Webhooks → View History**, rồi **Dokploy → hs-core-api → Deployments** và health runtime.
-
-```text
-Push master hs-core-api
-  → GitHub Actions chạy Maven test + Docker build
-  → push Docker Hub nvminh162/hs-core-api:latest + SHA
-  → Docker Hub webhook
-  → Dokploy cập nhật riêng Application hs-core-api
+```bash
+curl --fail --silent --show-error https://api.homespace.id.vn/actuator/health
+curl --fail --silent --show-error https://api.homespace.id.vn/api/v1/actuator/health/readiness
+curl --fail --silent --show-error 'https://api.homespace.id.vn/api/v1/public/listings?page=1&size=1'
 ```
 
-Dokploy so khớp repository và tag `latest` đã cấu hình trong Docker provider. Webhook cho tag SHA khác có thể bị bỏ qua/từ chối vì không khớp tag; kiểm tra lượt gửi cho `latest`. Không thêm webhook GitHub hoặc job gọi Dokploy song song. Repo Core chỉ cần hai Docker Hub secrets; `DOKPLOY_DEPLOY_WEBHOOK` không còn được workflow dùng và có thể xóa nếu đã tạo nhầm. Giữ webhook infra/Keycloak riêng.
+Lệnh đầu kiểm tra Gateway, hai lệnh sau qua Core. Gateway UP không tự chứng minh Core healthy. Kiểm tra anonymous vẫn bị từ chối ở API quản trị và đăng nhập frontend để xác minh identity propagation. Health không xác minh quyền/hạn dùng credential AWS, VNPT, SmartCA, SePay hoặc blockchain.
 
-Các credentials được giữ nguyên, chưa xác minh hạn dùng/quyền của AWS, VNPT, SmartCA, SePay hoặc blockchain. Các callback URL production chỉ hoạt động sau khi Gateway/frontend được deploy. Không public port DB/Kafka/Core lên Security Group.
+Nếu chuyển đổi lỗi: Stop Compose Core mới trước rồi Start bản cũ với cấu hình đã lưu. Chỉ quay về image cũ khi schema tương thích; không xóa database để rollback.
 
-Tham khảo: [Dokploy Applications](https://docs.dokploy.com/docs/core/applications) · [Mạng Dokploy](https://docs.dokploy.com/docs/core/networks) · [Application Advanced](https://docs.dokploy.com/docs/core/applications/advanced).
+## 6. Docker Hub webhook
+
+1. Sau lần Deploy đầu thành công, **Compose Core → General → bật Autodeploy**.
+2. **Deployments → Webhook URL**: copy URL đúng Compose Core, dạng `https://dokploy.homespace.id.vn/api/deploy/compose/TOKEN`.
+3. Docker Hub → `nvminh162/hs-core-api` → **Webhooks → New webhook**, name `dokploy-core-api`, URL vừa copy → Save. Vô hiệu hóa webhook Core Application cũ; không dùng URL `/api/deploy/TOKEN` hoặc webhook infra/Discovery/Gateway.
+4. Khi push image mới, kiểm tra Docker Hub delivery, deployment Core mới và health/Eureka/Gateway. Raw giữ `pull_policy: always`; dùng tag `latest` nếu muốn cập nhật theo latest mới.
+5. Raw Compose v0.31.4 không lọc tag: workflow push SHA và latest có thể gây hai delivery/deploy. Sự kiện SHA chưa chứng minh latest đã cập nhật; xác nhận deployment sau lượt push latest và image đang chạy.
+6. Khi sửa YAML, cập nhật bản Raw trên Dokploy và Save; Git không tự sửa Raw. Không thêm webhook GitHub chạy trước khi image build xong.
+
+## 7. Nếu dùng Git provider
+
+Repository URL `https://github.com/homespace-platform/hs-core-api.git`, branch `master`, Compose Path `./compose.production.yml`; repo private cần quyền đọc. File YAML phải có trên Git, Environment vẫn phải dán đầy đủ.
+
+Tắt Autodeploy, không nối Docker Hub webhook trực tiếp vào Compose Git v0.31.4 vì payload thiếu branch. Chờ image publish thành công rồi Deploy thủ công; workflow hiện chưa có bước deploy sau CI. Network/DNS và cách kiểm tra Core không đổi giữa Git và Raw.
+
+[Dokploy Compose](https://docs.dokploy.com/docs/core/docker-compose) · [Compose webhook v0.31.4](https://github.com/Dokploy/dokploy/blob/v0.31.4/apps/dokploy/pages/api/deploy/compose/%5BrefreshToken%5D.ts)
