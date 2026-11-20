@@ -15,36 +15,23 @@ Dán file **`D:/Workspace/homespace/hs-core-api/.env.dokploy`** vào Application
 
 ## 2. Nối mạng Application với infra một lần
 
-Dokploy Applications chạy bằng Docker Swarm nên dùng mạng **overlay**. Infra Compose hiện dùng mạng bridge `hs-network`; tạo mạng overlay attachable riêng để hai loại container giao tiếp. Không mở database/Kafka ra public IP.
+Production dùng chung mạng **overlay attachable `hs-network`**. Compose infra tạo mạng trong lần deploy đầu; giữ infra hiện tại khi thêm Core. Không tạo lại mạng hoặc mở database/Kafka ra public IP. File `docker-compose.yml` dành cho local; trên Dokploy infra dùng `compose.production.yml`.
 
-Trong **Dokploy → Docker → Networks → Create Network**:
-
-| Trường | Giá trị |
-| --- | --- |
-| Name | `homespace-backend` |
-| Driver | `overlay` |
-| Attachable | Bật |
-| Internal | Tắt để Application còn gọi được API bên ngoài |
-| IPv4 | Bật |
-
-Nếu dùng terminal Ubuntu thay cho UI, kiểm tra rồi tạo nếu chưa có:
+Kiểm tra trên EC2 trước khi deploy Core:
 
 ```bash
-sudo docker network inspect homespace-backend >/dev/null 2>&1 || \
-  sudo docker network create --driver overlay --attachable homespace-backend
-sudo docker network inspect homespace-backend \
+sudo docker network inspect hs-network \
   --format 'driver={{.Driver}} attachable={{.Attachable}}'
 ```
 
-Kết quả cần `driver=overlay attachable=true`. Nếu mạng đã có nhưng sai loại, dừng để xử lý tên mạng; không xóa mạng đang được dùng.
+Kết quả cần `driver=overlay attachable=true`. Nếu mạng chưa có, deploy infra trước; nếu sai loại, kiểm tra cấu hình hiện có, không xóa mạng đang dùng.
 
-Trong repo `hs-infra`, `compose.production.yml` đã được sửa để PostgreSQL, pgvector, MongoDB, Redis, Kafka, Keycloak và Gotenberg cùng tham gia `homespace-backend`; giữ mạng cũ và 7 volume. Không có service Core trong file đó.
+Infra có 11 service, không chứa Core; các named volumes phải giữ nguyên. Không cần deploy lại infra chỉ để thêm Application Core. Discovery dùng Compose riêng với DNS `hs-discovery-server`; Gateway đang thử nghiệm Compose riêng, Core vẫn giữ Application.
 
-1. Review rồi commit/push thay đổi infra lên `master`.
-2. Mở **homespace-infra → General → Preview Compose → Refresh**: phải vẫn có 11 service, thêm external network `homespace-backend`.
-3. Bấm **Deploy** một lần, chờ Done và kiểm tra infra healthy trở lại. Việc đổi network cần recreate các container liên quan và có thể gây gián đoạn ngắn; dữ liệu vẫn ở volume cũ.
-4. Giữ các domain và Environment infra hiện tại. Nếu đã dán các biến `CORE_*` từ bản gộp trước, thay lại bằng file `hs-infra/.env.dokploy` đã được làm sạch.
-5. Nếu đã deploy container Core trong Compose cũ, dừng Core cũ trước khi chạy Application Core mới. Không dừng hoặc xóa database/volume.
+1. Xác nhận infra và Discovery healthy.
+2. Giữ nguyên App Name, Environment, domains và volumes của infra; không tạo stack infra thứ hai.
+3. Gắn Application Core vào `hs-network` theo mục 4. Giữ `dokploy-network` cho routing của Dokploy nếu đang dùng.
+4. Nếu đã có Core trong một Compose cũ, dừng đúng Core cũ trước khi chạy Application Core mới; không dừng database hoặc xóa volume.
 
 Sau lần nối mạng này, cập nhật Core không cần deploy lại infra.
 
@@ -90,13 +77,13 @@ Bấm Save. Dockerfile đã được GitHub Actions build; Dokploy chỉ pull im
 
 Trong **Environment**, dán toàn bộ `hs-core-api/.env.dokploy` rồi Save. Không dán env infra hoặc biến `CORE_*`.
 
-Trong **Advanced → Networks**, chọn `homespace-backend`, đặt alias `core-api` nếu giao diện có trường Aliases, Save. Nếu dùng **Advanced → Swarm Settings → Network**, thêm Target `homespace-backend`, Aliases `core-api`, rồi Save Networks. Giữ kết nối mặc định `dokploy-network`; không bật Detach from dokploy-network trong bước này. Nếu mạng vừa tạo bằng CLI chưa hiện, vào Docker → Networks → Sync rồi quay lại.
+Trong **Advanced → Networks**, chọn `hs-network`, đặt alias `core-api` nếu giao diện có trường Aliases, Save. Nếu dùng **Advanced → Swarm Settings → Network**, thêm Target `hs-network`, Aliases `core-api`, rồi Save Networks. Giữ kết nối mặc định `dokploy-network`; không bật Detach from dokploy-network trong bước này. Nếu mạng vừa tạo bằng CLI chưa hiện, vào Docker → Networks → Sync rồi quay lại.
 
 Trong **Advanced → Resources**, đặt Memory Limit **`1610612736`** bytes (1536 MiB), replica **1**. Nếu UI cho nhập đơn vị trực tiếp, chọn tương đương 1536 MiB. Không điền `1536m` vào trường chỉ nhận số byte.
 
-Trong **Domains**, chưa tạo domain riêng cho Core. Cổng container là **8081**, health check lấy từ image. Gateway sau này dùng Eureka để gọi `hs-core-api`; domain public `homespace-api.nvminh162.id.vn` sẽ trỏ tới Gateway cổng 8080.
+Trong **Domains**, chưa tạo domain riêng cho Core. Cổng container là **8081**, health check lấy từ image. Gateway sau này dùng Eureka để gọi `hs-core-api`; domain public `api.homespace.id.vn` sẽ trỏ tới Gateway cổng 8080.
 
-Triển khai **Discovery → Core → Gateway**. Core đã đặt `SPRING_CLOUD_DISCOVERY_ENABLED=true` và `EUREKA_CLIENT_ENABLED=true`, URL `http://discovery:8761/eureka/`. Deploy Application Discovery và xác nhận healthy trước Core. Nếu cần chạy Core riêng trước Discovery, tạm đổi cả hai cờ thành `false` trong Environment rồi bật lại khi Discovery sẵn sàng.
+Triển khai **Discovery → Core → Gateway**. Core đã đặt `SPRING_CLOUD_DISCOVERY_ENABLED=true` và `EUREKA_CLIENT_ENABLED=true`, URL `http://hs-discovery-server:8761/eureka/`. Deploy Compose Discovery và xác nhận healthy trước Core. Nếu cần chạy Core riêng trước Discovery, tạm đổi cả hai cờ thành `false` trong Environment rồi bật lại khi Discovery sẵn sàng.
 
 ## 5. Deploy lần đầu và kiểm tra
 
@@ -122,14 +109,14 @@ else
 fi
 ```
 
-Kết quả cần health/readiness `UP`, Keycloak 200. Nếu không kết nối `postgres`, `redis`, `kafka` hoặc `keycloak`, kiểm tra cả Application và container infra đã vào `homespace-backend`.
+Kết quả cần health/readiness `UP`, Keycloak 200. Nếu không kết nối `postgres`, `redis`, `kafka` hoặc `keycloak`, kiểm tra cả Application và container infra đã vào `hs-network`.
 
 Database của Core là `homespace_core`. Nếu thiếu DB, kiểm tra trạng thái hiện tại rồi tạo có chủ đích; không reset volume để chạy lại init. Core có thể tạo/cập nhật schema theo `JPA_DDL_AUTO` và chạy initializer trong lần đầu. Trong Keycloak realm `homespace-platform` → Users, kiểm tra hai tài khoản bootstrap và quyền; health UP không tự chứng minh admin bootstrap thành công.
 
 ## 6. Gắn webhook trên Docker Hub
 
 1. Application **`hs-core-api` → General**: bật **Autodeploy**, Save. Provider phải là **Docker**, image `nvminh162/hs-core-api:latest`.
-2. Trong **Deployments**, copy Webhook URL của chính Application Core: `https://homespace-dokploy.nvminh162.id.vn/api/deploy/TOKEN`.
+2. Trong **Deployments**, copy Webhook URL của chính Application Core: `https://dokploy.homespace.id.vn/api/deploy/TOKEN`.
 3. Mở **Docker Hub → Repositories → nvminh162/hs-core-api → Webhooks**.
 4. Name: **`dokploy-core-api`**. Webhook URL: dán URL Application Core vừa copy. Bấm **Create / Add webhook**.
 5. GitHub → **Actions → Build and publish Core API → Run workflow → master** hoặc push commit mới.
