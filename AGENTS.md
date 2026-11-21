@@ -1,5 +1,15 @@
 # HomeSpace Core API — Codex Instructions
 
+<!-- BEGIN: HomeSpace engineering standards -->
+## HomeSpace engineering standards
+
+- Preserve business invariants, public contracts and backward compatibility. Keep authentication, authorization, input validation and error handling intact.
+- Protect secrets and sensitive data in code, commits, tests, logs and reports. Treat third-party hooks as untrusted until reviewed and explicitly authorized.
+- Change production configuration, deploy or run destructive data operations only when explicitly authorized for the target environment.
+- Keep review tasks read-only unless the developer requests fixes.
+- Run targeted verification first. Broaden coverage when the risk or affected interfaces warrant it. Report checks that ran and any unverified behavior.
+<!-- END: HomeSpace engineering standards -->
+
 ## Scope
 
 Java Spring Boot backend with Maven multi-module architecture.
@@ -42,7 +52,7 @@ Identify the affected module from the path of the changed file. Module-specific 
 
 - The Gateway verifies JWTs and forwards identity headers; `hs-api-service` converts them into the user context. Do not accept user identity from request bodies or parameters when the verified context is available.
 - Preserve `@PreAuthorize`, ownership checks and role checks. Do not widen access.
-- Preserve response envelopes, error codes and endpoint paths used by `hs-web-app`, `hs-admin-portal` and Gateway routes. Use the `platform-contract-review` workspace skill when a shared contract changes.
+- Preserve response envelopes, error codes and endpoint paths used by `hs-web-app`, `hs-admin-portal` and Gateway routes. When a shared contract changes, compare request and response shapes, authorization, status and error behavior with the Gateway routes and affected consumers. Identify required coordinated changes and verify backward compatibility.
 - Do not log or return sensitive personal data, bank data, tokens or secrets.
 
 ## Domain Documentation
