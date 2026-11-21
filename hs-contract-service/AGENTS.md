@@ -1,6 +1,6 @@
 # hs-contract-service — Module Instructions
 
-Adds to the repository-level `hs-core-api/AGENTS.md`. Changes in this module are L3 by default except documentation and static text.
+Adds to the repository's root `AGENTS.md`. Changes in this module are L3 by default except documentation and static text.
 
 ## Scope
 

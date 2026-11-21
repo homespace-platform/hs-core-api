@@ -1,6 +1,6 @@
 # hs-user-service — Module Instructions
 
-Adds to the repository-level `hs-core-api/AGENTS.md`. Changes in this module are L3 when they touch authentication, authorization, identity, KYC or personal data.
+Adds to the repository's root `AGENTS.md`. Changes in this module are L3 when they touch authentication, authorization, identity, KYC or personal data.
 
 ## Scope
 

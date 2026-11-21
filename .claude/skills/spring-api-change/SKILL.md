@@ -3,18 +3,29 @@ name: spring-api-change
 description: Implement focused changes to HomeSpace Spring Boot controllers, DTOs, services and repositories. Use for backend API implementation and bug fixes.
 ---
 
-# spring-api-change (Claude Code adapter for hs-core-api)
+# Spring API Change
 
-This is an adapter. It does not contain the workflow itself. The source workflow is the Codex skill at:
+## Goal
 
-```text
-../../../.agents/skills/spring-api-change/SKILL.md
-```
+Implement the smallest correct backend change while preserving architecture, security and compatibility.
 
-(relative to this directory; it resolves to `.agents/skills/spring-api-change/SKILL.md` in the `hs-core-api` repository root).
+## Procedure
 
-Claude Code does not import that file automatically. When this skill is triggered:
+1. Identify the affected Maven module.
+2. Inspect relevant source files and interfaces.
+3. Determine required behavior.
+4. Implement the focused change.
+5. Preserve validation, authorization and error contracts.
+6. Follow `docs/ai/verification.md` and finish after the required checks.
 
-1. Read the source file above with the Read tool.
-2. Follow its workflow exactly, together with the `AGENTS.md` rules of this repository.
-3. The source skill has no `references/` or `scripts/` directories. If they are added later, read them from the source skill directory when the workflow requires them.
+## Execution Rules
+
+- Prefer module-scoped Maven commands.
+- Reuse relevant existing tests.
+- Add regression tests for meaningful bug fixes.
+- Do not launch unrelated infrastructure.
+- For environment-backed configuration changes, compare `.env` and `.env.example` by key name, keep them in sync, and never print or commit `.env` values. Do not add silent fallback values for missing required variables; make startup fail with the missing variable name.
+
+## Output
+
+Report changed modules, verification results and unresolved risks.

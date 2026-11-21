@@ -9,21 +9,15 @@ description: Select and run relevant focused tests for HomeSpace Core API change
 
 1. Identify changed behavior and files.
 2. Identify the affected Maven module.
-3. Classify risk as L1, L2 or L3.
-4. Follow docs/ai/verification.md.
-5. Select the smallest meaningful verification.
-6. Execute necessary checks.
-7. Report results and limitations.
+3. Use `docs/ai/verification.md` to classify risk and select the smallest check that covers the behavior.
+4. Run the selected check and confirm that the intended test ran. Distinguish setup or dependency failures from code failures before retrying.
+5. Report results and limitations.
 
 ## Rules
 
 - Reuse existing tests when possible.
 - Add regression coverage when appropriate.
-- Avoid full reactor builds for isolated changes.
-- Avoid repeated equivalent commands.
-- Diagnose failures before retrying.
-- Expand verification for high-risk changes.
-- Never claim skipped tests passed.
+- Use module-scoped checks for isolated changes and verify affected integration boundaries for L3.
 
 ## Stop Condition
 
