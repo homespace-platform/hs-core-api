@@ -16,21 +16,16 @@ Implement the smallest correct backend change while preserving architecture, sec
 3. Determine required behavior.
 4. Implement the focused change.
 5. Preserve validation, authorization and error contracts.
-6. Follow docs/ai/verification.md.
-7. Inspect the final diff once, after the last edit.
+6. Follow `docs/ai/verification.md` and finish after the required checks.
 
 ## Execution Rules
 
 - Prefer module-scoped Maven commands.
 - Reuse relevant existing tests.
 - Add regression tests for meaningful bug fixes.
-- Do not run all modules by default.
 - Do not launch unrelated infrastructure.
-- Do not repeatedly execute equivalent commands. Never rerun a passing test whose inputs are unchanged; after a failure, diagnose, then rerun only the affected test.
-- Do not dispatch subagents, and do not start a review skill after implementation unless requested.
-- Do not refactor unrelated code.
 - For environment-backed configuration changes, compare `.env` and `.env.example` by key name, keep them in sync, and never print or commit `.env` values. Do not add silent fallback values for missing required variables; make startup fail with the missing variable name.
 
 ## Output
 
-Report implementation, changed files, verification and unresolved risks.
+Report changed modules, verification results and unresolved risks.

@@ -12,7 +12,7 @@ Review-only. Do not modify source code.
 ## Procedure
 
 1. Identify the requested review scope.
-2. Inspect the relevant diff.
+2. Inspect the relevant diff once. Reuse it when reviewing affected behavior.
 3. Examine changed behavior and affected interfaces.
 4. Identify credible failure scenarios.
 5. Validate important findings when necessary.
@@ -30,11 +30,7 @@ P3: Minor maintainability problems with concrete impact.
 
 ## Efficiency
 
-- Prefer static inspection first.
-- Do not automatically run builds or full test suites.
-- Do not inspect unrelated modules.
-- Do not launch subagents by default.
-- Do not perform repeated review passes without new evidence.
+- Start with static evidence. Inspect an affected dependency or run a focused check only to resolve a material uncertainty.
 - Do not report subjective style preferences.
 
 ## Output
