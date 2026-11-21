@@ -1,22 +1,57 @@
 ---
 name: contract-risk-review
 description: Perform an explicit high-risk review of rental contracts, deposit flows, signing operations and associated financial or data-integrity boundaries. Use when a deep contract or deposit review is specifically requested.
+disable-model-invocation: true
 ---
 
-# contract-risk-review (Claude Code adapter for hs-core-api)
+# Contract Risk Review
 
-This is an adapter. It does not contain the workflow itself. The source workflow is the Codex skill at:
+## Mode
 
-```text
-../../../.agents/skills/contract-risk-review/SKILL.md
-```
+Review-only unless implementation is explicitly requested.
 
-(relative to this directory; it resolves to `.agents/skills/contract-risk-review/SKILL.md` in the `hs-core-api` repository root).
+## Review Checklist
 
-Claude Code does not import that file automatically. When this skill is triggered:
+### Authorization
+- Contract ownership
+- Tenant and landlord permissions
+- Unauthorized document access
 
-1. Read the source file above with the Read tool.
-2. Follow its workflow exactly, together with the `AGENTS.md` rules of this repository.
-3. The source skill has no `references/` or `scripts/` directories. If they are added later, read them from the source skill directory when the workflow requires them.
+### Financial Integrity
+- Deposit amount correctness
+- Currency precision
+- Duplicate transactions
+- Payment state consistency
 
-The source directory also contains `agents/openai.yaml`. That file is Codex-only metadata; Claude Code ignores it.
+### Contract Lifecycle
+- Valid state transitions
+- Signing authorization
+- Duplicate signing requests
+- Cancellation and expiration
+- Idempotency where applicable
+
+### Document Integrity
+- Generated document consistency
+- Required business fields
+- Unauthorized document modification
+- Signature-related integrity
+
+### Integration
+- Payment integrations
+- Blockchain integrations when present
+- Asynchronous events
+- Failure handling and retries
+
+## Verification
+
+- Inspect relevant code and existing evidence first.
+- Run focused verification for material findings when needed.
+- Do not automatically start full infrastructure.
+- Do not run unrelated tests.
+- Report verification limitations.
+
+## Output
+
+Findings ordered by severity, with file location, failure scenario, impact and recommended correction.
+
+Do not report speculative findings without a credible failure scenario.

@@ -4,7 +4,7 @@
 
 Verify code changes with the smallest meaningful set of commands.
 
-Correctness and security take priority over token savings.
+Use the execution policy in `AGENTS.md`. L1 usually fits FAST. For L2, choose FAST for local changes and STANDARD when the scope spans components or interfaces. L3 always uses DEEP verification.
 
 ## L1 — Low Risk
 
@@ -15,7 +15,7 @@ Examples:
 - Nonfunctional formatting
 
 Required:
-- Inspect the affected diff.
+- Inspect the affected change once using the editor or scoped diff.
 
 Do not run Maven tests or builds by default.
 
@@ -30,8 +30,8 @@ Examples:
 Procedure:
 1. Identify the affected Maven module.
 2. Find relevant existing tests.
-3. Run focused tests.
-4. Compile affected modules when useful.
+3. Run focused tests or compile the affected module, whichever supplies the needed evidence.
+4. Add a separate compile or downstream check only when it covers a boundary the selected test does not verify.
 5. Review impacted interfaces.
 
 Do not run the full reactor, unrelated suites or a full build after focused tests pass.
@@ -64,13 +64,8 @@ Procedure:
 
 Do not bypass required verification to save time.
 
-## Command Policy
+## Maven and test environments
 
-- Do not repeat successful checks without relevant changes. Never rerun a passing test whose inputs are unchanged.
-- After a fix, rerun only the affected test, not unrelated suites.
-- Do not start duplicate background runs of equivalent commands.
-- Do not repeat `git status` / `git diff` without intervening edits; run `git diff --check` once after the final edit.
-- Do not rerun a failing command without diagnosing it.
 - Do not run clean builds without a concrete reason.
 - Do not start unrelated infrastructure.
 - Do not install dependencies merely to perform an optional check.
@@ -78,12 +73,6 @@ Do not bypass required verification to save time.
 
 ## Completion
 
-Report:
-- Risk level
-- Commands executed
-- Passed tests
-- Failed tests
-- Blocked tests
-- Unverified risks
+In Validation, report risk level, relevant commands and outcomes. Note blocked checks and unverified risks.
 
 Compilation alone does not prove tests passed.

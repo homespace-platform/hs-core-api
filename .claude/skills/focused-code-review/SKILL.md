@@ -1,22 +1,43 @@
 ---
 name: focused-code-review
 description: Review a specified HomeSpace code diff, commit, pull request or working tree for correctness, security, compatibility and regressions. Use only when code review is explicitly requested.
+disable-model-invocation: true
 ---
 
-# focused-code-review (Claude Code adapter for hs-core-api)
+# Focused Code Review
 
-This is an adapter. It does not contain the workflow itself. The source workflow is the Codex skill at:
+## Mode
 
-```text
-../../../.agents/skills/focused-code-review/SKILL.md
-```
+Review-only. Do not modify source code.
 
-(relative to this directory; it resolves to `.agents/skills/focused-code-review/SKILL.md` in the `hs-core-api` repository root).
+## Procedure
 
-Claude Code does not import that file automatically. When this skill is triggered:
+1. Identify the requested review scope.
+2. Inspect the relevant diff once. Reuse it when reviewing affected behavior.
+3. Examine changed behavior and affected interfaces.
+4. Identify credible failure scenarios.
+5. Validate important findings when necessary.
+6. Report actionable results.
 
-1. Read the source file above with the Read tool.
-2. Follow its workflow exactly, together with the `AGENTS.md` rules of this repository.
-3. The source skill has no `references/` or `scripts/` directories. If they are added later, read them from the source skill directory when the workflow requires them.
+## Priorities
 
-The source directory also contains `agents/openai.yaml`. That file is Codex-only metadata; Claude Code ignores it.
+P0: Critical security, data loss or financial integrity defects.
+
+P1: Serious correctness, authorization or transaction failures.
+
+P2: Meaningful validation, compatibility or performance problems.
+
+P3: Minor maintainability problems with concrete impact.
+
+## Efficiency
+
+- Start with static evidence. Inspect an affected dependency or run a focused check only to resolve a material uncertainty.
+- Do not report subjective style preferences.
+
+## Output
+
+Each finding must include priority, file location, failure scenario, impact and suggested fix.
+
+If no actionable findings are identified, state that clearly.
+
+Report any unverified boundaries.
