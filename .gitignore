@@ -40,5 +40,6 @@ build/
 .env
 .env.dev
 .env.dokploy
+.env.prod
 !.env.example
 !.env.dev.example
