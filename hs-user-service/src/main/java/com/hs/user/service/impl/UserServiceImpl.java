@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -247,10 +248,23 @@ public class UserServiceImpl implements UserService {
         @Override
         @Transactional(readOnly = true)
         public PublicUserProfileResponse getPublicUserProfile(String userId) {
-                User user = userRepository.findById(userId)
+                return toPublicProfile(userRepository.findById(userId));
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public PublicUserProfileResponse getPublicUserProfileByUsername(String username) {
+                return toPublicProfile(userRepository.findByUsernameIgnoreCase(username));
+        }
+
+        /** Single builder for both public lookups: only non-sensitive fields, province name from the active address. */
+        private PublicUserProfileResponse toPublicProfile(Optional<User> found) {
+                User user = found
                                 .filter(candidate -> Boolean.TRUE.equals(candidate.getActive()))
                                 .orElseThrow(() -> new AppException(UserErrorCode.USER_NOT_EXISTED));
                 boolean identityVerified = kycVerificationRepository.existsByUserIdAndProviderInAndStatus(user.getId(), KycPolicy.ACCEPTED_PROVIDERS, KycStatus.VERIFIED);
+                String provinceName = addressRepository.findByUser_IdAndActiveTrue(user.getId())
+                                .map(Address::getCity).orElse(null);
 
                 return PublicUserProfileResponse.builder()
                                 .id(user.getId())
@@ -260,6 +274,7 @@ public class UserServiceImpl implements UserService {
                                 .avatarUrl(user.getAvatarUrl())
                                 .kycVerified(identityVerified)
                                 .createdAt(user.getCreatedAt())
+                                .provinceName(provinceName)
                                 .build();
         }
 

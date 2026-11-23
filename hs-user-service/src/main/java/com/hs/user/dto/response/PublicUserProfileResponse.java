@@ -12,6 +12,7 @@ public record PublicUserProfileResponse(
         String lastName,
         String avatarUrl,
         Boolean kycVerified,
-        Instant createdAt
+        Instant createdAt,
+        String provinceName
 ) {
 }

@@ -48,6 +48,8 @@ public interface UserService {
     @Transactional(readOnly = true)
     PublicUserProfileResponse getPublicUserProfile(String userId);
 
+    PublicUserProfileResponse getPublicUserProfileByUsername(String username);
+
     void updateUserProfile(UpdateProfileRequest request);
 
     void updateUserAvatar(String avatarUrl, String avatarStorageId);

@@ -2,6 +2,8 @@ package com.hs.user.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -14,6 +16,8 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
+import com.hs.common.advice.entity.AppException;
+import com.hs.user.model.Address;
 import com.hs.user.model.User;
 import com.hs.user.model.Role;
 import com.hs.user.model.constant.KycProvider;
@@ -91,5 +95,49 @@ class UserServiceImplTest {
         assertFalse(fields.contains("phone"));
         assertFalse(fields.contains("cccd"));
         assertFalse(fields.contains("address"));
+    }
+
+    @Test
+    void looksUpByUsernameCaseInsensitivelyWithProvinceName() {
+        UserRepository users = mock(UserRepository.class);
+        AddressRepository addresses = mock(AddressRepository.class);
+        User user = new User();
+        user.setId("user-1");
+        user.setUsername("Nguyen-A");
+        user.setActive(true);
+        var address = new Address();
+        address.setCity("Ha Noi");
+        when(users.findByUsernameIgnoreCase("nguyen-a")).thenReturn(Optional.of(user));
+        when(addresses.findByUser_IdAndActiveTrue("user-1")).thenReturn(Optional.of(address));
+        var service = new UserServiceImpl(users, mock(RoleRepository.class), addresses,
+                mock(KycVerificationRepository.class), mock(KeycloakUserService.class),
+                mock(CurrentUserUtils.class), mock(AccountNotificationWriter.class));
+
+        var profile = service.getPublicUserProfileByUsername("nguyen-a");
+
+        assertEquals("user-1", profile.id());
+        assertEquals("Ha Noi", profile.provinceName());
+    }
+
+    @Test
+    void provinceNameIsNullWithoutActiveAddressAndInactiveOrUnknownUsersAreHidden() {
+        UserRepository users = mock(UserRepository.class);
+        AddressRepository addresses = mock(AddressRepository.class);
+        User user = new User();
+        user.setId("user-1");
+        user.setActive(true);
+        User inactive = new User();
+        inactive.setId("user-2");
+        inactive.setActive(false);
+        when(users.findByUsernameIgnoreCase("a")).thenReturn(Optional.of(user));
+        when(users.findByUsernameIgnoreCase("b")).thenReturn(Optional.of(inactive));
+        when(addresses.findByUser_IdAndActiveTrue("user-1")).thenReturn(Optional.empty());
+        var service = new UserServiceImpl(users, mock(RoleRepository.class), addresses,
+                mock(KycVerificationRepository.class), mock(KeycloakUserService.class),
+                mock(CurrentUserUtils.class), mock(AccountNotificationWriter.class));
+
+        assertNull(service.getPublicUserProfileByUsername("a").provinceName());
+        assertThrows(AppException.class, () -> service.getPublicUserProfileByUsername("b"));
+        assertThrows(AppException.class, () -> service.getPublicUserProfileByUsername("missing"));
     }
 }

@@ -21,6 +21,8 @@ public interface UserRepository extends JpaRepository<User, String> {
     java.util.List<User> lockActiveByRoleName(@org.springframework.data.repository.query.Param("roleName") String roleName);
     Optional<User> findByEmail(String email);
 
+    Optional<User> findByUsernameIgnoreCase(String username);
+
     boolean existsByRole_Name(String roleName);
 
     boolean existsByUsernameAndIdNot(String username, String id);
