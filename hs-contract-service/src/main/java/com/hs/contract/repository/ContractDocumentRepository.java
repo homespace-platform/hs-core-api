@@ -26,9 +26,4 @@ public interface ContractDocumentRepository extends JpaRepository<ContractDocume
 
     List<ContractDocument> findByContractIdAndRevisionId(String contractId, String revisionId);
 
-    Optional<ContractDocument> findFirstByContractIdAndRevisionIdAndDocumentTypeOrderByGeneratedAtDesc(
-            String contractId,
-            String revisionId,
-            ContractDocumentType documentType
-    );
 }

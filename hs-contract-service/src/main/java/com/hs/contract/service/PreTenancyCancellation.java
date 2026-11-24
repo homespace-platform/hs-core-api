@@ -25,7 +25,6 @@ final class PreTenancyCancellation {
     static final String LEASE_SIGNED = "HĐ thuê đã đủ chữ ký; cần dùng chấm dứt hợp đồng.";
     static final String SIGNATURE_PENDING = "Chữ ký đang xử lý hoặc chưa rõ kết quả; cần đối soát nhà cung cấp trước.";
     static final String FORFEIT_REASON = "Hủy sau khi HĐ cọc đã đủ chữ ký; cọc không hoàn";
-    static final String FORFEIT_NOTICE = "HĐ cọc đã đủ chữ ký: tiền cọc không được hoàn, chỉ hoàn tiền thuê tháng đầu nếu đã nhận.";
     private static final Set<ContractStatus> SIGNED = Set.of(ContractStatus.ACTIVE, ContractStatus.EXPIRED, ContractStatus.CLOSED, ContractStatus.TERMINATED);
     private static final Set<SignatureRequestStatus> DEAD = Set.of(SignatureRequestStatus.REJECTED, SignatureRequestStatus.CANCELLED, SignatureRequestStatus.EXPIRED);
 

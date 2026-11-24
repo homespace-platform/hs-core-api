@@ -17,10 +17,15 @@ public class ContractRentalHoldProtectionChecker implements RentalHoldProtection
                     ContractStatus.TENANT_SIGNATURE_PENDING, ContractStatus.ACTIVE);
 
     private final ContractRepository contractRepository;
+    // An open complaint pauses every automatic resolution (default notices, zero-deposit cancel, auto-confirm);
+    // the hold-expiry job must respect it too.
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.hs.payment.repository.DisputeCaseRepository disputeCases;
 
     @Override
     public boolean isProtected(String rentalRequestId) {
         return rentalRequestId != null
-                && contractRepository.existsByRentalRequestIdAndStatusIn(rentalRequestId, PROTECTED_STATUSES);
+                && (contractRepository.existsByRentalRequestIdAndStatusIn(rentalRequestId, PROTECTED_STATUSES)
+                || (disputeCases != null && disputeCases.existsByRentalRequestIdAndActiveKeyIsNotNull(rentalRequestId)));
     }
 }

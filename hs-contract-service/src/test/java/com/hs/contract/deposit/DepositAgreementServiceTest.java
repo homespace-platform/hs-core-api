@@ -188,6 +188,14 @@ class DepositAgreementServiceTest {
         assertEquals("HS-DEPOSIT",group(service.dataModel(c),"depositPayment").get("transferReference"));
         d.setSnapshotJson(d.getSnapshotJson()+" ");assertThrows(AppException.class,()->service.dataModel(c));
     }
+    @Test void paymentReconciledAsReceivedWithoutAPayerReportStillCreatesTheAgreementWithManualWording() {
+        payment.setPayerReportedAt(null);payment.setPayeeConfirmedAt(null);
+        Contract c=service.createAutomatically("rental");
+        var saved=ArgumentCaptor.forClass(DepositAgreement.class);verify(agreements).save(saved.capture());
+        var json=saved.getValue().getSnapshotJson();
+        assertEquals(c.getId(),saved.getValue().getSigningContractId());
+        assertTrue(json.contains("đối soát thủ công"));assertFalse(json.contains("null"));
+    }
     @Test void counterpartyWithoutKycBlocksDepositPrepareBeforeAnySnapshotOrEnvelopeIsCreated() {
         doThrow(new AppException(com.hs.user.advice.entity.enums.UserErrorCode.COUNTERPARTY_KYC_REQUIRED)).when(partyKyc).require("owner","tenant",null);
         var error=assertThrows(AppException.class,()->service.createAutomatically("rental"));

@@ -40,22 +40,30 @@ public interface ContractRepository extends JpaRepository<Contract, String>, Jpa
         + "and deposit.agreementKind = 'DEPOSIT' and deposit.parentContractId is null "
         + "and deposit.status = com.hs.contract.model.constant.ContractStatus.ACTIVE and deposit.signedAt is not null "
         + "and deposit.rentalRequestId = lease.rentalRequestId and deposit.landlordId = lease.landlordId and deposit.tenantId = lease.tenantId "
-        + "order by lease.id")
-    List<String> findSettledLeaseIdsWithActiveDeposit(Pageable pageable);
+        + "and (:afterId is null or lease.id > :afterId) order by lease.id")
+    List<String> findSettledLeaseIdsWithActiveDeposit(@Param("afterId") String afterId, Pageable pageable);
 
-    Optional<Contract> findByContractNumber(String contractNumber);
+    /** Lease/deposit documents whose tenant signing window ends inside (now, soon]; paged by id for the reminder job. */
+    @Query("select c.id from Contract c where c.status = com.hs.contract.model.constant.ContractStatus.TENANT_SIGNATURE_PENDING "
+            + "and c.tenantSigningDueAt > :now and c.tenantSigningDueAt <= :soon and (:afterId is null or c.id > :afterId) order by c.id")
+    List<String> findIdsAwaitingTenantSignatureDue(@Param("now") java.time.Instant now, @Param("soon") java.time.Instant soon,
+                                                   @Param("afterId") String afterId, Pageable pageable);
 
-    List<Contract> findByLandlordIdOrderByCreatedAtDesc(String landlordId);
-
-    List<Contract> findByTenantIdOrderByCreatedAtDesc(String tenantId);
+    /** Root leases the landlord has not signed yet whose first-rent signing deadline ends inside (now, soon]. */
+    @Query("select c.id from Contract c, PaymentRequest p where p.rentalRequestId = c.rentalRequestId "
+            + "and p.type = com.hs.payment.model.constant.PaymentType.INITIAL and p.status = com.hs.payment.model.constant.PaymentStatus.CONFIRMED "
+            + "and p.contractDueAt > :now and p.contractDueAt <= :soon and c.parentContractId is null "
+            + "and (c.agreementKind is null or c.agreementKind <> 'DEPOSIT') and c.tenantSigningDueAt is null "
+            + "and c.status in (com.hs.contract.model.constant.ContractStatus.DRAFT, com.hs.contract.model.constant.ContractStatus.PENDING_REVIEW, "
+            + "com.hs.contract.model.constant.ContractStatus.LANDLORD_SIGNATURE_PENDING) and (:afterId is null or c.id > :afterId) order by c.id")
+    List<String> findIdsAwaitingLandlordLeaseSignatureDue(@Param("now") java.time.Instant now, @Param("soon") java.time.Instant soon,
+                                                          @Param("afterId") String afterId, Pageable pageable);
 
     @Query("SELECT c FROM Contract c WHERE (c.landlordId = :userId OR c.tenantId = :userId) ORDER BY c.createdAt DESC")
     List<Contract> findByUserInvolved(@Param("userId") String userId);
 
     @Query("SELECT c FROM Contract c WHERE (c.landlordId = :userId OR c.tenantId = :userId) AND c.status = :status ORDER BY c.createdAt DESC")
     List<Contract> findByUserInvolvedAndStatus(@Param("userId") String userId, @Param("status") ContractStatus status);
-
-    List<Contract> findAllByOrderByCreatedAtDesc();
 
     List<Contract> findByStatusOrderByCreatedAtDesc(ContractStatus status);
 

@@ -60,8 +60,17 @@ class PaymentDueReminderSchedulerTest {
         p.setType(PaymentType.OTHER_CHARGE);p.setContractId("contract");assertTrue(PaymentTimePolicy.usesBillingTime(p));
     }
     @Test void schedulerUsesBothRealAndBillingTimeInOneBoundedCandidateQuery() {
-        when(time.now()).thenReturn(billingNow);when(payments.findDueSoonIds(any(),any(),any(),any(),any(),any(),any())).thenReturn(List.of());
+        when(time.now()).thenReturn(billingNow);when(payments.findDueSoonIds(any(),any(),any(),any(),any(),any(),any(),any())).thenReturn(List.of());
         scheduler.remindDueSoon();verify(payments).findDueSoonIds(any(),eq(PaymentTimePolicy.BILLING_TYPES),eq(billingNow),
-            eq(billingNow.plus(Duration.ofHours(24))),any(),any(),argThat(p->p.getPageSize()==100&&p.getPageNumber()==0));
+            eq(billingNow.plus(Duration.ofHours(24))),any(),any(),isNull(),argThat(p->p.getPageSize()==100&&p.getPageNumber()==0));
+    }
+    @Test void fullPageIsFollowedByTheNextKeysetPageAndAFailingRowDoesNotStarveTheRest() {
+        var first=new ArrayList<String>();for(int i=0;i<100;i++)first.add(String.format("p%03d",i));
+        when(time.now()).thenReturn(billingNow);
+        when(payments.findDueSoonIds(any(),any(),any(),any(),any(),any(),isNull(),any())).thenReturn(first);
+        when(payments.findDueSoonIds(any(),any(),any(),any(),any(),any(),eq("p099"),any())).thenReturn(List.of("p100"));
+        when(payments.findByIdForUpdate(anyString())).thenThrow(new IllegalStateException("poison"));
+        scheduler.remindDueSoon();
+        verify(payments).findByIdForUpdate("p000");verify(payments).findByIdForUpdate("p100"); // 101st id reached despite every row failing
     }
 }

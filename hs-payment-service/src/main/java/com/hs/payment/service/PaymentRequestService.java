@@ -579,7 +579,107 @@ public class PaymentRequestService {
         if (payment.getStatus() != PaymentStatus.TRANSFER_REPORTED) {
             throw new AppException(PaymentErrorCode.INVALID_PAYMENT_STATUS);
         }
+        return confirmLocked(payment, actorId,
+                payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"TENANT":"LANDLORD",
+                payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"Người thuê xác nhận đã nhận tiền hoàn":"Chủ nhà xác nhận đã nhận đủ tiền");
+    }
 
+    static final Set<PaymentType> AUTO_CONFIRMABLE_REFUNDS = Set.of(PaymentType.INITIAL_PAYMENT_REFUND, PaymentType.DEPOSIT_REFUND);
+    static final String AUTO_CONFIRM_REASON = "Hệ thống tự xác nhận vì người nhận không phản hồi sau thời hạn";
+
+    /**
+     * Owner-approved exception to "never mark money received for a party": a landlord→tenant refund that was reported
+     * with proof and left unanswered by the tenant past the window is confirmed by the SYSTEM, with the same effects
+     * as a manual confirmation. Never when the tenant rejected it or a complaint is open on the rental.
+     */
+    @Transactional
+    public boolean autoConfirmStaleRefund(String paymentRequestId, Duration window, Duration lead) {
+        PaymentRequest payment = lockTransferAction(paymentRequestId);
+        if (payment.getStatus() != PaymentStatus.TRANSFER_REPORTED || !AUTO_CONFIRMABLE_REFUNDS.contains(payment.getType())
+                || payment.getDirection() != PaymentDirection.LANDLORD_TO_TENANT || payment.getPayerReportedAt() == null) return false;
+        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? businessNow() : Instant.now();
+        if (now.isBefore(payment.getPayerReportedAt().plus(window))) return false;
+        if (payment.getRentalRequestId() != null && disputeCases != null
+                && disputeCases.existsByRentalRequestIdAndActiveKeyIsNotNull(payment.getRentalRequestId())) return false;
+        if (!warnedAtLeast(payment, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REFUND_AUTO_CONFIRM_SOON,
+                payment.getPayerReportedAt().toString(), now, lead)) return false;
+        confirmLocked(payment, "SYSTEM", "SYSTEM", AUTO_CONFIRM_REASON);
+        // confirmLocked tells the payer; the tenant (payee) did not act, so tell them the system confirmed on their behalf.
+        notifications.enqueue(payment, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_AUTO_CONFIRMED, payment.getPayeeId());
+        return true;
+    }
+
+    /**
+     * Warns the tenant once per report, from {@code lead} before the window ends (an already overdue backlog row is
+     * warned too), that an unanswered landlord refund will be auto-confirmed. Same eligibility as
+     * {@link #autoConfirmStaleRefund}; changes no payment state.
+     */
+    @Transactional
+    public boolean warnRefundAutoConfirmSoon(String paymentRequestId, Duration window, Duration lead) {
+        PaymentRequest payment = lockTransferAction(paymentRequestId);
+        if (payment.getStatus() != PaymentStatus.TRANSFER_REPORTED || !AUTO_CONFIRMABLE_REFUNDS.contains(payment.getType())
+                || payment.getDirection() != PaymentDirection.LANDLORD_TO_TENANT || payment.getPayerReportedAt() == null) return false;
+        Instant now = PaymentTimePolicy.usesBillingTime(payment) ? businessNow() : Instant.now();
+        Instant autoAt = payment.getPayerReportedAt().plus(window);
+        if (now.isBefore(autoAt.minus(lead))) return false;
+        if (payment.getRentalRequestId() != null && disputeCases != null
+                && disputeCases.existsByRentalRequestIdAndActiveKeyIsNotNull(payment.getRentalRequestId())) return false;
+        return notifications.enqueueOnce(payment, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REFUND_AUTO_CONFIRM_SOON,
+                payment.getPayeeId(), payment.getPayerReportedAt().toString());
+    }
+
+    /** A system confirmation needs its warning on record for at least {@code lead}, so nobody is confirmed unwarned (e.g. backlog right after deploy). */
+    private boolean warnedAtLeast(PaymentRequest p, com.hs.payment.notification.PaymentNotificationWriter.Event warning,
+                                  String dedupeKey, Instant clock, Duration lead) {
+        return notifications.onceCreatedAt(p, warning, dedupeKey).map(at -> !clock.isBefore(at.plus(lead))).orElse(false);
+    }
+
+    static final String RECEIPT_AUTO_CONFIRM_REASON = "Hệ thống tự xác nhận vì bên nhận không phản hồi quá hạn";
+
+    /** Reported, deadline set, not a refund (those use the longer refund window), and no complaint open on the rental. */
+    private boolean receiptAutoConfirmable(PaymentRequest p) {
+        return p.getStatus() == PaymentStatus.TRANSFER_REPORTED && p.getConfirmationDueAt() != null
+                && !AUTO_CONFIRMABLE_REFUNDS.contains(p.getType())
+                && !(p.getRentalRequestId() != null && disputeCases != null
+                    && disputeCases.existsByRentalRequestIdAndActiveKeyIsNotNull(p.getRentalRequestId()));
+    }
+
+    /**
+     * Owner rule: a receiver who stays silent past {@code confirmationDueAt} is treated as having received the money.
+     * Same lock order and {@link #confirmLocked} as a manual confirmation, so every downstream effect is identical.
+     * Rejected payments, open complaints, not-yet-due rows and rows whose AUTO_CONFIRM_SOON warning is missing or
+     * younger than {@code lead} are never touched; a second call is a no-op.
+     */
+    @Transactional
+    public boolean autoConfirmOverdueReceipt(String paymentRequestId, Instant now, Duration lead) {
+        PaymentRequest payment = lockTransferAction(paymentRequestId);
+        if (!receiptAutoConfirmable(payment)) return false;
+        Instant clock = PaymentTimePolicy.usesBillingTime(payment) ? businessNow() : now;
+        if (clock.isBefore(payment.getConfirmationDueAt())) return false;
+        if (!warnedAtLeast(payment, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_AUTO_CONFIRM_SOON,
+                payment.getConfirmationDueAt().toString(), clock, lead)) return false;
+        confirmLocked(payment, "SYSTEM", "SYSTEM", RECEIPT_AUTO_CONFIRM_REASON);
+        // The payer already got PAYMENT_RECEIPT_CONFIRMED from confirmLocked; tell the silent receiver it happened.
+        notifications.enqueue(payment, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_AUTO_CONFIRMED, payment.getPayeeId());
+        return true;
+    }
+
+    /** Warns the payee once per report from {@code lead} before the deadline, also when it already passed; changes no payment state. */
+    @Transactional
+    public boolean warnReceiptAutoConfirmSoon(String paymentRequestId, Instant now, Duration lead) {
+        PaymentRequest payment = lockTransferAction(paymentRequestId);
+        if (!receiptAutoConfirmable(payment)) return false;
+        Instant clock = PaymentTimePolicy.usesBillingTime(payment) ? businessNow() : now, due = payment.getConfirmationDueAt();
+        if (clock.isBefore(due.minus(lead))) return false;
+        return notifications.enqueueOnce(payment, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_AUTO_CONFIRM_SOON,
+                payment.getPayeeId(), due.toString());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DisputeCaseRepository disputeCases;
+
+    private PaymentRequestResponse confirmLocked(PaymentRequest payment, String actorId, String actorRole, String reason) {
+        String paymentRequestId = payment.getId();
         Instant now = PaymentTimePolicy.usesBillingTime(payment) ? businessNow() : Instant.now();
         payment.setStatus(PaymentStatus.CONFIRMED);
         payment.setPayeeConfirmedAt(now);
@@ -599,28 +699,28 @@ public class PaymentRequestService {
             deposit.setHeldAmount(held);deposit.setRefundableAmount(held);depositRecordRepository.save(deposit);
         }
 
-        // Update DepositRecord to HELD
-        depositRecordRepository.findByInitialPaymentRequestId(saved.getId()).ifPresent(record -> {
+        // Update DepositRecord to HELD (payment row is already locked; deposit last, as above)
+        depositRecordRepository.findByInitialPaymentRequestIdForUpdate(saved.getId()).ifPresent(record -> {
             record.setStatus(DepositStatus.HELD);
             record.setHeldAmount(record.getOriginalAmount());
             record.setReceivedConfirmedAt(now);
             depositRecordRepository.save(record);
         });
 
-        depositRecordRepository.findByRefundPaymentRequestId(saved.getId()).ifPresent(record -> {
+        depositRecordRepository.findByRefundPaymentRequestIdForUpdate(saved.getId()).ifPresent(record -> {
             record.setStatus(DepositStatus.REFUNDED); record.setHeldAmount(BigDecimal.ZERO); record.setRefundableAmount(BigDecimal.ZERO);
             depositRecordRepository.save(record);
         });
 
         recordEvent(saved.getId(), PaymentEventType.RECEIPT_CONFIRMED, PaymentStatus.TRANSFER_REPORTED,
-                PaymentStatus.CONFIRMED, actorId, payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"TENANT":"LANDLORD",
-                payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT?"Người thuê xác nhận đã nhận tiền hoàn":"Chủ nhà xác nhận đã nhận đủ tiền", null);
+                PaymentStatus.CONFIRMED, actorId, actorRole, reason, null);
 
-        log.info("Payee [{}] CONFIRMED receipt for PaymentRequest [{}]", actorId, paymentRequestId);
+        log.info("[{}] CONFIRMED receipt for PaymentRequest [{}]", actorId, paymentRequestId);
         if(receiptService!=null)receiptService.capture(saved);
         publishOnboardingReceipt(saved);
         if (receiptEvents != null && saved.getType() == PaymentType.INITIAL_PAYMENT_REFUND && saved.getRentalRequestId() != null) {
-            receiptEvents.publishEvent(new com.hs.payment.event.InitialRefundConfirmed(saved.getRentalRequestId(), actorId));
+            // The recipient is always the payee (a system auto-confirmation acts on the tenant's behalf).
+            receiptEvents.publishEvent(new com.hs.payment.event.InitialRefundConfirmed(saved.getRentalRequestId(), saved.getPayeeId()));
         }
         // Last, after receipt capture and every same-transaction listener: a failure above rolls the whole confirmation back.
         notifications.enqueue(saved, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_CONFIRMED, saved.getPayerId());
@@ -833,15 +933,27 @@ public class PaymentRequestService {
         createRefundObligation(initialPayment,amount,true);
     }
 
+    /**
+     * Same refund as {@link #createRentRefundObligation}, for the system-finalized default (tenant missed the lease signing
+     * deadline): that flow has no other notice to the landlord, who must send this refund, so tell him once.
+     */
+    @Transactional
+    public void createRentRefundObligationNotifyingLandlord(PaymentRequest initialPayment,BigDecimal amount) {
+        createRefundObligation(initialPayment,amount,true,null,true);
+    }
+
     /** Bilateral early-exit credit; does not imply a reservation-policy violation. */
     @Transactional public void createAgreedRentRefundObligation(PaymentRequest source,BigDecimal amount){
         createRefundObligation(source,amount,true,"Hoàn tiền thuê thực nhận theo thỏa thuận chấm dứt sớm; không thay đổi cọc hoặc chứng từ gốc");
     }
 
     private void createRefundObligation(PaymentRequest initialPayment,BigDecimal amount,boolean rentOnly) {
-        createRefundObligation(initialPayment,amount,rentOnly,null);
+        createRefundObligation(initialPayment,amount,rentOnly,null,false);
     }
     private void createRefundObligation(PaymentRequest initialPayment,BigDecimal amount,boolean rentOnly,String agreedReason) {
+        createRefundObligation(initialPayment,amount,rentOnly,agreedReason,false);
+    }
+    private void createRefundObligation(PaymentRequest initialPayment,BigDecimal amount,boolean rentOnly,String agreedReason,boolean notifyPayer) {
         if(amount==null || amount.signum()<0 || amount.compareTo(initialPayment.getTotalAmount())>0)
             throw new IllegalArgumentException("Invalid refund amount");
         if(amount.signum()==0)return;
@@ -862,7 +974,7 @@ public class PaymentRequestService {
         recordEvent(savedRefund.getId(), PaymentEventType.REFUND_OBLIGATION_CREATED, null,
                 PaymentStatus.AWAITING_TRANSFER, "SYSTEM", "SYSTEM",
                 agreedReason!=null?agreedReason:rentOnly?"Hoàn tiền thuê đã nhận; cọc được xử lý riêng theo thông báo vi phạm":"Hai bên đồng ý hủy hồ sơ trước khi ký; chủ nhà cần hoàn khoản thực nhận và người thuê xác nhận nhận đủ", null);
-        if(agreedReason!=null)notifications.enqueue(savedRefund,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED,savedRefund.getPayerId());
+        if(agreedReason!=null||notifyPayer)notifications.enqueue(savedRefund,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED,savedRefund.getPayerId());
     }
 
     private PaymentRequest newInitialRefund(PaymentRequest initialPayment, BigDecimal amount, String key, String sourcesSnapshot) {

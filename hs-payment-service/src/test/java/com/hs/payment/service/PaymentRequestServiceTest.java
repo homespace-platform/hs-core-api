@@ -288,6 +288,20 @@ class PaymentRequestServiceTest {
         assertThrows(IllegalArgumentException.class,()->paymentRequestService.createRentRefundObligation(source,new BigDecimal("16000000")));
         verifyNoInteractions(notifications);
     }
+    @Test void systemDefaultRentRefundTellsTheLandlordOnceAndIsIdempotent() {
+        when(paymentRequestRepository.findByOnboardingKey("CANCEL_REFUND:rental")).thenReturn(Optional.empty());
+        var source=PaymentRequest.builder().id("source").contractId("root").rentalRequestId("rental").listingId("listing")
+            .payerId("tenant").payeeId("owner").status(PaymentStatus.CONFIRMED).totalAmount(new BigDecimal("15000000")).build();
+        when(billingTime.now()).thenReturn(Instant.parse("2026-11-02T03:00:00Z"));
+        when(transferReferenceGenerator.generateUniqueReference()).thenReturn("HSREFUND1");
+        when(paymentRequestRepository.save(any())).thenAnswer(i->{PaymentRequest p=i.getArgument(0);p.setId("refund");return p;});
+        paymentRequestService.createRentRefundObligationNotifyingLandlord(source,new BigDecimal("5000000"));
+        var captor=org.mockito.ArgumentCaptor.forClass(PaymentRequest.class);verify(paymentRequestRepository).save(captor.capture());
+        verify(notifications,times(1)).enqueue(captor.getValue(),com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REQUEST_CREATED,"owner");
+        when(paymentRequestRepository.findByOnboardingKey("REFUND:source")).thenReturn(Optional.of(captor.getValue()));
+        paymentRequestService.createRentRefundObligationNotifyingLandlord(source,new BigDecimal("5000000"));
+        verifyNoMoreInteractions(notifications);
+    }
 
     @Test void depositDeltaCreatesOnlyDifferenceAndReusesSameObligation() {
         when(bankAccountService.getDefaultIncomingAccount("landlord-1")).thenReturn(landlordAccount);
@@ -354,6 +368,7 @@ class PaymentRequestServiceTest {
         when(paymentRequestRepository.findById("refund")).thenReturn(Optional.of(p));
         when(paymentRequestRepository.save(any())).thenAnswer(i->i.getArgument(0));
         when(depositRecordRepository.findByRefundPaymentRequestId("refund")).thenReturn(Optional.of(deposit));
+        when(depositRecordRepository.findByRefundPaymentRequestIdForUpdate("refund")).thenReturn(Optional.of(deposit));
         when(billingTime.now()).thenReturn(Instant.parse("2027-01-30T03:00:00Z"));
         when(paymentProofUploadSessionService.consumeSession("session","refund","landlord-1")).thenReturn("proof");
         assertThrows(AppException.class,()->paymentRequestService.reportTransfer("refund","tenant-1",ReportTransferRequest.builder().build()));
@@ -367,6 +382,8 @@ class PaymentRequestServiceTest {
         assertEquals(BigDecimal.ZERO,deposit.getHeldAmount());
         assertNull(p.getContractDueAt());
         assertEquals(Instant.parse("2027-01-30T03:00:00Z"),p.getConfirmedAt());
+        // The deposit row is read under a lock when confirming (lost-update guard).
+        verify(depositRecordRepository).findByRefundPaymentRequestIdForUpdate("refund");
     }
 
     @Test
@@ -743,6 +760,93 @@ class PaymentRequestServiceTest {
         verify(notifications).enqueue(payment,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_CONFIRMED,"tenant");
     }
 
+    @Test void staleReportedRefundIsAutoConfirmedForTheTenantOnlyAfterTheWindowAndNeverWhenRejectedOrDisputed() {
+        org.springframework.test.util.ReflectionTestUtils.setField(paymentRequestService,"receiptEvents",receiptEvents);
+        var cases=mock(DisputeCaseRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(paymentRequestService,"disputeCases",cases);
+        var reported=Instant.parse("2026-11-01T03:00:00Z");
+        var refund=PaymentRequest.builder().id("refund").rentalRequestId("rental").payerId("owner").payeeId("tenant")
+            .type(PaymentType.INITIAL_PAYMENT_REFUND).direction(com.hs.payment.model.constant.PaymentDirection.LANDLORD_TO_TENANT)
+            .status(PaymentStatus.TRANSFER_REPORTED).payerReportedAt(reported).totalAmount(new BigDecimal("3400000")).build();
+        when(paymentRequestRepository.findById("refund")).thenReturn(Optional.of(refund));
+        when(paymentRequestRepository.save(any())).thenAnswer(i->i.getArgument(0));
+        var window=java.time.Duration.ofHours(72);var lead=java.time.Duration.ofHours(24);
+        var soon=com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REFUND_AUTO_CONFIRM_SOON;
+
+        when(billingTime.now()).thenReturn(reported.plus(java.time.Duration.ofHours(71)));
+        assertFalse(paymentRequestService.autoConfirmStaleRefund("refund",window,lead));
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,refund.getStatus());
+
+        when(billingTime.now()).thenReturn(reported.plus(java.time.Duration.ofHours(72)));
+        when(cases.existsByRentalRequestIdAndActiveKeyIsNotNull("rental")).thenReturn(true);
+        assertFalse(paymentRequestService.autoConfirmStaleRefund("refund",window,lead)); // open complaint: never
+        when(cases.existsByRentalRequestIdAndActiveKeyIsNotNull("rental")).thenReturn(false);
+
+        assertFalse(paymentRequestService.autoConfirmStaleRefund("refund",window,lead)); // backlog: never warned, never confirmed
+        when(notifications.onceCreatedAt(refund,soon,reported.toString())).thenReturn(Optional.of(reported.plus(java.time.Duration.ofHours(60))));
+        assertFalse(paymentRequestService.autoConfirmStaleRefund("refund",window,lead)); // warning younger than the lead
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,refund.getStatus());
+        when(notifications.onceCreatedAt(refund,soon,reported.toString())).thenReturn(Optional.of(reported.plus(java.time.Duration.ofHours(48))));
+
+        assertTrue(paymentRequestService.autoConfirmStaleRefund("refund",window,lead));
+        assertEquals(PaymentStatus.CONFIRMED,refund.getStatus());
+        // Same downstream effect as a manual confirmation, addressed to the tenant who did not act.
+        verify(receiptEvents).publishEvent(new com.hs.payment.event.InitialRefundConfirmed("rental","tenant"));
+        verify(notifications).enqueue(refund,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_AUTO_CONFIRMED,"tenant");
+        verify(notifications,never()).enqueue(refund,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_CONFIRMED,"tenant");
+        assertFalse(paymentRequestService.autoConfirmStaleRefund("refund",window,lead)); // already confirmed: idempotent
+
+        refund.setStatus(PaymentStatus.REJECTED);
+        assertFalse(paymentRequestService.autoConfirmStaleRefund("refund",window,lead)); // tenant rejected: never
+        refund.setStatus(PaymentStatus.TRANSFER_REPORTED);refund.setType(PaymentType.MONTHLY_RENT);
+        assertFalse(paymentRequestService.autoConfirmStaleRefund("refund",window,lead)); // not a refund: untouched
+    }
+
+    @Test void tenantIsWarnedOnceBeforeTheRefundAutoConfirmsAndNeverWhenSettledOrDisputed() {
+        var cases=mock(DisputeCaseRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(paymentRequestService,"disputeCases",cases);
+        var reported=Instant.parse("2026-11-01T03:00:00Z");
+        var refund=PaymentRequest.builder().id("refund").rentalRequestId("rental").payerId("owner").payeeId("tenant")
+            .type(PaymentType.INITIAL_PAYMENT_REFUND).direction(com.hs.payment.model.constant.PaymentDirection.LANDLORD_TO_TENANT)
+            .status(PaymentStatus.TRANSFER_REPORTED).payerReportedAt(reported).totalAmount(new BigDecimal("3400000")).build();
+        when(paymentRequestRepository.findById("refund")).thenReturn(Optional.of(refund));
+        var window=java.time.Duration.ofHours(72);var lead=java.time.Duration.ofHours(24);
+        var event=com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REFUND_AUTO_CONFIRM_SOON;
+        when(notifications.enqueueOnce(refund,event,"tenant",reported.toString())).thenReturn(true);
+
+        when(billingTime.now()).thenReturn(reported.plus(java.time.Duration.ofHours(47)));
+        assertFalse(paymentRequestService.warnRefundAutoConfirmSoon("refund",window,lead)); // too early
+        when(billingTime.now()).thenReturn(reported.plus(java.time.Duration.ofHours(72)));
+        when(billingTime.now()).thenReturn(reported.plus(java.time.Duration.ofHours(50)));
+        when(cases.existsByRentalRequestIdAndActiveKeyIsNotNull("rental")).thenReturn(true);
+        assertFalse(paymentRequestService.warnRefundAutoConfirmSoon("refund",window,lead)); // open complaint: auto-confirm never happens
+        when(cases.existsByRentalRequestIdAndActiveKeyIsNotNull("rental")).thenReturn(false);
+        verify(notifications,never()).enqueueOnce(any(),any(),any(),any());
+
+        assertTrue(paymentRequestService.warnRefundAutoConfirmSoon("refund",window,lead));
+        verify(notifications).enqueueOnce(refund,event,"tenant",reported.toString());
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,refund.getStatus());
+        verify(paymentRequestRepository,never()).save(any());
+
+        refund.setStatus(PaymentStatus.REJECTED);
+        assertFalse(paymentRequestService.warnRefundAutoConfirmSoon("refund",window,lead));
+        refund.setStatus(PaymentStatus.TRANSFER_REPORTED);refund.setType(PaymentType.MONTHLY_RENT);
+        assertFalse(paymentRequestService.warnRefundAutoConfirmSoon("refund",window,lead));
+        verify(notifications,times(1)).enqueueOnce(any(),any(),any(),any());
+    }
+
+    @Test void overdueBacklogRefundIsWarnedAtOnce() {
+        var reported=Instant.parse("2026-11-01T03:00:00Z");
+        var refund=PaymentRequest.builder().id("refund").rentalRequestId("rental").payerId("owner").payeeId("tenant")
+            .type(PaymentType.INITIAL_PAYMENT_REFUND).direction(com.hs.payment.model.constant.PaymentDirection.LANDLORD_TO_TENANT)
+            .status(PaymentStatus.TRANSFER_REPORTED).payerReportedAt(reported).totalAmount(new BigDecimal("3400000")).build();
+        when(paymentRequestRepository.findById("refund")).thenReturn(Optional.of(refund));
+        when(billingTime.now()).thenReturn(reported.plus(java.time.Duration.ofHours(500)));
+        when(notifications.enqueueOnce(refund,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_REFUND_AUTO_CONFIRM_SOON,"tenant",reported.toString())).thenReturn(true);
+        assertTrue(paymentRequestService.warnRefundAutoConfirmSoon("refund",java.time.Duration.ofHours(72),java.time.Duration.ofHours(24)));
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,refund.getStatus());
+    }
+
     @Test
     @DisplayName("rejectReceipt changes status to REJECTED")
     void rejectReceipt_Success() {
@@ -782,5 +886,99 @@ class PaymentRequestServiceTest {
         paymentRequestService.reportTransfer(p.getId(),"owner",request);
         verify(notifications,times(2)).enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_TRANSFER_REPORTED,"tenant");
         verifyNoMoreInteractions(notifications);
+    }
+
+    private PaymentRequest reportedDeposit(Instant due) {
+        return PaymentRequest.builder().id("deposit").rentalRequestId("rental").payerId("tenant").payeeId("landlord")
+            .type(PaymentType.RESERVATION_DEPOSIT).direction(com.hs.payment.model.constant.PaymentDirection.TENANT_TO_LANDLORD)
+            .status(PaymentStatus.TRANSFER_REPORTED).payerReportedAt(due.minus(java.time.Duration.ofHours(24))).confirmationDueAt(due)
+            .totalAmount(new BigDecimal("2000000")).build();
+    }
+
+    @Test void silentLandlordReceiptIsAutoConfirmedAfterDeadlineWithTheSameEffectsAsManualConfirm() {
+        org.springframework.test.util.ReflectionTestUtils.setField(paymentRequestService,"receiptEvents",receiptEvents);
+        var cases=mock(DisputeCaseRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(paymentRequestService,"disputeCases",cases);
+        var due=Instant.parse("2026-11-02T03:00:00Z");var deposit=reportedDeposit(due);var lead=java.time.Duration.ofHours(12);
+        var soon=com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_AUTO_CONFIRM_SOON;
+        when(paymentRequestRepository.findById("deposit")).thenReturn(Optional.of(deposit));
+        when(paymentRequestRepository.save(any())).thenAnswer(i->i.getArgument(0));
+        var recorded=org.mockito.ArgumentCaptor.forClass(com.hs.payment.model.PaymentEvent.class);
+
+        when(billingTime.now()).thenReturn(due.minusSeconds(1));
+        assertFalse(paymentRequestService.autoConfirmOverdueReceipt("deposit",due.minusSeconds(1),lead)); // not before the deadline
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,deposit.getStatus());
+
+        when(billingTime.now()).thenReturn(due);
+        when(cases.existsByRentalRequestIdAndActiveKeyIsNotNull("rental")).thenReturn(true);
+        assertFalse(paymentRequestService.autoConfirmOverdueReceipt("deposit",due,lead)); // open complaint: never
+        when(cases.existsByRentalRequestIdAndActiveKeyIsNotNull("rental")).thenReturn(false);
+        verifyNoInteractions(receiptEvents);
+
+        assertFalse(paymentRequestService.autoConfirmOverdueReceipt("deposit",due,lead)); // backlog: never warned, never confirmed
+        when(notifications.onceCreatedAt(deposit,soon,due.toString())).thenReturn(Optional.of(due.minus(java.time.Duration.ofHours(6))));
+        assertFalse(paymentRequestService.autoConfirmOverdueReceipt("deposit",due,lead)); // warning younger than the lead
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,deposit.getStatus());
+        when(notifications.onceCreatedAt(deposit,soon,due.toString())).thenReturn(Optional.of(due.minus(java.time.Duration.ofHours(12))));
+
+        assertTrue(paymentRequestService.autoConfirmOverdueReceipt("deposit",due,lead));
+        assertEquals(PaymentStatus.CONFIRMED,deposit.getStatus());
+        verify(paymentEventRepository).save(recorded.capture());
+        assertEquals("SYSTEM",recorded.getValue().getActorId());assertEquals("SYSTEM",recorded.getValue().getActorRole());
+        assertEquals(PaymentRequestService.RECEIPT_AUTO_CONFIRM_REASON,recorded.getValue().getReason());
+        verify(receiptEvents).publishEvent(new com.hs.payment.event.OnboardingReceiptConfirmed("rental")); // same onboarding trigger as manual
+        verify(notifications).enqueue(deposit,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_CONFIRMED,"tenant");
+        verify(notifications).enqueue(deposit,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_AUTO_CONFIRMED,"landlord");
+
+        assertFalse(paymentRequestService.autoConfirmOverdueReceipt("deposit",due.plusSeconds(60),lead)); // idempotent
+        verify(paymentRequestRepository,times(1)).save(any());verify(receiptEvents,times(1)).publishEvent(any(Object.class));
+    }
+
+    @Test void rejectedRefundAndNoDeadlineReceiptsAreNeverAutoConfirmed() {
+        var due=Instant.parse("2026-11-02T03:00:00Z");var p=reportedDeposit(due);var lead=java.time.Duration.ofHours(12);
+        when(paymentRequestRepository.findById("deposit")).thenReturn(Optional.of(p));
+        lenient().when(billingTime.now()).thenReturn(due.plusSeconds(3600));
+        p.setStatus(PaymentStatus.REJECTED);
+        assertFalse(paymentRequestService.autoConfirmOverdueReceipt("deposit",due.plusSeconds(3600),lead)); // receiver rejected
+        p.setStatus(PaymentStatus.TRANSFER_REPORTED);p.setType(PaymentType.DEPOSIT_REFUND);
+        assertFalse(paymentRequestService.autoConfirmOverdueReceipt("deposit",due.plusSeconds(3600),lead)); // refunds keep their 72h path
+        p.setType(PaymentType.MONTHLY_RENT);p.setConfirmationDueAt(null);
+        assertFalse(paymentRequestService.autoConfirmOverdueReceipt("deposit",due.plusSeconds(3600),lead)); // legacy row without a deadline
+        verify(paymentRequestRepository,never()).save(any());verifyNoInteractions(notifications,receiptEvents);
+    }
+
+    @Test void payeeIsWarnedOnceInTheLastHoursBeforeTheReceiptAutoConfirms() {
+        var cases=mock(DisputeCaseRepository.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(paymentRequestService,"disputeCases",cases);
+        var due=Instant.parse("2026-11-02T03:00:00Z");var p=reportedDeposit(due);var lead=java.time.Duration.ofHours(12);
+        var event=com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_AUTO_CONFIRM_SOON;
+        when(paymentRequestRepository.findById("deposit")).thenReturn(Optional.of(p));
+        when(notifications.enqueueOnce(p,event,"landlord",due.toString())).thenReturn(true).thenReturn(false);
+
+        when(billingTime.now()).thenReturn(due.minus(java.time.Duration.ofHours(13)));
+        assertFalse(paymentRequestService.warnReceiptAutoConfirmSoon("deposit",Instant.now(),lead)); // too early
+        when(billingTime.now()).thenReturn(due);
+        when(billingTime.now()).thenReturn(due.minus(java.time.Duration.ofHours(6)));
+        when(cases.existsByRentalRequestIdAndActiveKeyIsNotNull("rental")).thenReturn(true);
+        assertFalse(paymentRequestService.warnReceiptAutoConfirmSoon("deposit",Instant.now(),lead)); // open complaint
+        when(cases.existsByRentalRequestIdAndActiveKeyIsNotNull("rental")).thenReturn(false);
+        verify(notifications,never()).enqueueOnce(any(),any(),any(),any());
+
+        assertTrue(paymentRequestService.warnReceiptAutoConfirmSoon("deposit",Instant.now(),lead));
+        assertFalse(paymentRequestService.warnReceiptAutoConfirmSoon("deposit",Instant.now(),lead)); // once per report (dedupe key)
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,p.getStatus());verify(paymentRequestRepository,never()).save(any());
+        p.setStatus(PaymentStatus.REJECTED);
+        assertFalse(paymentRequestService.warnReceiptAutoConfirmSoon("deposit",Instant.now(),lead));
+        verify(notifications,times(2)).enqueueOnce(any(),any(),any(),any());
+    }
+
+    @Test void overdueBacklogReceiptIsWarnedAtOnceAndNotConfirmedWithoutAWarningOnRecord() {
+        var due=Instant.parse("2026-11-02T03:00:00Z");var p=reportedDeposit(due);var lead=java.time.Duration.ofHours(12);
+        when(paymentRequestRepository.findById("deposit")).thenReturn(Optional.of(p));
+        when(billingTime.now()).thenReturn(due.plus(java.time.Duration.ofDays(30)));
+        when(notifications.enqueueOnce(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_AUTO_CONFIRM_SOON,"landlord",due.toString())).thenReturn(true);
+        assertFalse(paymentRequestService.autoConfirmOverdueReceipt("deposit",Instant.now(),lead)); // no warning on record yet
+        assertTrue(paymentRequestService.warnReceiptAutoConfirmSoon("deposit",Instant.now(),lead));
+        assertEquals(PaymentStatus.TRANSFER_REPORTED,p.getStatus());verify(paymentRequestRepository,never()).save(any());
     }
 }

@@ -467,11 +467,21 @@ class ContractLifecycleServiceTest {
     @Test void backgroundReconciliationProcessesOnlyTheBoundedStaleDepositCandidates() {
         root.setStatus(ContractStatus.CLOSED);
         var close=ContractClosure.builder().contractId("root").status("CLOSED").closedAt(time.now()).build();closureData.put("root",close);
-        when(contracts.findSettledLeaseIdsWithActiveDeposit(any())).thenReturn(List.of("root"));
+        when(contracts.findSettledLeaseIdsWithActiveDeposit(any(),any())).thenReturn(List.of("root"));
         service.scheduledSync();
         verify(depositAgreements).completeAfterLeaseSettlement(root,close);
-        verify(contracts).findSettledLeaseIdsWithActiveDeposit(argThat(p->p.getPageSize()==100&&p.getPageNumber()==0));
+        verify(contracts).findSettledLeaseIdsWithActiveDeposit(isNull(),argThat(p->p.getPageSize()==100&&p.getPageNumber()==0));
         verifyNoInteractions(terminationNotices);
+    }
+    @Test void staleDepositRecoveryIsKeysetPagedSoAFailingRowCannotStarveLaterIds() {
+        root.setStatus(ContractStatus.CLOSED);
+        var close=ContractClosure.builder().contractId("root").status("CLOSED").closedAt(time.now()).build();closureData.put("root",close);
+        var first=new ArrayList<String>();for(int i=0;i<100;i++)first.add(String.format("x%03d",i));
+        when(contracts.findSettledLeaseIdsWithActiveDeposit(isNull(),any())).thenReturn(first);
+        when(contracts.findSettledLeaseIdsWithActiveDeposit(eq("x099"),any())).thenReturn(List.of("root"));
+        when(contracts.findByIdForUpdate(startsWith("x"))).thenThrow(new IllegalStateException("poison"));
+        service.scheduledSync();
+        verify(depositAgreements).completeAfterLeaseSettlement(root,close); // the 101st id was reached
     }
     @Test void overdueRefundIsNeverAutomaticallyConfirmedOrCancelled() {
         propose();service.acceptClosure("root","tenant",acceptance());clock("2027-01-30T10:00:00");
@@ -604,6 +614,17 @@ class ContractLifecycleServiceTest {
         service.proposeClosure("root","owner",proposal(ZERO));service.acceptClosure("root","tenant",acceptance());
         assertEquals(new BigDecimal("20000000"),closureData.get("root").getRefundAmount());
         assertThrows(AppException.class,()->service.issueFinalCosts("root","owner",new FinalCostsPayload(UUID.randomUUID().toString(),new BigDecimal("1680"),null,List.of())));
+    }
+    @Test void finalCostsFromALegacySnapshotWithoutUnitAmountUseTheFrozenPriceAndAmbiguousOnesAreRejected() {
+        finalBills();
+        revision.setChargesSnapshot("[{\"billingMethod\":\"PER_KWH\",\"chargeType\":\"ELECTRICITY\",\"name\":\"Điện\",\"amountAndMethod\":\"3.500đ/kWh\"},"
+            +"{\"billingMethod\":\"PER_M3\",\"chargeType\":\"WATER\",\"name\":\"Nước\",\"amountAndMethod\":\"16.000đ/m3\"}]");
+        assertThrows(AppException.class,()->service.issueFinalCosts("root","owner",new FinalCostsPayload(UUID.randomUUID().toString(),new BigDecimal("1670"),null,List.of())));
+        assertEquals(3,bills.size()); // no frozen price to prove the rate: still refused, nothing written
+        rental.setExcludedChargesSnapshot("[{\"chargeType\":\"ELECTRICITY\",\"displayName\":\"Điện\",\"billingMethod\":\"PER_KWH\",\"unitAmount\":3500,\"reason\":\"3.500đ/kWh\"},"
+            +"{\"chargeType\":\"WATER\",\"displayName\":\"Nước\",\"billingMethod\":\"PER_M3\",\"unitAmount\":16000,\"reason\":\"16.000đ/m3\"}]");
+        service.issueFinalCosts("root","owner",new FinalCostsPayload(UUID.randomUUID().toString(),new BigDecimal("1670"),new BigDecimal("102"),List.of()));
+        assertEquals(4,bills.size());assertEquals(new BigDecimal("51000"),bills.get(3).getTotalAmount()); // 10 kWh*3500 + 1 m3*16000
     }
     @Test void addingSupplementInvalidatesReadProposalAndRejectsWrongActorOrLowerMeters() {
         propose();int version=closureData.get("root").getProposalVersion();

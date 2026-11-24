@@ -77,7 +77,6 @@ public class MutualTerminationService {
                 support.contracts.save(s.contract());w.setStatus("AGREED");
                 // A whole-period approval changes only the operational end, never existing invoices or receipts.
                 payments.attachOnboardingToContract(rental,s.contract().getId());
-                if(!signed)terminationNotices.other(s.contract(),actor,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_AGREED);
             }
             case "REJECT", "WITHDRAW", "CANCEL" -> {
                 if(!Set.of("PROPOSED","APPROVED").contains(w.getStatus()))throw support.invalid("Đề nghị không còn chờ phản hồi.");
@@ -199,7 +198,7 @@ public class MutualTerminationService {
         else if("PROPOSED".equals(w.getStatus())){
             // An expired or blocked proposal can still be withdrawn/rejected, never silently agreed.
             if(s.actor().equals(w.getProposedBy()))actions.add("WITHDRAW");
-            else {if("PROPOSED".equals(w.getStatus())&&eligible&&support.owner(s)&&s.rental().getRenterId().equals(w.getProposedBy())){
+            else {if(eligible&&support.owner(s)&&s.rental().getRenterId().equals(w.getProposedBy())){
                 try{validate(s,support.payload(s,RentalWorkflowPayloads.Termination.class));actions.add("ACCEPT");}
                 catch(com.hs.common.advice.entity.AppException e){blocked=e.getMessage();}
             }actions.add("REJECT");}

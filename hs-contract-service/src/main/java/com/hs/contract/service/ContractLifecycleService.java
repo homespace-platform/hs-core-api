@@ -344,10 +344,16 @@ public class ContractLifecycleService {
             }); } catch(RuntimeException e) { log.error("LEASE_LIFECYCLE_SYNC_FAILED contract={}",id,e); }
             afterId=ids.get(ids.size()-1);
         }
-        for(String id:contracts.findSettledLeaseIdsWithActiveDeposit(PageRequest.of(0,100))) {
-            try { new TransactionTemplate(transactionManager).executeWithoutResult(tx->{
-                var c=contracts.findByIdForUpdate(id).orElse(null);if(c!=null)syncLocked(c);
-            }); } catch(RuntimeException e) { log.error("DEPOSIT_SETTLEMENT_SYNC_FAILED contract={}",id,e); }
+        afterId=null;
+        while(true) { // keyset: a poison row must not starve ids after it
+            var ids=contracts.findSettledLeaseIdsWithActiveDeposit(afterId,PageRequest.of(0,100));
+            for(String id:ids) {
+                try { new TransactionTemplate(transactionManager).executeWithoutResult(tx->{
+                    var c=contracts.findByIdForUpdate(id).orElse(null);if(c!=null)syncLocked(c);
+                }); } catch(RuntimeException e) { log.error("DEPOSIT_SETTLEMENT_SYNC_FAILED contract={}",id,e); }
+            }
+            if(ids.size()<100) break;
+            afterId=ids.get(ids.size()-1);
         }
         syncObligationDeadlines();
     }
@@ -593,8 +599,18 @@ public class ContractLifecycleService {
         try {
             String snapshot=revision(c).getChargesSnapshot();
             List<Map<String,Object>> rows=mapper.readValue(snapshot==null?"[]":snapshot,new TypeReference<>(){});
-            return rows.stream().filter(r->method.equals(r.get("billingMethod"))&&!Boolean.TRUE.equals(r.get("includedInRent")))
-                    .map(r->new BigDecimal(String.valueOf(r.get("unitAmount")))).findFirst().orElse(ZERO);
+            var first=rows.stream().filter(r->method.equals(r.get("billingMethod"))&&!Boolean.TRUE.equals(r.get("includedInRent"))).findFirst();
+            if(first.isEmpty()) return ZERO;
+            Object unit=first.get().get("unitAmount");
+            if(unit!=null&&!unit.toString().isBlank()) return new BigDecimal(String.valueOf(unit)); // unchanged for current snapshots
+            // Older signed snapshots lack unitAmount: use the same validated frozen-price lookup as monthly billing.
+            BigDecimal legacy=MonthlyBillingService.meterRate(rows,()->{
+                String frozen=rental(c).getExcludedChargesSnapshot();
+                try { return frozen==null||frozen.isBlank()?List.<com.hs.listing.dto.estimate.ExcludedChargeItem>of()
+                        :mapper.readValue(frozen,new TypeReference<List<com.hs.listing.dto.estimate.ExcludedChargeItem>>(){}); }
+                catch(Exception e) { throw invalid(); }
+            },method);
+            return legacy==null?ZERO:legacy;
         } catch(Exception e) { throw invalid(); }
     }
     private BigDecimal adjustment(BigDecimal end,BigDecimal billedEnd,BigDecimal rate) {

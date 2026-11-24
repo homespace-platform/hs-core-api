@@ -31,7 +31,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -67,6 +69,7 @@ public class RentalRequestService {
     private final RentalPaymentLifecyclePort rentalPaymentLifecyclePort;
     private final RentalRequestNotificationWriter notifications;
     private List<RentalHoldProtectionChecker> holdProtectionCheckers = List.of();
+    @Autowired(required=false) private PlatformTransactionManager transactionManager;
     @Autowired(required=false) private com.hs.common.time.BillingTime businessTime;
     @Autowired private com.hs.listing.repository.RentalStartChangeRepository startChanges;
     @Value("${rental.response-hours:24}") private long responseHours=24;
@@ -560,59 +563,68 @@ public class RentalRequestService {
     }
 
     // 9. CRON JOB: HẾT HẠN GIỮ CHỖ -> TỰ ĐỘNG EXPIRE & TRẢ VỀ PUBLISHED
-    @Transactional
+    // Mỗi request chạy trong transaction riêng: một dòng lỗi không làm rollback cả batch.
     public int expirePendingHoldRequests(Instant now) {
         // Existing payment deadlines are immutable when configuration changes.
-
-        for(var pending:rentalRequestRepository.findByStatusAndRespondByLessThanEqual(RentalRequestStatus.PENDING,now)) {
-            var locked=rentalRequestRepository.findByIdForUpdate(pending.getId()).orElseThrow();
-            if(locked.getStatus()==RentalRequestStatus.PENDING && locked.getRespondBy()!=null && !now.isBefore(locked.getRespondBy())) {
-                locked.setStatus(RentalRequestStatus.EXPIRED); rentalRequestRepository.save(locked);
-                notifications.enqueueOthers(locked, "SYSTEM", Event.RENTAL_REQUEST_EXPIRED);
-            }
+        for (var pending : rentalRequestRepository.findByStatusAndRespondByLessThanEqual(RentalRequestStatus.PENDING, now)) {
+            String id = pending.getId();
+            try { inRowTransaction(() -> expirePendingResponse(id, now)); }
+            catch (Exception e) { log.error("RENTAL_REQUEST_EXPIRE_FAILED request={}", id, e); }
         }
-        List<RentalRequest> expiredList = rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(
-                RentalRequestStatus.ACCEPTED, now);
-
-        if (expiredList.isEmpty()) {
-            return 0;
-        }
-
         int expiredCount = 0;
-        for (RentalRequest candidate : expiredList) {
-            RentalRequest req=rentalRequestRepository.findByIdForUpdate(candidate.getId()).orElseThrow();
-            if(req.getStatus()!=RentalRequestStatus.ACCEPTED)continue;
-            if (isHoldProtected(req.getId()) || (rentalPaymentLifecyclePort != null && rentalPaymentLifecyclePort.isHoldProtected(req.getId()))) {
-                log.info("[RENTAL_HOLD_PROTECTED] Request [{}] has protected payment or contract; skip expiration.", req.getId());
-                continue;
-            }
+        for (RentalRequest candidate : rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(
+                RentalRequestStatus.ACCEPTED, now)) {
+            String id = candidate.getId();
+            try { if (Boolean.TRUE.equals(inRowTransaction(() -> expireHold(id)))) expiredCount++; }
+            catch (Exception e) { log.error("RENTAL_HOLD_EXPIRE_FAILED request={}", id, e); }
+        }
+        return expiredCount;
+    }
 
-            boolean wasConfirmed = rentalPaymentLifecyclePort != null && rentalPaymentLifecyclePort.isConfirmed(req.getId());
+    private <T> T inRowTransaction(java.util.function.Supplier<T> work) {
+        return transactionManager == null ? work.get() : new TransactionTemplate(transactionManager).execute(tx -> work.get());
+    }
 
-            if (rentalPaymentLifecyclePort != null) {
-                rentalPaymentLifecyclePort.handleHoldExpired(req.getId());
-            }
+    private Boolean expirePendingResponse(String id, Instant now) {
+        var locked = rentalRequestRepository.findByIdForUpdate(id).orElseThrow();
+        if (locked.getStatus() == RentalRequestStatus.PENDING && locked.getRespondBy() != null && !now.isBefore(locked.getRespondBy())) {
+            locked.setStatus(RentalRequestStatus.EXPIRED); rentalRequestRepository.save(locked);
+            notifications.enqueueOthers(locked, "SYSTEM", Event.RENTAL_REQUEST_EXPIRED);
+        }
+        return Boolean.TRUE;
+    }
 
-            req.setStatus(RentalRequestStatus.EXPIRED);
-            rentalRequestRepository.save(req);
-            expiredCount++;
-
-            // Giải phóng/hết hạn reservation
-            parkingReservationService.expireReservationsForRequest(req.getId());
-
-            Listing listing = req.getListing();
-            if (listing != null && listing.getOperationalStatus() == ListingStatus.RESERVED) {
-                String reason = wasConfirmed
-                        ? "Hết hạn chuẩn bị hợp đồng sau khi khoản thanh toán ban đầu đã được xác nhận"
-                        : "Hết hạn giữ chỗ mà không hoàn tất thủ tục thuê";
-                listingStatusService.releaseReserved(listing, "SYSTEM", reason);
-                log.info("[RENTAL_HOLD_EXPIRED] Rental request [{}] expired. Listing [{}] returned to PUBLISHED.",
-                        req.getId(), listing.getId());
-            }
-            notifications.enqueueOthers(req, "SYSTEM", Event.RENTAL_HOLD_EXPIRED);
+    private Boolean expireHold(String id) {
+        RentalRequest req = rentalRequestRepository.findByIdForUpdate(id).orElseThrow();
+        if (req.getStatus() != RentalRequestStatus.ACCEPTED) return Boolean.FALSE;
+        if (isHoldProtected(req.getId()) || (rentalPaymentLifecyclePort != null && rentalPaymentLifecyclePort.isHoldProtected(req.getId()))) {
+            log.info("[RENTAL_HOLD_PROTECTED] Request [{}] has protected payment or contract; skip expiration.", req.getId());
+            return Boolean.FALSE;
         }
 
-        return expiredCount;
+        boolean wasConfirmed = rentalPaymentLifecyclePort != null && rentalPaymentLifecyclePort.isConfirmed(req.getId());
+
+        if (rentalPaymentLifecyclePort != null) {
+            rentalPaymentLifecyclePort.handleHoldExpired(req.getId());
+        }
+
+        req.setStatus(RentalRequestStatus.EXPIRED);
+        rentalRequestRepository.save(req);
+
+        // Giải phóng/hết hạn reservation
+        parkingReservationService.expireReservationsForRequest(req.getId());
+
+        Listing listing = req.getListing();
+        if (listing != null && listing.getOperationalStatus() == ListingStatus.RESERVED) {
+            String reason = wasConfirmed
+                    ? "Hết hạn chuẩn bị hợp đồng sau khi khoản thanh toán ban đầu đã được xác nhận"
+                    : "Hết hạn giữ chỗ mà không hoàn tất thủ tục thuê";
+            listingStatusService.releaseReserved(listing, "SYSTEM", reason);
+            log.info("[RENTAL_HOLD_EXPIRED] Rental request [{}] expired. Listing [{}] returned to PUBLISHED.",
+                    req.getId(), listing.getId());
+        }
+        notifications.enqueueOthers(req, "SYSTEM", Event.RENTAL_HOLD_EXPIRED);
+        return Boolean.TRUE;
     }
 
     private boolean isHoldProtected(String rentalRequestId) {

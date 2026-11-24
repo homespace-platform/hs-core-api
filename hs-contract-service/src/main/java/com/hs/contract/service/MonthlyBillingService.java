@@ -48,6 +48,8 @@ public class MonthlyBillingService {
     @org.springframework.beans.factory.annotation.Autowired
     private ContractLifecycleService lifecycle;
     @org.springframework.beans.factory.annotation.Autowired
+    private com.hs.contract.deposit.DepositAgreementService depositAgreements;
+    @org.springframework.beans.factory.annotation.Autowired
     private ContractTermsResolver terms;
     @org.springframework.beans.factory.annotation.Autowired
     private ContractAmendmentService amendments;
@@ -355,6 +357,7 @@ public class MonthlyBillingService {
         terminationEvent(invoice, OverdueAction.Type.TERMINATION_ENDED, actor, reason + " Hợp đồng đã chấm dứt; công nợ còn nguyên, chờ xác nhận bàn giao.");
         terminationNotices.both(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_ENDED);
         if (lifecycle != null) lifecycle.cancelPendingRenewalsForClosedParent(contract);
+        if (depositAgreements != null) depositAgreements.terminateWithLease(contract, reason);
     }
     private void requireLegacyTermination(Contract contract, String invoiceId) {
         var notice = unilateralFor(contract, invoiceId);
@@ -768,6 +771,7 @@ public class MonthlyBillingService {
         if (forced && contract.getTerminationForcedAt() == null) contract.setTerminationForcedAt(time.now());
         contracts.save(contract);
         if(lifecycle!=null) lifecycle.cancelPendingRenewalsForClosedParent(contract);
+        if(depositAgreements!=null) depositAgreements.terminateWithLease(contract,reason);
         if (ending) terminationNotices.both(contract, com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_ENDED);
     }
 
@@ -1251,14 +1255,17 @@ public class MonthlyBillingService {
                 && invoice.getOverdueActionLoggedAt() == null
                 && !now.isBefore(actionRequiredAt(invoice))
                 && payments.findByInvoiceId(invoice.getId()).map(p -> p.getStatus() != PaymentStatus.TRANSFER_REPORTED).orElse(false)) {
-            invoice.setOverdueActionLoggedAt(now);
-            changed = true;
-            log.warn("BILLING_OVERDUE_ACTION_REQUIRED landlord={} tenant={} contract={} invoice={} amount={}",
-                    contract.getLandlordId(), contract.getTenantId(), contract.getId(), invoice.getId(), invoice.getTotalAmount());
-            // Marker and log are unchanged; only a landlord who still has a decision to make is told.
-            if (announce && invoice.getDeferredAt() == null && !activeTerminationProposal(contract)
-                    && !extensionActive(invoice) && pendingExtension(invoice).isEmpty())
-                notifications.enqueueLandlord(contract, invoice, Event.INVOICE_OVERDUE_ACTION_REQUIRED);
+            // A pending extension request is a temporary blocker: keep the marker free so the landlord is still told
+            // when it expires/is rejected. Catch-up issue (announce=false) tells the landlord too when no auto-deferral
+            // decided the invoice, because no later period will announce it.
+            boolean decided = invoice.getDeferredAt() != null || activeTerminationProposal(contract);
+            if (decided || (!extensionActive(invoice) && pendingExtension(invoice).isEmpty())) {
+                invoice.setOverdueActionLoggedAt(now);
+                changed = true;
+                log.warn("BILLING_OVERDUE_ACTION_REQUIRED landlord={} tenant={} contract={} invoice={} amount={}",
+                        contract.getLandlordId(), contract.getTenantId(), contract.getId(), invoice.getId(), invoice.getTotalAmount());
+                if (!decided) notifications.enqueueLandlord(contract, invoice, Event.INVOICE_OVERDUE_ACTION_REQUIRED);
+            }
         }
         if (changed) invoices.save(invoice);
     }
@@ -1386,6 +1393,13 @@ public class MonthlyBillingService {
     }
 
     private BigDecimal meterRate(List<Map<String, Object>> charges, RentalRequest rental, String method) {
+        return meterRate(charges, () -> readList(rental.getExcludedChargesSnapshot(),
+                new TypeReference<List<ExcludedChargeItem>>() {}), method);
+    }
+
+    /** Shared with ContractLifecycleService (static: no bean cycle). The frozen list is read only for legacy snapshots. */
+    static BigDecimal meterRate(List<Map<String, Object>> charges,
+                                java.util.function.Supplier<List<ExcludedChargeItem>> frozen, String method) {
         List<Map<String, Object>> matching = charges.stream()
                 .filter(c -> method.equals(c.get("billingMethod")) && !Boolean.TRUE.equals(c.get("includedInRent"))).toList();
         if (matching.isEmpty()) return null;
@@ -1395,9 +1409,7 @@ public class MonthlyBillingService {
         if (rate == null) {
             // Legacy signed revisions lack a numeric rate. Use the frozen rental-request rate only
             // when the signed charge description is unchanged from the frozen snapshot.
-            List<ExcludedChargeItem> excluded = readList(rental.getExcludedChargesSnapshot(),
-                    new TypeReference<List<ExcludedChargeItem>>() {});
-            List<ExcludedChargeItem> candidates = excluded.stream()
+            List<ExcludedChargeItem> candidates = frozen.get().stream()
                     .filter(c -> method.equals(c.billingMethod())
                             && Objects.equals(c.chargeType(), signed.get("chargeType"))
                             && Objects.equals(c.displayName(), signed.get("name"))
@@ -1412,7 +1424,7 @@ public class MonthlyBillingService {
         return rate;
     }
 
-    private BigDecimal decimal(Object value) {
+    private static BigDecimal decimal(Object value) {
         if (value == null || String.valueOf(value).isBlank()) return null;
         try { return new BigDecimal(String.valueOf(value)); }
         catch (NumberFormatException ex) { throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE); }

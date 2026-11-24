@@ -26,6 +26,19 @@ class PaymentNotificationWriterTest {
         .payerId("stored-payer").payeeId("stored-payee").rejectedReason("PRIVATE_REASON").build();
     final ObjectMapper json=new ObjectMapper();
 
+    @Test void enqueueOnceWritesOneEventPerDedupeKeyAndOnlyForStoredParties() throws Exception {
+        var type=PaymentNotificationWriter.Event.PAYMENT_REFUND_AUTO_CONFIRM_SOON;
+        assertTrue(writer.enqueueOnce(payment,type,"stored-payee","report-1"));
+        var capture=org.mockito.ArgumentCaptor.forClass(PaymentNotificationOutbox.class);verify(outbox).save(capture.capture());
+        var row=capture.getValue();var event=json.readTree(row.getPayload());
+        assertEquals(row.getEventId(),event.get("eventId").asText());assertEquals("stored-payee",event.get("recipients").get(0).asText());
+        assertEquals(Set.of("paymentId"),fields(event.get("data")));
+        when(outbox.existsByEventId(row.getEventId())).thenReturn(true);
+        assertFalse(writer.enqueueOnce(payment,type,"stored-payee","report-1"));verify(outbox,times(1)).save(any());
+        assertTrue(writer.enqueueOnce(payment,type,"stored-payee","report-2")); // a new report is a new warning
+        assertThrows(IllegalStateException.class,()->writer.enqueueOnce(payment,type,"stranger","report-3"));
+    }
+
     @Test void everyTypeProducesMinimalVersionedEnvelopeAndDistinctImmutableIdentity() throws Exception {
         for(var type:PaymentNotificationWriter.Event.values())writer.enqueue(payment,type,payment.getPayerId());
         var capture=org.mockito.ArgumentCaptor.forClass(PaymentNotificationOutbox.class);

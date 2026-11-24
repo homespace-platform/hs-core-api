@@ -841,7 +841,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                     throw new AppException(ContractErrorCode.SIGNATURE_NOT_ALLOWED);
                 }
                 if(com.hs.contract.deposit.DepositAgreementService.isDeposit(contract))depositAgreements.bothSigned(contract);
-                else activateAfterBothSignatures(contract);
+                else activateAfterBothSignatures(contract,verifiedSigningTime(req));
                 contract.setStatus(ContractStatus.ACTIVE);
                 contract.setSignedAt(Instant.now());
                 log.info("Contract {} tenant signed — now ACTIVE", ctx.contractId());
@@ -859,7 +859,13 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
         log.info("Request {} SIGNED: signedDocId={}", requestId, signedDoc.getId());
     }
 
-    private void activateAfterBothSignatures(Contract contract) {
+    /** Provider signed time, never before the request was created (that moment already passed the signing-window check). */
+    private static Instant verifiedSigningTime(SignatureRequest req) {
+        Instant signed = req.getConfirmedAt();
+        return signed != null && req.getCreatedAt() != null && signed.isBefore(req.getCreatedAt()) ? req.getCreatedAt() : signed;
+    }
+
+    private void activateAfterBothSignatures(Contract contract, Instant signedAt) {
         if(contract.getParentContractId()!=null) {
             lifecycle.applyRenewalAfterSignatures(contract);
             return;
@@ -881,7 +887,7 @@ public class SmartCaSignatureServiceImpl implements SmartCaSignatureService {
                 || !contract.getListingId().equals(rentalRequest.getListing().getId())) {
             throw new AppException(ContractErrorCode.CONTRACT_SIGNING_NOT_ALLOWED);
         }
-        if(onboarding!=null)onboarding.validateSigning(contract.getRentalRequestId(),contract.getTenantId());
+        if(onboarding!=null)onboarding.validateSigning(contract.getRentalRequestId(),contract.getTenantId(),signedAt);
         listingStatusService.markRentedByContract(contract.getListingId(), contract.getTenantId());
         rentalRequest.setStatus(RentalRequestStatus.COMPLETED);
         rentalRequest.setHoldExpiresAt(null);

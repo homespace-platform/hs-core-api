@@ -36,7 +36,8 @@ import com.hs.contract.repository.WorkflowSigningDocumentRepository;
  */
 @Service
 public class AgreementSigningNotificationWriter {
-    public enum Event { AGREEMENT_REVIEW_READY, AGREEMENT_SIGNING_TURN, AGREEMENT_FULLY_SIGNED, AGREEMENT_SIGNATURE_NEEDS_REVIEW }
+    public enum Event { AGREEMENT_REVIEW_READY, AGREEMENT_SIGNING_TURN, AGREEMENT_FULLY_SIGNED, AGREEMENT_SIGNATURE_NEEDS_REVIEW,
+        AGREEMENT_SIGNING_DUE_SOON }
     public enum Kind { LEASE, DEPOSIT, AMENDMENT, RENEWAL, EARLY_EXIT }
 
     private static final Logger log = LoggerFactory.getLogger(AgreementSigningNotificationWriter.class);
@@ -122,6 +123,24 @@ public class AgreementSigningNotificationWriter {
         write(envelope, Event.AGREEMENT_SIGNATURE_NEEDS_REVIEW, kind, party);
     }
 
+    /**
+     * Deadline reminder for the party whose signature is still missing. At most one per (envelope, recipient, dueAt):
+     * the event id is derived from that key, so reruns and a second instance cannot duplicate it.
+     * @return false when this reminder was already written
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean dueSoon(Contract envelope, String recipient, Instant dueAt) {
+        var kind = resolve(envelope);
+        if (kind == null || dueAt == null
+                || !Objects.equals(recipient, envelope.getLandlordId()) && !Objects.equals(recipient, envelope.getTenantId()))
+            throw new IllegalStateException("Signing reminder needs a stored party and a deadline");
+        String eventId = UUID.nameUUIDFromBytes((Event.AGREEMENT_SIGNING_DUE_SOON + ":" + envelope.getId() + ":" + recipient + ":" + dueAt)
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+        if (outbox.existsByEventId(eventId)) return false;
+        write(envelope, Event.AGREEMENT_SIGNING_DUE_SOON, kind, recipient, eventId);
+        return true;
+    }
+
     /** Closed-enum kind from persisted data only. Fails on any inconsistent envelope. */
     private Kind resolve(Contract envelope) {
         if (envelope == null || envelope.getId() == null || envelope.getId().isBlank()
@@ -162,7 +181,10 @@ public class AgreementSigningNotificationWriter {
     private static boolean blank(String value) { return value == null || value.isBlank(); }
 
     private void write(Contract envelope, Event type, Kind kind, String recipient) {
-        String eventId = UUID.randomUUID().toString();
+        write(envelope, type, kind, recipient, UUID.randomUUID().toString());
+    }
+
+    private void write(Contract envelope, Event type, Kind kind, String recipient, String eventId) {
         Instant now = Instant.now();
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("agreementId", envelope.getId());

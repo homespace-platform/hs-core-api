@@ -16,7 +16,8 @@ public record DepositPaymentAllocation(BigDecimal deposit,BigDecimal rent) {
             || !Objects.equals(p.getId(),ledger.getInitialPaymentRequestId())
             || !Objects.equals(r.getOwnerId(),p.getPayeeId()) || !Objects.equals(r.getRenterId(),p.getPayerId())
             || !Objects.equals(r.getListing().getId(),p.getListingId())
-            || p.getPayerReportedAt()==null || p.getPayeeConfirmedAt()==null || p.getConfirmedAt()==null)
+            // A payment the landlord reconciled as received may lack a payer declaration; CONFIRMED + confirmedAt is the proof.
+            || p.getConfirmedAt()==null)
             throw new IllegalStateException("Khoản cọc chưa có xác nhận hợp lệ của hai bên.");
         BigDecimal deposit=BigDecimal.ZERO,rent=BigDecimal.ZERO;
         for(var row:rows) {

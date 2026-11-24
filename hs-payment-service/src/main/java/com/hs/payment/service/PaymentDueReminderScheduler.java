@@ -20,15 +20,22 @@ public class PaymentDueReminderScheduler {
     private final PaymentNotificationWriter notifications;
     private final BillingTime time;
     private final PlatformTransactionManager transactions;
+    private static final int PAGE=100;
     private static final Set<PaymentStatus> UNPAID=Set.of(PaymentStatus.AWAITING_TRANSFER,PaymentStatus.REJECTED);
 
     @Scheduled(fixedDelay=60000)
     public void remindDueSoon() {
         Instant realNow=Instant.now(),billingNow=time.now();
-        for(String id:payments.findDueSoonIds(UNPAID,PaymentTimePolicy.BILLING_TYPES,billingNow,billingNow.plus(Duration.ofHours(24)),
-                realNow,realNow.plus(Duration.ofHours(24)),PageRequest.of(0,100))) {
-            try { new TransactionTemplate(transactions).executeWithoutResult(tx->remindLocked(id,realNow,billingNow)); }
-            catch(RuntimeException failure) { log.warn("Payment due reminder deferred ({})",failure.getClass().getSimpleName()); }
+        String afterId=null;
+        while(true) { // id keyset paging: one failing row cannot starve the rest of the window
+            var ids=payments.findDueSoonIds(UNPAID,PaymentTimePolicy.BILLING_TYPES,billingNow,billingNow.plus(Duration.ofHours(24)),
+                    realNow,realNow.plus(Duration.ofHours(24)),afterId,PageRequest.of(0,PAGE));
+            for(String id:ids) {
+                try { new TransactionTemplate(transactions).executeWithoutResult(tx->remindLocked(id,realNow,billingNow)); }
+                catch(RuntimeException failure) { log.warn("Payment due reminder deferred ({})",failure.getClass().getSimpleName()); }
+            }
+            if(ids.size()<PAGE)return;
+            afterId=ids.get(ids.size()-1);
         }
     }
     void remindLocked(String id,Instant realNow,Instant billingNow) {

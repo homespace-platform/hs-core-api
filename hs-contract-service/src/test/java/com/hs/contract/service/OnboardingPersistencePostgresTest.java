@@ -195,7 +195,7 @@ class OnboardingPersistencePostgresTest {
         assertEquals(ParkingReservationStatus.RELEASED,reservations.findById(holdId).orElseThrow().getStatus());
         verify(listingStatus,times(2)).releaseReserved(any(),eq("owner"),anyString());
         verify(paymentService,never()).createRefundObligation(any());
-        verify(paymentService,never()).createRentRefundObligation(any(),any());
+        verify(paymentService,never()).createRentRefundObligationNotifyingLandlord(any(),any());
     }
     @Test void ownerCancellationExpandsTheExistingStatusConstraintIdempotently() {
         // Only this test's throwaway schema: emulate the old Hibernate check before restarting Core.

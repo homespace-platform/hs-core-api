@@ -106,8 +106,8 @@ class RentalDefaultTest {
         assertEquals(DepositStatus.RETAINED_BY_LANDLORD,deposit.getStatus());assertEquals(new BigDecimal("10000000"),deposit.getRetainedAmount());
         verify(depositAgreements,times(1)).terminateForTenantDefault(eq("r"),contains("Lỗi Bên B"));
         verify(parking,times(1)).releaseReservationsForRequest("r");
-        if(signing)verify(paymentService).createRentRefundObligation(rent,new BigDecimal("5000000"));
-        else verify(paymentService,never()).createRentRefundObligation(any(),any());
+        if(signing)verify(paymentService).createRentRefundObligationNotifyingLandlord(rent,new BigDecimal("5000000"));
+        else verify(paymentService,never()).createRentRefundObligationNotifyingLandlord(any(),any());
     }
     @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"reported","rejected","provider","complaint","active-case","other-rental","paid","owner-not-signed","no-deposit-signature","zero-deposit"})
     void automaticDefaultPausesForUncertainMoneyOrSignaturesAndNeverBlamesTheOwner(String scenario) {
@@ -149,6 +149,14 @@ class RentalDefaultTest {
             when(signatures.findByContractIdOrderByCreatedAtDesc("c")).thenReturn(List.of(SignatureRequest.builder().status(SignatureRequestStatus.SIGNED).signerRole(SignerRole.TENANT).build()));
             assertTrue(service.refresh("r","t").canRequestCancellation());
         }
+    }
+    @Test void readOnlyViewMatchesRefreshWithoutLockingOrSyncingAndHidesTheRequestFromOutsiders() {
+        when(rentals.findById("r")).thenReturn(Optional.of(rental));
+        var refreshed=service.refresh("r","t");
+        assertEquals(refreshed.stage(),service.get("r","t").stage());
+        verify(rentals,times(1)).findByIdForUpdate("r"); // only refresh locks the row
+        assertThrows(AppException.class,()->service.get("r","outsider"));
+        assertThrows(AppException.class,()->service.get("r",null));
     }
     @Test void fullySignedDepositForfeitsTheDepositAndRefundsOnlyFirstRent() {
         rent.setStatus(PaymentStatus.CONFIRMED);var dc=signedDeposit();
@@ -211,7 +219,7 @@ class RentalDefaultTest {
         assertEquals(ContractStatus.CANCELLED,contract.getStatus());assertEquals(PaymentStatus.CANCELLED,rent.getStatus());
         assertEquals(new BigDecimal("10000000"),deposit.getRetainedAmount());assertEquals(BigDecimal.ZERO,deposit.getHeldAmount());
         verify(parking,times(1)).releaseReservationsForRequest("r");verify(listingStatus,times(1)).releaseReserved(any(),eq("o"),anyString());
-        verify(paymentService,never()).createRentRefundObligation(any(),any());
+        verify(paymentService,never()).createRentRefundObligationNotifyingLandlord(any(),any());
     }
     @Test void noConsentOrUnreadyDocumentNeverAllowsRetention() {
         rental.setReservationPolicyVersion(null);assertThrows(AppException.class,this::notice);
@@ -227,6 +235,19 @@ class RentalDefaultTest {
     @ParameterizedTest @EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","REJECTED"})
     void transferOrDisputeInvalidatesNotice(PaymentStatus status) {notice();elapsed();rent.setStatus(status);assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));}
     @Test void tenantResponseStopsRetentionEvenAfterDeadline() {notice();elapsed();service.disputeDefault("r","t",new RentalOnboardingService.Cancellation("Tôi cần đối soát khoản chuyển"));assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));}
+    @Test void aTenantResponsePausesOnlyTheCurrentNoticeAndTheLandlordCanReissueSoDefaultsNeverHangForever() {
+        notice();elapsed();
+        service.disputeDefault("r","t",new RentalOnboardingService.Cancellation("Tôi đã liên hệ chủ nhà"));
+        assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));
+        var firstRespondBy=rental.getDefaultRespondBy();
+        service.refresh("r","o"); // the system must not silently re-send the same notice
+        assertEquals(firstRespondBy,rental.getDefaultRespondBy());assertNotNull(rental.getDefaultDisputedAt());
+        notice(); // landlord re-issues after contacting the tenant: new window, response cleared
+        assertNull(rental.getDefaultDisputedAt());assertTrue(rental.getDefaultRespondBy().isAfter(firstRespondBy));
+        assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));
+        elapsed();service.completeDefault("r","o",decision());
+        assertEquals(DepositStatus.RETAINED_BY_LANDLORD,deposit.getStatus());
+    }
     @Test void reopenedDeadlineOrRevisionInvalidatesOldNotice() {
         notice();elapsed();rent.setDueAt(now.plusSeconds(86400));assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));
         rent.setDueAt(now);contract.setCurrentRevisionId("new");assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));
@@ -245,17 +266,99 @@ class RentalDefaultTest {
         rent.setStatus(PaymentStatus.CONFIRMED);rent.setConfirmedAt(now.minusSeconds(200000));
         when(signatures.findByContractIdOrderByCreatedAtDesc("c")).thenReturn(List.of(SignatureRequest.builder().status(SignatureRequestStatus.SIGNED).signerRole(SignerRole.LANDLORD).revisionId("rev").build()));
     }
+    @Test void inTimeProviderSignatureStillActivatesWhenTheWorkerRunsAfterTheDeadline() {
+        tenantSigning(); // window closed one second ago
+        assertThrows(AppException.class,()->service.validateSigning("r","t"));              // signing NOW is too late
+        assertThrows(AppException.class,()->service.validateSigning("r","t",now));          // signed after the deadline: still rejected
+        assertDoesNotThrow(()->service.validateSigning("r","t",now.minusSeconds(30)));      // signed before the deadline, worker late
+    }
     @Test void tenantSigningHasOwnWindowAndGraceThenRefundsRentNotDeposit() {
         tenantSigning();notice();assertTrue(service.refresh("r","t").canSign());elapsed();service.completeDefault("r","o",decision());
-        verify(paymentService).createRentRefundObligation(rent,new BigDecimal("5000000"));assertEquals(PaymentStatus.CONFIRMED,rent.getStatus());
+        verify(paymentService).createRentRefundObligationNotifyingLandlord(rent,new BigDecimal("5000000"));assertEquals(PaymentStatus.CONFIRMED,rent.getStatus());
         assertEquals(DepositStatus.RETAINED_BY_LANDLORD,deposit.getStatus());
     }
     @Test void combinedReceiptRefundExcludesDeposit() {
         tenantSigning();deposit.setInitialPaymentRequestId("rent");rent.setTotalAmount(new BigDecimal("15000000"));notice();elapsed();
-        service.completeDefault("r","o",decision());verify(paymentService).createRentRefundObligation(rent,new BigDecimal("5000000"));
+        service.completeDefault("r","o",decision());verify(paymentService).createRentRefundObligationNotifyingLandlord(rent,new BigDecimal("5000000"));
     }
     @Test void ownerCannotBlameTenantBeforeSupplyingOwnSignature() {
         rent.setStatus(PaymentStatus.CONFIRMED);rent.setConfirmedAt(now.minusSeconds(300000));assertThrows(AppException.class,this::notice);
+    }
+    @Test void zeroDepositUnpaidFirstRentGetsOneFinalWindowThenTheHoldEndsWithNothingRetained() {
+        rental.setDepositAmount(BigDecimal.ZERO);
+        when(events.findByRentalRequestIdOrderByOccurredAtDesc("r")).thenReturn(List.of());
+        service.processDue("r");
+        // First pass: a final 24h window, nothing cancelled yet.
+        assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());
+        assertEquals(PaymentStatus.AWAITING_TRANSFER,rent.getStatus());assertTrue(rent.getDueAt().isAfter(now));
+        verify(events).save(argThat(e->RentalOnboardingService.NO_DEPOSIT_RENT_NOTICE.equals(e.getAction())));
+        verify(parking,never()).releaseReservationsForRequest(any());
+        // Still unpaid after the window: the hold ends; no deposit exists, so nothing is retained.
+        when(events.findByRentalRequestIdOrderByOccurredAtDesc("r")).thenReturn(List.of(
+            com.hs.listing.model.RentalOnboardingEvent.builder().action(RentalOnboardingService.NO_DEPOSIT_RENT_NOTICE).build()));
+        now=rent.getDueAt();
+        service.processDue("r");
+        assertEquals(RentalRequestStatus.CANCELLED_BY_SYSTEM,rental.getStatus());
+        assertEquals(PaymentStatus.CANCELLED,rent.getStatus());assertEquals(ContractStatus.CANCELLED,contract.getStatus());
+        verify(parking).releaseReservationsForRequest("r");verify(listingStatus).releaseReserved(eq(rental.getListing()),eq("SYSTEM"),anyString());
+        verify(paymentService,never()).createCancellationRefund(any());
+    }
+    @Test void zeroDepositHoldIsNotEndedWhileTheTenantHasPaidOrBeforeTheDueDate() {
+        rental.setDepositAmount(BigDecimal.ZERO);
+        rent.setDueAt(now.plusSeconds(60));service.processDue("r");
+        rent.setDueAt(now.minusSeconds(60));rent.setStatus(PaymentStatus.TRANSFER_REPORTED);service.processDue("r");
+        assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());verify(events,never()).save(any());
+    }
+    @Test void nextActionNamesTheSingleNextStepAndWhoOwesIt() {
+        var overdue=service.refresh("r","t").nextAction();
+        assertEquals(RentalOnboardingService.NextActionCode.FIRST_RENT_OVERDUE,overdue.code());assertEquals("LANDLORD",overdue.actor());
+        notice();
+        var notice=service.refresh("r","t").nextAction();
+        assertEquals(RentalOnboardingService.NextActionCode.RESPOND_DEFAULT_NOTICE,notice.code());assertEquals("TENANT",notice.actor());
+        assertEquals(rental.getDefaultRespondBy(),notice.dueAt());
+        rent.setStatus(PaymentStatus.TRANSFER_REPORTED);rent.setConfirmationDueAt(now.plusSeconds(3600));
+        rental.setDefaultNoticeAt(null);
+        var confirm=service.refresh("r","o").nextAction();
+        assertEquals(RentalOnboardingService.NextActionCode.CONFIRM_FIRST_RENT,confirm.code());assertEquals("LANDLORD",confirm.actor());
+        rental.setCancellationRequestedAt(now);
+        assertEquals(RentalOnboardingService.NextActionCode.DECIDE_CANCELLATION,service.refresh("r","o").nextAction().code());
+    }
+    @Test void tenantWhoAlreadyPaidIsNotAskedToRespondToTheDefaultNoticeAgain() {
+        notice();
+        assertEquals(RentalOnboardingService.NextActionCode.RESPOND_DEFAULT_NOTICE,service.refresh("r","t").nextAction().code());
+        rent.setStatus(PaymentStatus.TRANSFER_REPORTED);rent.setConfirmationDueAt(now.plusSeconds(3600));
+        var next=service.refresh("r","o").nextAction();
+        assertEquals(RentalOnboardingService.NextActionCode.CONFIRM_FIRST_RENT,next.code());assertEquals("LANDLORD",next.actor());
+    }
+    @Test void systemReNoticeAfterAFactChangeKeepsTheTenantsPendingResponse() {
+        when(contracts.findByRentalRequestId("r")).thenReturn(Optional.empty());signedDeposit();
+        service.processDue("r");service.disputeDefault("r","t",new RentalOnboardingService.Cancellation("Tôi đã chuyển khoản"));
+        var disputedAt=rental.getDefaultDisputedAt();assertNotNull(disputedAt);
+        now=rental.getDefaultRespondBy();rent.setDueAt(now.minusSeconds(5)); // facts changed: fingerprint differs
+        service.processDue("r");
+        assertEquals(disputedAt,rental.getDefaultDisputedAt());
+    }
+    @Test void zeroDepositRejectedFirstRentIsNeverAutoCancelled() {
+        rental.setDepositAmount(BigDecimal.ZERO);rent.setStatus(PaymentStatus.REJECTED);
+        when(events.findByRentalRequestIdOrderByOccurredAtDesc("r")).thenReturn(List.of(
+            com.hs.listing.model.RentalOnboardingEvent.builder().action(RentalOnboardingService.NO_DEPOSIT_RENT_NOTICE).build()));
+        service.processDue("r");
+        assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());assertEquals(PaymentStatus.REJECTED,rent.getStatus());
+        verify(parking,never()).releaseReservationsForRequest(any());
+    }
+    @Test void zeroDepositNotYetOverdueRentIsNeverLockedAndReopenedDeadlineGetsAFreshFinalNotice() {
+        rental.setDepositAmount(BigDecimal.ZERO);
+        rent.setDueAt(now.plusSeconds(60));
+        service.processDue("r");
+        verify(payments,never()).findByRentalRequestIdAndTypeForUpdate("r",PaymentType.INITIAL);
+        // The landlord reopened the deadline after the earlier notice; it lapsed again: notify again before cancelling.
+        rent.setDueAt(now.minusSeconds(1));
+        when(events.findByRentalRequestIdOrderByOccurredAtDesc("r")).thenReturn(List.of(
+            com.hs.listing.model.RentalOnboardingEvent.builder().action("PAYMENT_REOPENED").build(),
+            com.hs.listing.model.RentalOnboardingEvent.builder().action(RentalOnboardingService.NO_DEPOSIT_RENT_NOTICE).build()));
+        service.processDue("r");
+        assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());assertTrue(rent.getDueAt().isAfter(now));
+        verify(events).save(argThat(e->RentalOnboardingService.NO_DEPOSIT_RENT_NOTICE.equals(e.getAction())));
     }
     @Test void zeroDepositNoForfeitureAndTenantCannotComplete() {
         deposit.setHeldAmount(BigDecimal.ZERO);assertThrows(AppException.class,this::notice);

@@ -34,11 +34,7 @@ public interface SignatureRequestRepository extends JpaRepository<SignatureReque
 
     Optional<SignatureRequest> findByProviderTranCode(String providerTranCode);
 
-    Optional<SignatureRequest> findByDocId(String docId);
-
     List<SignatureRequest> findByStatus(SignatureRequestStatus status);
-
-    List<SignatureRequest> findByStatusAndExpiresAtBefore(SignatureRequestStatus status, Instant threshold);
 
     /** Tìm PROVIDER_SIGNED chưa bị claim quá nhiều lần. */
     @Query("SELECT r FROM SignatureRequest r " +

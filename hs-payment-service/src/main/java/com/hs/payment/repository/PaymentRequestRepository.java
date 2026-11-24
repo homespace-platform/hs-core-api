@@ -25,15 +25,29 @@ public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, 
         + "and (((p.type in :billingTypes or p.type = com.hs.payment.model.constant.PaymentType.OTHER_CHARGE and p.contractId is not null) "
         + "and p.dueAt > :billingNow and p.dueAt <= :billingSoon and (p.opensAt is null or p.opensAt <= :billingNow)) "
         + "or (p.type not in :billingTypes and (p.type <> com.hs.payment.model.constant.PaymentType.OTHER_CHARGE or p.contractId is null) "
-        + "and p.dueAt > :realNow and p.dueAt <= :realSoon and (p.opensAt is null or p.opensAt <= :realNow))) order by p.id")
+        + "and p.dueAt > :realNow and p.dueAt <= :realSoon and (p.opensAt is null or p.opensAt <= :realNow))) "
+        + "and (:afterId is null or p.id > :afterId) order by p.id")
     List<String> findDueSoonIds(@Param("statuses") Collection<PaymentStatus> statuses,@Param("billingTypes") Collection<PaymentType> billingTypes,
         @Param("billingNow") Instant billingNow,@Param("billingSoon") Instant billingSoon,@Param("realNow") Instant realNow,
-        @Param("realSoon") Instant realSoon,Pageable page);
+        @Param("realSoon") Instant realSoon,@Param("afterId") String afterId,Pageable page);
 
     Optional<PaymentRequest> findByRentalRequestIdAndType(String rentalRequestId, PaymentType type);
 
     @Query("SELECT p.id FROM PaymentRequest p WHERE p.status = :status")
     List<String> findIdsByStatus(@Param("status") com.hs.payment.model.constant.PaymentStatus status);
+
+    /** Reported transfers (other than refunds, which have their own window) whose confirmation deadline is at or before {@code horizon}. */
+    @Query("SELECT p.id FROM PaymentRequest p WHERE p.status = :status AND p.type NOT IN :excludedTypes "
+            + "AND p.confirmationDueAt IS NOT NULL AND p.confirmationDueAt <= :horizon AND (:afterId IS NULL OR p.id > :afterId) ORDER BY p.id")
+    List<String> findReportedIdsDueByAfter(@Param("status") PaymentStatus status, @Param("excludedTypes") Collection<PaymentType> excludedTypes,
+            @Param("horizon") java.time.Instant horizon, @Param("afterId") String afterId, Pageable page);
+
+    /** Landlord refunds reported at or before {@code reportedBefore} that the tenant has not answered; keyset-paged so no row is starved by a page limit. */
+    @Query("SELECT p.id FROM PaymentRequest p WHERE p.status = :status AND p.type IN :types AND p.direction = :direction "
+            + "AND p.payerReportedAt IS NOT NULL AND p.payerReportedAt <= :reportedBefore AND (:afterId IS NULL OR p.id > :afterId) ORDER BY p.id")
+    List<String> findReportedRefundIdsAfter(@Param("status") PaymentStatus status, @Param("types") Collection<PaymentType> types,
+            @Param("direction") com.hs.payment.model.constant.PaymentDirection direction,
+            @Param("reportedBefore") Instant reportedBefore, @Param("afterId") String afterId, Pageable page);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM PaymentRequest p WHERE p.id = :id")
@@ -52,7 +66,6 @@ public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, 
     List<PaymentRequest> findForContractAndActor(@Param("contractId") String contractId,
                                                  @Param("actorId") String actorId);
 
-    Optional<PaymentRequest> findByTransferReference(String transferReference);
     Optional<PaymentRequest> findByOnboardingKey(String onboardingKey);
     List<PaymentRequest> findByRentalRequestIdAndTypeIn(String rentalRequestId, Collection<PaymentType> types);
 

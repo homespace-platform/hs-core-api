@@ -80,15 +80,15 @@ class PaymentNotificationPostgresTest {
         var states=Set.of(PaymentStatus.AWAITING_TRANSFER,PaymentStatus.REJECTED);
         var realNow=now.minusSeconds(30*86400L);
         payment.setType(PaymentType.DEPOSIT_REFUND);payment.setStatus(PaymentStatus.AWAITING_TRANSFER);payment=payments.saveAndFlush(payment);
-        assertEquals(List.of(payment.getId()),payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page));
+        assertEquals(List.of(payment.getId()),payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),null,page));
         payment.setReminderForDueAt(payment.getDueAt());payment=payments.saveAndFlush(payment);
-        assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page).isEmpty());
+        assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),null,page).isEmpty());
         payment.setDueAt(now.plusSeconds(7200));payment=payments.saveAndFlush(payment);
-        assertEquals(List.of(payment.getId()),payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page));
+        assertEquals(List.of(payment.getId()),payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),null,page));
         payment.setType(PaymentType.UTILITY);payment=payments.saveAndFlush(payment);
-        assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page).isEmpty());
+        assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),null,page).isEmpty());
         payment.setType(PaymentType.DEPOSIT_REFUND);payment.setStatus(PaymentStatus.TRANSFER_REPORTED);payment=payments.saveAndFlush(payment);
-        assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page).isEmpty());
+        assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),null,page).isEmpty());
     }
     @Test void authorizedConfirmationCommitsOutcomeAndSingleNoticeAndReplayIsSilent() throws Exception{
         service.confirmReceipt(payment.getId(),"payee");service.confirmReceipt(payment.getId(),"payee");

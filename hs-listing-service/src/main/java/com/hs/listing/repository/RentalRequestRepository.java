@@ -56,16 +56,10 @@ public interface RentalRequestRepository extends JpaRepository<RentalRequest, St
 
     List<RentalRequest> findByStatusAndRespondByLessThanEqual(RentalRequestStatus status, Instant now);
 
-    List<RentalRequest> findByListingIdAndStatusIn(String listingId, Collection<RentalRequestStatus> statuses);
-
     Optional<RentalRequest> findFirstByListingIdAndRenterIdAndStatusIn(
             String listingId, String renterId, Collection<RentalRequestStatus> statuses);
 
     List<RentalRequest> findAllByStatusAndHoldExpiresAtLessThanEqual(RentalRequestStatus status, Instant now);
-
-    List<RentalRequest> findAllByStatusAndHoldExpiresAtIsNotNull(RentalRequestStatus status);
-
-    long countByListingIdAndStatusIn(String listingId, Collection<RentalRequestStatus> statuses);
 
     boolean existsByListingIdAndRenterId(String listingId, String renterId);
 

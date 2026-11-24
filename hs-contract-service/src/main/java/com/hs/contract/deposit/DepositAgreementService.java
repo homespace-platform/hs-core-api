@@ -94,6 +94,22 @@ public class DepositAgreementService {
         audit(rentalId,"SYSTEM",action,reason);
     }
 
+    /**
+     * A root lease that ended TERMINATED (unilateral or overdue termination) must not leave its fully signed
+     * deposit agreement looking active. Lifecycle metadata only; signed PDF and signatures are untouched.
+     */
+    @Transactional
+    public void terminateWithLease(Contract lease,String reason) {
+        if(lease==null || lease.getParentContractId()!=null || isDeposit(lease) || lease.getStatus()!=ContractStatus.TERMINATED)return;
+        var found=find(lease.getRentalRequestId());
+        if(found.isEmpty())return;
+        var c=contracts.findByIdForUpdate(found.get().getId()).orElseThrow();
+        if(!Objects.equals(lease.getLandlordId(),c.getLandlordId()) || !Objects.equals(lease.getTenantId(),c.getTenantId()))return;
+        if(c.getStatus()!=ContractStatus.ACTIVE || c.getSignedAt()==null)return;
+        c.setStatus(ContractStatus.TERMINATED);c.setTerminationCompletedAt(time.now());contracts.save(c);
+        audit(lease.getRentalRequestId(),"SYSTEM","DEPOSIT_TERMINATED_WITH_LEASE",reason);
+    }
+
     /** Called with the lease locked; completion changes lifecycle metadata only. */
     @Transactional
     public void completeAfterLeaseSettlement(Contract lease,ContractClosure settlement) {
@@ -216,7 +232,7 @@ public class DepositAgreementService {
         model.put("depositPayment",Map.of("typeText",p.getType()==PaymentType.RESERVATION_DEPOSIT?"Cọc giữ chỗ":"Khoản ban đầu gồm tiền thuê và cọc",
             "totalAmountNumber",ContractRenderService.formatVND(p.getTotalAmount()),"rentComponentAmountNumber",ContractRenderService.formatVND(a.rent()),
             "confirmedAmountNumber",ContractRenderService.formatVND(a.deposit()),"confirmedAmountWords",VietnameseCurrencyTextConverter.toWords(a.deposit()),
-            "payerReportedAt",STAMP.format(p.getPayerReportedAt()),"payeeConfirmedAt",STAMP.format(p.getPayeeConfirmedAt()),"confirmedAt",STAMP.format(p.getConfirmedAt()),"transferReference",Objects.toString(p.getTransferReference(),"")));
+            "payerReportedAt",stampOr(p.getPayerReportedAt(),MANUAL),"payeeConfirmedAt",stampOr(p.getPayeeConfirmedAt()!=null?p.getPayeeConfirmedAt():p.getConfirmedAt(),MANUAL),"confirmedAt",stampOr(p.getConfirmedAt(),MANUAL),"transferReference",Objects.toString(p.getTransferReference(),"")));
         var optional=new ArrayList<Map<String,String>>();
         for(var party:Map.of("landlord",s.getLandlord(),"tenant",s.getTenant()).entrySet()) {
             String side=party.getKey().equals("landlord")?"Bên A":"Bên B";
@@ -226,6 +242,9 @@ public class DepositAgreementService {
         row(optional,"Mã ngân hàng do bên giao dịch cung cấp",p.getBankTransactionReference());model.put("depositOptionalRows",optional);
         return model;
     }
+    /** A reconciled-as-received payment may have no payer declaration; say so instead of failing or inventing a time. */
+    private static final String MANUAL="Không có khai báo của người trả; chủ nhà đối soát thủ công";
+    private static String stampOr(Instant at,String fallback){return at==null?fallback:STAMP.format(at);}
     private void row(List<Map<String,String>> rows,String label,Object value){if(value!=null&&!value.toString().isBlank())rows.add(Map.of("label",label,"value",value.toString()));}
     private String json(Object o){try{return mapper.writeValueAsString(o);}catch(Exception e){throw new IllegalStateException("Không lưu được snapshot cọc",e);}}
     @Transactional(readOnly=true)

@@ -724,6 +724,8 @@ class MonthlyBillingServiceTest {
         when(deposits.findByRentalRequestIdForUpdate("rental")).thenReturn(Optional.of(deposit));
         when(deposits.findByRentalRequestId("rental")).thenReturn(Optional.of(deposit));
 
+        var agreements=mock(com.hs.contract.deposit.DepositAgreementService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",agreements);
         service.proposeMutualTermination("invoice", "landlord");
         verify(terminationNotices).tenant(contract,com.hs.contract.notification.TerminationNotificationWriter.Event.TERMINATION_RESPONSE_NEEDED);
         assertEquals(ContractStatus.ACTIVE, contract.getStatus());
@@ -745,6 +747,8 @@ class MonthlyBillingServiceTest {
         assertEquals(BigDecimal.ZERO, deposit.getRefundableAmount());
         verify(listingStatusService).releaseRentedAfterTermination("listing", "landlord");
         verify(parkingReservations).releaseReservationsForContract("contract");
+        // The signed deposit agreement ends together with the terminated lease.
+        verify(agreements).terminateWithLease(eq(contract),anyString());
     }
     @Test void terminationOfANoDepositLeaseDoesNotRecordZeroDepositForfeiture() {
         Contract contract=contracts.findById("contract").orElseThrow();
@@ -1859,5 +1863,27 @@ class MonthlyBillingServiceTest {
         contracts.findById("contract").orElseThrow().setTerminationProposedAt(null); invoice.setOverdueActionLoggedAt(null);
         service.list("contract", "landlord"); service.list("contract", "landlord");
         assertEquals(List.of(k("OVERDUE_ACTION_REQUIRED", "landlord", "invoice")), outbox.keys());
+    }
+
+    @Test void pendingExtensionAtActionTimeDoesNotConsumeTheLandlordReminderMarker() {
+        overdueDemo("2027-01-22T20:00:00"); // request stays pending (48h window) when the action time (23/01 00:01) arrives
+        var request = service.requestPaymentExtension("invoice", "tenant", extension(7)).paymentExtensions().getFirst();
+        outbox.clear();
+        demoTime("2027-01-23T00:01:00"); service.list("contract", "landlord");
+        assertNull(invoice.getOverdueActionLoggedAt()); assertEquals(List.of(), outbox.keys()); // blocked, nothing consumed
+        service.decidePaymentExtension("invoice", request.id(), "landlord", false);
+        outbox.clear();
+        service.list("contract", "landlord"); service.list("contract", "landlord");
+        assertNotNull(invoice.getOverdueActionLoggedAt());
+        assertEquals(List.of(k("OVERDUE_ACTION_REQUIRED", "landlord", "invoice")), outbox.keys()); // told once, after the blocker is gone
+    }
+
+    @Test void catchUpIssueOfTheLastPeriodStillTellsTheLandlordBecauseNoLaterPeriodCanDefer() {
+        skippedMonthsDemo("FIXED_PER_DAY", ContractStatus.ACTIVE);
+        when(rentals.findById("rental")).thenReturn(Optional.of(RentalRequest.builder()
+                .moveInDate(LocalDate.of(2026, 10, 12)).leaseMonths(2).build())); // period 1 is the last: cannot auto-defer
+        demoTime("2026-12-30T00:01:00"); service.scheduledSync();
+        assertEquals(1, outbox.keys().stream().filter(x -> x.equals(k("OVERDUE_ACTION_REQUIRED", "landlord", "bill-1"))).count());
+        var before = outbox.keys().size(); service.scheduledSync(); assertEquals(before, outbox.keys().size());
     }
 }

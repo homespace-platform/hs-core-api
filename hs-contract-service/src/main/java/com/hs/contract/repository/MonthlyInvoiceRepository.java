@@ -21,5 +21,4 @@ public interface MonthlyInvoiceRepository extends JpaRepository<MonthlyInvoice, 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select i from MonthlyInvoice i where i.id = :id")
     Optional<MonthlyInvoice> findByIdForUpdate(@Param("id") String id);
-    List<MonthlyInvoice> findByStatusAndDueAtBefore(MonthlyInvoiceStatus status, Instant now);
 }

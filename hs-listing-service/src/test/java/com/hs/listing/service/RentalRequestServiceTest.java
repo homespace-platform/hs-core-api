@@ -852,4 +852,25 @@ class RentalRequestServiceTest {
         verify(listingStatusService).releaseReserved(eq(listing), eq("SYSTEM"), any());
         verify(parkingReservationService).expireReservationsForRequest("req-1");
     }
+
+    @Test
+    void expirePendingHoldRequests_oneFailingRowDoesNotStopTheOthers() {
+        Instant now = Instant.now();
+        Listing l1 = Listing.builder().id("l-1").status(ListingStatus.RESERVED).build();
+        Listing l2 = Listing.builder().id("l-2").status(ListingStatus.RESERVED).build();
+        RentalRequest poison = RentalRequest.builder().id("bad").listing(l1).ownerId("owner-1").renterId("renter-1")
+                .status(RentalRequestStatus.ACCEPTED).holdExpiresAt(now.minusSeconds(10)).build();
+        RentalRequest healthy = RentalRequest.builder().id("good").listing(l2).ownerId("owner-2").renterId("renter-2")
+                .status(RentalRequestStatus.ACCEPTED).holdExpiresAt(now.minusSeconds(10)).build();
+        when(rentalRequestRepository.findAllByStatusAndHoldExpiresAtLessThanEqual(eq(RentalRequestStatus.ACCEPTED), any()))
+                .thenReturn(List.of(poison, healthy));
+        when(rentalRequestRepository.findByIdForUpdate("bad")).thenThrow(new IllegalStateException("poison row"));
+        when(rentalRequestRepository.findByIdForUpdate("good")).thenReturn(Optional.of(healthy));
+
+        assertEquals(1, rentalRequestService.expirePendingHoldRequests(now));
+
+        assertEquals(RentalRequestStatus.EXPIRED, healthy.getStatus());
+        assertEquals(RentalRequestStatus.ACCEPTED, poison.getStatus());
+        verify(listingStatusService).releaseReserved(eq(l2), eq("SYSTEM"), any());
+    }
 }

@@ -80,7 +80,21 @@ public class RentalOnboardingService {
                        List<PaymentRequestResponse> payments,List<RentalStartChange> startChanges,String message,String askerRole,
                        Instant cancellationRequestedAt,String cancellationReason,List<RentalOnboardingEvent> history,
                        DefaultView defaultCase,com.hs.payment.dto.DepositLedgerView deposit,boolean canRequestCancellation, String depositAgreementContractId, String depositAgreementStatus,boolean depositAgreementRequired,boolean depositAgreementTenantSigned,
-                       LocalDate originalEndExclusive,String leaseTermSource) {}
+                       LocalDate originalEndExclusive,String leaseTermSource,NextAction nextAction) {}
+    /** The single next step of the pre-tenancy flow. Codes are stable identifiers; the clients map them to labels. */
+    public record NextAction(String actor,NextActionCode code,Instant dueAt) {}
+    /**
+     * PAY_DEPOSIT (tenant) · CONFIRM_DEPOSIT (landlord) · REVIEW_PAYMENT (landlord: rejected/overdue proof) ·
+     * PREPARE_DEPOSIT_AGREEMENT (system) · SIGN_DEPOSIT_LANDLORD · SIGN_DEPOSIT_TENANT · WAIT_START (nobody, until dueAt) ·
+     * PAY_FIRST_RENT (tenant) · FIRST_RENT_OVERDUE (landlord may notify/end) · CONFIRM_FIRST_RENT (landlord) ·
+     * PREPARE_LEASE (system) · LEASE_TEMPLATE_REQUIRED (admin) · SIGN_LEASE_LANDLORD · SIGN_LEASE_TENANT ·
+     * SIGNING_OVERDUE (landlord reopens or cancels) · RESPOND_DEFAULT_NOTICE (tenant) · DECIDE_CANCELLATION (landlord) ·
+     * RESOLUTION_IN_PROGRESS (see the workflow's allowedActions) · SEND_REFUND (landlord) · CONFIRM_REFUND (tenant) · NONE.
+     */
+    public enum NextActionCode { PAY_DEPOSIT, CONFIRM_DEPOSIT, REVIEW_PAYMENT, PREPARE_DEPOSIT_AGREEMENT, SIGN_DEPOSIT_LANDLORD,
+        SIGN_DEPOSIT_TENANT, WAIT_START, PAY_FIRST_RENT, FIRST_RENT_OVERDUE, CONFIRM_FIRST_RENT, PREPARE_LEASE, LEASE_TEMPLATE_REQUIRED,
+        SIGN_LEASE_LANDLORD, SIGN_LEASE_TENANT, SIGNING_OVERDUE, RESPOND_DEFAULT_NOTICE, DECIDE_CANCELLATION, RESOLUTION_IN_PROGRESS,
+        SEND_REFUND, CONFIRM_REFUND, NONE }
     public record DefaultView(String eligibleKind,Instant notifiedAt,Instant respondBy,String reason,
                               Instant disputedAt,Instant completedAt,boolean canComplete,String policyVersion,boolean automatic) {}
     @Value("${rental.hold-duration-minutes:60}") private long holdMinutes=60;
@@ -104,6 +118,12 @@ public class RentalOnboardingService {
     }
     @Transactional public View refresh(String id,String actor) {
         var r=rental(id,actor); sync(r); return view(r,actor);
+    }
+    /** Read-only twin of {@link #refresh}: same view, no sync side effects and no row lock (for polling and lists). */
+    @Transactional(readOnly=true) public View get(String id,String actor) {
+        var r=rentals.findById(id).orElseThrow(()->invalid("Không tìm thấy yêu cầu thuê."));
+        if(actor==null || (!actor.equals(r.getOwnerId())&&!actor.equals(r.getRenterId())))throw invalid("Không tìm thấy yêu cầu thuê.");
+        return view(r,actor);
     }
     private void sync(RentalRequest r) {
         for(var c:changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId())) {
@@ -134,7 +154,9 @@ public class RentalOnboardingService {
             }
         });
     }
-    private View view(RentalRequest r,String actor) {
+    private View view(RentalRequest r,String actor) { return view(r,actor,time.now()); }
+    /** @param signingClock instant the signing window is judged at (now, or the verified provider time for a late worker). */
+    private View view(RentalRequest r,String actor,Instant signingClock) {
         var deposit=payment(r.getId(),PaymentType.RESERVATION_DEPOSIT);
         var rent=payment(r.getId(),PaymentType.INITIAL);
         var refunds=payments.findByRentalRequestIdAndTypeIn(r.getId(),List.of(PaymentType.INITIAL_PAYMENT_REFUND));
@@ -153,7 +175,7 @@ public class RentalOnboardingService {
         boolean paid=confirmed(rent)&&(deposit==null||confirmed(deposit));
         boolean signingOpen=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&r.getResolutionWorkflowId()==null
             &&r.getListing().getOperationalStatus()==com.hs.listing.model.constant.ListingStatus.RESERVED
-            &&paid&&depositSigned&&!time.now().isBefore(opens)&&signDue!=null&&time.now().isBefore(signDue);
+            &&paid&&depositSigned&&!signingClock.isBefore(opens)&&signDue!=null&&signingClock.isBefore(signDue);
         String stage,message;
         if(r.getStatus()==RentalRequestStatus.COMPLETED){stage="COMPLETED";message="Đã ký đủ và bắt đầu hợp đồng.";}
         else if(r.getDefaultCompletedAt()!=null){
@@ -165,10 +187,13 @@ public class RentalOnboardingService {
                 +(hasRentRefund?"Tiền thuê đã nhận được theo dõi trong khoản hoàn riêng.":"Không có tiền thuê cần hoàn.");
         }
         else if(r.getStatus()!=RentalRequestStatus.ACCEPTED){stage=r.getStatus().name();message="Yêu cầu chưa được chấp nhận hoặc không còn hiệu lực.";}
-        else if(r.getCancellationRefundApprovedAt()!=null){stage="CANCELLATION_REFUND_PENDING";message="Đã đồng ý hủy. Phòng vẫn được giữ cho đến khi người thuê xác nhận nhận đủ tiền hoàn.";}
+        else if(r.getCancellationRefundApprovedAt()!=null){stage="CANCELLATION_REFUND_PENDING";message="Đã đồng ý hủy. Phòng vẫn được giữ cho đến khi người thuê xác nhận nhận đủ tiền hoàn. Sau khi chủ nhà báo đã hoàn tiền, nếu người thuê không xác nhận hoặc từ chối trong 72 giờ, hệ thống sẽ tự xác nhận đã nhận.";}
         else if(r.getResolutionWorkflowId()!=null){stage="RESOLUTION_PENDING";message="Đang xử lý hồ sơ trước thuê. Xem đề nghị, phản hồi hoặc khiếu nại tại mục Xử lý cọc và ký bên dưới.";}
         else if(r.getCancellationRequestedAt()!=null){stage="CANCELLATION_REQUESTED";message="Người thuê đề nghị hủy hồ sơ và hoàn tiền; chờ chủ nhà quyết định.";}
-        else if(unresolved(deposit)||unresolved(rent)||depositExempt&&deposit!=null&&!confirmed(deposit)){stage="REQUIRES_REVIEW";message="Chủ nhà cần kiểm tra và xác nhận khoản chuyển; phòng tiếp tục được giữ, không tự xác nhận hay hoàn tiền.";}
+        else if(unresolved(deposit)||unresolved(rent)||depositExempt&&deposit!=null&&!confirmed(deposit)){stage="REQUIRES_REVIEW";
+            message=deposit!=null&&deposit.getStatus()==PaymentStatus.REJECTED||rent!=null&&rent.getStatus()==PaymentStatus.REJECTED
+                ?"Khoản chuyển đã bị từ chối. Chủ nhà cần mở lại hoặc xác nhận sau khi đối soát; hệ thống không tự xác nhận khoản đã bị từ chối. Phòng tiếp tục được giữ."
+                :"Chủ nhà cần kiểm tra và xác nhận hoặc từ chối khoản chuyển. Nếu quá hạn xác nhận mà chủ nhà không phản hồi, hệ thống sẽ cảnh báo rồi tự xác nhận là đã nhận tiền. Phòng tiếp tục được giữ.";}
         else if(!depositReady(r)&&(deposit!=null&&deposit.getStatus()==PaymentStatus.TRANSFER_REPORTED||rent!=null&&rent.getStatus()==PaymentStatus.TRANSFER_REPORTED)){stage="AWAITING_DEPOSIT_CONFIRMATION";message="Đã báo chuyển khoản giữ chỗ, chờ chủ nhà xác nhận nhận đủ tiền.";}
         else if(!depositReady(r)){stage="AWAITING_DEPOSIT";message="Chờ chuyển khoản giữ chỗ trước hạn ghi trên yêu cầu thanh toán.";}
         else if(!depositSigned){stage="AWAITING_DEPOSIT_SIGNATURE";message=depositDocument==null?"Đã xác nhận cọc. Đang chuẩn bị hợp đồng cọc; kiểm tra mẫu và dữ liệu nếu chưa có văn bản. Không chuyển tiền thêm.":"Đã xác nhận tiền. Hai bên cần ký số hợp đồng cọc trước khi ký hợp đồng thuê.";}
@@ -176,7 +201,7 @@ public class RentalOnboardingService {
         else if(!paid){
             boolean reported=rent.getStatus()==PaymentStatus.TRANSFER_REPORTED;
             stage=reported?"AWAITING_RENT_CONFIRMATION":rent.getDueAt()!=null&&!time.now().isBefore(rent.getDueAt())?"REQUIRES_REVIEW":"AWAITING_FIRST_RENT";
-            message=reported?"Chờ chủ nhà xác nhận tiền tháng đầu.":depositExempt?"Chờ tiền thuê tháng đầu; hồ sơ không yêu cầu đặt cọc và không cần ký hợp đồng cọc. Quá hạn cần hai bên đối soát, không tự đổi ngày thuê.":"Chờ tiền thuê tháng đầu; không thu lại tiền cọc. Quá hạn cần hai bên đối soát, không tự đổi ngày thuê.";
+            message=reported?"Chờ chủ nhà xác nhận tiền tháng đầu.":depositExempt?(stage.equals("REQUIRES_REVIEW")?"Đã quá hạn thanh toán tiền thuê tháng đầu; hồ sơ không yêu cầu đặt cọc. Hệ thống gửi thông báo cuối với hạn 24 giờ, sau đó tự hủy giữ phòng nếu chưa thanh toán (không có tiền cọc để giữ lại).":"Chờ tiền thuê tháng đầu; hồ sơ không yêu cầu đặt cọc và không cần ký hợp đồng cọc. Nếu quá hạn, hệ thống gửi thông báo cuối rồi tự hủy giữ phòng."):"Chờ tiền thuê tháng đầu; không thu lại tiền cọc. Quá hạn cần hai bên đối soát, không tự đổi ngày thuê.";
         } else if(contract==null){
             var templateProblem=ContractDraftTemplates.problem(draftTemplates,r.getListing().getCategory());
             stage=templateProblem==null?"PREPARING_CONTRACT":"CONTRACT_TEMPLATE_REQUIRED";
@@ -203,7 +228,48 @@ public class RentalOnboardingService {
             opens,rent!=null?rent.getDueAt():null,signDue,r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getResolutionWorkflowId()==null&&r.getCancellationRequestedAt()==null&&paid&&(contract==null||contract.getStatus()==ContractStatus.DRAFT),signingOpen&&contract!=null,earlier,holdMinutes,
             rows,changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()),message,actor.equals(r.getOwnerId())?"LANDLORD":"TENANT",r.getCancellationRequestedAt(),r.getCancellationReason(),events.findByRentalRequestIdOrderByOccurredAtDesc(r.getId()),
             defaultView(r),depositLedger.forRental(r.getId()),canCancel(r,contract),depositDocument==null?null:depositDocument.getId(),depositDocument==null?null:depositDocument.getStatus().name(),!depositExempt,
-            depositAgreements!=null && depositAgreements.tenantHasSigned(r.getId()),originalEnd,termSource);
+            depositAgreements!=null && depositAgreements.tenantHasSigned(r.getId()),originalEnd,termSource,
+            nextAction(stage,r,deposit,rent,refunds,depositDocument,contract,opens,signDue));
+    }
+    /** Past the window the tenant cannot sign any more (DepositAgreementService.validateSigning); only the landlord can reopen. */
+    NextAction tenantDepositSigning(com.hs.contract.model.Contract deposit) {
+        var due=deposit.getTenantSigningDueAt();
+        return due!=null&&!time.now().isBefore(due) ? new NextAction("LANDLORD",NextActionCode.SIGNING_OVERDUE,due)
+            : new NextAction("TENANT",NextActionCode.SIGN_DEPOSIT_TENANT,due);
+    }
+    /** Derived from the same facts as the stage above, so the two can never disagree. */
+    private NextAction nextAction(String stage,RentalRequest r,PaymentRequest deposit,PaymentRequest rent,List<PaymentRequest> refunds,
+                                  com.hs.contract.model.Contract depositDocument,com.hs.contract.model.Contract lease,Instant opens,Instant signDue) {
+        var def=r.getDefaultNoticeAt()!=null&&r.getDefaultCompletedAt()==null&&r.getDefaultDisputedAt()==null&&r.getDefaultRespondBy()!=null
+            &&time.now().isBefore(r.getDefaultRespondBy());
+        // The notice only counts while the tenant still owes what it named; once they paid or signed the next step is the landlord's.
+        // (defaultKind() is null inside the response window by design, so the stage - same facts - tells whether it is still owed.)
+        boolean owed="FIRST_RENT".equals(r.getDefaultNoticeKind())?"AWAITING_FIRST_RENT".equals(stage)
+            :"TENANT_SIGNING".equals(r.getDefaultNoticeKind())&&"READY_TO_SIGN".equals(stage);
+        if(def && owed && r.getStatus()==RentalRequestStatus.ACCEPTED)return new NextAction("TENANT",NextActionCode.RESPOND_DEFAULT_NOTICE,r.getDefaultRespondBy());
+        return switch(stage) {
+            case "AWAITING_DEPOSIT" -> new NextAction("TENANT",NextActionCode.PAY_DEPOSIT,deposit!=null?deposit.getDueAt():rent!=null?rent.getDueAt():null);
+            case "AWAITING_DEPOSIT_CONFIRMATION" -> new NextAction("LANDLORD",NextActionCode.CONFIRM_DEPOSIT,
+                deposit!=null&&deposit.getStatus()==PaymentStatus.TRANSFER_REPORTED?deposit.getConfirmationDueAt():rent!=null?rent.getConfirmationDueAt():null);
+            case "AWAITING_DEPOSIT_SIGNATURE" -> depositDocument==null ? new NextAction("SYSTEM",NextActionCode.PREPARE_DEPOSIT_AGREEMENT,null)
+                : depositDocument.getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING ? tenantDepositSigning(depositDocument)
+                : new NextAction("LANDLORD",NextActionCode.SIGN_DEPOSIT_LANDLORD,null);
+            case "WAITING_START" -> new NextAction("NONE",NextActionCode.WAIT_START,opens);
+            case "AWAITING_FIRST_RENT" -> new NextAction("TENANT",NextActionCode.PAY_FIRST_RENT,rent!=null?rent.getDueAt():null);
+            case "AWAITING_RENT_CONFIRMATION" -> new NextAction("LANDLORD",NextActionCode.CONFIRM_FIRST_RENT,rent!=null?rent.getConfirmationDueAt():null);
+            case "PREPARING_CONTRACT" -> new NextAction("SYSTEM",NextActionCode.PREPARE_LEASE,null);
+            case "CONTRACT_TEMPLATE_REQUIRED" -> new NextAction("SYSTEM",NextActionCode.LEASE_TEMPLATE_REQUIRED,null);
+            case "READY_TO_SIGN" -> lease!=null&&lease.getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING
+                ? new NextAction("TENANT",NextActionCode.SIGN_LEASE_TENANT,signDue) : new NextAction("LANDLORD",NextActionCode.SIGN_LEASE_LANDLORD,signDue);
+            case "REQUIRES_REVIEW" -> unresolved(deposit)||unresolved(rent) ? new NextAction("LANDLORD",NextActionCode.REVIEW_PAYMENT,null)
+                : rent!=null&&!confirmed(rent) ? new NextAction("LANDLORD",NextActionCode.FIRST_RENT_OVERDUE,null)
+                : new NextAction("LANDLORD",NextActionCode.SIGNING_OVERDUE,null);
+            case "CANCELLATION_REQUESTED" -> new NextAction("LANDLORD",NextActionCode.DECIDE_CANCELLATION,null);
+            case "RESOLUTION_PENDING" -> new NextAction("NONE",NextActionCode.RESOLUTION_IN_PROGRESS,null);
+            case "CANCELLATION_REFUND_PENDING" -> refunds.stream().anyMatch(p->p.getStatus()==PaymentStatus.TRANSFER_REPORTED)
+                ? new NextAction("TENANT",NextActionCode.CONFIRM_REFUND,null) : new NextAction("LANDLORD",NextActionCode.SEND_REFUND,null);
+            default -> new NextAction("NONE",NextActionCode.NONE,null);
+        };
     }
     @Transactional public View requestEarlier(String id,String actor,StartRequest request) {
         var r=rental(id,actor);sync(r);
@@ -266,9 +332,15 @@ public class RentalOnboardingService {
         c.setStatus("WITHDRAWN");c.setDecidedAt(time.now());c.setDecidedBy(actor);changes.save(c);
         notifications.enqueue(r,Event.RENTAL_START_CHANGE_WITHDRAWN,Side.OWNER);return view(r,actor);
     }
-    @Transactional public void validateSigning(String rentalId,String actor) {
+    @Transactional public void validateSigning(String rentalId,String actor) { validateSigning(rentalId,actor,time.now()); }
+    /**
+     * Commit-time check for an already provider-signed request: the deadline is judged at the verified signing time
+     * (never later than now), so a worker running seconds after the deadline cannot void an in-time signature.
+     */
+    @Transactional public void validateSigning(String rentalId,String actor,Instant signedAt) {
         var r=rental(rentalId,actor);sync(r);
-        if(!view(r,actor).canSign())throw invalid("Chưa đến ngày bắt đầu thuê, chưa xác nhận đủ tiền hoặc đã hết hạn ký. Vui lòng xem tiến trình nhận nhà.");
+        Instant now=time.now(),at=signedAt==null||signedAt.isAfter(now)?now:signedAt;
+        if(!view(r,actor,at).canSign())throw invalid("Chưa đến ngày bắt đầu thuê, chưa xác nhận đủ tiền hoặc đã hết hạn ký. Vui lòng xem tiến trình nhận nhà.");
     }
     public record Cancellation(@NotBlank @Size(min=10,max=1000) String reason) {}
     /** Either party can release an unpaid hold without waiting for its timeout. */
@@ -415,7 +487,8 @@ public class RentalOnboardingService {
         if(rentals.findByListingIdAndStatus(r.getListing().getId(),RentalRequestStatus.ACCEPTED).stream().anyMatch(other->!other.getId().equals(r.getId())))return null;
         if(r.getResolutionWorkflowId()!=null)return null;
         if(depositAgreements!=null && !depositAgreements.signedOrExempt(r))return null;
-        if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getCancellationRequestedAt()!=null || r.getDefaultDisputedAt()!=null
+        // A tenant response pauses only the completion of the current notice (see defaultView); it must not disable defaults forever.
+        if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getCancellationRequestedAt()!=null
                 || !Set.of("RESERVATION_DEFAULT_V1","RESERVATION_DEFAULT_V2","RESERVATION_DEFAULT_V3").contains(Objects.toString(r.getReservationPolicyVersion(),"")) || r.getReservationPolicyAcceptedAt()==null
                 || r.getListing().getOperationalStatus()!=com.hs.listing.model.constant.ListingStatus.RESERVED)return null;
         var d=deposits.findByRentalRequestId(r.getId()).orElse(null);
@@ -474,7 +547,7 @@ public class RentalOnboardingService {
     }
     private DefaultView defaultView(RentalRequest r) {
         var kind=defaultKind(r);
-        boolean complete=kind!=null && kind.equals(r.getDefaultNoticeKind()) && r.getDefaultRespondBy()!=null
+        boolean complete=kind!=null && r.getDefaultDisputedAt()==null && kind.equals(r.getDefaultNoticeKind()) && r.getDefaultRespondBy()!=null
             && !time.now().isBefore(r.getDefaultRespondBy()) && defaultFingerprint(r,kind).equals(r.getDefaultNoticeFingerprint());
         return new DefaultView(kind,r.getDefaultNoticeAt(),r.getDefaultRespondBy(),r.getDefaultNoticeReason(),r.getDefaultDisputedAt(),r.getDefaultCompletedAt(),complete,r.getReservationPolicyVersion(),
             depositAgreements!=null && !com.hs.contract.deposit.DepositAgreementService.isExempt(r) && depositAgreements.signedOrExempt(r));
@@ -490,7 +563,12 @@ public class RentalOnboardingService {
         var kind=defaultKind(r);if(kind==null)throw invalid("Chưa đủ điều kiện: cần cọc thực nhận, thỏa thuận giữ cọc và quá hạn do người thuê; quá hạn ký cần văn bản chủ nhà đã ký. Không được có khoản/chữ ký đang đối soát.");
         if(defaultView(r).canComplete())return;
         var fingerprint=defaultFingerprint(r,kind);
-        if(fingerprint.equals(r.getDefaultNoticeFingerprint()))return;
+        // Same facts: the system never re-sends; only the landlord may re-issue after the tenant responded to this notice.
+        boolean landlordReissueAfterResponse=r.getDefaultDisputedAt()!=null && actor.equals(r.getOwnerId());
+        if(fingerprint.equals(r.getDefaultNoticeFingerprint()) && !landlordReissueAfterResponse)return;
+        // A landlord re-issue opens a new response window (the old response stays in the audit log); a SYSTEM re-notice after a
+        // fact change must not erase the tenant's pending response.
+        if(landlordReissueAfterResponse)r.setDefaultDisputedAt(null);
         r.setDefaultNoticeKind(kind);r.setDefaultNoticeAt(time.now());
         r.setDefaultRespondBy(time.now().plus(Duration.ofHours(Math.max(24,defaultResponseHours))));
         r.setDefaultNoticeReason(reason);
@@ -535,7 +613,7 @@ public class RentalOnboardingService {
         if(confirmed(rent)) {
             var refundable=rent.getTotalAmount().subtract(rent.getId().equals(deposit.getInitialPaymentRequestId())?deposit.getHeldAmount():java.math.BigDecimal.ZERO);
             if(refundable.signum()<0)throw invalid("Sổ cọc không khớp khoản đã nhận, cần đối soát.");
-            paymentService.createRentRefundObligation(rent,refundable);
+            paymentService.createRentRefundObligationNotifyingLandlord(rent,refundable);
         } else {rent.setStatus(PaymentStatus.CANCELLED);rent.setCancelledAt(time.now());rent.setCancelledReason(note.reason());payments.save(rent);}
         PreTenancyCancellation.retain(deposit,time.now(),note.reason());deposits.save(deposit);
         if(c!=null){c.setStatus(ContractStatus.CANCELLED);contracts.save(c);}
@@ -554,8 +632,8 @@ public class RentalOnboardingService {
         var r=rentals.findByIdForUpdate(id).orElseThrow();
         if(entityManager!=null)entityManager.refresh(r);
         sync(r);
-        if(depositAgreements==null || com.hs.contract.deposit.DepositAgreementService.isExempt(r)
-            || !depositAgreements.signedOrExempt(r) || r.getDefaultCompletedAt()!=null)return;
+        if(depositAgreements!=null && com.hs.contract.deposit.DepositAgreementService.isExempt(r)) { expireUnpaidWithoutDeposit(r); return; }
+        if(depositAgreements==null || !depositAgreements.signedOrExempt(r) || r.getDefaultCompletedAt()!=null)return;
         var dc=depositAgreements.find(id).orElse(null);
         if(dc==null || dc.getSignedAt()==null || dc.getStatus()!=ContractStatus.ACTIVE)return;
         contracts.findByIdForUpdate(dc.getId()).orElseThrow();
@@ -566,6 +644,59 @@ public class RentalOnboardingService {
         if(defaultView(r).canComplete()) {
             finalizeDefault(r,"SYSTEM",new DefaultCompletion("Người thuê không hoàn tất "+("FIRST_RENT".equals(kind)?"thanh toán tháng đầu":"ký hợp đồng thuê")+" sau hạn cuối; hệ thống tự động chấm dứt HĐ cọc do lỗi bên thuê.",true,true));
         } else issueDefaultNotice(r,"SYSTEM","Người thuê chưa "+("FIRST_RENT".equals(kind)?"thanh toán tháng đầu":"ký hợp đồng thuê")+" đúng hạn. Cần hoàn tất trước hạn cuối ghi bên dưới. Nếu vẫn chưa hoàn tất khi hết hạn, hệ thống sẽ hủy giữ phòng và chủ nhà giữ tiền cọc. Nếu có khiếu nại hoặc khoản tiền, chữ ký cần kiểm tra, hệ thống sẽ tạm dừng xử lý.");
+    }
+    static final String NO_DEPOSIT_RENT_NOTICE="NO_DEPOSIT_FIRST_RENT_NOTICE";
+    private static final Set<PaymentStatus> UNPAID_RENT=Set.of(PaymentStatus.AWAITING_TRANSFER,PaymentStatus.OVERDUE,PaymentStatus.EXPIRED); // REJECTED: only the landlord can reopen
+    /**
+     * A zero-deposit hold has no default flow (nothing to forfeit), so an unpaid first month used to keep the room
+     * reserved forever. The tenant gets one final 24h window, then the hold ends with nothing retained.
+     * Paused while a complaint, a cancellation or an in-flight signature exists; a fully signed lease is never touched.
+     */
+    private void expireUnpaidWithoutDeposit(RentalRequest r) {
+        if(r.getStatus()!=RentalRequestStatus.ACCEPTED || r.getCancellationRequestedAt()!=null
+            || r.getCancellationRefundApprovedAt()!=null || r.getResolutionWorkflowId()!=null)return;
+        if(complaintCases!=null && complaintCases.existsByRentalRequestIdAndActiveKeyIsNotNull(r.getId()))return;
+        // Unlocked read first: this runs every tick for every zero-deposit rental, so lock only one that is really overdue.
+        if(!overdueUnpaidRent(payment(r.getId(),PaymentType.INITIAL)))return;
+        // Lock order as processDue/issueDefaultNotice: contract, then payments (deposit before first rent).
+        var c=contracts.findByRentalRequestId(r.getId()).map(x->contracts.findByIdForUpdate(x.getId()).orElseThrow()).orElse(null);
+        lockedPayment(r.getId(),PaymentType.RESERVATION_DEPOSIT);
+        var rent=lockedPayment(r.getId(),PaymentType.INITIAL);
+        if(!overdueUnpaidRent(rent))return;
+        if(c!=null && (PreTenancyCancellation.fullySigned(c) || PreTenancyCancellation.signatureInProgress(signatures.findByContractIdOrderByCreatedAtDesc(c.getId()))))return;
+        // Newest of notice/reopen wins: a landlord who reopened the deadline after the notice gets a fresh final notice.
+        boolean noticed=false;
+        for(var e:events.findByRentalRequestIdOrderByOccurredAtDesc(r.getId())) {
+            if(NO_DEPOSIT_RENT_NOTICE.equals(e.getAction())){noticed=true;break;}
+            if("PAYMENT_REOPENED".equals(e.getAction()))break;
+        }
+        if(!noticed) {
+            var finalDue=time.now().plus(Duration.ofHours(Math.max(24,defaultResponseHours)));
+            rent.setStatus(PaymentStatus.AWAITING_TRANSFER);rent.setDueAt(finalDue);payments.save(rent);
+            audit(r,"SYSTEM",NO_DEPOSIT_RENT_NOTICE,"Quá hạn thanh toán tháng đầu; hạn cuối "+finalDue+", sau đó tự hủy giữ phòng.");
+            notifications.enqueueOthers(r,"SYSTEM",Event.RENTAL_HOLD_EXTENDED);
+            return;
+        }
+        String reason="Người thuê không thanh toán tháng đầu sau hạn cuối; hệ thống tự hủy giữ phòng (không có cọc để giữ lại).";
+        for(var type:List.of(PaymentType.RESERVATION_DEPOSIT,PaymentType.INITIAL))
+            payments.findByRentalRequestIdAndTypeForUpdate(r.getId(),type).filter(p->p.getStatus()!=PaymentStatus.CONFIRMED&&p.getStatus()!=PaymentStatus.CANCELLED)
+                .ifPresent(p->{p.setStatus(PaymentStatus.CANCELLED);p.setCancelledAt(time.now());p.setCancelledReason(reason);payments.save(p);});
+        if(c!=null){c.setStatus(ContractStatus.CANCELLED);contracts.save(c);}
+        r.setStatus(RentalRequestStatus.CANCELLED_BY_SYSTEM);r.setHoldExpiresAt(null);r.setCancellationReason(reason);rentals.save(r);
+        for(var change:changes.findByRentalRequestIdOrderByRequestedAtDesc(r.getId()))if("REQUESTED".equals(change.getStatus())) {
+            change.setStatus("EXPIRED");change.setDecidedAt(time.now());change.setDecidedBy("SYSTEM");changes.save(change);
+        }
+        parking.releaseReservationsForRequest(r.getId());listingStatus.releaseReserved(r.getListing(),"SYSTEM",reason);
+        audit(r,"SYSTEM","NO_DEPOSIT_HOLD_CANCELLED",reason);
+        notifications.enqueueOthers(r,"SYSTEM",Event.RENTAL_REQUEST_CANCELLED_BY_SYSTEM);
+    }
+    private boolean overdueUnpaidRent(PaymentRequest rent) {
+        return rent!=null && rent.getDueAt()!=null && !time.now().isBefore(rent.getDueAt()) && UNPAID_RENT.contains(rent.getStatus());
+    }
+    private PaymentRequest lockedPayment(String rentalId,PaymentType type) {
+        var p=payments.findByRentalRequestIdAndTypeForUpdate(rentalId,type).orElse(null);
+        if(p!=null&&entityManager!=null)entityManager.refresh(p); // the unlocked read may have cached an older state
+        return p;
     }
     private void audit(RentalRequest r,String actor,String action,String note) {
         events.save(RentalOnboardingEvent.builder().rentalRequestId(r.getId()).actorId(actor).action(action).note(note).occurredAt(time.now()).build());

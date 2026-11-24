@@ -416,4 +416,16 @@ class RentalOnboardingServiceTest {
         assertThrows(AppException.class,()->service.resolveReview("rental","rent","tenant",new RentalOnboardingService.ReviewDecision(false,"Không phải chủ nhà")));
         verifyNoInteractions(notifications);
     }
+
+    @Test void depositTenantSigningActionTurnsIntoLandlordOverdueOnceTheWindowPassed() {
+        var due=now.plusSeconds(3600);
+        var doc=Contract.builder().id("deposit-doc").status(ContractStatus.TENANT_SIGNATURE_PENDING).tenantSigningDueAt(due).build();
+        var open=service.tenantDepositSigning(doc);
+        assertEquals("TENANT",open.actor());assertEquals(RentalOnboardingService.NextActionCode.SIGN_DEPOSIT_TENANT,open.code());assertEquals(due,open.dueAt());
+        now=due; // the window is closed from the due instant on, same boundary as DepositAgreementService.validateSigning
+        var late=service.tenantDepositSigning(doc);
+        assertEquals("LANDLORD",late.actor());assertEquals(RentalOnboardingService.NextActionCode.SIGNING_OVERDUE,late.code());assertEquals(due,late.dueAt());
+        doc.setTenantSigningDueAt(null); // no window recorded: unchanged behaviour, tenant still asked
+        assertEquals(RentalOnboardingService.NextActionCode.SIGN_DEPOSIT_TENANT,service.tenantDepositSigning(doc).code());
+    }
 }

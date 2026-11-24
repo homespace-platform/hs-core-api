@@ -22,5 +22,13 @@ public interface DepositRecordRepository extends JpaRepository<DepositRecord, St
     Optional<DepositRecord> findByInitialPaymentRequestId(String initialPaymentRequestId);
     Optional<DepositRecord> findByRefundPaymentRequestId(String refundPaymentRequestId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select d from DepositRecord d where d.initialPaymentRequestId = :id")
+    Optional<DepositRecord> findByInitialPaymentRequestIdForUpdate(@Param("id") String initialPaymentRequestId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select d from DepositRecord d where d.refundPaymentRequestId = :id")
+    Optional<DepositRecord> findByRefundPaymentRequestIdForUpdate(@Param("id") String refundPaymentRequestId);
+
     Optional<DepositRecord> findByContractId(String contractId);
 }

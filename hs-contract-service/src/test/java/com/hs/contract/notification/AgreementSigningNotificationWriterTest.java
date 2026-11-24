@@ -101,6 +101,25 @@ class AgreementSigningNotificationWriterTest {
         assertThrows(IllegalStateException.class, () -> writer.leaseActivated(contract("child", "root", null)));
     }
 
+    @Test void dueSoonIsWrittenOncePerDeadlineForAStoredPartyWithTheFrozenDataShape() throws Exception {
+        var deposit = contract("deposit", null, "DEPOSIT");
+        var due = java.time.Instant.parse("2026-11-25T03:00:00Z");
+        assertTrue(writer.dueSoon(deposit, "tenant", due));
+        assertEquals("AGREEMENT_SIGNING_DUE_SOON", event(0).get("eventType").asText());
+        assertEquals("tenant", event(0).get("recipients").get(0).asText());
+        assertEquals(List.of("agreementId", "agreementKind"), fields(event(0).get("data")));
+        assertEquals("DEPOSIT", event(0).get("data").get("agreementKind").asText());
+        assertEquals(rows.getFirst().getEventId(), event(0).get("eventId").asText());
+        when(outbox.existsByEventId(rows.getFirst().getEventId())).thenReturn(true);
+        assertFalse(writer.dueSoon(deposit, "tenant", due));
+        assertEquals(1, rows.size());
+        assertTrue(writer.dueSoon(deposit, "tenant", due.plusSeconds(3600))); // moved deadline: new reminder
+        assertTrue(writer.dueSoon(deposit, "landlord", due));
+        assertEquals(3, rows.size());
+        assertThrows(IllegalStateException.class, () -> writer.dueSoon(deposit, "stranger", due));
+        assertThrows(IllegalStateException.class, () -> writer.dueSoon(deposit, "tenant", null));
+    }
+
     @Test void failureNoticeGoesOnlyToTheVerifiedPersistedSigner() throws Exception {
         var request = SignatureRequest.builder().id("request").signerRole(SignerRole.LANDLORD).signerUserId("landlord").build();
         writer.needsReview(request, root);

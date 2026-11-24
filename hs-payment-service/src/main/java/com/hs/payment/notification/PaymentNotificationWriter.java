@@ -26,7 +26,8 @@ import com.hs.payment.model.PaymentRequest;
 @Service
 public class PaymentNotificationWriter {
     public enum Event {
-        PAYMENT_REQUEST_CREATED, PAYMENT_OBLIGATION_OVERDUE, PAYMENT_DUE_SOON, PAYMENT_TRANSFER_REPORTED, PAYMENT_RECEIPT_CONFIRMED, PAYMENT_RECEIPT_REJECTED
+        PAYMENT_REQUEST_CREATED, PAYMENT_OBLIGATION_OVERDUE, PAYMENT_DUE_SOON, PAYMENT_TRANSFER_REPORTED, PAYMENT_RECEIPT_CONFIRMED, PAYMENT_RECEIPT_REJECTED,
+        PAYMENT_REFUND_AUTO_CONFIRM_SOON, PAYMENT_RECEIPT_AUTO_CONFIRM_SOON, PAYMENT_RECEIPT_AUTO_CONFIRMED
     }
 
     private static final DateTimeFormatter TIMESTAMP = new DateTimeFormatterBuilder().appendInstant(3).toFormatter();
@@ -47,7 +48,33 @@ public class PaymentNotificationWriter {
         if (recipient == null || recipient.isBlank()
                 || !recipient.equals(payment.getPayerId()) && !recipient.equals(payment.getPayeeId()))
             throw new IllegalStateException("Payment notification recipient is not a stored party");
-        write(payment.getId(), type, recipient);
+        write(payment.getId(), type, recipient, UUID.randomUUID().toString());
+    }
+
+    /**
+     * At most one event per dedupe key: the event id is derived from it, so reruns and a second instance cannot
+     * duplicate it (a lost race fails on the unique event_id and rolls that transaction back).
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean enqueueOnce(PaymentRequest payment, Event type, String recipient, String dedupeKey) {
+        requirePayment(payment);
+        if (recipient == null || recipient.isBlank()
+                || !recipient.equals(payment.getPayerId()) && !recipient.equals(payment.getPayeeId()))
+            throw new IllegalStateException("Payment notification recipient is not a stored party");
+        String eventId = onceEventId(payment, type, dedupeKey);
+        if (outbox.existsByEventId(eventId)) return false;
+        write(payment.getId(), type, recipient, eventId);
+        return true;
+    }
+
+    private static String onceEventId(PaymentRequest payment, Event type, String dedupeKey) {
+        return UUID.nameUUIDFromBytes((type.name() + ":" + payment.getId() + ":" + dedupeKey)
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+    }
+
+    /** When the {@link #enqueueOnce} event for this key was recorded; empty if it never was. */
+    public java.util.Optional<Instant> onceCreatedAt(PaymentRequest payment, Event type, String dedupeKey) {
+        return outbox.findByEventId(onceEventId(payment, type, dedupeKey)).map(PaymentNotificationOutbox::getCreatedAt);
     }
 
     /** Every distinct stored party except the actor; an actor that is not a party (admin) reaches both. */
@@ -69,8 +96,7 @@ public class PaymentNotificationWriter {
             throw new IllegalStateException("Payment notification parties missing");
     }
 
-    private void write(String paymentId, Event type, String recipient) {
-        String eventId = UUID.randomUUID().toString();
+    private void write(String paymentId, Event type, String recipient, String eventId) {
         Instant now = Instant.now();
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("eventId", eventId);
