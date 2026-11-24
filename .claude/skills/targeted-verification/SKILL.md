@@ -10,8 +10,8 @@ disable-model-invocation: true
 
 1. Identify changed behavior and files.
 2. Identify the affected Maven module.
-3. Use `docs/ai/verification.md` to classify risk and select the smallest check that covers the behavior.
-4. Run the selected check and confirm that the intended test ran. Distinguish setup or dependency failures from code failures before retrying.
+3. Use `docs/ai/verification.md` to classify risk. For L1 changes without behavior impact, inspect the affected change once. For L2 or L3, select the checks that cover the remaining risks.
+4. Reuse applicable passing results for unchanged inputs. Run any remaining focused checks together after edits and confirm that the intended tests ran. Distinguish setup or dependency failures from code failures before rerunning the affected check.
 5. Report results and limitations.
 
 ## Rules
