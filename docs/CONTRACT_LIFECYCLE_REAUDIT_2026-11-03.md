@@ -1,5 +1,7 @@
 # Đối chiếu lại 10 giai đoạn vòng đời hợp đồng
 
+> Ghi chú 24/11/2026: phần đối soát chuyển tiền (giai đoạn 02) nhắc tới bên dưới đã bị gỡ; xem đầu `CONTRACT_LIFECYCLE_PHASE_02_REPORT.md`.
+
 Ngày: **03/11/2026**. Phạm vi: rà soát checklist, code backend/web/admin/AI, bằng chứng kiểm thử và các phần chưa hoàn tất; **bỏ qua giai đoạn 6 của danh sách người dùng (mã 05 trong tài liệu): thông báo/nhắc hạn**.
 
 **Cập nhật sau lượt rà soát:** chủ dự án đã chốt không đặt cọc/cọc 0 đồng bỏ qua HĐ cọc; đã triển khai và đạt kiểm thử tại [báo cáo miễn cọc](CONTRACT_ZERO_DEPOSIT_IMPLEMENTATION_REPORT.md). Vì vậy mục quyết định cọc 0 bên dưới đã được đóng; số hiện tại là 93/95 ô đã đánh dấu, 2 ô còn mở. Phần dưới giữ lại kết quả và phạm vi của chính lượt rà soát trước khi triển khai miễn cọc.

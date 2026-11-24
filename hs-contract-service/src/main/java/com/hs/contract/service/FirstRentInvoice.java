@@ -25,7 +25,7 @@ final class FirstRentInvoice {
         var closed=Set.of(PaymentStatus.CANCELLED,PaymentStatus.EXPIRED).contains(payment.status());
         var status=payment.status()==PaymentStatus.CONFIRMED?MonthlyInvoiceStatus.PAID
             :closed?MonthlyInvoiceStatus.CANCELLED:payment.dueAt()!=null&&!now.isBefore(payment.dueAt())?MonthlyInvoiceStatus.OVERDUE:MonthlyInvoiceStatus.UNPAID;
-        var workflow=Set.of(PaymentStatus.TRANSFER_REPORTED,PaymentStatus.DISPUTED,PaymentStatus.REJECTED).contains(payment.status())?"UNDER_REVIEW":status.name();
+        var workflow=Set.of(PaymentStatus.TRANSFER_REPORTED,PaymentStatus.REJECTED).contains(payment.status())?"UNDER_REVIEW":status.name();
         return MonthlyInvoiceResponse.builder().id("first-rent:"+payment.id()).contractId(contractId).periodIndex(-1)
             .periodStart(rental.getMoveInDate()).periodEndExclusive(rental.getMoveInDate().plusMonths(1))
             .billingPeriod(new BillingPeriodView("INITIAL_RENT",1,rental.getMoveInDate(),rental.getMoveInDate().plusMonths(1)))

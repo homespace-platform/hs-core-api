@@ -79,7 +79,7 @@ import com.hs.storage.repository.StorageObjectRepository;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Import({com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,InvoiceNotificationWriter.class, com.hs.listing.notification.RentalRequestNotificationWriter.class,
     com.hs.payment.notification.PaymentNotificationWriter.class, ContractLifecycleService.class, MonthlyBillingService.class,
-    PaymentRequestService.class, DepositLedgerService.class, PaymentDisputeService.class})
+    PaymentRequestService.class, DepositLedgerService.class})
 class MonthlyInvoiceNotificationPostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs") @EnableJpaAuditing
     @EnableJpaRepositories(basePackageClasses = {ContractNotificationOutboxRepository.class,

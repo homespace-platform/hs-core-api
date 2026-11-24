@@ -4,7 +4,7 @@ Adds to the repository's root `AGENTS.md`. Changes in this module are L3 by defa
 
 ## Scope
 
-Payment requests and line items, evidence and proof uploads, deposits and the deposit ledger, disputes, receipts (PDF), bank accounts, membership orders (SePay) and ETH membership payments (EIP-712 quotes, wallet challenges, on-chain verification). Depends on common, user, storage and listing; `hs-contract-service` depends on this module.
+Payment requests and line items, evidence and proof uploads, deposits and the deposit ledger, receipts (PDF), bank accounts, membership orders (SePay) and ETH membership payments (EIP-712 quotes, wallet challenges, on-chain verification). Depends on common, user, storage and listing; `hs-contract-service` depends on this module.
 
 ## Financial Data Integrity
 
@@ -15,7 +15,7 @@ Payment requests and line items, evidence and proof uploads, deposits and the de
 
 ## State Transitions
 
-- `PaymentStatus` values: `AWAITING_TRANSFER`, `TRANSFER_REPORTED`, `CONFIRMED`, `REJECTED`, `OVERDUE`, `EXPIRED`, `CANCELLED`, `DISPUTED`. `isFinalState()` treats `CONFIRMED`, `EXPIRED`, `CANCELLED` as final. Do not add a path that leaves a final state or skips validation.
+- `PaymentStatus` values: `AWAITING_TRANSFER`, `TRANSFER_REPORTED`, `CONFIRMED`, `REJECTED`, `OVERDUE`, `EXPIRED`, `CANCELLED`, plus the deprecated `DISPUTED` (legacy rows only; the payment dispute feature was removed and `LegacyPaymentDisputeNormalizer` moves such rows back at startup — never set it again). `isFinalState()` treats `CONFIRMED`, `EXPIRED`, `CANCELLED` as final. Do not add a path that leaves a final state or skips validation.
 - `DepositStatus` values: `PENDING`, `HELD`, `SETTLEMENT_PENDING`, `REFUND_DUE`, `REFUND_REPORTED`, `REFUNDED`, `DISPUTED`, `RETAINED_BY_LANDLORD`. Deposit moves go through `DepositLedgerService`; keep ledger entries consistent with payments.
 - Adding or renaming a persisted status needs a compatibility or migration check (see `*SchemaMigration` classes in `config`).
 - Time rules (due dates, overdue, expiry) are centralized in `PaymentTimePolicy`; do not re-implement them elsewhere.

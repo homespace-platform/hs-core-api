@@ -5,7 +5,9 @@ public enum PaymentEventType {
     TRANSFER_REPORTED,
     RECEIPT_CONFIRMED,
     RECEIPT_REJECTED,
+    @Deprecated // legacy rows only; no code path sets them
     DISPUTED,
+    @Deprecated // legacy rows; only LegacyPaymentDisputeNormalizer writes it, when clearing old DISPUTED payments
     DISPUTE_ROUTED,
     EXPIRED,
     CANCELLED,

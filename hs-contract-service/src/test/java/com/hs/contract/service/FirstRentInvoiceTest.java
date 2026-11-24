@@ -29,7 +29,7 @@ class FirstRentInvoiceTest {
         assertEquals(LocalDate.of(2026,12,1),bill.periodEndExclusive());assertEquals(MonthlyInvoiceStatus.PAID,bill.status());
         assertFalse(bill.canRequestExtension());assertFalse(bill.canResolveOverdue());assertFalse(bill.canDeferToNextPeriod());
     }
-    @ParameterizedTest @EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","DISPUTED","REJECTED"})
+    @ParameterizedTest @EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","REJECTED"})
     void reportedOrDisputedIsNotPaid(PaymentStatus status) {
         var bill=FirstRentInvoice.from("root",rental,payment(status),now);
         assertEquals(MonthlyInvoiceStatus.UNPAID,bill.status());assertEquals("UNDER_REVIEW",bill.workflowState());

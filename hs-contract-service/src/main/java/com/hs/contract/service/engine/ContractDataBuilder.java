@@ -1014,9 +1014,8 @@ public class ContractDataBuilder {
             case AWAITING_TRANSFER -> "Chưa báo chuyển khoản";
             case TRANSFER_REPORTED -> "Đã báo chuyển; chờ xác nhận thực nhận";
             case REJECTED -> "Chứng từ chưa được chấp nhận; cần đối soát";
-            case DISPUTED -> "Đang đối soát";
             case CANCELLED -> "Đã hủy";
-            case EXPIRED,OVERDUE -> "Đã hết hạn; cần xử lý";
+            case EXPIRED,OVERDUE,DISPUTED -> "Đã hết hạn; cần xử lý";
         };
         String note="Mã: "+p.getTransferReference()+"; trạng thái: "+label;
         if(p.getPayerReportedAt()!=null)note+="; báo chuyển: "+DATE_TIME_FORMATTER.format(p.getPayerReportedAt().atZone(VIETNAM_ZONE));
@@ -1051,7 +1050,6 @@ public class ContractDataBuilder {
                     case TRANSFER_REPORTED -> "Người thuê đã báo chuyển, đang chờ chủ nhà xác nhận";
                     case AWAITING_TRANSFER -> "Chờ người thuê chuyển khoản";
                     case REJECTED -> "Chủ nhà từ chối xác nhận";
-                    case DISPUTED -> "Đang chờ đối soát tranh chấp";
                     case EXPIRED -> "Yêu cầu thanh toán đã hết hạn";
                     case CANCELLED -> "Yêu cầu thanh toán đã hủy";
                     default -> payment.getStatus().name();

@@ -217,7 +217,7 @@ class MutualTerminationServiceTest {
         assertNull(contract.getAgreedEarlyEndExclusive());assertEquals("PROPOSED",workflow.getStatus());
         assertEquals(java.util.List.of(LocalDate.of(2027,4,29)),service.get("rental","tenant").terminationOptions().choices().stream().map(com.hs.contract.dto.billing.RentalWorkflowView.Choice::lastOccupiedDay).toList());
     }
-    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.EnumSource(value=com.hs.payment.model.constant.PaymentStatus.class,names={"CONFIRMED","TRANSFER_REPORTED","AWAITING_TRANSFER","DISPUTED"})
+    @org.junit.jupiter.params.ParameterizedTest @org.junit.jupiter.params.provider.EnumSource(value=com.hs.payment.model.constant.PaymentStatus.class,names={"CONFIRMED","TRANSFER_REPORTED","AWAITING_TRANSFER"})
     void existingInitialRentCoverageCannotBeCutOrSilentlyRefunded(com.hs.payment.model.constant.PaymentStatus status){
         active();var initial=com.hs.payment.model.PaymentRequest.builder().id("initial").status(status).build();
         when(paymentRecords.findByRentalRequestIdAndType("rental",com.hs.payment.model.constant.PaymentType.INITIAL)).thenReturn(java.util.Optional.of(initial));

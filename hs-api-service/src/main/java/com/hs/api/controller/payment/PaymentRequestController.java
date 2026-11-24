@@ -93,19 +93,6 @@ public class PaymentRequestController {
                 .build();
     }
 
-    @RequiresCompleteProfile
-    @PreAuthorize("hasAuthority('PAYMENT_DISPUTE_CREATE')")
-    @PostMapping("/{id}/dispute")
-    public ApiResponse<PaymentRequestResponse> dispute(
-            @PathVariable String id,
-            @RequestBody @Valid DisputePaymentRequest request) {
-        String actorId = requireUserId();
-        return ApiResponse.<PaymentRequestResponse>builder()
-                .message("Khoản thanh toán đã được chuyển sang trạng thái chờ đối soát.")
-                .result(paymentRequestService.dispute(id, actorId, request))
-                .build();
-    }
-
     @GetMapping("/{id}/events")
     public ApiResponse<List<PaymentEventResponse>> getEvents(@PathVariable String id) {
         String actorId = requireUserId();

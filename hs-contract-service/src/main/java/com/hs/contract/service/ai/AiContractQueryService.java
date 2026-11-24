@@ -595,7 +595,6 @@ public class AiContractQueryService {
         if (refund != null) return switch (refund.getStatus()) {
             case CONFIRMED -> "REFUND_CONFIRMED_BY_RECIPIENT";
             case TRANSFER_REPORTED -> "REFUND_TRANSFER_REPORTED_AWAITING_RECIPIENT_CONFIRMATION";
-            case DISPUTED -> "REFUND_DISPUTED";
             case OVERDUE -> "REFUND_OVERDUE";
             default -> "REFUND_PENDING_TRANSFER";
         };
@@ -611,7 +610,6 @@ public class AiContractQueryService {
             case TRANSFER_REPORTED -> "TRANSFER_REPORTED_AWAITING_CONFIRMATION";
             case AWAITING_TRANSFER -> "AWAITING_TRANSFER";
             case REJECTED -> "TRANSFER_REJECTED";
-            case DISPUTED -> "DISPUTED";
             case OVERDUE -> "OVERDUE";
             default -> p.getStatus().name();
         };

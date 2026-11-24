@@ -76,12 +76,22 @@ public class DepositAgreementService {
     /** End the obligation; preserve both signatures, the frozen terms and the signed PDF. */
     @Transactional
     public void terminateForTenantDefault(String rentalId,String reason) {
+        terminateSigned(rentalId,reason,"DEPOSIT_TERMINATED_TENANT_DEFAULT");
+    }
+
+    /** A completed pre-tenancy cancellation ends a fully signed deposit agreement (forfeited or refunded deposit alike). */
+    @Transactional
+    public void terminateForCancellation(String rentalId,String reason) {
+        terminateSigned(rentalId,reason,"DEPOSIT_TERMINATED_CANCELLATION");
+    }
+
+    private void terminateSigned(String rentalId,String reason,String action) {
         var found=find(rentalId).orElseThrow(()->invalid("Thiếu hợp đồng cọc đã ký."));
         var c=contracts.findByIdForUpdate(found.getId()).orElseThrow();
         if(c.getStatus()==ContractStatus.TERMINATED)return;
         if(c.getStatus()!=ContractStatus.ACTIVE || c.getSignedAt()==null)throw invalid("Hợp đồng cọc chưa ký đủ; không tự xử lý mất cọc.");
         c.setStatus(ContractStatus.TERMINATED);c.setTerminationCompletedAt(time.now());contracts.save(c);
-        audit(rentalId,"SYSTEM","DEPOSIT_TERMINATED_TENANT_DEFAULT",reason);
+        audit(rentalId,"SYSTEM",action,reason);
     }
 
     /** Called with the lease locked; completion changes lifecycle metadata only. */

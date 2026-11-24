@@ -780,10 +780,7 @@ class PaymentRequestServiceTest {
         paymentRequestService.rejectReceipt(p.getId(),"tenant",new RejectReceiptRequest("Chưa nhận được tiền hoàn"));
         verify(notifications).enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_RECEIPT_REJECTED,"owner");
         paymentRequestService.reportTransfer(p.getId(),"owner",request);
-        paymentRequestService.dispute(p.getId(),"owner",new com.hs.payment.dto.DisputePaymentRequest("Cần đối soát chứng từ hoàn tiền"));
         verify(notifications,times(2)).enqueue(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_TRANSFER_REPORTED,"tenant");
-        verify(notifications).enqueueOthers(p,com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_DISPUTE_OPENED,"owner");
-        assertThrows(AppException.class,()->paymentRequestService.dispute(p.getId(),"owner",new com.hs.payment.dto.DisputePaymentRequest("Cần đối soát chứng từ hoàn tiền")));
         verifyNoMoreInteractions(notifications);
     }
 }

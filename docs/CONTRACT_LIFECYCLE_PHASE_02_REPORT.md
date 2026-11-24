@@ -1,5 +1,7 @@
 # Bàn giao giai đoạn 02 — Giải quyết tranh chấp thanh toán
 
+> **Đã gỡ (24/11/2026).** Tính năng đối soát chuyển tiền trong tài liệu này đã bị gỡ khỏi backend, web, admin và mobile vì khó dùng và gây deadlock với luồng hủy giữ chỗ. Các API `/payment-requests/{id}/dispute*`, `/payment-disputes/**`, `/admin/payment-disputes/**` và quyền `DISPUTE_VIEW`/`DISPUTE_RESOLVE`/`PAYMENT_DISPUTE_CREATE` không còn tồn tại. Bảng `dispute_cases`/`dispute_case_events` vẫn dùng cho khiếu nại hồ sơ thuê. Khoản `DISPUTED` cũ được `LegacyPaymentDisputeNormalizer` chuyển về trạng thái xử lý được khi khởi động. Phần dưới chỉ là lịch sử.
+
 Ngày: **03/11/2026**. Phạm vi được duyệt: **giai đoạn 02 / F02**. Các kiểm thử cuối đã đạt; dừng chờ chủ dự án nghiệm thu trước khi triển khai giai đoạn 03.
 
 ## 1. Kết quả

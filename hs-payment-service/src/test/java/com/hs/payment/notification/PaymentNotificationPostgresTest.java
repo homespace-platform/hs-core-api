@@ -40,7 +40,7 @@ import static org.mockito.Mockito.*;
     "spring.datasource.password=${HS_TEST_PG_PASSWORD}","spring.jpa.hibernate.ddl-auto=create-drop","spring.jpa.open-in-view=false",
     "spring.datasource.hikari.connection-init-sql=SET lock_timeout TO '5s'"})
 @Transactional(propagation=Propagation.NOT_SUPPORTED)
-@Import({PaymentRequestService.class,PaymentNotificationWriter.class,PaymentDisputeService.class,RentalRequestNotificationWriter.class,
+@Import({PaymentRequestService.class,PaymentNotificationWriter.class,RentalRequestNotificationWriter.class,
     PaymentProofUploadSessionService.class})
 class PaymentNotificationPostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs") @EnableJpaAuditing
@@ -51,7 +51,6 @@ class PaymentNotificationPostgresTest {
     @Autowired PaymentRequestService service;
     @Autowired PaymentRequestRepository payments;
     @Autowired PaymentEventRepository events;
-    @Autowired PaymentDisputeService disputes;
     @Autowired DisputeCaseRepository cases;
     @Autowired DisputeCaseEventRepository caseEvents;
     @Autowired PaymentEvidenceRepository evidence;
@@ -80,15 +79,15 @@ class PaymentNotificationPostgresTest {
         var page=org.springframework.data.domain.PageRequest.of(0,100);
         var states=Set.of(PaymentStatus.AWAITING_TRANSFER,PaymentStatus.REJECTED);
         var realNow=now.minusSeconds(30*86400L);
-        payment.setType(PaymentType.DEPOSIT_REFUND);payment.setStatus(PaymentStatus.AWAITING_TRANSFER);payments.saveAndFlush(payment);
+        payment.setType(PaymentType.DEPOSIT_REFUND);payment.setStatus(PaymentStatus.AWAITING_TRANSFER);payment=payments.saveAndFlush(payment);
         assertEquals(List.of(payment.getId()),payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page));
-        payment.setReminderForDueAt(payment.getDueAt());payments.saveAndFlush(payment);
+        payment.setReminderForDueAt(payment.getDueAt());payment=payments.saveAndFlush(payment);
         assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page).isEmpty());
-        payment.setDueAt(now.plusSeconds(7200));payments.saveAndFlush(payment);
+        payment.setDueAt(now.plusSeconds(7200));payment=payments.saveAndFlush(payment);
         assertEquals(List.of(payment.getId()),payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page));
-        payment.setType(PaymentType.UTILITY);payments.saveAndFlush(payment);
+        payment.setType(PaymentType.UTILITY);payment=payments.saveAndFlush(payment);
         assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page).isEmpty());
-        payment.setType(PaymentType.DEPOSIT_REFUND);payment.setStatus(PaymentStatus.TRANSFER_REPORTED);payments.saveAndFlush(payment);
+        payment.setType(PaymentType.DEPOSIT_REFUND);payment.setStatus(PaymentStatus.TRANSFER_REPORTED);payment=payments.saveAndFlush(payment);
         assertTrue(payments.findDueSoonIds(states,PaymentTimePolicy.BILLING_TYPES,now,now.plusSeconds(86400),realNow,realNow.plusSeconds(86400),page).isEmpty());
     }
     @Test void authorizedConfirmationCommitsOutcomeAndSingleNoticeAndReplayIsSilent() throws Exception{
@@ -132,37 +131,6 @@ class PaymentNotificationPostgresTest {
     @Test void writerRequiresExistingBusinessTransaction(){
         assertThrows(IllegalTransactionStateException.class,()->writer.enqueue(payment,PaymentNotificationWriter.Event.PAYMENT_RECEIPT_CONFIRMED,"payer"));
         assertEquals(0,outbox.count());
-    }
-    com.hs.payment.dto.DisputeCaseAction action(com.hs.payment.model.DisputeCase c,DisputeResolution resolution){
-        return new com.hs.payment.dto.DisputeCaseAction(c.getRevision(),"Đã kiểm tra chứng từ để xử lý",resolution,null);
-    }
-    @Test void reportRejectAndCaseRoutingCommitNoticesWithTheirActualTransitions() throws Exception{
-        service.rejectReceipt(payment.getId(),"payee",new com.hs.payment.dto.RejectReceiptRequest("Chưa thấy khoản tiền cần kiểm tra"));
-        PaymentProofUploadSessionService target=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(proofs);
-        doReturn("test-proof").when(target).consumeSession("session",payment.getId(),"payer");
-        var report=com.hs.payment.dto.ReportTransferRequest.builder().evidenceUploadSessionId("session").expectedAmount(payment.getTotalAmount()).build();
-        service.reportTransfer(payment.getId(),"payer",report);service.reportTransfer(payment.getId(),"payer",report);
-        service.dispute(payment.getId(),"payee",new com.hs.payment.dto.DisputePaymentRequest("Cần đối soát chứng từ chuyển tiền"));
-        var c=cases.findByActiveKey("PAYMENT:"+payment.getId()).orElseThrow();
-        disputes.act(c.getId(),"payer","PROPOSE",action(c,DisputeResolution.REOPEN_TRANSFER));c=cases.findById(c.getId()).orElseThrow();
-        var accepted=action(c,null);disputes.act(c.getId(),"payee","ACCEPT",accepted);
-        assertThrows(AppException.class,()->disputes.act(acceptedCaseId(),"payee","ACCEPT",accepted));
-        assertEquals(PaymentStatus.AWAITING_TRANSFER,readStatus());assertNull(payments.findById(payment.getId()).orElseThrow().getConfirmedAt());
-        var sequence=new ArrayList<String>();for(var row:outbox.findAll().stream().sorted(Comparator.comparing(PaymentNotificationOutbox::getId)).toList()){
-            var e=new ObjectMapper().readTree(row.getPayload());sequence.add(e.get("eventType").asText()+":"+e.get("recipients").get(0).asText());
-        }
-        assertEquals(List.of("PAYMENT_RECEIPT_REJECTED:payer","PAYMENT_TRANSFER_REPORTED:payee","PAYMENT_DISPUTE_OPENED:payer",
-            "PAYMENT_DISPUTE_PROPOSED:payee","PAYMENT_DISPUTE_REOPENED:payer"),sequence);
-    }
-    String acceptedCaseId(){return cases.findAll().getFirst().getId();}
-    @Test void disputeProposalOutboxFailureRollsBackCaseRevisionProposalAndAudit(){
-        service.dispute(payment.getId(),"payer",new com.hs.payment.dto.DisputePaymentRequest("Cần đối soát khoản tiền đã báo"));
-        var c=cases.findByActiveKey("PAYMENT:"+payment.getId()).orElseThrow();long auditCount=caseEvents.count();
-        PaymentNotificationWriter target=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(writer);
-        doAnswer(call->{call.callRealMethod();throw new IllegalStateException("test proposal failure");}).when(target).enqueueOthers(any(),any(),anyString());
-        assertThrows(IllegalStateException.class,()->disputes.act(c.getId(),"payee","PROPOSE",action(c,DisputeResolution.REOPEN_TRANSFER)));
-        var unchanged=cases.findById(c.getId()).orElseThrow();assertEquals(c.getRevision(),unchanged.getRevision());assertNull(unchanged.getProposedBy());
-        assertEquals(auditCount,caseEvents.count());assertEquals(1,outbox.count());assertEquals(PaymentStatus.DISPUTED,readStatus());
     }
     com.hs.payment.model.PaymentProofUploadSession session(String token) throws Exception{
         String hash=HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8)));

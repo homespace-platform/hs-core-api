@@ -218,8 +218,7 @@ public class MutualTerminationService {
             else if(!"RETURNED".equals(w.getStatus()))obligation="RETURN_PENDING";
             else if(current.billing()!=null&&!current.billing().allPaid())obligation="BILLS_PENDING";
             else if(close!=null&&Set.of("REFUND_PENDING","BALANCE_PENDING").contains(close.getStatus())){
-                var cash="REFUND_PENDING".equals(close.getStatus())?current.refundPayment():current.balancePayment();
-                obligation=cash!=null&&cash.status()==PaymentStatus.DISPUTED?"DISPUTED":close.getStatus();
+                obligation=close.getStatus();
             }else obligation="SETTLEMENT_PENDING";
         }
         LocalDate proposedLastDay=null;

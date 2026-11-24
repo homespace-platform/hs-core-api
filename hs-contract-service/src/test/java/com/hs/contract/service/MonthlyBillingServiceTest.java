@@ -153,7 +153,7 @@ class MonthlyBillingServiceTest {
         assertTrue(outbox.rows().isEmpty());
     }
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","DISPUTED","CONFIRMED","CANCELLED","EXPIRED"})
+    @org.junit.jupiter.params.provider.EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","CONFIRMED","CANCELLED","EXPIRED"})
     void paymentReminderDoesNotAskForAnotherTransferWhileReceiptIsBeingReviewedOrClosed(PaymentStatus status) {
         var contract=contracts.findById("contract").orElseThrow();invoice.setStatus(MonthlyInvoiceStatus.UNPAID);
         invoice.setDueAt(time.now().plusSeconds(86400));
@@ -1043,7 +1043,7 @@ class MonthlyBillingServiceTest {
 
     @Test void paymentReviewDisputeAndPaidBillsAreNotAutomaticallyDeferred() {
         octoberThreeMonthDemo(); demoTime("2026-11-27T00:01:00");
-        for (PaymentStatus status : List.of(PaymentStatus.TRANSFER_REPORTED, PaymentStatus.DISPUTED, PaymentStatus.CONFIRMED)) {
+        for (PaymentStatus status : List.of(PaymentStatus.TRANSFER_REPORTED, PaymentStatus.CONFIRMED)) {
             when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(status).build()));
             assertNull(service.list("contract", "landlord").get(0).deferredAt());
         }
@@ -1330,7 +1330,7 @@ class MonthlyBillingServiceTest {
         demoTime("2027-02-02T10:00:00");assertEquals(new BigDecimal("450000"),service.list("contract","tenant").getFirst().lateFeeAmount());
         verify(payments,times(1)).increaseMonthlyPayment(eq("invoice"),eq(new BigDecimal("1450000")),anyString());
     }
-    @ParameterizedTest @CsvSource({"TRANSFER_REPORTED","DISPUTED"})
+    @ParameterizedTest @CsvSource({"TRANSFER_REPORTED"})
     void resumedFeesStillPauseWhilePaymentIsBeingReviewedAndCatchUpWhenRejected(PaymentStatus status) {
         approveSevenDaysAfterThreeOverdueDays();
         when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(status).build()));
@@ -1727,8 +1727,6 @@ class MonthlyBillingServiceTest {
         when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.TRANSFER_REPORTED).build()));
         service.list("contract", "tenant");
         assertEquals(MonthlyInvoiceStatus.UNPAID, invoice.getStatus()); assertEquals(List.of(), outbox.keys());
-        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.DISPUTED).build()));
-        service.list("contract", "tenant"); assertEquals(List.of(), outbox.keys());
         invoice.setStatus(MonthlyInvoiceStatus.OVERDUE);
         when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.OVERDUE).build()));
         when(payments.increaseMonthlyPayment(anyString(), any(), anyString())).thenReturn(false); // blocked / capped: no persisted change
@@ -1817,7 +1815,7 @@ class MonthlyBillingServiceTest {
         invoice.setStatus(MonthlyInvoiceStatus.OVERDUE); invoice.setDueAt(Instant.parse("2026-11-05T16:59:59Z"));
         when(time.now()).thenReturn(Instant.parse("2026-11-10T17:01:00Z"));
         var note = new CreateOverdueActionRequest(OverdueAction.Type.PAYMENT_REQUEST, "Đề nghị kiểm tra và thanh toán khoản nợ.", null);
-        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.DISPUTED).build()));
+        when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.TRANSFER_REPORTED).build()));
         assertThrows(AppException.class, () -> service.recordOverdueAction("invoice", "landlord", note));
         when(time.now()).thenReturn(Instant.parse("2026-11-09T00:00:00Z"));
         when(payments.findByInvoiceId("invoice")).thenReturn(Optional.of(PaymentRequest.builder().status(PaymentStatus.OVERDUE).build()));

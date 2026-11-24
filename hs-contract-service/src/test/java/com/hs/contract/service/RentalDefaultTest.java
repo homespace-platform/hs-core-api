@@ -109,14 +109,13 @@ class RentalDefaultTest {
         if(signing)verify(paymentService).createRentRefundObligation(rent,new BigDecimal("5000000"));
         else verify(paymentService,never()).createRentRefundObligation(any(),any());
     }
-    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"reported","disputed","rejected","provider","complaint","active-case","other-rental","paid","owner-not-signed","no-deposit-signature","zero-deposit"})
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"reported","rejected","provider","complaint","active-case","other-rental","paid","owner-not-signed","no-deposit-signature","zero-deposit"})
     void automaticDefaultPausesForUncertainMoneyOrSignaturesAndNeverBlamesTheOwner(String scenario) {
         signedDeposit();
         if("owner-not-signed".equals(scenario))rent.setStatus(PaymentStatus.CONFIRMED);
         else {service.processDue("r");elapsed();}
         switch(scenario) {
             case "reported" -> rent.setStatus(PaymentStatus.TRANSFER_REPORTED);
-            case "disputed" -> rent.setStatus(PaymentStatus.DISPUTED);
             case "rejected" -> rent.setStatus(PaymentStatus.REJECTED);
             case "provider" -> when(signatures.findByContractIdOrderByCreatedAtDesc("c")).thenReturn(List.of(SignatureRequest.builder().status(SignatureRequestStatus.EMBEDDING).signerRole(SignerRole.TENANT).build()));
             case "complaint" -> rental.setDefaultDisputedAt(now);
@@ -129,10 +128,60 @@ class RentalDefaultTest {
         service.processDue("r");assertNull(rental.getDefaultCompletedAt());assertEquals(DepositStatus.HELD,deposit.getStatus());
         verify(parking,never()).releaseReservationsForRequest(any());verify(depositAgreements,never()).terminateForTenantDefault(any(),any());
     }
-    @Test void tenantDepositSignatureLocksVoluntaryCancellationEvenWhenLeaseHasNoSignature() {
-        signedDeposit();assertFalse(service.refresh("r","t").canRequestCancellation());
-        assertThrows(AppException.class,()->service.requestCancellation("r","t",new RentalOnboardingService.Cancellation("Muốn hủy sau khi ký hợp đồng cọc")));
-        verify(paymentService,never()).createCancellationRefund(any());verify(paymentService,never()).createRefundObligation(any());
+    private void cancel() {
+        service.requestCancellation("r","t",new RentalOnboardingService.Cancellation("Hai bên thỏa thuận hủy trước khi thuê"));
+        service.decideCancellation("r","o",new RentalOnboardingService.Decision(true,null));
+    }
+    private Contract partialDeposit(ContractStatus status) {
+        var dc=Contract.builder().id("dc").agreementKind("DEPOSIT").status(status).build();
+        when(depositAgreements.find("r")).thenReturn(Optional.of(dc));when(depositAgreements.tenantHasSigned("r")).thenReturn(true);
+        when(contracts.findByIdForUpdate("dc")).thenReturn(Optional.of(dc));return dc;
+    }
+    @Test void tenantOnlySignedDepositAgreementAllowsCancellationWithFullRefund() {
+        rent.setStatus(PaymentStatus.CONFIRMED);partialDeposit(ContractStatus.LANDLORD_SIGNATURE_PENDING);
+        assertTrue(service.refresh("r","t").canRequestCancellation());cancel();
+        verify(paymentService).createCancellationRefund(argThat(s->s.size()==2));
+        assertEquals(DepositStatus.HELD,deposit.getStatus());
+    }
+    @Test void tenantOnlySignedOrLandlordPendingLeaseAllowsCancellation() {
+        for(var st:List.of(ContractStatus.LANDLORD_SIGNATURE_PENDING,ContractStatus.TENANT_SIGNATURE_PENDING)) {
+            contract.setStatus(st);
+            when(signatures.findByContractIdOrderByCreatedAtDesc("c")).thenReturn(List.of(SignatureRequest.builder().status(SignatureRequestStatus.SIGNED).signerRole(SignerRole.TENANT).build()));
+            assertTrue(service.refresh("r","t").canRequestCancellation());
+        }
+    }
+    @Test void fullySignedDepositForfeitsTheDepositAndRefundsOnlyFirstRent() {
+        rent.setStatus(PaymentStatus.CONFIRMED);var dc=signedDeposit();
+        assertTrue(service.refresh("r","t").canRequestCancellation());cancel();
+        verify(paymentService).createCancellationRefund(List.of(rent));
+        assertEquals(DepositStatus.RETAINED_BY_LANDLORD,deposit.getStatus());assertEquals(new BigDecimal("10000000"),deposit.getRetainedAmount());
+        assertEquals(BigDecimal.ZERO,deposit.getHeldAmount());assertEquals(BigDecimal.ZERO,deposit.getRefundableAmount());
+        assertNotNull(deposit.getRetainedAt());assertTrue(deposit.getRetainedReason().contains("cọc không hoàn"));
+        assertEquals(ContractStatus.ACTIVE,dc.getStatus());assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());
+        // Refund still pending: the agreement is only ended when the cancellation completes.
+        verify(depositAgreements,never()).terminateForCancellation(any(),any());
+    }
+    @Test void fullySignedDepositWithOnlyTheDepositConfirmedFinishesCancelledWithoutRefund() {
+        var dc=signedDeposit();cancel();
+        verify(paymentService).createCancellationRefund(List.of());
+        assertEquals(DepositStatus.RETAINED_BY_LANDLORD,deposit.getStatus());
+        assertEquals(RentalRequestStatus.CANCELLED_BY_RENTER,rental.getStatus());assertEquals(ContractStatus.CANCELLED,contract.getStatus());
+        // A finished cancellation must not leave the signed deposit agreement looking active.
+        verify(depositAgreements).terminateForCancellation("r",PreTenancyCancellation.FORFEIT_REASON);verify(parking).releaseReservationsForRequest("r");
+    }
+    @Test void partiallySignedDepositAgreementIsCancelledWhenNothingIsRefunded() {
+        var dc=partialDeposit(ContractStatus.LANDLORD_SIGNATURE_PENDING);rent.setStatus(PaymentStatus.AWAITING_TRANSFER);
+        deposit.setStatus(DepositStatus.HELD);payments.findByRentalRequestIdAndTypeForUpdate("r",PaymentType.RESERVATION_DEPOSIT).orElseThrow().setTotalAmount(BigDecimal.ZERO);
+        cancel();
+        assertEquals(ContractStatus.CANCELLED,dc.getStatus());assertEquals(ContractStatus.CANCELLED,contract.getStatus());
+        assertEquals(DepositStatus.HELD,deposit.getStatus());
+    }
+    @Test void signatureInProgressOnTheDepositAgreementStillBlocks() {
+        partialDeposit(ContractStatus.TENANT_SIGNATURE_PENDING);
+        when(signatures.findByContractIdOrderByCreatedAtDesc("dc")).thenReturn(List.of(SignatureRequest.builder().status(SignatureRequestStatus.EMBEDDING).signerRole(SignerRole.TENANT).build()));
+        assertFalse(service.refresh("r","t").canRequestCancellation());
+        assertThrows(AppException.class,()->service.requestCancellation("r","t",new RentalOnboardingService.Cancellation("Muốn hủy khi đang ký")));
+        verify(paymentService,never()).createCancellationRefund(any());
     }
     @Test void firstRentDefaultWorksWithoutAnyContractAndStillNeedsNoticeAndGrace() {
         when(contracts.findByRentalRequestId("r")).thenReturn(Optional.empty());
@@ -175,7 +224,7 @@ class RentalDefaultTest {
             .status(SignatureRequestStatus.EXPIRED).providerSignatureValue("provider-signed-not-yet-embedded").build()));
         assertThrows(AppException.class,this::notice);
     }
-    @ParameterizedTest @EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","DISPUTED","REJECTED"})
+    @ParameterizedTest @EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","REJECTED"})
     void transferOrDisputeInvalidatesNotice(PaymentStatus status) {notice();elapsed();rent.setStatus(status);assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));}
     @Test void tenantResponseStopsRetentionEvenAfterDeadline() {notice();elapsed();service.disputeDefault("r","t",new RentalOnboardingService.Cancellation("Tôi cần đối soát khoản chuyển"));assertThrows(AppException.class,()->service.completeDefault("r","o",decision()));}
     @Test void reopenedDeadlineOrRevisionInvalidatesOldNotice() {
@@ -248,7 +297,7 @@ class RentalDefaultTest {
     @Test void cancellingPendingRequestDoesNotReleaseSomeoneElsesReservedListing() {
         unpaidHold();rental.setStatus(RentalRequestStatus.PENDING);service.cancelUnpaid("r","o");verifyNoInteractions(listingStatus);
     }
-    @ParameterizedTest @EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","DISPUTED","REJECTED","CONFIRMED"})
+    @ParameterizedTest @EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","REJECTED","CONFIRMED"})
     void reportedOrPaidFundsBlockImmediateCancel(PaymentStatus status) {
         unpaidHold();rent.setStatus(status);assertThrows(AppException.class,()->service.cancelUnpaid("r","o"));
         assertEquals(RentalRequestStatus.ACCEPTED,rental.getStatus());verifyNoInteractions(parking,listingStatus);

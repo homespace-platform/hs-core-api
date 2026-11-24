@@ -460,7 +460,7 @@ public class MonthlyBillingService {
         if (contract.getStatus() != ContractStatus.ACTIVE || invoice.getStatus() != MonthlyInvoiceStatus.OVERDUE
                 || invoice.getDueAt() == null || time.now().isBefore(actionRequiredAt(invoice))
                 || payments.findByInvoiceId(invoiceId).map(p -> p.getStatus() == PaymentStatus.TRANSFER_REPORTED
-                    || p.getStatus() == PaymentStatus.DISPUTED || p.getStatus() == PaymentStatus.CONFIRMED)
+                    || p.getStatus() == PaymentStatus.CONFIRMED)
                     .orElse(true))
             throw new AppException(ContractErrorCode.OVERDUE_ACTION_NOT_ALLOWED);
         if (request == null || request.type() == null || request.note() == null
@@ -1118,7 +1118,6 @@ public class MonthlyBillingService {
                         contract.getId(), invoice.getId());
             }
         } else if (payment.isPresent() && payment.get().getStatus() != PaymentStatus.TRANSFER_REPORTED
-                && payment.get().getStatus() != PaymentStatus.DISPUTED
                 && contracts.findById(invoice.getContractId())
                     .map(this::billable).orElse(false)
                 && invoice.getDueAt() != null && invoice.getDueAt().isBefore(time.now())) {
@@ -1251,8 +1250,7 @@ public class MonthlyBillingService {
         if (invoice.getStatus() == MonthlyInvoiceStatus.OVERDUE && invoice.getDueAt() != null
                 && invoice.getOverdueActionLoggedAt() == null
                 && !now.isBefore(actionRequiredAt(invoice))
-                && payments.findByInvoiceId(invoice.getId()).map(p -> p.getStatus() != PaymentStatus.TRANSFER_REPORTED
-                    && p.getStatus() != PaymentStatus.DISPUTED).orElse(false)) {
+                && payments.findByInvoiceId(invoice.getId()).map(p -> p.getStatus() != PaymentStatus.TRANSFER_REPORTED).orElse(false)) {
             invoice.setOverdueActionLoggedAt(now);
             changed = true;
             log.warn("BILLING_OVERDUE_ACTION_REQUIRED landlord={} tenant={} contract={} invoice={} amount={}",
@@ -1584,8 +1582,7 @@ public class MonthlyBillingService {
             if (now.isBefore(meterDeadline(i))) return "METER_REQUIRED";
             return "METER_DEADLINE_MISSED";
         }
-        if (payments.findByInvoiceId(i.getId()).map(p -> p.getStatus() == PaymentStatus.TRANSFER_REPORTED
-                || p.getStatus() == PaymentStatus.DISPUTED).orElse(false)) return "UNDER_REVIEW";
+        if (payments.findByInvoiceId(i.getId()).map(p -> p.getStatus() == PaymentStatus.TRANSFER_REPORTED).orElse(false)) return "UNDER_REVIEW";
         if (i.getDeferredAt() != null) return "DEFERRED";
         if (pendingExtension(i).isPresent()) return "EXTENSION_PENDING";
         if (extensionActive(i)) return "PAYMENT_EXTENDED";

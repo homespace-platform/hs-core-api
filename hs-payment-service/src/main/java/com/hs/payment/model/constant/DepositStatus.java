@@ -7,6 +7,6 @@ public enum DepositStatus {
     REFUND_DUE,
     REFUND_REPORTED,
     REFUNDED,
-    DISPUTED,
+    DISPUTED, // still set by contract closure settlement disputes (not payment disputes)
     RETAINED_BY_LANDLORD
 }

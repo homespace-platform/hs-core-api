@@ -57,7 +57,7 @@ import static org.mockito.ArgumentMatchers.*;
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.datasource.url=${HS_COMPLAINT_TEST_PG_URL}","spring.datasource.username=postgres",
     "spring.datasource.password=hs_phase04_test","spring.jpa.hibernate.ddl-auto=create-drop","spring.profiles.active=test"})
-@Import({com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,com.hs.contract.notification.InvoiceNotificationWriter.class,com.hs.listing.notification.RentalRequestNotificationWriter.class,com.hs.payment.notification.PaymentNotificationWriter.class,ContractLifecycleService.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class,ComplaintCaseService.class,ComplaintEvidenceAccessChecker.class})
+@Import({com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,com.hs.contract.notification.InvoiceNotificationWriter.class,com.hs.listing.notification.RentalRequestNotificationWriter.class,com.hs.payment.notification.PaymentNotificationWriter.class,ContractLifecycleService.class,PaymentRequestService.class,DepositLedgerService.class,ComplaintCaseService.class,ComplaintEvidenceAccessChecker.class})
 class ComplaintCasePostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs")
     @EnableJpaRepositories(basePackageClasses={com.hs.contract.notification.ContractNotificationOutboxRepository.class,com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,com.hs.payment.notification.PaymentNotificationOutboxRepository.class,ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class})
@@ -88,7 +88,6 @@ class ComplaintCasePostgresTest {
     @Autowired DisputeCaseRepository cases;
     @MockitoSpyBean DisputeCaseEventRepository caseEvents;
     @Autowired PaymentRequestService payments;
-    @Autowired PaymentDisputeService disputes;
     @Autowired DepositLedgerService ledger;
     @Autowired ContractRepository contracts;
     @Autowired ContractRevisionRepository revisions;
@@ -275,10 +274,8 @@ class ComplaintCasePostgresTest {
         assertTrue(access.canAccess("owner",storage.findById(file).orElseThrow()));assertFalse(access.canAccess("stranger",storage.findById(file).orElseThrow()));assertTrue(access.preventsDeletion(storage.findById(file).orElseThrow()));
         var current=c;assertThrows(AppException.class,()->complaints.act(current.id(),"owner","COMMENT",new ComplaintAction(current.revision(),"Không được mạo nhận chứng cứ người thuê",List.of(file),null,null,null)));
     }
-    @Test void paymentQueueAndRoutesRemainIsolatedFromRentalComplaints(){
+    @Test void complaintsAreListedOnlyInComplaintQueue(){
         var c=open(ComplaintCategory.REPAIR);admin("admin");
-        assertTrue(disputes.adminList("admin",null,1,50).getResult().isEmpty());
-        assertThrows(AppException.class,()->disputes.adminGet(c.id(),"admin"));
         assertTrue(complaints.adminList("admin",DisputeCaseStatus.OPEN,ComplaintCategory.REPAIR,false,1,20).getResult().stream().anyMatch(row->row.id().equals(c.id())));
         assertTrue(complaints.adminList("admin",null,null,true,1,20).getResult().stream().noneMatch(row->row.id().equals(c.id())));
         time.instant=c.respondBy();assertTrue(complaints.adminList("admin",null,null,true,1,20).getResult().stream().anyMatch(row->row.id().equals(c.id())));

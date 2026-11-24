@@ -51,7 +51,7 @@ import static org.mockito.ArgumentMatchers.*;
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.datasource.url=${HS_LIFECYCLE_TEST_PG_URL}","spring.datasource.username=postgres",
     "spring.datasource.password=hs_phase03_test","spring.jpa.hibernate.ddl-auto=create-drop","spring.profiles.active=test"})
-@Import({com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,com.hs.contract.notification.InvoiceNotificationWriter.class,com.hs.listing.notification.RentalRequestNotificationWriter.class,com.hs.payment.notification.PaymentNotificationWriter.class,ContractLifecycleService.class,MonthlyBillingService.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class})
+@Import({com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,com.hs.contract.notification.InvoiceNotificationWriter.class,com.hs.listing.notification.RentalRequestNotificationWriter.class,com.hs.payment.notification.PaymentNotificationWriter.class,ContractLifecycleService.class,MonthlyBillingService.class,PaymentRequestService.class,DepositLedgerService.class})
 class ContractLifecyclePhase03PostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs")
     @EnableJpaRepositories(basePackageClasses={com.hs.contract.notification.ContractNotificationOutboxRepository.class,com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,com.hs.payment.notification.PaymentNotificationOutboxRepository.class,ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class})
@@ -78,7 +78,6 @@ class ContractLifecyclePhase03PostgresTest {
     @Autowired ContractLifecycleService service;
     @Autowired MonthlyBillingService billing;
     @Autowired PaymentRequestService payments;
-    @Autowired PaymentDisputeService disputes;
     @Autowired DepositLedgerService ledger;
     @Autowired ContractRepository contracts;
     @Autowired ContractRevisionRepository revisions;
@@ -352,16 +351,12 @@ class ContractLifecyclePhase03PostgresTest {
         var result=service.get(id,"tenant");assertEquals("REFUND_PENDING",result.closure().getStatus());assertEquals(0,new BigDecimal("3000000").compareTo(result.refundPayment().totalAmount()));
         assertEquals(0,new BigDecimal("3000000").compareTo(ledger.forRental(rentalId).confirmedReceivedAmount()));
     }
-    @Test void refundRejectedAndDisputedThenConfirmedKeepsRetentionAndClosesOnlyAfterRealReceipt(){
+    @Test void refundRejectedAndReReportedThenConfirmedKeepsRetentionAndClosesOnlyAfterRealReceipt(){
         var close=proposal("100000");accept(close.getProposalVersion());String paymentId=closures.findById(id).orElseThrow().getRefundPaymentId();
         String proof=proof(paymentId,"owner");var amount=new BigDecimal("19900000");
         payments.reportTransfer(paymentId,"owner",ReportTransferRequest.builder().proofStorageId(proof).expectedAmount(amount).build());
         payments.rejectReceipt(paymentId,"tenant",new RejectReceiptRequest("Chưa thấy tiền hoàn trong tài khoản"));
-        payments.dispute(paymentId,"owner",new DisputePaymentRequest("Đã chuyển khoản cần kiểm tra ngân hàng"));
-        var dispute=disputes.forPayment(paymentId,"owner").getFirst();
-        disputes.act(dispute.id(),"owner","PROPOSE",new DisputeCaseAction(dispute.revision(),"Đối chiếu lại chứng từ ngân hàng",DisputeResolution.REVIEW_TRANSFER,null));
-        dispute=disputes.forPayment(paymentId,"tenant").getFirst();
-        disputes.act(dispute.id(),"tenant","ACCEPT",new DisputeCaseAction(dispute.revision(),"Đồng ý kiểm tra lại khoản đã chuyển",null,null));
+        payments.reportTransfer(paymentId,"owner",ReportTransferRequest.builder().proofStorageId(proof(paymentId,"owner")).expectedAmount(amount).build());
         assertEquals("REFUND_PENDING",service.get(id,"tenant").closure().getStatus());
         assertEquals(0,ledger.forRental(rentalId).confirmedRefundedAmount().signum());
         payments.confirmReceipt(paymentId,"tenant");payments.confirmReceipt(paymentId,"tenant");

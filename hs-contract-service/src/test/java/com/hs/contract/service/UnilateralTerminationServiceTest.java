@@ -112,7 +112,7 @@ class UnilateralTerminationServiceTest {
         assertEquals(UnilateralTerminationNotice.Status.ENDED,result.unilateralTermination().status());assertEquals(time.now(),contract.getTerminationCompletedAt());
         assertNull(contract.getTerminationAcceptedAt());assertEquals(ContractStatus.TERMINATED,contract.getStatus());verifyNoInteractions(listings,parking);
     }
-    @ParameterizedTest @EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","DISPUTED"})
+    @ParameterizedTest @EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED"})
     void moneyUnderReviewBlocksAutomaticEndAndConfirmedPaymentCancelsTheNotice(PaymentStatus status) {
         issue();payment.setStatus(status);clock("2026-11-12T11:00:00");assertEquals(UnilateralTerminationNotice.Status.NOTICE,current().unilateralTermination().status());
         assertEquals(ContractStatus.ACTIVE,contract.getStatus());payment.setStatus(PaymentStatus.CONFIRMED);payment.setConfirmedAt(time.now());
@@ -120,7 +120,7 @@ class UnilateralTerminationServiceTest {
         assertEquals(ContractStatus.ACTIVE,contract.getStatus());assertFalse(paid.canRequestTerminationReview());
     }
     @Test void reportedTransferAlsoBlocksOwnerRejectionAndRejectedProofResumesAutomaticEnd() {
-        var n=review(issue(),UnilateralTerminationNotice.Option.PAYMENT_EXTENSION);payment.setStatus(PaymentStatus.DISPUTED);
+        var n=review(issue(),UnilateralTerminationNotice.Option.PAYMENT_EXTENSION);payment.setStatus(PaymentStatus.TRANSFER_REPORTED);
         assertThrows(AppException.class,()->service.decideTerminationReview("invoice",n.id(),"owner",new UnilateralTerminationPayloads.Decision(n.version(),false,"Không được kết thúc khi đang đối soát")));
         assertEquals(ContractStatus.ACTIVE,contract.getStatus());
         service.withdrawUnilateralTermination("invoice",n.id(),"owner",new UnilateralTerminationPayloads.Version(n.version()));

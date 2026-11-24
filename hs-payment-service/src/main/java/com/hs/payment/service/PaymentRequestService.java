@@ -671,42 +671,6 @@ public class PaymentRequestService {
         return toResponse(saved, actorId);
     }
 
-    @Transactional
-    public PaymentRequestResponse dispute(String paymentRequestId, String actorId, DisputePaymentRequest request) {
-        PaymentRequest payment = lockTransferAction(paymentRequestId);
-
-        if (!actorId.equals(payment.getPayerId()) && !actorId.equals(payment.getPayeeId())) {
-            throw new AppException(PaymentErrorCode.PAYMENT_REQUEST_FORBIDDEN);
-        }
-
-        if (payment.getStatus() != PaymentStatus.TRANSFER_REPORTED && payment.getStatus() != PaymentStatus.REJECTED
-                && !(isOnboarding(payment) && (payment.getStatus()==PaymentStatus.AWAITING_TRANSFER || payment.getStatus()==PaymentStatus.EXPIRED))) {
-            throw new AppException(PaymentErrorCode.DISPUTE_NOT_ALLOWED);
-        }
-
-        if(request==null||request.reason()==null||request.reason().isBlank()||request.reason().trim().length()>500)
-            throw new AppException(PaymentErrorCode.DISPUTE_CASE_INVALID);
-        PaymentStatus oldStatus = payment.getStatus();
-        var refundRecord=payment.getType()==PaymentType.DEPOSIT_REFUND
-                ?depositRecordRepository.findByRefundPaymentRequestId(payment.getId()).orElse(null):null;
-        var previousDepositStatus=refundRecord==null?null:refundRecord.getStatus();
-        payment.setStatus(PaymentStatus.DISPUTED);
-        PaymentRequest saved = paymentRequestRepository.save(payment);
-
-        boolean reverse=payment.getDirection()==PaymentDirection.LANDLORD_TO_TENANT;
-        String role = actorId.equals(payment.getPayerId()) ? (reverse?"LANDLORD":"TENANT") : (reverse?"TENANT":"LANDLORD");
-        recordEvent(saved.getId(), PaymentEventType.DISPUTED, oldStatus, PaymentStatus.DISPUTED,
-                actorId, role, request.reason().trim(), null);
-        if(refundRecord!=null){refundRecord.setStatus(DepositStatus.DISPUTED);depositRecordRepository.save(refundRecord);}
-        if(receiptEvents!=null)receiptEvents.publishEvent(new com.hs.payment.event.PaymentDisputed(saved.getId(),actorId,
-                request.reason().trim(),oldStatus,previousDepositStatus));
-        // After the synchronous PaymentDisputed listener registered (or reused) the case in this transaction.
-        notifications.enqueueOthers(saved, com.hs.payment.notification.PaymentNotificationWriter.Event.PAYMENT_DISPUTE_OPENED, actorId);
-
-        log.info("Actor [{}] [{}] opened DISPUTE on PaymentRequest [{}]", actorId, role, paymentRequestId);
-        return toResponse(saved, actorId);
-    }
-
     @Transactional(readOnly = true)
     public PaymentRequestResponse getPaymentRequest(String paymentRequestId, String actorId) {
         PaymentRequest payment = paymentRequestRepository.findById(paymentRequestId)
@@ -994,7 +958,7 @@ public class PaymentRequestService {
         return java.util.stream.Stream.of(PaymentType.INITIAL,PaymentType.RESERVATION_DEPOSIT)
             .map(t->paymentRequestRepository.findByRentalRequestIdAndType(rentalRequestId,t))
             .flatMap(Optional::stream).anyMatch(p-> switch(p.getStatus()) {
-                case CONFIRMED,TRANSFER_REPORTED,DISPUTED,REJECTED -> true;
+                case CONFIRMED,TRANSFER_REPORTED,REJECTED -> true;
                 case AWAITING_TRANSFER -> p.getDueAt()==null || businessNow().isBefore(p.getDueAt());
                 default -> false;
             });

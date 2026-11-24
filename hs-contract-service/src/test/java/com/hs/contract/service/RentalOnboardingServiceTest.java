@@ -147,7 +147,7 @@ class RentalOnboardingServiceTest {
         assertDoesNotThrow(()->service.validateSigning("rental","tenant"));
     }
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","DISPUTED","REJECTED"})
+    @org.junit.jupiter.params.provider.EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","REJECTED"})
     void exemptionDoesNotBypassAnUnresolvedRecordedDeposit(PaymentStatus status) {
         rental.setDepositAmount(BigDecimal.ZERO);deposit.setStatus(status);
         var waiting=service.refresh("rental","tenant");assertEquals("REQUIRES_REVIEW",waiting.stage());assertFalse(waiting.canRequestEarlierStart());
@@ -245,17 +245,6 @@ class RentalOnboardingServiceTest {
         assertThrows(AppException.class,()->service.decideEarlier("rental","change","owner",new RentalOnboardingService.Decision(true,null)));
         assertEquals(LocalDate.of(2026,11,1),rental.getMoveInDate());verifyNoInteractions(parking);
     }
-    @Test void outstandingDisputeNeverLooksPaid() {deposit.setStatus(PaymentStatus.DISPUTED);var v=service.refresh("rental","tenant");assertEquals("REQUIRES_REVIEW",v.stage());assertFalse(v.canSign());}
-    @Test void legacyReviewCannotUnilaterallyReopenOrConfirmFormalDispute() {
-        var p=rent(PaymentStatus.DISPUTED);
-        when(payments.findById("rent")).thenReturn(Optional.of(p));
-        for(boolean received:List.of(true,false)) {
-            var error=assertThrows(AppException.class,()->service.resolveReview("rental","rent","owner",
-                new RentalOnboardingService.ReviewDecision(received,"Đối soát khoản đang tranh chấp")));
-            assertEquals(7027,error.getCode());assertEquals(PaymentStatus.DISPUTED,p.getStatus());
-        }
-        verifyNoInteractions(paymentService);verify(payments,never()).save(any());
-    }
     @Test void transferReportedIsNotAnotherRequestToPay() {deposit.setStatus(PaymentStatus.TRANSFER_REPORTED);assertEquals("AWAITING_DEPOSIT_CONFIRMATION",service.refresh("rental","tenant").stage());}
     @Test void signingRequiresBothPaymentsAndStartDate() {
         when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(Contract.builder().id("contract").status(ContractStatus.TENANT_SIGNATURE_PENDING).build()));
@@ -284,7 +273,7 @@ class RentalOnboardingServiceTest {
         deposit.setConfirmedAt(LocalDateTime.parse("2026-11-06T10:00:00").atZone(BillingTime.ZONE).toInstant());
         var agreements=mock(com.hs.contract.deposit.DepositAgreementService.class);
         var signedDeposit=Contract.builder().id("signed-deposit").agreementKind("DEPOSIT").status(ContractStatus.TENANT_SIGNATURE_PENDING).build();
-        when(agreements.find("rental")).thenReturn(Optional.of(signedDeposit));when(agreements.signedOrExempt(rental)).thenReturn(true);
+        when(agreements.find("rental")).thenReturn(Optional.of(signedDeposit));when(agreements.signedOrExempt(rental)).thenReturn(true);when(contracts.findByIdForUpdate("signed-deposit")).thenReturn(Optional.of(signedDeposit));
         org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",agreements);
         PaymentRequest first=rentOpened?rent(PaymentStatus.AWAITING_TRANSFER):null;
         if(first!=null)when(payments.findByRentalRequestIdAndTypeForUpdate("rental",PaymentType.INITIAL)).thenReturn(Optional.of(first));
@@ -382,6 +371,20 @@ class RentalOnboardingServiceTest {
         assertEquals(RentalRequestStatus.CANCELLED_BY_RENTER,rental.getStatus());
         verify(notifications).enqueue(rental,com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_REQUEST_CANCELLED,com.hs.listing.notification.RentalRequestNotificationWriter.Side.RENTER);
         verify(notifications,never()).enqueue(any(),eq(com.hs.listing.notification.RentalRequestNotificationWriter.Event.RENTAL_CANCELLATION_REFUND_PENDING),any());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","REJECTED","AWAITING_TRANSFER"})
+    void cancellationBlocksOnlyAReportedTransferAndCancelsOtherUnconfirmedPayments(PaymentStatus status) {
+        service.requestCancellation("rental","tenant",new RentalOnboardingService.Cancellation(REASON));
+        deposit.setStatus(status);
+        when(payments.findByRentalRequestIdAndTypeForUpdate("rental",PaymentType.RESERVATION_DEPOSIT)).thenReturn(Optional.of(deposit));
+        var decision=new RentalOnboardingService.Decision(true,null);
+        if(status==PaymentStatus.TRANSFER_REPORTED){
+            assertThrows(AppException.class,()->service.decideCancellation("rental","owner",decision));assertEquals(status,deposit.getStatus());
+        } else {
+            service.decideCancellation("rental","owner",decision);assertEquals(PaymentStatus.CANCELLED,deposit.getStatus());
+            assertEquals(RentalRequestStatus.CANCELLED_BY_RENTER,rental.getStatus());
+        }
     }
     @Test void cancellationDecisionByWrongPartyOrWithoutRequestNotifiesNobody() {
         assertThrows(AppException.class,()->service.decideCancellation("rental","owner",new RentalOnboardingService.Decision(true,null)));

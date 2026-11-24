@@ -56,7 +56,7 @@ import static org.mockito.ArgumentMatchers.*;
 @org.junit.jupiter.api.condition.EnabledIf("databaseIsAllowed")
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.profiles.active=test"})
-@Import({com.hs.contract.notification.InvoiceNotificationWriter.class,com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,com.hs.listing.notification.RentalRequestNotificationWriter.class,com.hs.payment.notification.PaymentNotificationWriter.class,ContractLifecycleService.class,MonthlyBillingService.class,FinalRentCalculator.class,WorkflowDocumentService.class,WorkflowDocumentCommitter.class,WorkflowDocumentRetentionChecker.class,PaymentRequestService.class,DepositLedgerService.class,PaymentDisputeService.class,ComplaintCaseService.class,ComplaintEvidenceAccessChecker.class,RentalWorkflowSupport.class,PreTenancyResolutionService.class,RentalOnboardingService.class,MutualTerminationService.class,RentalWorkflowEvidenceAccessChecker.class})
+@Import({com.hs.contract.notification.InvoiceNotificationWriter.class,com.hs.contract.notification.AgreementSigningNotificationWriter.class,com.hs.contract.notification.RenewalNotificationWriter.class,com.hs.contract.notification.TerminationNotificationWriter.class,com.hs.listing.notification.RentalRequestNotificationWriter.class,com.hs.payment.notification.PaymentNotificationWriter.class,ContractLifecycleService.class,MonthlyBillingService.class,FinalRentCalculator.class,WorkflowDocumentService.class,WorkflowDocumentCommitter.class,WorkflowDocumentRetentionChecker.class,PaymentRequestService.class,DepositLedgerService.class,ComplaintCaseService.class,ComplaintEvidenceAccessChecker.class,RentalWorkflowSupport.class,PreTenancyResolutionService.class,RentalOnboardingService.class,MutualTerminationService.class,RentalWorkflowEvidenceAccessChecker.class})
 class RentalWorkflowPostgresTest {
     static final String LEGACY_URL="jdbc:postgresql://127\\.0\\.0\\.1:[0-9]+/hs_workflow_test";
     static final String DEDICATED_URL="jdbc:postgresql://[^/]+/core_(rental_notification|notification_rollout)_test_[A-Za-z0-9]+";
@@ -102,7 +102,6 @@ class RentalWorkflowPostgresTest {
     @Autowired DisputeCaseRepository cases;
     @MockitoSpyBean DisputeCaseEventRepository caseEvents;
     @Autowired PaymentRequestService payments;
-    @Autowired PaymentDisputeService disputes;
     @Autowired DepositLedgerService ledger;
     @Autowired ContractRepository contracts;
     @Autowired ContractRevisionRepository revisions;
@@ -328,12 +327,20 @@ class RentalWorkflowPostgresTest {
         });
         assertTrue(contracts.findByRentalRequestId(rentalId).isEmpty());
         if(depositSigned) {
+            // Fully signed deposit agreement, no lease: cancellation is allowed but the deposit is forfeited; nothing is refunded.
             when(depositAgreements.tenantHasSigned(rentalId)).thenReturn(true);
-            assertFalse(onboarding.refresh(rentalId,"tenant").canRequestCancellation());
-            assertThrows(AppException.class,()->onboarding.requestCancellation(rentalId,"tenant",new RentalOnboardingService.Cancellation("Đề nghị hoàn cọc sau khi đã ký")));
-            assertThrows(AppException.class,()->cancellation.propose(rentalId,"tenant",new RentalWorkflowPayloads.Cancellation(0L,"Đề nghị hoàn cọc sau khi đã ký",List.of())));
+            assertTrue(onboarding.refresh(rentalId,"tenant").canRequestCancellation());
+            var proposedForfeit=cancellation.propose(rentalId,"tenant",new RentalWorkflowPayloads.Cancellation(0L,"Hủy sau khi HĐ cọc đã đủ chữ ký",List.of()));
+            var done=cancellation.act(rentalId,"owner","ACCEPT",action(proposedForfeit.revision()));
+            assertEquals("COMPLETED",done.status());assertTrue(done.refundPayments().isEmpty());
             assertTrue(paymentRepo.findByRentalRequestIdAndTypeIn(rentalId,List.of(PaymentType.INITIAL_PAYMENT_REFUND)).isEmpty());
-            assertEquals(DepositStatus.HELD,deposits.findByRentalRequestId(rentalId).orElseThrow().getStatus());return;
+            var kept=deposits.findByRentalRequestId(rentalId).orElseThrow();
+            assertEquals(DepositStatus.RETAINED_BY_LANDLORD,kept.getStatus());assertEquals(0,new BigDecimal("1000000").compareTo(kept.getRetainedAmount()));
+            assertEquals(0,kept.getHeldAmount().signum());assertEquals(0,kept.getRefundableAmount().signum());
+            // Signed PDF stays; the agreement itself is ended with the forfeiture reason (service is mocked here).
+            verify(depositAgreements).terminateForCancellation(rentalId,PreTenancyCancellation.FORFEIT_REASON);
+            assertEquals(PaymentStatus.CONFIRMED,paymentRepo.findByRentalRequestIdAndType(rentalId,PaymentType.RESERVATION_DEPOSIT).orElseThrow().getStatus());
+            return;
         }
         var proposed=cancellation.propose(rentalId,"tenant",new RentalWorkflowPayloads.Cancellation(0L,"Chưa đóng tháng đầu, hai bên thống nhất hoàn cọc",List.of()));
         var pending=cancellation.act(rentalId,"owner","ACCEPT",action(proposed.revision()));
@@ -482,7 +489,16 @@ class RentalWorkflowPostgresTest {
         assertThrows(AppException.class,()->cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision())));
         assertEquals(RentalRequestStatus.ACCEPTED,rentals.findById(rentalId).orElseThrow().getStatus());verify(parking,never()).releaseReservationsForRequest(anyString());
     }
-    @ParameterizedTest @org.junit.jupiter.params.provider.EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED","DISPUTED","REJECTED"})
+    @Test void rejectedRentTransferIsCancelledInsteadOfBlockingCancellation(){
+        // Without payment disputes a REJECTED transfer would otherwise be a dead end for the cancellation.
+        var p=proposeCancel();var rent=paymentRepo.saveAndFlush(PaymentRequest.builder().contractId(id).rentalRequestId(rentalId).listingId(listingId).payerId("tenant").payeeId("owner").type(PaymentType.INITIAL).direction(PaymentDirection.TENANT_TO_LANDLORD).status(PaymentStatus.REJECTED).totalAmount(new BigDecimal("5000000")).transferReference("HS"+UUID.randomUUID().toString().substring(0,12)).build());
+        cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision()));
+        assertEquals(PaymentStatus.CANCELLED,paymentRepo.findById(rent.getId()).orElseThrow().getStatus());
+        // Only the confirmed reservation deposit from the fixture is refunded; the rejected 5,000,000 never is.
+        var refunded=paymentRepo.findByRentalRequestIdAndTypeIn(rentalId,List.of(PaymentType.INITIAL_PAYMENT_REFUND)).stream().map(PaymentRequest::getTotalAmount).reduce(BigDecimal.ZERO,BigDecimal::add);
+        assertEquals(0,principal.compareTo(refunded));
+    }
+    @ParameterizedTest @org.junit.jupiter.params.provider.EnumSource(value=PaymentStatus.class,names={"TRANSFER_REPORTED"})
     void ambiguousRentTransferBlocksCancellation(PaymentStatus state){
         var p=proposeCancel();tx(()->paymentRepo.saveAndFlush(PaymentRequest.builder().contractId(id).rentalRequestId(rentalId).listingId(listingId).payerId("tenant").payeeId("owner").type(PaymentType.INITIAL).direction(PaymentDirection.TENANT_TO_LANDLORD).status(state).totalAmount(new BigDecimal("5000000")).transferReference("HS"+UUID.randomUUID().toString().substring(0,12)).build()));
         assertThrows(AppException.class,()->cancellation.act(rentalId,"tenant","ACCEPT",action(p.revision())));
@@ -1172,7 +1188,7 @@ class RentalWorkflowPostgresTest {
         var revised=closureProposal("50000");var accepted=service.acceptClosure(id,"tenant",new AcceptClosurePayload(revised.getProposalVersion(),true,true));
         assertEquals(List.of("PAYMENT_REQUEST_CREATED:owner"),cashEvents(accepted.refundPayment().id()));
     }
-    @ParameterizedTest @CsvSource({"0,AWAITING_TRANSFER,owner","0,TRANSFER_REPORTED,owner","0,DISPUTED,owner","21000000,AWAITING_TRANSFER,tenant","21000000,TRANSFER_REPORTED,tenant","21000000,DISPUTED,tenant"})
+    @ParameterizedTest @CsvSource({"0,AWAITING_TRANSFER,owner","0,TRANSFER_REPORTED,owner","21000000,AWAITING_TRANSFER,tenant","21000000,TRANSFER_REPORTED,tenant",})
     void phase6eClosureDeadlineUsesOnlyRootMarkerEvenForProofOrDispute(String deduction,PaymentStatus status,String payer){
         readyClosure();var proposal=closureProposal(deduction);var accepted=service.acceptClosure(id,"tenant",new AcceptClosurePayload(proposal.getProposalVersion(),true,true));
         String paymentId=accepted.refundPayment()!=null?accepted.refundPayment().id():accepted.balancePayment().id();
@@ -1196,12 +1212,12 @@ class RentalWorkflowPostgresTest {
         service.scheduledSync();service.scheduledSync();
         for(var p:pending){assertEquals(PaymentStatus.OVERDUE,paymentRepo.findById(p.getId()).orElseThrow().getStatus());assertEquals(List.of("PAYMENT_OBLIGATION_OVERDUE:"+p.getPayerId()),cashEvents(p.getId()));}
     }
-    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"BOUNDARY","PROOF","DISPUTED","CONFIRMED","CANCELLED","OVERDUE","CANCELLATION","WRONG_RENTAL","WRONG_PARTIES","CHILD","DEPOSIT"})
+    @ParameterizedTest @org.junit.jupiter.params.provider.ValueSource(strings={"BOUNDARY","PROOF","CONFIRMED","CANCELLED","OVERDUE","CANCELLATION","WRONG_RENTAL","WRONG_PARTIES","CHILD","DEPOSIT"})
     void phase6eDeadlineSweepExcludesCancellationUntrustedLinksProofAndHistoricalOverdue(String scenario){
         PaymentRequest[] candidate={null};tx(()->{
             var c=contracts.findById(id).orElseThrow();c.setStatus(ContractStatus.TERMINATED);if(!scenario.equals("CANCELLATION"))c.setAgreedEarlyEndExclusive(LocalDate.of(2026,12,20));
             if(scenario.equals("CHILD"))c.setParentContractId("other-root");if(scenario.equals("DEPOSIT"))c.setAgreementKind("DEPOSIT");contracts.save(c);
-            PaymentStatus status=switch(scenario){case "PROOF"->PaymentStatus.TRANSFER_REPORTED;case "DISPUTED"->PaymentStatus.DISPUTED;case "CONFIRMED"->PaymentStatus.CONFIRMED;case "CANCELLED"->PaymentStatus.CANCELLED;case "OVERDUE"->PaymentStatus.OVERDUE;default->PaymentStatus.AWAITING_TRANSFER;};
+            PaymentStatus status=switch(scenario){case "PROOF"->PaymentStatus.TRANSFER_REPORTED;case "CONFIRMED"->PaymentStatus.CONFIRMED;case "CANCELLED"->PaymentStatus.CANCELLED;case "OVERDUE"->PaymentStatus.OVERDUE;default->PaymentStatus.AWAITING_TRANSFER;};
             var p=pendingObligation(PaymentType.INITIAL_PAYMENT_REFUND,status,scenario.equals("BOUNDARY")?time.now():time.now().minusSeconds(1),true);
             if(scenario.equals("WRONG_RENTAL"))p.setRentalRequestId("unrelated-rental");if(scenario.equals("WRONG_PARTIES"))p.setPayerId("outsider");candidate[0]=paymentRepo.saveAndFlush(p);
         });

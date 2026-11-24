@@ -8,6 +8,7 @@ public enum PaymentStatus {
     OVERDUE,
     EXPIRED,
     CANCELLED,
+    @Deprecated // legacy rows only; no code path sets them (startup normalizer moves them out)
     DISPUTED;
 
     public boolean isConfirmed() {

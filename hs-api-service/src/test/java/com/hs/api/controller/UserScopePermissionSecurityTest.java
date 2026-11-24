@@ -68,8 +68,6 @@ class UserScopePermissionSecurityTest {
             Map.entry("ContractSignatureController.initiateSignature", Permissions.CONTRACT_SIGN),
             Map.entry("ContractSignatureController.retrySignature", Permissions.CONTRACT_SIGN),
             Map.entry("ComplaintController.open", Permissions.COMPLAINT_CREATE),
-            Map.entry("PaymentRequestController.dispute", Permissions.PAYMENT_DISPUTE_CREATE),
-            Map.entry("PaymentDisputeController.adopt", Permissions.PAYMENT_DISPUTE_CREATE),
             Map.entry("MembershipController.checkout", Permissions.MEMBERSHIP_PURCHASE),
             Map.entry("MembershipController.ethQuote", Permissions.MEMBERSHIP_PURCHASE),
             Map.entry("VnptKycController.start", Permissions.KYC_SUBMIT),

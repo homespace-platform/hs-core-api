@@ -50,7 +50,7 @@ class PaymentNotificationWriterTest {
         var fields=new HashSet<String>();node.fieldNames().forEachRemaining(fields::add);return fields;
     }
     @Test void partyActionReachesOnlyOtherPartyAndAdminDecisionUsesSeparateSingletonEnvelopes() throws Exception {
-        var type=PaymentNotificationWriter.Event.PAYMENT_DISPUTE_REOPENED;
+        var type=PaymentNotificationWriter.Event.PAYMENT_RECEIPT_CONFIRMED;
         writer.enqueueOthers(payment,type,"stored-payer");writer.enqueueOthers(payment,type,"outside-admin");
         var capture=org.mockito.ArgumentCaptor.forClass(PaymentNotificationOutbox.class);verify(outbox,times(3)).save(capture.capture());
         var recipients=new ArrayList<String>();for(var row:capture.getAllValues())recipients.add(json.readTree(row.getPayload()).get("recipients").get(0).asText());

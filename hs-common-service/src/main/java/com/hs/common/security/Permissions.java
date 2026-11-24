@@ -35,8 +35,6 @@ public final class Permissions {
     public static final String CONTRACT_VIEW = "CONTRACT_VIEW";
     public static final String COMPLAINT_VIEW = "COMPLAINT_VIEW";
     public static final String COMPLAINT_RESOLVE = "COMPLAINT_RESOLVE";
-    public static final String DISPUTE_VIEW = "DISPUTE_VIEW";
-    public static final String DISPUTE_RESOLVE = "DISPUTE_RESOLVE";
     public static final String NEARBY_SCAN_VIEW = "NEARBY_SCAN_VIEW";
     public static final String NEARBY_SCAN_MANAGE = "NEARBY_SCAN_MANAGE";
     public static final String NOTIFICATION_BROADCAST = "NOTIFICATION_BROADCAST";
@@ -52,7 +50,6 @@ public final class Permissions {
     public static final String CONTRACT_MANAGE = "CONTRACT_MANAGE";
     public static final String CONTRACT_SIGN = "CONTRACT_SIGN";
     public static final String COMPLAINT_CREATE = "COMPLAINT_CREATE";
-    public static final String PAYMENT_DISPUTE_CREATE = "PAYMENT_DISPUTE_CREATE";
     public static final String MEMBERSHIP_PURCHASE = "MEMBERSHIP_PURCHASE";
     public static final String FAVORITE_USE = "FAVORITE_USE";
     public static final String KYC_SUBMIT = "KYC_SUBMIT";
@@ -60,7 +57,7 @@ public final class Permissions {
     /** Codes grantable to the USER role. Everything else in CATALOG is admin scope. */
     public static final java.util.Set<String> USER_SCOPE = java.util.Set.of(
             LISTING_POST, APPOINTMENT_BOOK, APPOINTMENT_MANAGE, RENTAL_REQUEST_CREATE, RENTAL_REQUEST_MANAGE,
-            CONTRACT_MANAGE, CONTRACT_SIGN, COMPLAINT_CREATE, PAYMENT_DISPUTE_CREATE, MEMBERSHIP_PURCHASE,
+            CONTRACT_MANAGE, CONTRACT_SIGN, COMPLAINT_CREATE, MEMBERSHIP_PURCHASE,
             FAVORITE_USE, KYC_SUBMIT);
 
     public static boolean isUserScope(String code) {
@@ -90,8 +87,6 @@ public final class Permissions {
         m.put(CONTRACT_VIEW, "Xem hợp đồng hệ thống và tài liệu hợp đồng");
         m.put(COMPLAINT_VIEW, "Xem khiếu nại");
         m.put(COMPLAINT_RESOLVE, "Xử lý khiếu nại");
-        m.put(DISPUTE_VIEW, "Xem tranh chấp thanh toán");
-        m.put(DISPUTE_RESOLVE, "Xử lý tranh chấp thanh toán");
         m.put(NEARBY_SCAN_VIEW, "Xem job quét địa điểm lân cận");
         m.put(NEARBY_SCAN_MANAGE, "Tạo, hủy job quét địa điểm lân cận");
         m.put(NOTIFICATION_BROADCAST, "Gửi thông báo toàn hệ thống");
@@ -105,7 +100,6 @@ public final class Permissions {
         m.put(CONTRACT_MANAGE, "Chủ nhà tạo, soạn và gửi hợp đồng");
         m.put(CONTRACT_SIGN, "Ký hợp đồng");
         m.put(COMPLAINT_CREATE, "Gửi khiếu nại");
-        m.put(PAYMENT_DISPUTE_CREATE, "Mở tranh chấp thanh toán");
         m.put(MEMBERSHIP_PURCHASE, "Mua gói hội viên");
         m.put(FAVORITE_USE, "Lưu tin yêu thích");
         m.put(KYC_SUBMIT, "Xác minh danh tính (eKYC)");

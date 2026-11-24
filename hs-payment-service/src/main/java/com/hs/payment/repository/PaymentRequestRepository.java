@@ -32,6 +32,9 @@ public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, 
 
     Optional<PaymentRequest> findByRentalRequestIdAndType(String rentalRequestId, PaymentType type);
 
+    @Query("SELECT p.id FROM PaymentRequest p WHERE p.status = :status")
+    List<String> findIdsByStatus(@Param("status") com.hs.payment.model.constant.PaymentStatus status);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM PaymentRequest p WHERE p.id = :id")
     Optional<PaymentRequest> findByIdForUpdate(@Param("id") String id);
