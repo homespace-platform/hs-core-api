@@ -102,7 +102,7 @@ public class MembershipService {
         Instant upgradeDeadline = paid == null ? null : paid.getStartAt().plus(UPGRADE_WINDOW);
         boolean upgrade = paid != null && target.ordinal() > paid.getTier().ordinal() && now.isBefore(upgradeDeadline);
         return new Quote(target.name(), upgrade ? target.priceVnd - paid.getPriceVnd() : target.priceVnd,
-                upgrade ? "UPGRADE" : "NEW", target.uses - (upgrade ? paid.getUsed() + paid.getReserved() : 0),
+                upgrade ? "UPGRADE" : "NEW", target.uses - (upgrade ? paid.getUsed() + paid.getReserved() : paid == null ? spentOnFree(ownerId, now) : 0),
                 now.plus(PERIOD), upgradeDeadline, upgrade);
     }
 
@@ -112,7 +112,7 @@ public class MembershipService {
      */
     @Transactional
     public boolean activate(String ownerId, MembershipTier target, boolean upgrade, String orderId) {
-        locked(ownerId);
+        User owner = locked(ownerId);
         Instant now = now();
         MembershipPeriod paid = activePaid(ownerId, now).orElse(null);
         if (upgrade) {
@@ -133,9 +133,22 @@ public class MembershipService {
             paid.setEndAt(now); // Only one paid row may be active; its reservations stay on it.
             periods.save(paid);
         }
-        MembershipPeriod next = periods.save(period(ownerId, MembershipKind.PLAN, target, now, now.plus(PERIOD),
-                target.uses, target.priceVnd));
-        record(MembershipEvent.Type.PURCHASE, next.getQuota(), next, null, orderId, null, null);
+        MembershipPeriod next = period(ownerId, MembershipKind.PLAN, target, now, now.plus(PERIOD),
+                target.uses, target.priceVnd);
+        MembershipPeriod free = paid == null ? freePeriod(owner, now) : null;
+        if (free != null) {
+            // Leaving FREE: uses already spent or pending in this FREE period count against the new plan.
+            next.setUsed(free.getUsed());
+            next.setReserved(free.getReserved());
+        }
+        next = periods.save(next);
+        if (free != null && free.getReserved() > 0) {
+            free.setCarriedReserved(free.getCarriedReserved() + free.getReserved());
+            free.setCarriedToId(next.getId());
+            free.setReserved(0);
+            periods.save(free);
+        }
+        record(MembershipEvent.Type.PURCHASE, next.remaining(), next, null, orderId, null, null);
         return true;
     }
 
@@ -197,6 +210,7 @@ public class MembershipService {
             // Always the row holding the reservation, even if it has since ended or been replaced.
             MembershipPeriod held = Optional.ofNullable(listing.getPublicationPeriodId())
                     .flatMap(periods::findById)
+                    .map(this::carriedTarget)
                     .filter(p -> Objects.equals(p.getOwnerId(), listing.getOwnerId()) && p.getReserved() > 0)
                     .orElseThrow(() -> new AppException(ListingErrorCode.MEMBERSHIP_RESERVATION_REQUIRED));
             held.setReserved(held.getReserved() - 1);
@@ -207,6 +221,21 @@ public class MembershipService {
         }
         listing.setPublicationReservation(null);
         listing.setPublicationPeriodId(null);
+    }
+
+    /** Reservations on a row are interchangeable, so carried ones are settled first, on the plan that took them. */
+    private MembershipPeriod carriedTarget(MembershipPeriod held) {
+        if (held.getCarriedReserved() <= 0) return held;
+        held.setCarriedReserved(held.getCarriedReserved() - 1);
+        periods.save(held);
+        return periods.findById(held.getCarriedToId())
+                .orElseThrow(() -> new AppException(ListingErrorCode.MEMBERSHIP_RESERVATION_REQUIRED));
+    }
+
+    private int spentOnFree(String ownerId, Instant now) {
+        MembershipPeriod free = freePeriod(users.findById(ownerId)
+                .orElseThrow(() -> new AppException(ListingErrorCode.LISTING_OWNER_NOT_FOUND)), now);
+        return free.getUsed() + free.getReserved();
     }
 
     private User locked(String ownerId) {
