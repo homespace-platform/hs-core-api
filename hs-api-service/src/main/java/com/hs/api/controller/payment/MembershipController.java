@@ -23,6 +23,8 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 import org.springframework.security.access.prepost.PreAuthorize;
+import jakarta.validation.constraints.Digits;
+import java.math.BigDecimal;
 
 @RestController
 @RequestMapping({"/membership", "/api/v1/membership"})
@@ -34,6 +36,22 @@ public class MembershipController {
     private final EthPaymentService ethPayment;
 
     public record CheckoutRequest(@NotNull MembershipTier tier, @NotNull MembershipOrder.Provider provider) {}
+
+    // BigDecimal + @Digits so 10.9 is rejected instead of being truncated to 10.
+    public record AddonCheckoutRequest(@NotNull @Digits(integer = 3, fraction = 0) BigDecimal quantity, @NotNull MembershipOrder.Provider provider) {}
+
+    @GetMapping("/addons")
+    public ApiResponse<MembershipService.AddonOffer> addons() {
+        return ApiResponse.<MembershipService.AddonOffer>builder().result(memberships.addonOffer()).build();
+    }
+
+    @RequiresCompleteProfile
+    @PreAuthorize("hasAuthority('MEMBERSHIP_PURCHASE')")
+    @PostMapping("/addons/checkout")
+    public ApiResponse<MembershipCheckoutService.Checkout> addonCheckout(@RequestBody @Valid AddonCheckoutRequest request) {
+        return ApiResponse.<MembershipCheckoutService.Checkout>builder()
+                .result(checkout.addonCheckout(requireUserId(), request.quantity().intValueExact(), request.provider())).build();
+    }
 
     @GetMapping("/plans")
     public ApiResponse<List<MembershipService.Plan>> plans() {

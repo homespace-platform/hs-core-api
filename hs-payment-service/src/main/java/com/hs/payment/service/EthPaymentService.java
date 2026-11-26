@@ -2,6 +2,7 @@ package com.hs.payment.service;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.listing.advice.ListingErrorCode;
+import com.hs.listing.membership.MembershipKind;
 import com.hs.listing.membership.MembershipService;
 import com.hs.payment.advice.PaymentErrorCode;
 import com.hs.payment.dto.EthPaymentDtos;
@@ -153,7 +154,7 @@ public class EthPaymentService {
             if (txHash.equals(quote.getTransactionHash())) return MembershipCheckoutService.OrderView.from(preview);
             throw new AppException(PaymentErrorCode.ETH_PAYMENT_INVALID);
         }
-        Instant minedAt = chain.verify(quote, txHash);
+        chain.verify(quote, txHash);
         memberships.lockOwner(ownerId);
         MembershipOrder order = orders.lockById(orderId)
                 .orElseThrow(() -> new AppException(ListingErrorCode.MEMBERSHIP_ORDER_NOT_FOUND));
@@ -173,8 +174,7 @@ public class EthPaymentService {
             throw new AppException(PaymentErrorCode.ETH_PAYMENT_INVALID);
         Instant now = Instant.now();
         MembershipOrder.Status before = order.getStatus();
-        order.setStatus(order.getStatus() == MembershipOrder.Status.PENDING
-                && memberships.activateAt(ownerId, order.getTier(), order.isUpgrade(), minedAt)
+        order.setStatus(order.getStatus() == MembershipOrder.Status.PENDING && activate(order)
                 ? MembershipOrder.Status.PAID : MembershipOrder.Status.REVIEW);
         order.setTransactionNo(txHash.substring(2));
         order.setPaidAt(now);
@@ -184,6 +184,12 @@ public class EthPaymentService {
         quotes.save(quote);
         notifications.enqueueTransition(order, before); // after verified receipt and locked order/quote persistence
         return MembershipCheckoutService.OrderView.from(order);
+    }
+
+    private boolean activate(MembershipOrder order) {
+        return order.getKind() == MembershipKind.ADDON
+                ? memberships.activateAddon(order.getOwnerId(), order.getQuantity(), order.getId())
+                : memberships.activate(order.getOwnerId(), order.getTier(), order.isUpgrade(), order.getId());
     }
 
     private MembershipOrder payable(String orderId, String ownerId) {

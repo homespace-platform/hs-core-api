@@ -46,20 +46,22 @@ import static org.mockito.Mockito.*;
 @DataJpaTest(showSql=false) @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
 @TestPropertySource(properties={"spring.datasource.url=${HS_TEST_PG_URL}","spring.datasource.username=${HS_TEST_PG_USER}",
     "spring.datasource.password=${HS_TEST_PG_PASSWORD}","spring.jpa.hibernate.ddl-auto=create-drop","spring.jpa.open-in-view=false",
+    "homespace.time.simulated-at=",
     "spring.datasource.hikari.connection-init-sql=SET lock_timeout TO '5s'",
     "homespace.membership.sepay.merchant-id=test","homespace.membership.sepay.checkout-url=https://invalid.example",
     "homespace.membership.sepay.return-url=https://invalid.example","homespace.membership.sepay.ipn-secret=test-only"})
 @Transactional(propagation=Propagation.NOT_SUPPORTED)
-@Import({MembershipCheckoutService.class,MembershipService.class,MembershipNotificationWriter.class,EthPaymentService.class})
+@Import({MembershipCheckoutService.class,MembershipService.class,com.hs.common.time.BillingTime.class,MembershipNotificationWriter.class,EthPaymentService.class})
 class MembershipNotificationPostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs") @EnableJpaAuditing
     @EnableJpaRepositories(basePackageClasses={MembershipOrderRepository.class,
-        UserRepository.class,ListingMembershipRepository.class,EthPaymentQuoteRepository.class,
+        UserRepository.class,MembershipPeriodRepository.class,EthPaymentQuoteRepository.class,
         com.hs.listing.repository.ListingStatusHistoryRepository.class})
     static class Config {@Bean SepaySigner signer(){return new SepaySigner("test-only");}}
     @Autowired UserRepository users;
     @Autowired MembershipOrderRepository orders;
-    @Autowired ListingMembershipRepository memberships;
+    @Autowired MembershipPeriodRepository memberships;
+    @Autowired MembershipEventRepository events;
     @Autowired MembershipNotificationOutboxRepository outbox;
     @Autowired MembershipCheckoutService service;
     @Autowired EthPaymentService eth;
@@ -74,7 +76,7 @@ class MembershipNotificationPostgresTest {
     final ObjectMapper json=new ObjectMapper();
     MembershipOrder order;
     @BeforeEach void fixture(){
-        outbox.deleteAllInBatch();quotes.deleteAllInBatch();orders.deleteAllInBatch();memberships.deleteAllInBatch();users.deleteAllInBatch();
+        outbox.deleteAllInBatch();quotes.deleteAllInBatch();orders.deleteAllInBatch();events.deleteAllInBatch();memberships.deleteAllInBatch();users.deleteAllInBatch();
         User u=new User();u.setId(UUID.randomUUID().toString());u.setUsername("membership-test");u.setEmail("membership@example.invalid");users.saveAndFlush(u);
         order=new MembershipOrder();order.setId(UUID.randomUUID().toString().replace("-",""));order.setOwnerId(u.getId());
         order.setTier(MembershipTier.STARTER);order.setAmountVnd(49000);order.setStatus(MembershipOrder.Status.PENDING);
@@ -86,20 +88,32 @@ class MembershipNotificationPostgresTest {
         root.putObject("transaction").put("transaction_id",tx).put("transaction_status","APPROVED").put("transaction_type","PAYMENT")
             .put("transaction_currency","VND").put("transaction_amount","49000");return root;
     }
-    @Test void membershipExpiryQueryUsesRenewedExpiryAndSeparateSoonAndExpiredMarkers() {
+    @Test void membershipExpiryQuerySkipsReplacedAndAddonRowsAndNotifiesAgainWhenEndMoves() {
         var now=Instant.parse("2026-11-17T00:00:00Z");var soon=now.plusSeconds(3*86400);var page=org.springframework.data.domain.PageRequest.of(0,100);
-        var m=new ListingMembership();m.setOwnerId(order.getOwnerId());m.setTier(MembershipTier.STARTER);m.setPaidExpiresAt(now.plusSeconds(3600));memberships.saveAndFlush(m);
-        assertEquals(List.of(order.getOwnerId()),memberships.findExpiryNoticeOwnerIds(now,soon,page));
-        m.setExpiryReminderFor(m.getPaidExpiresAt());memberships.saveAndFlush(m);assertTrue(memberships.findExpiryNoticeOwnerIds(now,soon,page).isEmpty());
-        var expiry=m.getPaidExpiresAt();assertEquals(List.of(order.getOwnerId()),memberships.findExpiryNoticeOwnerIds(expiry,expiry.plusSeconds(3*86400),page));
-        m.setExpiredNoticeFor(expiry);memberships.saveAndFlush(m);assertTrue(memberships.findExpiryNoticeOwnerIds(expiry,expiry.plusSeconds(3*86400),page).isEmpty());
-        m.setPaidExpiresAt(now.plusSeconds(30*86400L));memberships.saveAndFlush(m);assertTrue(memberships.findExpiryNoticeOwnerIds(now,soon,page).isEmpty());
-        assertEquals(List.of(order.getOwnerId()),memberships.findExpiryNoticeOwnerIds(now.plusSeconds(28*86400L),now.plusSeconds(31*86400L),page));
+        var replaced=memberships.saveAndFlush(row(MembershipKind.PLAN,MembershipTier.STARTER,now));
+        var current=memberships.saveAndFlush(row(MembershipKind.PLAN,MembershipTier.PRO,now.plusSeconds(3600)));
+        memberships.saveAndFlush(row(MembershipKind.ADDON,null,now.plusSeconds(60)));
+        assertEquals(List.of(order.getOwnerId()),memberships.findExpiryNoticeOwnerIds(now,soon,now.minusSeconds(7*86400L),"",page));
+        assertEquals(List.of(current.getId()),memberships.findExpiryNotices(order.getOwnerId(),now,soon,now.minusSeconds(7*86400L)).stream().map(MembershipPeriod::getId).toList());
+        assertNotEquals(replaced.getId(),current.getId());
+        assertEquals(List.of(current.getId()),memberships.findActivePaid(order.getOwnerId(),now).stream().map(MembershipPeriod::getId).toList());
+        assertEquals(1,memberships.findActiveAddons(order.getOwnerId(),now).size());
+        current.setExpiryReminderFor(current.getEndAt());current=memberships.saveAndFlush(current);
+        assertTrue(memberships.findExpiryNoticeOwnerIds(now,soon,now.minusSeconds(7*86400L),"",page).isEmpty());
+        var expiry=current.getEndAt();assertEquals(List.of(order.getOwnerId()),memberships.findExpiryNoticeOwnerIds(expiry,expiry.plusSeconds(3*86400),expiry.minusSeconds(7*86400L),"",page));
+        current.setExpiredNoticeFor(expiry);current=memberships.saveAndFlush(current);
+        assertTrue(memberships.findExpiryNoticeOwnerIds(expiry,expiry.plusSeconds(3*86400),expiry.minusSeconds(7*86400L),"",page).isEmpty());
+        current.setEndAt(now.plusSeconds(30*86400L));memberships.saveAndFlush(current);
+        assertEquals(List.of(order.getOwnerId()),memberships.findExpiryNoticeOwnerIds(now.plusSeconds(28*86400L),now.plusSeconds(31*86400L),now.plusSeconds(21*86400L),"",page));
+    }
+    MembershipPeriod row(MembershipKind kind,MembershipTier tier,Instant end){
+        var p=new MembershipPeriod();p.setOwnerId(order.getOwnerId());p.setKind(kind);p.setTier(tier);
+        p.setStartAt(end.minusSeconds(30*86400L));p.setEndAt(end);p.setQuota(1);return p;
     }
     @Test void businessActivationOrderAndNoticeCommitOnceAndSecondPaymentTriggersOneReview(){
         service.sepayIpn(callback("first"));service.sepayIpn(callback("first"));
         assertEquals(MembershipOrder.Status.PAID,orders.findById(order.getId()).orElseThrow().getStatus());
-        assertEquals(MembershipTier.STARTER,memberships.findById(order.getOwnerId()).orElseThrow().getTier());assertEquals(1,outbox.count());
+        assertEquals(MembershipTier.STARTER,memberships.findActivePaid(order.getOwnerId(),Instant.now()).getFirst().getTier());assertEquals(1,outbox.count());
         service.sepayIpn(callback("second"));service.sepayIpn(callback("second"));
         assertEquals(MembershipOrder.Status.REVIEW,orders.findById(order.getId()).orElseThrow().getStatus());assertEquals(2,outbox.count());
     }
@@ -109,7 +123,7 @@ class MembershipNotificationPostgresTest {
             .when(target).enqueueTransition(any(),any());
         assertThrows(IllegalStateException.class,()->service.sepayIpn(callback("first")));
         assertEquals(MembershipOrder.Status.PENDING,orders.findById(order.getId()).orElseThrow().getStatus());
-        assertTrue(memberships.findById(order.getOwnerId()).isEmpty());assertEquals(0,outbox.count());
+        assertEquals(0,memberships.count());assertEquals(0,outbox.count());
     }
     @Test void parallelDuplicateCallbacksDoNotReactivateOrNotifyTwice() throws Exception{
         var ready=new CountDownLatch(2);var go=new CountDownLatch(1);
@@ -148,7 +162,7 @@ class MembershipNotificationPostgresTest {
             var a=pool.submit(call);var b=pool.submit(call);assertEquals("PAID",a.get(20,TimeUnit.SECONDS).status());assertEquals("PAID",b.get(20,TimeUnit.SECONDS).status());
         }
         assertEquals(1,outbox.count());assertEquals(hash,quotes.findById(q.getPaymentId()).orElseThrow().getTransactionHash());
-        assertEquals(MembershipTier.STARTER,memberships.findById(order.getOwnerId()).orElseThrow().getTier());
+        assertEquals(MembershipTier.STARTER,memberships.findActivePaid(order.getOwnerId(),Instant.now()).getFirst().getTier());
     }
     @Test void ethFailureAfterNotificationInsertRollsBackQuoteOrderAndPlan(){
         var q=ethFixture();String hash="0x"+"e".repeat(64);when(chain.verify(any(),eq(hash))).thenReturn(Instant.now());
@@ -156,13 +170,13 @@ class MembershipNotificationPostgresTest {
         doAnswer(call->{call.callRealMethod();throw new IllegalStateException("test after ETH enqueue");}).when(target).enqueueTransition(any(),any());
         assertThrows(IllegalStateException.class,()->eth.settle(order.getId(),order.getOwnerId(),new EthPaymentDtos.Settle(q.getPaymentId(),hash)));
         assertEquals(MembershipOrder.Status.PENDING,orders.findById(order.getId()).orElseThrow().getStatus());
-        assertNull(quotes.findById(q.getPaymentId()).orElseThrow().getConfirmedAt());assertTrue(memberships.findById(order.getOwnerId()).isEmpty());assertEquals(0,outbox.count());
+        assertNull(quotes.findById(q.getPaymentId()).orElseThrow().getConfirmedAt());assertEquals(0,memberships.count());assertEquals(0,outbox.count());
     }
     @Test void latePaymentOnlyRecordsReviewAndWriterRequiresTransaction(){
         assertThrows(IllegalTransactionStateException.class,()->writer.enqueueTransition(order,MembershipOrder.Status.PENDING));
         order.setExpiresAt(Instant.now().minusSeconds(1));orders.saveAndFlush(order);service.sepayIpn(callback("late"));
         assertEquals(MembershipOrder.Status.REVIEW,orders.findById(order.getId()).orElseThrow().getStatus());
-        assertTrue(memberships.findById(order.getOwnerId()).isEmpty());assertEquals(1,outbox.count());
+        assertEquals(0,memberships.count());assertEquals(1,outbox.count());
     }
     @SuppressWarnings("unchecked") KafkaTemplate<String,String> kafka(){return mock(KafkaTemplate.class);}
     @Test void kafkaFailureKeepsImmutableOrderedEventsForRetry(){

@@ -25,6 +25,8 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     MEMBERSHIP_ORDER_PENDING(4018, "A membership checkout is already pending", HttpStatus.CONFLICT),
     MEMBERSHIP_ORDER_NOT_FOUND(4019, "Membership order not found", HttpStatus.NOT_FOUND),
     MEMBERSHIP_PROVIDER_UNAVAILABLE(4080, "Payment provider is unavailable", HttpStatus.BAD_REQUEST),
+    MEMBERSHIP_SAME_TIER_ACTIVE(4082, "Gói này đang còn lượt đăng tin; chỉ được mua lại khi đã dùng hết lượt.", HttpStatus.CONFLICT),
+    MEMBERSHIP_ADDON_QUANTITY_INVALID(4083, "Số lượt mua thêm phải từ 1 đến 10.", HttpStatus.BAD_REQUEST),
     MEMBERSHIP_PROVIDER_NOT_CONFIGURED(4081, "SePay chưa được cấu hình để nhận thanh toán. Vui lòng liên hệ quản trị viên.", HttpStatus.SERVICE_UNAVAILABLE),
     LISTING_PUBLICATION_WINDOW_ENDED(
             4011,

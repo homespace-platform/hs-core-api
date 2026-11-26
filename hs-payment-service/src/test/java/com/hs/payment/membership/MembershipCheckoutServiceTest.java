@@ -1,5 +1,6 @@
 package com.hs.payment.membership;
 
+import com.hs.listing.membership.MembershipKind;
 import com.hs.listing.membership.MembershipService;
 import com.hs.listing.membership.MembershipTier;
 import com.hs.common.advice.entity.AppException;
@@ -13,6 +14,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Instant;
 import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.*;
 
 class MembershipCheckoutServiceTest {
@@ -124,7 +126,7 @@ class MembershipCheckoutServiceTest {
         assertFalse(service.sepayIpn(withTransaction(callback, "transaction_amount", "1")));
         assertFalse(service.sepayIpn(withTransaction(callback, "transaction_status", "DECLINED")));
         assertEquals(MembershipOrder.Status.PENDING, order.getStatus());
-        verify(memberships, never()).activate(anyString(), any(), anyBoolean());
+        verify(memberships, never()).activate(anyString(), any(), anyBoolean(), anyString());
     }
 
     @Test
@@ -132,22 +134,22 @@ class MembershipCheckoutServiceTest {
         MembershipOrder order = sepayOrder();
         when(orders.findById("order1")).thenReturn(Optional.of(order));
         when(orders.lockById("order1")).thenReturn(Optional.of(order));
-        when(memberships.activate("owner", MembershipTier.STARTER, false)).thenReturn(true);
+        when(memberships.activate("owner", MembershipTier.STARTER, false, "order1")).thenReturn(true);
         JsonNode callback = sepayCallback();
         assertTrue(service.sepayIpn(callback));
         assertEquals(MembershipOrder.Status.PAID, order.getStatus());
         assertTrue(service.sepayIpn(callback));
-        verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false);
+        verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false, "order1");
 
         assertTrue(service.sepayIpn(withTransaction(callback, "transaction_id", "tx456")));
         assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
         assertEquals("tx123", order.getTransactionNo());
-        verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false);
+        verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false, "order1");
 
         order.setStatus(MembershipOrder.Status.CANCELLED);
         assertTrue(service.sepayIpn(callback));
         assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
-        verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false);
+        verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false, "order1");
     }
 
     @Test
@@ -160,7 +162,7 @@ class MembershipCheckoutServiceTest {
         assertEquals("SEPAY", service.order("owner", "order1").provider());
         assertTrue(service.sepayIpn(sepayCallback()));
         assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
-        verify(memberships, never()).activate(anyString(), any(), anyBoolean());
+        verify(memberships, never()).activate(anyString(), any(), anyBoolean(), anyString());
     }
 
     @Test
@@ -169,7 +171,7 @@ class MembershipCheckoutServiceTest {
         when(orders.findById("order1")).thenReturn(Optional.of(order));
         when(orders.lockById("order1")).thenReturn(Optional.of(order));
         assertFalse(service.sepayIpn(sepayCallback()));
-        verify(memberships, never()).activate(anyString(), any(), anyBoolean());
+        verify(memberships, never()).activate(anyString(), any(), anyBoolean(), anyString());
         assertEquals(MembershipOrder.Status.PENDING, order.getStatus());
     }
 
@@ -186,7 +188,7 @@ class MembershipCheckoutServiceTest {
         assertEquals("CANCELLED", service.cancel("owner", "order1").status());
         order.setStatus(MembershipOrder.Status.PAID);
         assertEquals("PAID", service.cancel("owner", "order1").status());
-        verify(memberships, never()).activate(anyString(), any(), anyBoolean());
+        verify(memberships, never()).activate(anyString(), any(), anyBoolean(), anyString());
     }
 
     @Test
@@ -196,6 +198,87 @@ class MembershipCheckoutServiceTest {
         when(orders.findById("order1")).thenReturn(Optional.of(order));
         assertEquals("VNPAY", service.order("owner", "order1").provider());
         assertNull(order.getProvider());
+    }
+
+    @Test
+    void addonCheckoutPricesOnTheServerRejectsBadInputAndSharesThePendingRule() {
+        ReflectionTestUtils.setField(service, "sepayMerchantId", "MERCHANT_TEST");
+        ReflectionTestUtils.setField(service, "sepayCheckoutUrl", "https://pay-sandbox.sepay.vn/v1/checkout/init");
+        ReflectionTestUtils.setField(service, "sepayReturnUrl", "https://example.test/dashboard/membership/return");
+        ReflectionTestUtils.setField(service, "sepayIpnSecret", "test-ipn-secret");
+        when(memberships.addonAmountVnd(3)).thenReturn(24_000);
+        assertEquals(ListingErrorCode.MEMBERSHIP_PROVIDER_UNAVAILABLE.getCode(), assertThrows(AppException.class,
+                () -> service.addonCheckout("owner", 3, MembershipOrder.Provider.VNPAY)).getCode());
+        when(memberships.addonAmountVnd(11))
+                .thenThrow(new AppException(ListingErrorCode.MEMBERSHIP_ADDON_QUANTITY_INVALID));
+        assertThrows(AppException.class, () -> service.addonCheckout("owner", 11, MembershipOrder.Provider.SEPAY));
+        verify(orders, never()).save(any());
+
+        var checkout = service.addonCheckout("owner", 3, MembershipOrder.Provider.SEPAY);
+        assertEquals(24_000, checkout.amountVnd());
+        assertEquals("SEPAY", checkout.provider());
+        assertEquals("24000", checkout.formFields().get("order_amount"));
+        var saved = org.mockito.ArgumentCaptor.forClass(MembershipOrder.class);
+        verify(orders).save(saved.capture());
+        assertEquals(MembershipKind.ADDON, saved.getValue().getKind());
+        assertEquals(3, saved.getValue().getQuantity());
+        assertNull(saved.getValue().getTier());
+        var view = MembershipCheckoutService.OrderView.from(saved.getValue());
+        assertEquals("ADDON", view.kind());
+        assertEquals(3, view.quantity());
+        assertNull(view.tier());
+        verify(memberships).lockOwner("owner");
+        var ethCheckout = service.addonCheckout("owner", 3, MembershipOrder.Provider.ETH);
+        assertEquals("ETH", ethCheckout.provider());
+        assertEquals(24_000, ethCheckout.amountVnd());
+        assertTrue(ethCheckout.formFields().isEmpty());
+
+        when(orders.findByOwnerIdAndStatus("owner", MembershipOrder.Status.PENDING))
+                .thenReturn(java.util.List.of(saved.getValue()));
+        assertEquals(ListingErrorCode.MEMBERSHIP_ORDER_PENDING.getCode(), assertThrows(AppException.class,
+                () -> service.addonCheckout("owner", 3, MembershipOrder.Provider.SEPAY)).getCode());
+        when(memberships.quote("owner", MembershipTier.STARTER)).thenReturn(
+                new MembershipService.Quote("STARTER", 49_000, "NEW", 10, null, null, false));
+        assertEquals(ListingErrorCode.MEMBERSHIP_ORDER_PENDING.getCode(), assertThrows(AppException.class,
+                () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY)).getCode());
+    }
+
+    @Test
+    void addonIpnRejectsAmountMismatchAndActivatesOnceForDuplicates() throws Exception {
+        MembershipOrder order = sepayOrder();
+        order.setKind(MembershipKind.ADDON);
+        order.setTier(null);
+        order.setQuantity(2);
+        order.setAmountVnd(16_000);
+        when(orders.findById("order1")).thenReturn(Optional.of(order));
+        when(orders.lockById("order1")).thenReturn(Optional.of(order));
+        when(memberships.activateAddon("owner", 2, "order1")).thenReturn(true);
+        JsonNode callback = withTransaction(withOrder(sepayCallback(), "order_amount", "16000"),
+                "transaction_amount", "16000");
+        assertFalse(service.sepayIpn(withOrder(callback, "order_amount", "8000")));
+        assertFalse(service.sepayIpn(withTransaction(callback, "transaction_amount", "8000")));
+        verify(memberships, never()).activateAddon(anyString(), anyInt(), anyString());
+        assertEquals(MembershipOrder.Status.PENDING, order.getStatus());
+
+        assertTrue(service.sepayIpn(callback));
+        assertTrue(service.sepayIpn(callback));
+        assertEquals(MembershipOrder.Status.PAID, order.getStatus());
+        verify(memberships, times(1)).activateAddon("owner", 2, "order1");
+        assertTrue(service.sepayIpn(withTransaction(callback, "transaction_id", "tx456")));
+        assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
+        verify(memberships, times(1)).activateAddon("owner", 2, "order1");
+        verify(memberships, never()).activate(anyString(), any(), anyBoolean(), anyString());
+    }
+
+    @Test
+    void paidSepayOrderWhoseActivationIsRefusedIsHeldForReview() throws Exception {
+        MembershipOrder order = sepayOrder();
+        when(orders.findById("order1")).thenReturn(Optional.of(order));
+        when(orders.lockById("order1")).thenReturn(Optional.of(order));
+        assertTrue(service.sepayIpn(sepayCallback())); // activate() returns false.
+        assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
+        assertEquals("tx123", order.getTransactionNo());
+        assertNotNull(order.getPaidAt());
     }
 
     private MembershipOrder legacyVnpayOrder() {

@@ -1,5 +1,6 @@
 package com.hs.payment.membership;
 
+import com.hs.listing.membership.MembershipKind;
 import com.hs.listing.membership.MembershipTier;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -14,8 +15,13 @@ public class MembershipOrder {
     private String id;
     @Column(name = "owner_id", nullable = false, length = 36)
     private String ownerId;
-    @Enumerated(EnumType.STRING) @Column(nullable = false, length = 16)
+    @Enumerated(EnumType.STRING) @Column(nullable = false, length = 8)
+    private MembershipKind kind = MembershipKind.PLAN;
+    /** Null for ADDON orders. */
+    @Enumerated(EnumType.STRING) @Column(length = 16)
     private MembershipTier tier;
+    /** Extra uses bought; null for PLAN orders. */
+    private Integer quantity;
     @Column(name = "amount_vnd", nullable = false)
     private int amountVnd;
     @Column(nullable = false)

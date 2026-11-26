@@ -70,6 +70,9 @@ public class Listing extends BaseEntity {
     private Instant expiresAt;
     @Column(name = "publication_reservation", length = 8)
     private String publicationReservation;
+    /** membership_periods row holding the reservation; null for ADMIN exemptions. */
+    @Column(name = "publication_period_id", length = 36)
+    private String publicationPeriodId;
     @Column(length = 36)
     private String pendingEditId;
     @Column(columnDefinition = "text")

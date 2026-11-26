@@ -48,10 +48,10 @@ class MembershipNotificationAcceptanceTest {
     List<MembershipNotificationOutbox> rows(int count){var c=ArgumentCaptor.forClass(MembershipNotificationOutbox.class);verify(outbox,times(count)).save(c.capture());return c.getAllValues();}
 
     @Test void sepayActivationReplayAndSecondTransactionReviewExportExactContract() throws Exception {
-        var o=order(MembershipOrder.Provider.SEPAY);when(memberships.activate("persisted-owner",MembershipTier.STARTER,false)).thenReturn(true);
+        var o=order(MembershipOrder.Provider.SEPAY);when(memberships.activate(eq("persisted-owner"),eq(MembershipTier.STARTER),eq(false),anyString())).thenReturn(true);
         assertTrue(sepay.sepayIpn(callback("tx-one")));assertTrue(sepay.sepayIpn(callback("tx-one")));
         assertTrue(sepay.sepayIpn(callback("tx-two")));assertTrue(sepay.sepayIpn(callback("tx-two")));
-        var rows=rows(2);verify(memberships,times(1)).activate(anyString(),any(),anyBoolean());
+        var rows=rows(2);verify(memberships,times(1)).activate(anyString(),any(),anyBoolean(),anyString());
         assertEquals(MembershipOrder.Status.REVIEW,o.getStatus());assertNotNull(o.getPaidAt());assertEquals("tx-one",o.getTransactionNo());
         var fixtures=new ArrayList<Object>();
         for(int i=0;i<rows.size();i++){
@@ -70,7 +70,7 @@ class MembershipNotificationAcceptanceTest {
         var o=order(MembershipOrder.Provider.SEPAY);o.setStatus(before);o.setExpiresAt(Instant.now().minusSeconds(1));
         assertTrue(sepay.sepayIpn(callback("late")));assertTrue(sepay.sepayIpn(callback("late")));
         assertEquals(MembershipOrder.Status.REVIEW,o.getStatus());assertTrue(rows(1).getFirst().getPayload().contains("MEMBERSHIP_PAYMENT_REVIEW"));
-        verify(memberships,never()).activate(anyString(),any(),anyBoolean());
+        verify(memberships,never()).activate(anyString(),any(),anyBoolean(),anyString());
     }
     @Test void refusedActivationAndInvalidCallbacksNeverClaimActivated(){
         var o=order(MembershipOrder.Provider.SEPAY);var bad=callback("invalid");bad.withObject("transaction").put("transaction_amount","1");
@@ -86,10 +86,10 @@ class MembershipNotificationAcceptanceTest {
         when(chain.verify(q,hash)).thenThrow(new IllegalStateException("not verified"));
         assertThrows(IllegalStateException.class,()->eth.settle(id,"persisted-owner",req));verifyNoInteractions(outbox);
         Instant mined=Instant.now();doReturn(mined).when(chain).verify(q,hash);
-        when(memberships.activateAt("persisted-owner",MembershipTier.STARTER,false,mined)).thenReturn(true);
+        when(memberships.activate(eq("persisted-owner"),eq(MembershipTier.STARTER),eq(false),anyString())).thenReturn(true);
         eth.settle(id,"persisted-owner",req);eth.settle(id,"persisted-owner",req);
         assertEquals(MembershipOrder.Status.PAID,o.getStatus());assertTrue(rows(1).getFirst().getPayload().contains("MEMBERSHIP_ACTIVATED"));
-        verify(memberships,times(1)).activateAt(anyString(),any(),anyBoolean(),any());
+        verify(memberships,times(1)).activate(anyString(),any(),anyBoolean(),anyString());
     }
     @Test void unsupportedPendingAndMissingIdentityCannotBeQueued(){
         var o=order(MembershipOrder.Provider.SEPAY);writer.enqueueTransition(o,MembershipOrder.Status.PENDING);verifyNoInteractions(outbox);

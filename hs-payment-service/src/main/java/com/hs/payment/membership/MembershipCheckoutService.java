@@ -2,6 +2,7 @@ package com.hs.payment.membership;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.listing.advice.ListingErrorCode;
+import com.hs.listing.membership.MembershipKind;
 import com.hs.listing.membership.MembershipService;
 import com.hs.listing.membership.MembershipTier;
 import com.hs.payment.membership.notification.MembershipNotificationWriter;
@@ -42,25 +43,56 @@ public class MembershipCheckoutService {
 
     public record Checkout(String orderId, String paymentUrl, int amountVnd, String provider, Map<String, String> formFields) {}
     public record OrderView(String id, String tier, int amountVnd, String status, Instant createdAt, Instant paidAt,
-                            String provider, String txHash) {
+                            String provider, String txHash, String kind, Integer quantity) {
         public static OrderView from(MembershipOrder o) {
             // Legacy rows may store null provider from the pre-SePay era; surface as VNPAY without rewriting storage.
-            return new OrderView(o.getId(), o.getTier().name(), o.getAmountVnd(), o.getStatus().name(),
+            return new OrderView(o.getId(), o.getTier() == null ? null : o.getTier().name(), o.getAmountVnd(),
+                    o.getStatus().name(),
                     o.getCreatedAt(), o.getPaidAt(),
                     o.getProvider() == null ? MembershipOrder.Provider.VNPAY.name() : o.getProvider().name(),
                     o.getProvider() == MembershipOrder.Provider.ETH && o.getTransactionNo() != null
-                            ? "0x" + o.getTransactionNo() : null);
+                            ? "0x" + o.getTransactionNo() : null,
+                    o.getKind().name(), o.getQuantity());
         }
     }
 
     @Transactional
     public Checkout checkout(String ownerId, MembershipTier tier, MembershipOrder.Provider provider) {
+        requireProvider(provider);
+        MembershipService.Quote quote = memberships.quote(ownerId, tier); // Locks owner for concurrent orders.
+        MembershipOrder order = new MembershipOrder();
+        order.setTier(tier);
+        order.setAmountVnd(quote.amountVnd());
+        order.setUpgrade(quote.upgrade());
+        // The ETH quote expiry is capped by this value, so it is stored on the gateway (real) clock.
+        order.setUpgradeDeadline(quote.upgrade() ? memberships.realTimeOf(quote.upgradeDeadline()) : null);
+        return place(order, ownerId, provider, "HomeSpace membership " + tier.name());
+    }
+
+    /** Same providers and order rules as plans. The amount is computed here from the validated quantity. */
+    @Transactional
+    public Checkout addonCheckout(String ownerId, int quantity, MembershipOrder.Provider provider) {
+        requireProvider(provider);
+        int amountVnd = memberships.addonAmountVnd(quantity);
+        memberships.lockOwner(ownerId);
+        MembershipOrder order = new MembershipOrder();
+        order.setKind(MembershipKind.ADDON);
+        order.setQuantity(quantity);
+        order.setAmountVnd(amountVnd);
+        return place(order, ownerId, provider, "HomeSpace extra listing uses x" + quantity);
+    }
+
+    private void requireProvider(MembershipOrder.Provider provider) {
         if (provider != MembershipOrder.Provider.SEPAY && provider != MembershipOrder.Provider.ETH)
             throw new AppException(ListingErrorCode.MEMBERSHIP_PROVIDER_UNAVAILABLE);
-        if (provider == MembershipOrder.Provider.SEPAY && (isBlank(sepayMerchantId) || isBlank(sepayReturnUrl) || isBlank(sepayCheckoutUrl)
-                || isBlank(sepayIpnSecret) || !sepaySigner.isConfigured()))
+        if (provider == MembershipOrder.Provider.SEPAY && (isBlank(sepayMerchantId) || isBlank(sepayReturnUrl)
+                || isBlank(sepayCheckoutUrl) || isBlank(sepayIpnSecret) || !sepaySigner.isConfigured()))
             throw new AppException(ListingErrorCode.MEMBERSHIP_PROVIDER_NOT_CONFIGURED);
-        MembershipService.Quote quote = memberships.quote(ownerId, tier); // Locks owner for concurrent orders.
+    }
+
+    /** Caller holds the owner lock. Plan and add-on orders share the one-pending-order rule. */
+    private Checkout place(MembershipOrder order, String ownerId, MembershipOrder.Provider provider,
+                           String description) {
         Instant now = Instant.now();
         boolean pending = false;
         for (MembershipOrder previous : orders.findByOwnerIdAndStatus(ownerId, MembershipOrder.Status.PENDING)) {
@@ -71,13 +103,8 @@ public class MembershipCheckoutService {
         }
         if (pending)
             throw new AppException(ListingErrorCode.MEMBERSHIP_ORDER_PENDING);
-        MembershipOrder order = new MembershipOrder();
         order.setId(UUID.randomUUID().toString().replace("-", ""));
         order.setOwnerId(ownerId);
-        order.setTier(tier);
-        order.setAmountVnd(quote.amountVnd());
-        order.setUpgrade(quote.upgrade());
-        order.setUpgradeDeadline(quote.upgrade() ? quote.upgradeDeadline() : null);
         order.setStatus(MembershipOrder.Status.PENDING);
         order.setProvider(provider);
         order.setCreatedAt(now);
@@ -91,7 +118,7 @@ public class MembershipCheckoutService {
         fields.put("merchant", sepayMerchantId);
         fields.put("currency", "VND");
         fields.put("operation", "PURCHASE");
-        fields.put("order_description", "HomeSpace membership " + tier.name());
+        fields.put("order_description", description);
         fields.put("order_invoice_number", order.getId());
         fields.put("success_url", callback + "&sepayReturn=success");
         fields.put("error_url", callback + "&sepayReturn=error");
@@ -188,7 +215,7 @@ public class MembershipCheckoutService {
         Instant now = Instant.now();
         if (o.getStatus() != MembershipOrder.Status.PENDING || !o.getExpiresAt().isAfter(now)) {
             o.setStatus(MembershipOrder.Status.REVIEW);
-        } else if (memberships.activate(o.getOwnerId(), o.getTier(), o.isUpgrade())) {
+        } else if (activate(o)) {
             o.setStatus(MembershipOrder.Status.PAID);
         } else {
             o.setStatus(MembershipOrder.Status.REVIEW);
@@ -197,6 +224,12 @@ public class MembershipCheckoutService {
         o.setPaidAt(now);
         notifications.enqueueTransition(o, before);
         return true;
+    }
+
+    private boolean activate(MembershipOrder o) {
+        return o.getKind() == MembershipKind.ADDON
+                ? memberships.activateAddon(o.getOwnerId(), o.getQuantity(), o.getId())
+                : memberships.activate(o.getOwnerId(), o.getTier(), o.isUpgrade(), o.getId());
     }
 
     private static boolean isBlank(String value) {
