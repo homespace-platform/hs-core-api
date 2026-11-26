@@ -159,7 +159,7 @@ class MembershipServiceTest {
     }
 
     @Test
-    void upgradeEditsTheActiveRowAndKeepsUsageAndStart() {
+    void upgradeEditsTheActiveRowResetsUsageAndKeepsStart() {
         assertTrue(service.activate("owner", STARTER, false, "o1"));
         consume(2);
         service.reserve(listing(), false);
@@ -168,7 +168,7 @@ class MembershipServiceTest {
         var quote = service.quote("owner", PRO);
         assertEquals("UPGRADE", quote.mode());
         assertEquals(80_000, quote.amountVnd());
-        assertEquals(27, quote.remainingUsesAfter());
+        assertEquals(29, quote.remainingUsesAfter()); // Only the pending use stays held.
         assertEquals(start.plus(Duration.ofHours(24)), quote.upgradeDeadline());
         assertTrue(service.activate("owner", PRO, true, "o2"));
         assertEquals(1, rows.size());
@@ -176,13 +176,13 @@ class MembershipServiceTest {
         assertEquals(PRO, row.getTier());
         assertEquals(30, row.getQuota());
         assertEquals(129_000, row.getPriceVnd());
-        assertEquals(2, row.getUsed());
+        assertEquals(0, row.getUsed());
         assertEquals(1, row.getReserved());
         assertEquals(start, row.getStartAt());
         assertEquals(now.plus(MONTH), row.getEndAt());
         MembershipEvent upgrade = ledger.getLast();
         assertEquals(UPGRADE, upgrade.getType());
-        assertEquals(20, upgrade.getDelta());
+        assertEquals(22, upgrade.getDelta());
         assertEquals(STARTER, upgrade.getOldTier());
         assertEquals(PRO, upgrade.getNewTier());
         assertEquals("o2", upgrade.getOrderId());
@@ -231,24 +231,6 @@ class MembershipServiceTest {
     }
 
     @Test
-    void buyingFromFreeCountsSpentAndPendingFreeUsesAndRefundsTheNewPlan() {
-        consume(1);
-        Listing pending = listing();
-        service.reserve(pending, false);
-        assertEquals(98, service.quote("owner", BUSINESS).remainingUsesAfter());
-        assertTrue(service.activate("owner", BUSINESS, false, "o1"));
-        var view = service.view("owner");
-        assertEquals(98, view.remainingUses());
-        assertEquals(1, view.reservedUses());
-        service.finish(pending, false); // Rejected: the use comes back to the plan that took it over.
-        assertEquals(99, service.view("owner").remainingUses());
-        MembershipPeriod free = rows.stream().filter(p -> p.getTier() == FREE).findFirst().orElseThrow();
-        assertEquals(0, free.getReserved());
-        assertEquals(0, free.getCarriedReserved());
-        assertEquals(1, free.getUsed());
-    }
-
-    @Test
     void aPaidUpgradeWithoutAnActiveLowerPlanIsRefusedAndNothingDowngrades() {
         assertFalse(service.activate("owner", PRO, true, "o1"));
         assertTrue(service.activate("owner", PRO, false, "o2"));
@@ -286,7 +268,7 @@ class MembershipServiceTest {
     void exhaustedPaidPlanCannotUseFreeAndExpiryRestoresTheCurrentFreeBalance() {
         consume(1);
         assertTrue(service.activate("owner", STARTER, false, "o1"));
-        consume(9); // The FREE use already spent counts against the plan.
+        consume(10);
         assertError(ListingErrorCode.LISTING_QUOTA_EXHAUSTED, () -> service.reserve(listing(), false));
         var paid = service.view("owner");
         assertEquals("STARTER", paid.tier());

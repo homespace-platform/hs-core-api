@@ -33,12 +33,6 @@ public class MembershipPeriod {
     // Set only on FREE rows. NULLs never collide, so other rows may share a start_at (simulated time is frozen).
     @Column(name = "free_start_at")
     private Instant freeStartAt;
-    /** FREE rows only: pending reservations handed to a purchased plan. The default keeps existing tables updatable. */
-    @org.hibernate.annotations.ColumnDefault("0")
-    @Column(nullable = false)
-    private int carriedReserved;
-    @Column(length = 36)
-    private String carriedToId;
     private Instant expiryReminderFor;
     private Instant expiredNoticeFor;
 
