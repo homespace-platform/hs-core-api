@@ -34,6 +34,7 @@ Cần `driver=overlay attachable=true`. Nếu chưa có mạng, hoàn tất infr
 | `DATASOURCE_USERNAME`, `DATASOURCE_PASSWORD` | Khớp PostgreSQL infra |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | `redis`, `6379`, password khớp infra |
 | `KAFKA_BOOTSTRAP_SERVERS` | `kafka:19092` |
+| `KAFKA_CHAT_PROFILE_TOPIC` | `homespace.user.chat-profile.v1`, cùng giá trị với Infra và Chat |
 | `KEYCLOAK_SERVER_URL` | `http://keycloak:8080` |
 | `KEYCLOAK_ADMIN_USERNAME` | `homespace` theo env infra hiện tại; phải là tài khoản có thật và có quyền |
 | `KEYCLOAK_ADMIN_PASSWORD` | Mật khẩu thật của tài khoản quản trị Keycloak đang tồn tại |

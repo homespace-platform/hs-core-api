@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -34,6 +35,7 @@ import com.hs.user.dto.response.UserPermissionsResponse;
 import com.hs.user.dto.response.UserProfileResponse;
 import com.hs.user.dto.response.UserResponse;
 import com.hs.user.dto.response.PublicUserProfileResponse;
+import com.hs.user.event.ChatProfileChanges;
 import com.hs.user.mapper.UserMapper;
 import com.hs.user.model.Address;
 import com.hs.user.model.Role;
@@ -69,6 +71,7 @@ public class UserServiceImpl implements UserService {
         KeycloakUserService keycloakUserService;
         CurrentUserUtils currentUserUtils;
         AccountNotificationWriter accountNotifications;
+        ChatProfileChanges chatProfileChanges;
 
         @Override
         public AdminCreateUserResponse createUser(AdminCreateUserRequest request) {
@@ -304,6 +307,7 @@ public class UserServiceImpl implements UserService {
         @Override
         public void updateUserAvatar(String avatarUrl, String avatarStorageId) {
                 User user = currentUserUtils.getCurrentUser();
+                boolean changed = !Objects.equals(user.getAvatarUrl(), avatarUrl);
 
                 keycloakUserService.updateUserIfChanged(
                                 user.getId(),
@@ -314,6 +318,7 @@ public class UserServiceImpl implements UserService {
                 user.setAvatarUrl(avatarUrl);
                 user.setAvatarStorageId(avatarStorageId);
                 userRepository.save(user);
+                if (changed) chatProfileChanges.afterCommit(user.getId());
                 log.info("Updated avatar for user {}", user.getId());
         }
 

@@ -7,6 +7,7 @@ import com.hs.user.dto.request.AdminUpdateUserRequest;
 import com.hs.user.model.Permission;
 import com.hs.user.model.Role;
 import com.hs.user.model.User;
+import com.hs.user.event.ChatProfileChanges;
 import com.hs.user.notification.AccountNotificationWriter;
 import com.hs.user.repository.AddressRepository;
 import com.hs.user.repository.KycVerificationRepository;
@@ -44,7 +45,7 @@ class UserServiceImplAdminGuardsTest {
     final CurrentUserUtils actor = mock(CurrentUserUtils.class);
     final AccountNotificationWriter notifications = mock(AccountNotificationWriter.class);
     final UserServiceImpl service = new UserServiceImpl(users, roles, mock(AddressRepository.class),
-            mock(KycVerificationRepository.class), keycloak, actor, notifications);
+            mock(KycVerificationRepository.class), keycloak, actor, notifications, mock(ChatProfileChanges.class));
 
     final Role adminRole = role("role-admin", "ADMIN", "USER_VIEW", "ROLE_UPDATE");
     final Role userRole = role("role-user", "USER");

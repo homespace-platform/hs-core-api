@@ -3,6 +3,7 @@ package com.hs.user.service.impl;
 import com.hs.user.dto.request.AdminUpdateUserRequest;
 import com.hs.user.model.Role;
 import com.hs.user.model.User;
+import com.hs.user.event.ChatProfileChanges;
 import com.hs.user.notification.AccountNotificationWriter;
 import com.hs.user.repository.*;
 import com.hs.user.service.KeycloakUserService;
@@ -28,7 +29,7 @@ class AccountNotificationServiceTest {
     final KeycloakUserService keycloak=mock(KeycloakUserService.class);
     final CurrentUserUtils identity=mock(CurrentUserUtils.class);
     final AccountNotificationWriter notices=mock(AccountNotificationWriter.class);
-    final UserServiceImpl service=new UserServiceImpl(users,roles,mock(AddressRepository.class),mock(KycVerificationRepository.class),keycloak,identity,notices);
+    final UserServiceImpl service=new UserServiceImpl(users,roles,mock(AddressRepository.class),mock(KycVerificationRepository.class),keycloak,identity,notices,mock(ChatProfileChanges.class));
     User target;
     @BeforeEach void setup() {
         target=new User();target.setId("target");target.setEmail("private@secret.test");target.setUsername("target");target.setActive(true);

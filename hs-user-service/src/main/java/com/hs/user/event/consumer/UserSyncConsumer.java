@@ -1,11 +1,14 @@
 package com.hs.user.event.consumer;
 
+import java.util.Arrays;
+
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.hs.user.config.database.BootstrapAdminProperties;
 import com.hs.user.constant.RoleConstants;
+import com.hs.user.event.ChatProfileChanges;
 import com.hs.common.context.UserContextHolder;
 import com.hs.common.context.UserContext;
 import com.hs.user.model.Role;
@@ -33,6 +36,7 @@ public class UserSyncConsumer {
     RoleRepository roleRepository;
     ObjectMapper objectMapper;
     BootstrapAdminProperties bootstrapAdminProperties;
+    ChatProfileChanges chatProfileChanges;
 
     @KafkaListener(topics = "${spring.kafka.topic.keycloak-user-events}")
     @Transactional
@@ -111,6 +115,7 @@ public class UserSyncConsumer {
 
     private void handleUpdateUser(JsonNode payload, String userId) {
         userRepository.findById(userId).ifPresentOrElse(user -> {
+            String[] previous = chatProfile(user);
             if (payload.has("username")) user.setUsername(payload.path("username").asText(null));
             if (payload.has("email")) user.setEmail(payload.path("email").asText(null));
             if (payload.has("firstName")) user.setFirstName(payload.path("firstName").asText(null));
@@ -123,8 +128,13 @@ public class UserSyncConsumer {
             }
 
             userRepository.save(user);
+            if (!Arrays.equals(previous, chatProfile(user))) chatProfileChanges.afterCommit(userId);
             log.info("Successfully updated user {} from Kafka event.", userId);
         }, () -> log.warn("User {} not found. Skipping update.", userId));
+    }
+
+    private String[] chatProfile(User user) {
+        return new String[] {user.getUsername(), user.getFirstName(), user.getLastName(), user.getAvatarUrl()};
     }
 
     private void handleDeleteUser(String userId) {

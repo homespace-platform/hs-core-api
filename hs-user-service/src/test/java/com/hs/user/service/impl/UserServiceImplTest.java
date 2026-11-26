@@ -23,6 +23,7 @@ import com.hs.user.model.Role;
 import com.hs.user.model.constant.KycProvider;
 import com.hs.user.service.kyc.KycPolicy;
 import com.hs.user.model.constant.KycStatus;
+import com.hs.user.event.ChatProfileChanges;
 import com.hs.user.notification.AccountNotificationWriter;
 import com.hs.user.repository.AddressRepository;
 import com.hs.user.repository.KycVerificationRepository;
@@ -47,7 +48,7 @@ class UserServiceImplTest {
         when(actor.getCurrentUser()).thenReturn(user);
         when(users.findById("admin-1")).thenReturn(Optional.of(user));
         var service = new UserServiceImpl(users, mock(RoleRepository.class), mock(AddressRepository.class),
-                verifications, mock(KeycloakUserService.class), actor, mock(AccountNotificationWriter.class));
+                verifications, mock(KeycloakUserService.class), actor, mock(AccountNotificationWriter.class), mock(ChatProfileChanges.class));
 
         assertFalse(service.getUserProfile().kycVerified());
         assertFalse(service.getUserProfile().kycOptional());
@@ -83,7 +84,7 @@ class UserServiceImplTest {
                 verifications,
                 mock(KeycloakUserService.class),
                 mock(CurrentUserUtils.class),
-                mock(AccountNotificationWriter.class));
+                mock(AccountNotificationWriter.class), mock(ChatProfileChanges.class));
         var profile = service.getPublicUserProfile("user-1");
         Set<String> fields = Arrays.stream(profile.getClass().getRecordComponents())
                 .map(component -> component.getName())
@@ -111,7 +112,7 @@ class UserServiceImplTest {
         when(addresses.findByUser_IdAndActiveTrue("user-1")).thenReturn(Optional.of(address));
         var service = new UserServiceImpl(users, mock(RoleRepository.class), addresses,
                 mock(KycVerificationRepository.class), mock(KeycloakUserService.class),
-                mock(CurrentUserUtils.class), mock(AccountNotificationWriter.class));
+                mock(CurrentUserUtils.class), mock(AccountNotificationWriter.class), mock(ChatProfileChanges.class));
 
         var profile = service.getPublicUserProfileByUsername("nguyen-a");
 
@@ -134,7 +135,7 @@ class UserServiceImplTest {
         when(addresses.findByUser_IdAndActiveTrue("user-1")).thenReturn(Optional.empty());
         var service = new UserServiceImpl(users, mock(RoleRepository.class), addresses,
                 mock(KycVerificationRepository.class), mock(KeycloakUserService.class),
-                mock(CurrentUserUtils.class), mock(AccountNotificationWriter.class));
+                mock(CurrentUserUtils.class), mock(AccountNotificationWriter.class), mock(ChatProfileChanges.class));
 
         assertNull(service.getPublicUserProfileByUsername("a").provinceName());
         assertThrows(AppException.class, () -> service.getPublicUserProfileByUsername("b"));

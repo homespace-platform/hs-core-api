@@ -5,6 +5,7 @@ import com.hs.user.model.Role;
 import com.hs.user.repository.*;
 import com.hs.user.service.KeycloakUserService;
 import com.hs.user.service.impl.UserServiceImpl;
+import com.hs.user.event.ChatProfileChanges;
 import com.hs.user.utils.CurrentUserUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,6 +56,7 @@ class AccountNotificationPostgresTest {
     @Autowired PlatformTransactionManager manager;
     @MockitoSpyBean AccountNotificationWriter writer;
     @MockitoBean KeycloakUserService keycloak;
+    @MockitoBean ChatProfileChanges chatProfileChanges;
     @MockitoBean CurrentUserUtils identity;
     User target;
     @BeforeEach void fixture() {
