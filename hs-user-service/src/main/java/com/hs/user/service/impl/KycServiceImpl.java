@@ -60,7 +60,7 @@ public class KycServiceImpl implements KycService {
 
         if (latest.isEmpty()) {
             return new KycStatusResponse(
-                    KycStatus.NOT_VERIFIED, null, KycProvider.VNPT, null, null, null);
+                    KycStatus.NOT_VERIFIED, null, KycProvider.VNPT, KycProvider.VNPT.label(), null, null, null);
         }
 
         KycVerification v = latest.get();
@@ -71,6 +71,7 @@ public class KycServiceImpl implements KycService {
                 status,
                 v.getVerifiedAt(),
                 v.getProvider(),
+                v.getProvider() == null ? null : v.getProvider().label(),
                 v.getProvider() == KycProvider.VNPT ? v.getId() : v.getProviderSessionId(),
                 null,
                 v.getRejectionReason()

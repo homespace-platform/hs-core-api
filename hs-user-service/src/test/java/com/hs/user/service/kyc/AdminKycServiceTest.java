@@ -195,9 +195,9 @@ class AdminKycServiceTest {
     @Test void statusExposesOnlyStateProviderAndTimeNeverPersonalData() {
         login("ADMIN", "KYC_VIEW");
         var at = Instant.parse("2026-11-27T00:00:00Z");
-        when(kyc.getCurrentStatus("alice")).thenReturn(new KycStatusResponse(KycStatus.VERIFIED, at, KycProvider.ADMIN, "s", null, null));
+        when(kyc.getCurrentStatus("alice")).thenReturn(new KycStatusResponse(KycStatus.VERIFIED, at, KycProvider.ADMIN, "Quản trị viên", "s", null, null));
         assertEquals(new AdminKycStatusResponse(true, "ADMIN", "Quản trị viên", at), service.status("alice"));
-        when(kyc.getCurrentStatus("bob")).thenReturn(new KycStatusResponse(KycStatus.NOT_VERIFIED, null, KycProvider.VNPT, null, null, null));
+        when(kyc.getCurrentStatus("bob")).thenReturn(new KycStatusResponse(KycStatus.NOT_VERIFIED, null, KycProvider.VNPT, "VNPT", null, null, null));
         assertFalse(service.status("bob").verified());
         verifyNoInteractions(details);
     }

@@ -8,6 +8,7 @@ public record KycStatusResponse(
         KycStatus status,
         Instant verifiedAt,
         KycProvider provider,
+        String providerLabel,
         String sessionId,
         String sessionUrl,
         String rejectionReason
