@@ -6,7 +6,7 @@ import com.hs.common.advice.entity.AppException;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.config.vnpt.VnptKycProperties;
 import com.hs.user.integration.vnpt.*;
-import com.hs.user.model.VnptKycStep;
+import com.hs.user.model.KycProviderStep;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import javax.imageio.ImageIO;
@@ -35,7 +35,7 @@ public class VnptKycProxy {
             // VNPT's face SDK uploads its 3D scan as a text Blob before liveness.
             type="text";
         } else type=imageType(image);
-        VnptKycStep call=new VnptKycStep();call.setKind(scan3d?"scan3d":"upload");call.setImageDigest(digest(image));
+        KycProviderStep call=new KycProviderStep();call.setKind(scan3d?"scan3d":"upload");call.setImageDigest(digest(image));
         call.setId(digest((attempt+":upload:"+call.getImageDigest()).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         call=store.prepare(userId,attempt,call,List.of());
         if("DONE".equals(call.getState()))return read(call.getResultJson());
@@ -54,7 +54,7 @@ public class VnptKycProxy {
         if(!ENDPOINTS.containsKey(kind) || input==null || !input.isObject())throw new AppException(UserErrorCode.KYC_INPUT_INVALID);
         ObjectNode body=mapper.createObjectNode();
         body.put("client_session",attempt);body.put("token","e41-1b6d-45c9-9");
-        VnptKycStep call=new VnptKycStep();call.setKind(kind);
+        KycProviderStep call=new KycProviderStep();call.setKind(kind);
         List<String> references=new ArrayList<>();
         switch(kind) {
             case "card" -> {String h=reference(input,"img");body.put("img",h);body.put("crop_param","0,0");references.add(h);call.setFrontHash(h);}
@@ -93,7 +93,7 @@ public class VnptKycProxy {
             JsonNode sanitized=project(result);store.finish(userId,call,write(sanitized),null);return sanitized;
         }catch(RuntimeException ex){fail(userId,call);throw ex;}
     }
-    private void fail(String userId,VnptKycStep call){try{store.fail(userId,call);}catch(RuntimeException ignored){/* Expired/cancelled attempts must stay terminal. */}}
+    private void fail(String userId,KycProviderStep call){try{store.fail(userId,call);}catch(RuntimeException ignored){/* Expired/cancelled attempts must stay terminal. */}}
     private static String providerCode(JsonNode result) {
         String code=result==null?"":result.path("message").asText();
         return code.matches("IDG-[A-Z0-9-]{1,24}")?code:"unexpected";

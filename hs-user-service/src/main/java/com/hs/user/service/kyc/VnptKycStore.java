@@ -23,7 +23,7 @@ public class VnptKycStore {
     private final UserRepository users;
     private final KycVerificationRepository verifications;
     private final UserKycDetailsRepository detailsRepository;
-    private final VnptKycStepRepository steps;
+    private final KycProviderStepRepository steps;
     private final VnptKycProperties config;
     private final CccdClaimService claims;
     private final ObjectMapper mapper;
@@ -65,12 +65,12 @@ public class VnptKycStore {
         return v;
     }
     @Transactional
-    public VnptKycStep prepare(String userId,String attempt,VnptKycStep call,List<String> references) {
+    public KycProviderStep prepare(String userId,String attempt,KycProviderStep call,List<String> references) {
         KycVerification verification = owned(userId,attempt,false);
         if("face".equals(call.getKind()) && references.size()!=3)throw new AppException(UserErrorCode.KYC_INPUT_INVALID);
         for(int i=0;i<references.size();i++) {
             String uploadKind="face".equals(call.getKind()) && i==2?"scan3d":"upload";
-            if(!steps.existsByAttemptIdAndUploadHashAndStateAndKind(attempt,references.get(i),"DONE",uploadKind))
+            if(!steps.existsByProviderAndAttemptIdAndUploadHashAndStateAndKind(KycProvider.VNPT,attempt,references.get(i),"DONE",uploadKind))
                 throw new AppException(UserErrorCode.KYC_INPUT_INVALID);
         }
         var existing=steps.findById(call.getId());
@@ -78,20 +78,20 @@ public class VnptKycStore {
             if(!"DONE".equals(existing.get().getState())) throw new AppException(UserErrorCode.KYC_ATTEMPT_INVALID);
             return existing.get();
         }
-        if(steps.countByAttemptId(attempt)>=30)throw new AppException(UserErrorCode.KYC_ATTEMPT_LIMIT);
+        if(steps.countByProviderAndAttemptId(KycProvider.VNPT,attempt)>=30)throw new AppException(UserErrorCode.KYC_ATTEMPT_LIMIT);
         call.setClientSession(verification.getProviderSessionId());
-        call.setAttemptId(attempt);call.setState("RUNNING");call.setCreatedAt(Instant.now());
+        call.setProvider(KycProvider.VNPT);call.setAttemptId(attempt);call.setState("RUNNING");call.setCreatedAt(Instant.now());
         return steps.saveAndFlush(call);
     }
     @Transactional
-    public void finish(String userId,VnptKycStep call,String result,String uploadHash) {
+    public void finish(String userId,KycProviderStep call,String result,String uploadHash) {
         owned(userId,call.getAttemptId(),false);
-        VnptKycStep row=steps.findById(call.getId()).orElseThrow();
+        KycProviderStep row=steps.findById(call.getId()).orElseThrow();
         if(!"RUNNING".equals(row.getState()))throw new AppException(UserErrorCode.KYC_ATTEMPT_INVALID);
         row.setResultJson(result);row.setUploadHash(uploadHash);row.setState("DONE");steps.save(row);
     }
     @Transactional
-    public void fail(String userId,VnptKycStep call) {
+    public void fail(String userId,KycProviderStep call) {
         var attempt=owned(userId,call.getAttemptId(),false);
         steps.findById(call.getId()).ifPresent(row -> {
             row.setState("FAILED");steps.save(row);
@@ -106,15 +106,15 @@ public class VnptKycStore {
         claims.lockVerification(userId);
         KycVerification v=owned(userId,attempt,true);
         if(v.getStatus()==KycStatus.VERIFIED)return v.getStatus();
-        List<VnptKycStep> all=steps.findByAttemptIdOrderByCreatedAtAsc(attempt);
+        List<KycProviderStep> all=steps.findByProviderAndAttemptIdOrderByCreatedAtAsc(KycProvider.VNPT,attempt);
         if(all.stream().anyMatch(s -> !"DONE".equals(s.getState())))throw new AppException(UserErrorCode.KYC_ATTEMPT_INVALID);
-        VnptKycStep ocr=last(all,"ocr"),compare=last(all,"compare"),face=last(all,"face"),mask=last(all,"mask");
+        KycProviderStep ocr=last(all,"ocr"),compare=last(all,"compare"),face=last(all,"face"),mask=last(all,"mask");
         if(ocr==null || compare==null || face==null || mask==null || !Objects.equals(ocr.getFrontHash(),compare.getFrontHash()))
             throw new AppException(UserErrorCode.KYC_ATTEMPT_INVALID);
-        VnptKycStep front=card(all,ocr.getFrontHash()),back=card(all,ocr.getBackHash());
+        KycProviderStep front=card(all,ocr.getFrontHash()),back=card(all,ocr.getBackHash());
         String faceHash=compare.getFaceHash();
         if(faceHash==null)throw new AppException(UserErrorCode.KYC_ATTEMPT_INVALID);
-        VnptKycStep upload=all.stream().filter(s -> "upload".equals(s.getKind()) && faceHash.equals(s.getUploadHash())).findFirst().orElse(null);
+        KycProviderStep upload=all.stream().filter(s -> "upload".equals(s.getKind()) && faceHash.equals(s.getUploadHash())).findFirst().orElse(null);
         String faceReferenceDigest=VnptKycProxy.digest(faceHash.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         if(front==null || back==null || upload==null || !faceHash.equals(mask.getFaceHash())
             || !(faceReferenceDigest.equals(face.getNearDigest()) || faceReferenceDigest.equals(face.getFarDigest()))
@@ -139,25 +139,25 @@ public class VnptKycStore {
             :com.hs.user.notification.AccountNotificationWriter.KycEvent.KYC_REJECTED);
         return v.getStatus();
     }
-    private KycVerifiedDetailsResponse details(VnptKycStep ocr, VnptKycStep compare, VnptKycStep face,
-                           VnptKycStep mask, VnptKycStep front, VnptKycStep back) {
+    private KycVerifiedDetailsResponse details(KycProviderStep ocr, KycProviderStep compare, KycProviderStep face,
+                           KycProviderStep mask, KycProviderStep front, KycProviderStep back) {
         try {
             return VnptKycDetails.from(result(ocr),result(compare),result(face),
                     result(mask),result(front),result(back),mapper);
         } catch (Exception ex) { throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR); }
     }
-    private JsonNode result(VnptKycStep s) {
+    private JsonNode result(KycProviderStep s) {
         try{return mapper.readTree(s.getResultJson());}catch(Exception ex){throw new AppException(UserErrorCode.KYC_PROVIDER_ERROR);}
     }
-    private static VnptKycStep last(List<VnptKycStep> all,String kind) {
+    private static KycProviderStep last(List<KycProviderStep> all,String kind) {
         for(int i=all.size()-1;i>=0;i--)if(kind.equals(all.get(i).getKind()) && "DONE".equals(all.get(i).getState()))return all.get(i);
         return null;
     }
-    private static VnptKycStep card(List<VnptKycStep> all,String hash) {
+    private static KycProviderStep card(List<KycProviderStep> all,String hash) {
         return all.stream().filter(s -> "card".equals(s.getKind()) && "DONE".equals(s.getState()) && Objects.equals(hash,s.getFrontHash())).reduce((a,b)->b).orElse(null);
     }
     @Scheduled(fixedDelay=3600000) @Transactional
     public void purgeTemporaryEvidence() {
-        steps.deleteByCreatedAtBefore(Instant.now().minus(Duration.ofDays(1)));
+        steps.deleteByProviderAndCreatedAtBefore(KycProvider.VNPT,Instant.now().minus(Duration.ofDays(1)));
     }
 }

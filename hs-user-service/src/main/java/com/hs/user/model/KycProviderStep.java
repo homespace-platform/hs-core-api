@@ -5,10 +5,11 @@ import lombok.*;
 import java.time.Instant;
 
 @Entity
-@Table(name="vnpt_kyc_steps", indexes=@Index(name="idx_vnpt_step_attempt", columnList="attempt_id"))
+@Table(name="kyc_provider_steps", indexes=@Index(name="idx_kyc_step_attempt", columnList="attempt_id"))
 @Getter @Setter @NoArgsConstructor
-public class VnptKycStep {
+public class KycProviderStep {
     @Id @Column(length=64) private String id;
+    @Enumerated(EnumType.STRING) @Column(nullable=false, length=32) private com.hs.user.model.constant.KycProvider provider;
     @Column(name="attempt_id", nullable=false, length=36) private String attemptId;
     @Column(nullable=false, length=32) private String kind;
     @Column(nullable=false, length=32) private String state;

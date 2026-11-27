@@ -44,7 +44,7 @@ class VnptKycPostgresTest {
     @Autowired UserRepository users;
     @Autowired KycVerificationRepository verifications;
     @Autowired UserKycDetailsRepository details;
-    @Autowired VnptKycStepRepository steps;
+    @Autowired KycProviderStepRepository steps;
     @Autowired VnptKycStore store;
     @org.springframework.test.context.bean.override.mockito.MockitoBean
     com.hs.user.notification.AccountNotificationWriter notifications;
@@ -93,7 +93,7 @@ class VnptKycPostgresTest {
     }
     @Test void cancelBlocksLateProviderResultAndDuplicateReservationCannotSpendAgain() {
         user("alice");String id=store.start("alice").sessionId();
-        VnptKycStep call=new VnptKycStep();call.setId("call");call.setKind("upload");
+        KycProviderStep call=new KycProviderStep();call.setId("call");call.setKind("upload");
         store.prepare("alice",id,call,List.of());
         assertThrows(AppException.class,()->store.prepare("alice",id,call,List.of()));
         new TransactionTemplate(manager).executeWithoutResult(tx->{var v=verifications.lockById(id).orElseThrow();v.setStatus(KycStatus.EXPIRED);verifications.save(v);});
@@ -115,7 +115,7 @@ class VnptKycPostgresTest {
     @Test void verifiedDetailsSurviveTemporaryEvidencePurge() throws Exception {
         user("alice");String id=store.start("alice").sessionId();proof(id);
         assertEquals(1,jdbc.queryForObject("select count(*) from pg_constraint where conname = 'fk_user_kyc_details_user'",Integer.class));
-        var ocr=steps.findByAttemptIdOrderByCreatedAtAsc(id).stream().filter(s->"ocr".equals(s.getKind())).findFirst().orElseThrow();
+        var ocr=steps.findByProviderAndAttemptIdOrderByCreatedAtAsc(KycProvider.VNPT,id).stream().filter(s->"ocr".equals(s.getKind())).findFirst().orElseThrow();
         var response=(com.fasterxml.jackson.databind.node.ObjectNode)new ObjectMapper().readTree(ocr.getResultJson());
         ((com.fasterxml.jackson.databind.node.ObjectNode)response.path("object")).put("name","NGUYEN VAN A");
         ocr.setResultJson(response.toString());steps.saveAndFlush(ocr);
@@ -203,7 +203,7 @@ class VnptKycPostgresTest {
         evidence(attempt,"mask",null,null,null,"selfie",null,null,"{\"masked\":\"no\"}");
     }
     private void evidence(String attempt,String kind,String upload,String front,String back,String face,String near,String far,String object) {
-        var row=new VnptKycStep();row.setId(UUID.randomUUID().toString());row.setAttemptId(attempt);row.setKind(kind);row.setState("DONE");row.setCreatedAt(Instant.now());
+        var row=new KycProviderStep();row.setProvider(KycProvider.VNPT);row.setId(UUID.randomUUID().toString());row.setAttemptId(attempt);row.setKind(kind);row.setState("DONE");row.setCreatedAt(Instant.now());
         row.setUploadHash(upload);row.setImageDigest("fixture");row.setFrontHash(front);row.setBackHash(back);row.setFaceHash(face);row.setNearDigest(near);row.setFarDigest(far);
         row.setResultJson("{\"message\":\"IDG-00000000\",\"object\":"+object+"}");steps.saveAndFlush(row);
     }
