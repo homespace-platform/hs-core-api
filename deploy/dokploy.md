@@ -9,7 +9,7 @@ Core dùng cùng cách với Discovery/Gateway: service name `hs-core-api`, exte
 - Workflow `publish-image.yml` giữ nguyên: GitHub Actions test/build/push tag SHA và `latest`, không gọi Dokploy API.
 - `.env.prod`: env production riêng tư, Git ignore. Không dán env infra/Gateway thay cho Core. `.env` và `.env.example` dành cho local, không dùng để triển khai production.
 
-Compose yêu cầu `CORE_IMAGE` và đủ **68 biến runtime** từ `.env.prod`, không có fallback. Các cờ `SPRING_CLOUD_DISCOVERY_ENABLED`, `EUREKA_CLIENT_ENABLED` đặt cạnh `EUREKA_CLIENT_SERVICE_URL` trong nhóm Eureka. Mọi biến dùng `${VARIABLE:?}` để chặn thiếu/rỗng, trừ `HOMESPACE_TIME_SIMULATED_AT` và `SMARTCA_WEBHOOK_PUBLIC_URL` dùng `${VARIABLE?}`: bắt buộc khai báo nhưng được phép rỗng như cấu hình hiện tại. Không điền thời gian giả lập/callback giả để vượt validation.
+Compose yêu cầu `CORE_IMAGE` và đủ **68 biến runtime** từ `.env.prod`, không có fallback. Các cờ `SPRING_CLOUD_DISCOVERY_ENABLED`, `EUREKA_CLIENT_ENABLED` đặt cạnh `EUREKA_CLIENT_SERVICE_URL` trong nhóm Eureka. Mọi biến dùng `${VARIABLE:?}` để chặn thiếu/rỗng, trừ `HOMESPACE_TIME_SIMULATED_AT` và `VNPT_SMARTCA_WEBHOOK_PUBLIC_URL` dùng `${VARIABLE?}`: bắt buộc khai báo nhưng được phép rỗng như cấu hình hiện tại. Không điền thời gian giả lập/callback giả để vượt validation.
 
 `application.properties` đọc hai cờ Eureka từ env cho cả dev/prod, không ghi cứng `true`. Dev đặt biến trong nhóm **EUREKA SERVER** của `.env` theo `.env.example`; production dùng `.env.prod` rồi truyền qua Compose. Đặt cả hai `true` khi dùng Eureka; nếu chủ đích chạy standalone thì đặt cả hai `false`. Không lấy URL/credential production đưa vào file dev.
 

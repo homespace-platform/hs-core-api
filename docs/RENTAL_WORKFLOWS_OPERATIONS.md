@@ -64,7 +64,7 @@ Kiểm thử schema/restart/nhiều context dùng `RentalWorkflowSchemaUpgradeTe
 
 Người dùng xác nhận **chưa có sandbox và hai tài khoản ký thử**, nên chưa nghiệm thu ký thật. Các kiểm thử provider giả lập/PDF/đối soát không được dùng thay kết quả này.
 
-Chuẩn bị môi trường staging riêng, tài khoản chủ nhà/người thuê có CCCD và KYC hợp lệ, chứng thư SmartCA tương ứng, SP sandbox, cấu hình `SMARTCA_BASE_URL`, `SMARTCA_SP_ID`, `SMARTCA_SP_PASSWORD`, Gotenberg và storage riêng. Bật chế độ SMARTCA; không dùng endpoint production cho ca thử. Không đưa mật khẩu/token vào repo, Postman export hoặc chat.
+Chuẩn bị môi trường staging riêng, tài khoản chủ nhà/người thuê có CCCD và KYC hợp lệ, chứng thư SmartCA tương ứng, SP sandbox, cấu hình `VNPT_SMARTCA_BASE_URL`, `VNPT_SMARTCA_SP_ID`, `VNPT_SMARTCA_SP_PASSWORD`, Gotenberg và storage riêng. Bật chế độ SMARTCA; không dùng endpoint production cho ca thử. Không đưa mật khẩu/token vào repo, Postman export hoặc chat.
 
 Tạo đúng workflow/PDF trên staging. Trong terminal riêng, đặt `HS_SMARTCA_TEST_OWNER_TOKEN`, `HS_SMARTCA_TEST_OWNER_SERIAL` và hai biến tương ứng `TENANT`. Chạy `scripts/Test-WorkflowSmartCaSandbox.ps1` với `BaseUrl`, `SandboxHost`, `RentalId`, `Kind`, `SigningContractId`, `Role`. Mặc định script chỉ preflight, xác minh PDF khớp nguồn và SmartCA đã bật. Sau khi đọc PDF, thêm `-Initiate` cho chủ nhà rồi người thuê; người ký xác nhận trên app. Dùng `-RequestId` để đối soát giao dịch cũ, không gửi lại mù quáng.
 

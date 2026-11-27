@@ -75,9 +75,9 @@ class SmartCaClientTest {
     @Test
     void liveProviderDiagnosticWhenExplicitlyConfigured() {
         String cccd = System.getenv("SMARTCA_TEST_CCCD");
-        String spId = System.getenv("SMARTCA_SP_ID");
-        String spPassword = System.getenv("SMARTCA_SP_PASSWORD");
-        String baseUrl = System.getenv("SMARTCA_BASE_URL");
+        String spId = System.getenv("VNPT_SMARTCA_SP_ID");
+        String spPassword = System.getenv("VNPT_SMARTCA_SP_PASSWORD");
+        String baseUrl = System.getenv("VNPT_SMARTCA_BASE_URL");
         Assumptions.assumeTrue(cccd != null && spId != null && spPassword != null && baseUrl != null,
                 "Live SmartCA check requires explicit credentials and test CCCD");
 

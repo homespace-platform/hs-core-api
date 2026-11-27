@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class RequiredEnvironmentConfiguration {
     private static final Pattern VARIABLE = Pattern.compile("\\$\\{([A-Z][A-Z0-9_]*)}");
-    private static final Set<String> OPTIONAL_EMPTY = Set.of("HOMESPACE_TIME_SIMULATED_AT", "SMARTCA_WEBHOOK_PUBLIC_URL");
+    private static final Set<String> OPTIONAL_EMPTY = Set.of("HOMESPACE_TIME_SIMULATED_AT", "VNPT_SMARTCA_WEBHOOK_PUBLIC_URL");
 
     public RequiredEnvironmentConfiguration(Environment environment) throws IOException {
         Properties properties = new Properties();

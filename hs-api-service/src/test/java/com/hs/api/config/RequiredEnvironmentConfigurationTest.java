@@ -62,7 +62,7 @@ class RequiredEnvironmentConfigurationTest {
         properties.setProperty("first", "${KAFKA_EVENTS_TOPIC}");
         properties.setProperty("second", "${VNPT_EKYC_CLIENT_SECRET}");
         properties.setProperty("optional", "${HOMESPACE_TIME_SIMULATED_AT}");
-        properties.setProperty("optionalMissing", "${SMARTCA_WEBHOOK_PUBLIC_URL}");
+        properties.setProperty("optionalMissing", "${VNPT_SMARTCA_WEBHOOK_PUBLIC_URL}");
         MockEnvironment environment = new MockEnvironment()
                 .withProperty("KAFKA_EVENTS_TOPIC", "private-value")
                 .withProperty("VNPT_EKYC_CLIENT_SECRET", "")
