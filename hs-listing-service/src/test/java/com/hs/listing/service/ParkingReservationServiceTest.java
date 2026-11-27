@@ -488,6 +488,124 @@ class ParkingReservationServiceTest {
         assertEquals("renewal", saved.getValue().getContractId());
     }
 
+    private ParkingReservation renewalHoldInADeletedBranch(int listingLimit, int heldByOthers) {
+        var listing = Listing.builder().id("listing").ownerId("owner").maxMotorbikeCount(listingLimit).build();
+        when(listingRepository.findById("listing")).thenReturn(java.util.Optional.of(listing));
+        when(listingRepository.findByIdForUpdate("listing")).thenReturn(java.util.Optional.of(listing));
+        when(propertyBranchRepository.isSoftDeleted("deleted")).thenReturn(true);
+        var hold = ParkingReservation.builder().contractId("renewal").rentalRequestId("rental").branchId("deleted")
+                .listingId("listing").vehicleType(VehicleType.MOTORBIKE).quantity(2).startDate(amendmentStart)
+                .endDateExclusive(amendmentEnd).status(ParkingReservationStatus.HELD).build();
+        var other = ParkingReservation.builder().contractId("other").listingId("listing").vehicleType(VehicleType.MOTORBIKE)
+                .quantity(heldByOthers).startDate(amendmentStart).endDateExclusive(amendmentEnd)
+                .status(ParkingReservationStatus.ACTIVE).build();
+        when(parkingReservationRepository.findByContractId("renewal")).thenReturn(List.of(hold));
+        when(parkingReservationRepository.findOverlappingListingReservations(any(), Mockito.eq(VehicleType.MOTORBIKE), any(), any(), any()))
+                .thenReturn(List.of(hold, other));
+        return hold;
+    }
+
+    @Test
+    void renewalSignedAfterItsBranchWasDeletedActivatesInTheStandalonePool() {
+        var hold = renewalHoldInADeletedBranch(3, 1);
+
+        service.activateRenewalHold("renewal", "root");
+
+        assertNull(hold.getBranchId());
+        assertEquals("root", hold.getContractId());
+        assertEquals(ParkingReservationStatus.ACTIVE, hold.getStatus());
+        assertEquals(2, hold.getQuantity());
+        assertEquals(amendmentStart, hold.getStartDate());
+        assertEquals(amendmentEnd, hold.getEndDateExclusive());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullSource
+    @org.junit.jupiter.params.provider.ValueSource(strings = "branch")
+    void normalRenewalKeepsItsPoolQuantityAndDatesThroughApprovalAndSigning(String branchId) {
+        amendmentPool(10, 0);
+        var listing = listingRepository.findById("listing").orElseThrow();
+        listing.setBranchId(branchId);
+        listing.setMaxMotorbikeCount(2);
+        var current = booked("root", VehicleType.MOTORBIKE, 2, amendmentStart, amendmentEnd);
+        current.setBranchId(branchId);
+        var renewalEnd = amendmentEnd.plusMonths(2);
+
+        service.holdForRenewal("root", "renewal", amendmentEnd, renewalEnd, Instant.now().plusSeconds(3600));
+        var hold = amendmentBookings.getLast();
+        assertEquals(ParkingReservationStatus.HELD, hold.getStatus());
+        assertEquals("renewal", hold.getContractId());
+        service.activateRenewalHold("renewal", "root");
+
+        assertEquals(2, amendmentBookings.size());
+        assertEquals(amendmentEnd, current.getEndDateExclusive());
+        assertEquals(branchId, hold.getBranchId());
+        assertEquals("root", hold.getContractId());
+        assertEquals(ParkingReservationStatus.ACTIVE, hold.getStatus());
+        assertNull(hold.getHoldExpiresAt());
+        assertEquals(2, hold.getQuantity());
+        assertEquals(amendmentEnd, hold.getStartDate());
+        assertEquals(renewalEnd, hold.getEndDateExclusive());
+    }
+
+    @Test
+    void renewalSignedAfterItsBranchWasDeletedChecksTheStandaloneListingCapacity() {
+        var hold = renewalHoldInADeletedBranch(2, 1);
+
+        var full = assertThrows(com.hs.common.advice.entity.AppException.class,
+                () -> service.activateRenewalHold("renewal", "root"));
+
+        assertEquals(com.hs.listing.advice.ListingErrorCode.PARKING_CAPACITY_CHANGED.getCode(), full.getCode());
+        assertEquals("deleted", hold.getBranchId());
+        assertEquals("renewal", hold.getContractId());
+        assertEquals(ParkingReservationStatus.HELD, hold.getStatus());
+        verify(parkingReservationRepository, never()).save(any());
+    }
+
+    @Test
+    void draftFallbackCountsPlacesOtherRentalsStillHoldInTheDeletedBranch() {
+        var listing = Listing.builder().id("listing").ownerId("owner").maxMotorbikeCount(2).maxCarCount(0).build();
+        when(listingRepository.findById("listing")).thenReturn(java.util.Optional.of(listing));
+        when(propertyBranchRepository.isSoftDeleted("deleted")).thenReturn(true);
+        var rental = RentalRequest.builder().id("rental").listing(listing).moveInDate(amendmentStart).leaseMonths(2).build();
+        var other = ParkingReservation.builder().rentalRequestId("other").branchId("deleted").listingId("listing")
+                .vehicleType(VehicleType.MOTORBIKE).quantity(1).startDate(amendmentStart).endDateExclusive(amendmentEnd)
+                .status(ParkingReservationStatus.ACTIVE).build();
+        when(parkingReservationRepository.findOverlappingListingReservations(any(), Mockito.eq(VehicleType.MOTORBIKE), any(), any(), any()))
+                .thenReturn(List.of(other));
+
+        var full = assertThrows(com.hs.common.advice.entity.AppException.class,
+                () -> service.replaceDraftHoldInBranch(rental, 2, 0, "deleted"));
+        assertEquals(com.hs.listing.advice.ListingErrorCode.PARKING_CAPACITY_CHANGED.getCode(), full.getCode());
+        verify(parkingReservationRepository, never()).save(any());
+    }
+
+    @Test
+    void fallbackAppendixHoldsOnlyTheIncreaseOverPlacesStillRecordedInTheDeletedBranch() {
+        var listing = Listing.builder().id("listing").ownerId("owner").maxMotorbikeCount(3).maxCarCount(0).build();
+        when(listingRepository.findById("listing")).thenReturn(java.util.Optional.of(listing));
+        when(propertyBranchRepository.isSoftDeleted("deleted")).thenReturn(true);
+        var root = ParkingReservation.builder().contractId("root").rentalRequestId("rental").branchId("deleted")
+                .listingId("listing").vehicleType(VehicleType.MOTORBIKE).quantity(1).startDate(amendmentStart)
+                .endDateExclusive(amendmentEnd).status(ParkingReservationStatus.ACTIVE).build();
+        List<ParkingReservation> rows = new ArrayList<>(List.of(root));
+        when(parkingReservationRepository.findByContractId("root")).thenReturn(List.of(root));
+        when(parkingReservationRepository.findOverlappingListingReservations(any(), Mockito.eq(VehicleType.MOTORBIKE), any(), any(), any()))
+                .thenAnswer(i -> List.copyOf(rows));
+        when(parkingReservationRepository.save(any())).thenAnswer(i -> { rows.add(i.getArgument(0)); return i.getArgument(0); });
+
+        service.holdForAmendmentInBranch("root", "appendix", "rental", "listing", "deleted", amendmentStart, amendmentEnd, 2, 0,
+                Instant.now().plusSeconds(3600));
+
+        assertEquals(2, rows.size());
+        assertNull(rows.getLast().getBranchId());
+        assertEquals(1, rows.getLast().getQuantity());
+        // Another rental of the same listing still finds the third place free.
+        var other = RentalRequest.builder().id("other").listing(listing).moveInDate(amendmentStart).leaseMonths(2).build();
+        service.replaceDraftHoldInBranch(other, 1, 0, null);
+        assertEquals("other", rows.getLast().getRentalRequestId());
+    }
+
     @Test
     void zeroVehicleRentalIgnoresThePoolOfAReplacedAmendmentSegment() {
         var start = LocalDate.of(2026, 10, 1);

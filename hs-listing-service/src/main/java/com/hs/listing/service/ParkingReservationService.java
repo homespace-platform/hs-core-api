@@ -303,11 +303,27 @@ public class ParkingReservationService {
         }
     }
     @Transactional public void activateRenewalHold(String agreementId,String rootId) {
-        for(var r:parkingReservationRepository.findByContractId(agreementId)) {
-            if(r.getStatus()!=ParkingReservationStatus.HELD) throw new IllegalStateException("Renewal parking hold no longer valid");
+        var holds=parkingReservationRepository.findByContractId(agreementId);
+        if(holds.stream().anyMatch(r->r.getStatus()!=ParkingReservationStatus.HELD))
+            throw new IllegalStateException("Renewal parking hold no longer valid");
+        validateRenewalHold(agreementId,rootId);
+        for(var r:holds) {
+            r.setBranchId(liveBranch(r.getBranchId()));
             r.setContractId(rootId); r.setStatus(ParkingReservationStatus.ACTIVE); r.setHoldExpiresAt(null);
             parkingReservationRepository.save(r);
         }
+    }
+    /** A branch soft-deleted since approval sends the renewal to the standalone pool, under the fallback appendix check. */
+    @Transactional public void validateRenewalHold(String agreementId,String rootId) {
+        var stranded=parkingReservationRepository.findByContractId(agreementId).stream()
+                .filter(r->r.getStatus()==ParkingReservationStatus.HELD && isDeleted(r.getBranchId())).toList();
+        if(stranded.isEmpty()) return;
+        var first=stranded.get(0);
+        var listing=listingRepository.findByIdForUpdate(first.getListingId()).orElseThrow();
+        Map<VehicleType,Integer> counts=new EnumMap<>(VehicleType.class);
+        stranded.forEach(r->counts.merge(r.getVehicleType(),r.getQuantity(),Integer::sum));
+        validateAmendmentCapacity(new AmendmentPool(listing,null,true),rootId,agreementId,first.getStartDate(),first.getEndDateExclusive(),
+                counts.getOrDefault(VehicleType.MOTORBIKE,0),counts.getOrDefault(VehicleType.CAR,0));
     }
     @Transactional public void releaseRenewalHold(String agreementId) {
         for(var r:parkingReservationRepository.findByContractId(agreementId)) {
@@ -315,7 +331,7 @@ public class ParkingReservationService {
         }
     }
 
-    /** Listing limits initialize a rental; only a shared branch pool limits an amendment. */
+    /** Listing limits initialize a rental; an amendment is limited by a branch pool, or when it falls back from a deleted one. */
     @Transactional
     public void validateAmendmentCapacity(String rootId, String agreementId, String listingId,
             LocalDate start, LocalDate end, int motorbikes, int cars) {
@@ -329,7 +345,8 @@ public class ParkingReservationService {
         validateAmendmentCapacity(lockSelectedPool(listingId,branchId),rootId,agreementId,start,end,bikes,cars);
     }
 
-    private record AmendmentPool(Listing listing, PropertyBranch branch) {}
+    /** lostBranch: a branch was asked for but is soft-deleted, so the standalone listing pool takes over. */
+    private record AmendmentPool(Listing listing, PropertyBranch branch, boolean lostBranch) {}
 
     /** Replace only this unsigned rental's holds under the shared pool lock; never count its old hold twice. */
     @Transactional
@@ -360,7 +377,7 @@ public class ParkingReservationService {
             Integer capacity=branch==null?limit:type==VehicleType.MOTORBIKE?branch.getMotorbikeParkingCapacity():branch.getCarParkingCapacity();
             var others=branch==null?parkingReservationRepository.findOverlappingListingReservations(listing.getId(),type,ACTIVE_STATUSES,start,end)
                     :parkingReservationRepository.findOverlappingBranchReservations(branch.getId(),type,ACTIVE_STATUSES,start,end);
-            var occupied=others.stream().filter(r->branch!=null || r.getBranchId()==null)
+            var occupied=others.stream().filter(r->branch!=null || inListingPool(r))
                     .filter(r->!Objects.equals(request.getId(),r.getRentalRequestId())).toList();
             int available=Math.max(0,Objects.requireNonNullElse(capacity,0)-calculatePeakUsage(occupied,start,end));
             if(desired>available || limit!=null && desired>limit)
@@ -388,6 +405,21 @@ public class ParkingReservationService {
         return branch==null?null:branch.getId();
     }
 
+    /** Scalar query: loads no entity to go stale. */
+    private boolean isDeleted(String branchId) {
+        return branchId!=null && propertyBranchRepository.isSoftDeleted(branchId);
+    }
+
+    /** The branch id, or null for a soft-deleted branch. */
+    public String liveBranch(String branchId) {
+        return isDeleted(branchId)?null:branchId;
+    }
+
+    /** Places the standalone listing holds, including those still recorded against a soft-deleted branch. */
+    private boolean inListingPool(ParkingReservation r) {
+        return r.getBranchId()==null || isDeleted(r.getBranchId());
+    }
+
     /** Pool already allocated to an unsigned rental. The listing's current branch only seeds a first allocation. */
     public String draftPool(RentalRequest request, boolean pinned, String pinnedBranchId) {
         var own = parkingReservationRepository.findByRentalRequestId(request.getId());
@@ -401,9 +433,8 @@ public class ParkingReservationService {
 
     /** Pool the signed rental occupies just before an appendix takes effect. */
     public String amendmentPool(String rootId, String listingId, LocalDate effectiveOn, boolean pinned, String pinnedBranchId) {
-        String pool = recordedAmendmentPool(rootId, listingId, effectiveOn, pinned, pinnedBranchId);
-        // An appendix must not record a soft-deleted branch as its destination. Scalar query: loads no entity to go stale.
-        return pool != null && propertyBranchRepository.isSoftDeleted(pool) ? null : pool;
+        // An appendix must not record a soft-deleted branch as its destination.
+        return liveBranch(recordedAmendmentPool(rootId, listingId, effectiveOn, pinned, pinnedBranchId));
     }
 
     private String recordedAmendmentPool(String rootId, String listingId, LocalDate effectiveOn, boolean pinned, String pinnedBranchId) {
@@ -429,7 +460,7 @@ public class ParkingReservationService {
         Listing listing = listingRepository.findByIdForUpdate(listingId).orElseThrow();
         if (!Objects.equals(branchId, listing.getBranchId()))
             throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED, "Liên kết chi nhánh đã thay đổi; vui lòng kiểm tra lại phụ lục.");
-        return new AmendmentPool(listing, branch);
+        return new AmendmentPool(listing, branch, false);
     }
 
     private AmendmentPool lockSelectedPool(String listingId,String branchId) {
@@ -438,14 +469,15 @@ public class ParkingReservationService {
         if(branch!=null && !Objects.equals(listing.getOwnerId(),branch.getOwnerId()))
             throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,"Chi nhánh không thuộc chủ nhà của hợp đồng.");
         entityManager.lock(listing,jakarta.persistence.LockModeType.OPTIMISTIC);
-        return new AmendmentPool(listing,branch);
+        return new AmendmentPool(listing,branch,branchId!=null && branch==null);
     }
 
     private void validateAmendmentCapacity(AmendmentPool pool, String rootId, String agreementId,
             LocalDate start, LocalDate end, int motorbikes, int cars) {
         if (start == null || end == null || !end.isAfter(start) || motorbikes < 0 || cars < 0 || motorbikes > 100 || cars > 100)
             throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED, "Ngày hoặc số xe của phụ lục không hợp lệ.");
-        if(pool.branch()==null)return;
+        // A listing that is simply standalone keeps no appendix limit.
+        if(pool.branch()==null && !pool.lostBranch() && !leavesDeletedBranch(rootId,start))return;
         for (VehicleType type : VehicleType.values()) {
             int desired = type == VehicleType.MOTORBIKE ? motorbikes : cars;
             if (desired == 0) continue;
@@ -454,16 +486,64 @@ public class ParkingReservationService {
             var bookings=pool.branch()==null?parkingReservationRepository.findOverlappingListingReservations(pool.listing().getId(),type,ACTIVE_STATUSES,start,end)
                     :parkingReservationRepository.findOverlappingBranchReservations(pool.branch().getId(), type, ACTIVE_STATUSES, start, end);
             var others = bookings.stream()
-                    .filter(r->pool.branch()!=null || r.getBranchId()==null)
+                    .filter(r->pool.branch()!=null || inListingPool(r))
                     // The root's future segment is replaced, not booked a second time.
                     .filter(r -> !(Objects.equals(rootId, r.getContractId()) && r.getStatus() == ParkingReservationStatus.ACTIVE))
                     .filter(r -> !(agreementId != null && Objects.equals(agreementId, r.getContractId()) && r.getStatus() == ParkingReservationStatus.HELD))
                     .toList();
             int available = Math.max(0, (capacity == null ? 0 : capacity) - calculatePeakUsage(others, start, end));
             if (desired > available) throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,
-                    "Chi nhánh chỉ còn " + available + " chỗ " + (type == VehicleType.MOTORBIKE ? "xe máy" : "ô tô")
+                    (pool.branch()==null ? "Bài đăng" : "Chi nhánh") + " chỉ còn " + available + " chỗ " + (type == VehicleType.MOTORBIKE ? "xe máy" : "ô tô")
                             + " trong thời gian áp dụng; phụ lục đề xuất " + desired + " chỗ.");
         }
+    }
+
+    /** Checks a branch fallback that changes neither vehicles nor term: every held segment, over its own range. */
+    @Transactional
+    public void validateFallbackMove(String rootId, String agreementId, String listingId, LocalDate from) {
+        var pool = new AmendmentPool(lockSelectedPool(listingId, null).listing(), null, true);
+        var held = heldFrom(rootId, from);
+        for (var r : held) {
+            LocalDate start = r.getStartDate().isAfter(from) ? r.getStartDate() : from;
+            int quantity = calculatePeakUsage(held.stream().filter(o -> o.getVehicleType() == r.getVehicleType()).toList(),
+                    start, r.getEndDateExclusive());
+            validateAmendmentCapacity(pool, rootId, agreementId, start, r.getEndDateExclusive(),
+                    r.getVehicleType() == VehicleType.MOTORBIKE ? quantity : 0, r.getVehicleType() == VehicleType.CAR ? quantity : 0);
+        }
+    }
+
+    /** Moves the places from the date on to the standalone pool as they are: same quantities, same end dates (renewals too). */
+    @Transactional
+    public void moveToListingPool(String rootId, String agreementId, String listingId, LocalDate from) {
+        validateFallbackMove(rootId, agreementId, listingId, from);
+        releaseRenewalHold(agreementId);
+        for (var r : heldFrom(rootId, from)) {
+            if (r.getStartDate().isBefore(from)) {
+                parkingReservationRepository.save(ParkingReservation.builder().contractId(rootId).listingId(r.getListingId())
+                        .rentalRequestId(r.getRentalRequestId()).vehicleType(r.getVehicleType()).quantity(r.getQuantity())
+                        .startDate(from).endDateExclusive(r.getEndDateExclusive()).status(ParkingReservationStatus.ACTIVE).build());
+                r.setEndDateExclusive(from);
+            } else r.setBranchId(null);
+            parkingReservationRepository.save(r);
+        }
+    }
+
+    /** The rental holds places from the date on, and every one of them is already recorded in this pool. */
+    public boolean holdsOnlyIn(String rootId, LocalDate from, String branchId) {
+        var held = heldFrom(rootId, from);
+        return !held.isEmpty() && held.stream().allMatch(r -> Objects.equals(r.getBranchId(), branchId));
+    }
+
+    private List<ParkingReservation> heldFrom(String rootId, LocalDate from) {
+        return parkingReservationRepository.findByContractId(rootId).stream()
+                .filter(r -> r.getStatus() == ParkingReservationStatus.ACTIVE && r.getEndDateExclusive().isAfter(from)).toList();
+    }
+
+    /** The rental's own places in a deleted branch reach this period; one ending on the start date covers a replaced appendix. */
+    private boolean leavesDeletedBranch(String rootId, LocalDate start) {
+        return parkingReservationRepository.findByContractId(rootId).stream()
+                .anyMatch(r -> r.getStatus() == ParkingReservationStatus.ACTIVE && !r.getEndDateExclusive().isBefore(start)
+                        && isDeleted(r.getBranchId()));
     }
 
     /** Hold the delta at EVERY root reservation boundary, including newly extended lease dates. */
@@ -496,7 +576,8 @@ public class ParkingReservationService {
             var dates = new ArrayList<>(boundaries);
             for (int i = 0; i < dates.size() - 1; i++) {
                 LocalDate segmentStart = dates.get(i), segmentEnd = dates.get(i + 1);
-                int covered = existing.stream().filter(r -> Objects.equals(r.getBranchId(),pool.branch()==null?null:pool.branch().getId()))
+                // Same pool identification as the capacity check, or the increment is counted twice against other rentals.
+                int covered = existing.stream().filter(r -> pool.branch()==null?inListingPool(r):pool.branch().getId().equals(r.getBranchId()))
                         .filter(r -> r.getVehicleType() == type && !r.getStartDate().isAfter(segmentStart) && r.getEndDateExclusive().isAfter(segmentStart))
                         .mapToInt(ParkingReservation::getQuantity).sum();
                 int increase = Math.max(0, desired - covered);

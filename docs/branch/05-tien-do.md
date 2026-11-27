@@ -148,6 +148,12 @@ JUnit chạy bằng `mvnw.cmd -o -B` với các tham số `-D` được quote. L
 - [ ] Yêu cầu merge `feature/branch-monitoring` vào `master`
 - [ ] Deploy: notification-service trước, core sau
 
-## 27/11 · ĐIỂM DỪNG (hết hạn mức)
-- Bản sửa 4 lỗi core (`nhat-ky/PRE-MERGE-FIX.md`) đã commit lên nhánh. Codex rà lại: **6 lỗi còn mở** ở core, mobile, web, xem `nhat-ky/RECHECK.md`. CHƯA repo nào được merge (notification không nằm trong lượt rà lại).
-- Bước tiếp: đọc `RECHECK.md`; Sonnet sửa từng lỗi (test đỏ trước); Codex rà lại; commit, push nhánh `feature/branch-monitoring`. Không merge khi chưa được yêu cầu.
+## 27/11 · ĐIỂM DỪNG · Rà trước merge lần 3
+
+- **Core còn 1 lỗi chặn merge theo Q15.** Ký bản thay thế phụ lục đồng bộ chỉ đổi tiện ích có thể nhả chỗ xe của kỳ gia hạn dù chi nhánh vẫn hoạt động. Unit offline đạt 184/185, giữ một test đỏ tái hiện. [RECHECK-3](nhat-ky/RECHECK-3.md)
+- Bản sửa core còn trong cây làm việc. Lượt 2 ghi nhận web và mobile đã qua các lỗi chặn merge của hai repo. Lượt 3 chỉ rà core. [RECHECK-2](nhat-ky/RECHECK-2.md)
+
+## 27/11 · Trạng thái mới nhất (thay mục ĐIỂM DỪNG ở trên)
+- Đã sửa 6 lỗi `RECHECK.md`, 2 lỗi `RECHECK-2.md` và lỗi `RECHECK-3.md` (chi tiết `nhat-ky/RECHECK-FIX.md`). Lần sửa RECHECK-3 được kiểm bằng test đỏ của Codex chuyển xanh, Codex chưa rà lại.
+- Đã commit và push cả 4 repo trên `feature/branch-monitoring`. CHƯA merge `master`.
+- Còn để sau: Q13 (phụ lục đổi xe/thời hạn/bãi sau gia hạn), Q14, các ca ghi đồng thời. Việc chủ dự án làm cuối: thử tay, xem quyết định, merge, deploy (notification, core, web).

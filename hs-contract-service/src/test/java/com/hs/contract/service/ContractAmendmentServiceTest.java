@@ -589,12 +589,16 @@ class ContractAmendmentServiceTest {
     /** Real parking service over an in-memory store. Only branches stubbed as active can be locked. */
     List<ParkingReservation> store = new ArrayList<>();
     PropertyBranchRepository branchRepository = mock(PropertyBranchRepository.class);
+    Listing standalone = Listing.builder().id("listing").ownerId("owner").maxMotorbikeCount(5).build();
     ParkingReservationService realParking() {
         var bookings = mock(ParkingReservationRepository.class);
         var listings = mock(ListingRepository.class);
-        var listing = Listing.builder().id("listing").ownerId("owner").build();
-        when(listings.findById("listing")).thenReturn(Optional.of(listing));
-        when(listings.findByIdForUpdate("listing")).thenReturn(Optional.of(listing));
+        when(listings.findById("listing")).thenReturn(Optional.of(standalone));
+        when(listings.findByIdForUpdate("listing")).thenReturn(Optional.of(standalone));
+        when(bookings.findOverlappingListingReservations(any(), any(), anyList(), any(), any())).thenAnswer(i -> overlapping(
+                r -> i.getArgument(0).equals(r.getListingId()), i.getArgument(1), i.getArgument(3), i.getArgument(4)));
+        when(bookings.findOverlappingBranchReservations(any(), any(), anyList(), any(), any())).thenAnswer(i -> overlapping(
+                r -> i.getArgument(0).equals(r.getBranchId()), i.getArgument(1), i.getArgument(3), i.getArgument(4)));
         when(bookings.findByContractId(anyString())).thenAnswer(i -> store.stream()
                 .filter(r -> Objects.equals(r.getContractId(), i.getArgument(0))).toList());
         when(bookings.save(any())).thenAnswer(i -> { ParkingReservation r = i.getArgument(0); if (!store.contains(r)) store.add(r); return r; });
@@ -602,9 +606,26 @@ class ContractAmendmentServiceTest {
         ReflectionTestUtils.setField(real, "entityManager", mock(jakarta.persistence.EntityManager.class));
         return real;
     }
-    void activeBranch(String id) {
+    List<ParkingReservation> overlapping(java.util.function.Predicate<ParkingReservation> pool, VehicleType type, LocalDate start, LocalDate end) {
+        return store.stream().filter(r -> pool.test(r) && r.getVehicleType() == type
+                && (r.getStatus() == ParkingReservationStatus.ACTIVE || r.getStatus() == ParkingReservationStatus.HELD)
+                && r.getStartDate().isBefore(end) && r.getEndDateExclusive().isAfter(start)).toList();
+    }
+    void activeBranch(String id) { activeBranch(id, 5); }
+    void activeBranch(String id, int motorbikes) {
         when(branchRepository.findByIdForUpdate(id)).thenReturn(Optional.of(
-                PropertyBranch.builder().id(id).ownerId("owner").motorbikeParkingCapacity(5).build()));
+                PropertyBranch.builder().id(id).ownerId("owner").motorbikeParkingCapacity(motorbikes).build()));
+    }
+    void deleteBranch(String id) {
+        when(branchRepository.findByIdForUpdate(id)).thenReturn(Optional.empty());
+        when(branchRepository.isSoftDeleted(id)).thenReturn(true);
+    }
+    static void assertNoRoom(org.junit.jupiter.api.function.Executable call) {
+        assertEquals(ListingErrorCode.PARKING_CAPACITY_CHANGED.getCode(), assertThrows(AppException.class, call).getCode());
+    }
+    List<String> activePools() {
+        return store.stream().filter(r -> r.getStatus() == ParkingReservationStatus.ACTIVE)
+                .map(r -> r.getBranchId() + " " + r.getQuantity() + " " + r.getStartDate() + " " + r.getEndDateExclusive()).toList();
     }
     ParkingReservation occupied(String branchId) {
         var tenant = builder.map(original.getTenantSnapshot());
@@ -677,15 +698,17 @@ class ContractAmendmentServiceTest {
                 () -> "branches: " + active.stream().map(ParkingReservation::getBranchId).toList());
         assertEquals(LocalDate.of(2027, 1, 14), active.stream().map(ParkingReservation::getEndDateExclusive).max(Comparator.naturalOrder()).orElseThrow());
     }
-    @Test void syncStillMovesTheHoldWhenTheContractBranchDiffersFromTheSyncedTarget() {
+    @Test void syncStillMovesTheHoldWhenVehiclesChangeAndTheContractBranchDiffersFromTheSyncedTarget() {
         root.setBranchId("old-branch");
         var row = occupied("old-branch");
         ReflectionTestUtils.setField(service, "parking", realParking());
+        activeBranch("old-branch");
         listingLeftTheBranch();
-        service.propose("root", "owner", syncPayload());
+        service.propose("root", "owner", payload(Map.of("freeForm", true, "listingSourceVersion", "left", "motorbikeCount", 2)));
         var child = approve(proposals.getFirst()); signaturesReady(child); service.signed(child);
         assertEquals(LocalDate.of(2026, 11, 14), row.getEndDateExclusive());
         assertEquals(1, activeExcept(row).size()); assertNull(activeExcept(row).getFirst().getBranchId());
+        assertEquals(2, activeExcept(row).getFirst().getQuantity());
     }
     @Test void softDeletedReservationBranchIsTreatedAsStandaloneThroughSubmitApprovalAndSigning() {
         var row = occupied("deleted-branch");
@@ -712,6 +735,255 @@ class ContractAmendmentServiceTest {
         signaturesReady(child);
         assertDoesNotThrow(() -> { service.validateSigning(child); service.signed(child); });
         assertEquals(1, activeExcept(row).size()); assertNull(activeExcept(row).getFirst().getBranchId());
+    }
+
+    // RECHECK finding 1: a rental falling back from a soft-deleted branch is limited by the standalone listing.
+    @Test void fallbackFromABranchDeletedBeforeSubmitEnforcesTheListingLimit() {
+        occupied("deleted-branch"); standalone.setMaxMotorbikeCount(1); deleteBranch("deleted-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        var p = payload(Map.of("freeForm", true, "motorbikeCount", 2));
+        assertNoRoom(() -> service.preview("root", "owner", p));
+        assertNoRoom(() -> service.propose("root", "owner", p));
+        assertTrue(proposals.isEmpty()); assertEquals(1, store.size());
+    }
+    @Test void fallbackBetweenSubmitAndApprovalWritesNoHoldAboveTheListingLimit() {
+        occupied("old-branch"); standalone.setMaxMotorbikeCount(1); activeBranch("old-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        service.propose("root", "owner", payload(Map.of("freeForm", true, "motorbikeCount", 2)));
+        deleteBranch("old-branch");
+        assertNoRoom(() -> approve(proposals.getFirst()));
+        assertEquals("REQUESTED", proposals.getFirst().getStatus()); assertEquals(1, store.size());
+    }
+    @Test void fallbackBetweenApprovalAndSigningActivatesNothingAboveTheListingLimit() {
+        var row = occupied("old-branch"); standalone.setMaxMotorbikeCount(1); activeBranch("old-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        service.propose("root", "owner", payload(Map.of("freeForm", true, "motorbikeCount", 2)));
+        var child = approve(proposals.getFirst()); deleteBranch("old-branch"); signaturesReady(child);
+        assertNoRoom(() -> service.validateSigning(child));
+        assertNoRoom(() -> service.signed(child));
+        assertEquals(List.of("old-branch 1 2026-10-14 2027-01-14"), activePools());
+        assertEquals(LocalDate.of(2027, 1, 14), row.getEndDateExclusive());
+    }
+    @Test void aNullTargetFromAnEarlierDeletionIsStillLimitedAtApprovalAndSigning() {
+        occupied("deleted-branch"); standalone.setMaxMotorbikeCount(2); deleteBranch("deleted-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        service.propose("root", "owner", payload(Map.of("freeForm", true, "motorbikeCount", 2)));
+        standalone.setMaxMotorbikeCount(1);
+        assertNoRoom(() -> approve(proposals.getFirst())); assertEquals(1, store.size());
+        standalone.setMaxMotorbikeCount(2);
+        var child = approve(proposals.getFirst()); signaturesReady(child);
+        standalone.setMaxMotorbikeCount(1);
+        assertNoRoom(() -> service.validateSigning(child));
+        assertNoRoom(() -> service.signed(child));
+        assertEquals(List.of("deleted-branch 1 2026-10-14 2027-01-14"), activePools());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.NullSource
+    @org.junit.jupiter.params.provider.ValueSource(strings = "deleted-branch")
+    void fallbackCountsThePlacesOtherRentalsHoldOnTheListing(String otherPool) {
+        occupied("deleted-branch"); standalone.setMaxMotorbikeCount(2); deleteBranch("deleted-branch");
+        store.add(ParkingReservation.builder().contractId("other").rentalRequestId("other-rental").listingId("listing")
+                .branchId(otherPool).vehicleType(VehicleType.MOTORBIKE).quantity(1).startDate(LocalDate.of(2026, 11, 14))
+                .endDateExclusive(LocalDate.of(2027, 1, 14)).status(ParkingReservationStatus.HELD).build());
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        assertNoRoom(() -> service.propose("root", "owner", payload(Map.of("freeForm", true, "motorbikeCount", 2))));
+    }
+    @Test void aRentalWithoutVehiclesFallingBackFromItsRecordedBranchIsLimitedToo() {
+        root.setBranchId("deleted-branch"); standalone.setMaxMotorbikeCount(1); deleteBranch("deleted-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        assertNoRoom(() -> service.propose("root", "owner", payload(Map.of("freeForm", true, "motorbikeCount", 2))));
+        assertTrue(store.isEmpty());
+    }
+    @Test void replacingAScheduledFallbackAppendixCannotExceedTheListingLimit() {
+        occupied("deleted-branch"); standalone.setMaxMotorbikeCount(2); deleteBranch("deleted-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        service.propose("root", "owner", payload(Map.of("freeForm", true, "motorbikeCount", 2)));
+        var first = proposals.getFirst(); var oldChild = approve(first); signaturesReady(oldChild); service.signed(oldChild);
+        assertNoRoom(() -> service.propose("root", "owner", replace(first, Map.of("freeForm", true, "motorbikeCount", 3))));
+    }
+
+    // RECHECK finding 2: approved on master, so no target snapshot, a null document branch and holds in the standalone pool.
+    Contract approvedOnMaster(AmendmentPayload p, int vehicles) {
+        service.propose("root", "owner", p);
+        var child = approve(proposals.getFirst());
+        proposals.getFirst().setParkingTargetSnapshot(null); child.setBranchId(null);
+        store.add(ParkingReservation.builder().contractId(child.getId()).rentalRequestId("rental").listingId("listing")
+                .vehicleType(VehicleType.MOTORBIKE).quantity(vehicles).startDate(p.effectiveOn())
+                .endDateExclusive(LocalDate.of(2027, 1, 14)).status(ParkingReservationStatus.HELD).build());
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        signaturesReady(child);
+        return child;
+    }
+    @Test void legacyVehicleAmendmentChecksTheCapacityOfTheHeldBranch() {
+        occupied("old-branch"); activeBranch("old-branch", 1);
+        var child = approvedOnMaster(payload(Map.of("freeForm", true, "motorbikeCount", 2)), 2);
+        assertNoRoom(() -> service.validateSigning(child));
+        assertNoRoom(() -> service.signed(child));
+        assertEquals(List.of("old-branch 1 2026-10-14 2027-01-14"), activePools());
+    }
+    @Test void legacyVehicleAmendmentActivatesInTheHeldBranch() {
+        occupied("old-branch"); activeBranch("old-branch");
+        var child = approvedOnMaster(payload(Map.of("freeForm", true, "motorbikeCount", 2)), 2);
+        service.validateSigning(child); service.signed(child);
+        assertEquals(List.of("old-branch 1 2026-10-14 2026-11-14", "old-branch 2 2026-11-14 2027-01-14"), activePools());
+    }
+    @Test void legacyAmendmentWhoseSyncConfirmedLeavingTheBranchStaysStandalone() {
+        occupied("old-branch"); activeBranch("old-branch", 1); listingLeftTheBranch();
+        var child = approvedOnMaster(payload(Map.of("freeForm", true, "listingSourceVersion", "left", "motorbikeCount", 2)), 2);
+        service.validateSigning(child); service.signed(child);
+        assertEquals(List.of("old-branch 1 2026-10-14 2026-11-14", "null 2 2026-11-14 2027-01-14"), activePools());
+    }
+
+    // RECHECK finding 3 (owner, 27/11): the contract records branch A, the listing left A, no vehicle or term change.
+    @Test void syncLeavingTheRecordedBranchWithoutVehicleOrTermChangeKeepsTheHoldAndTheRecordedBranch() {
+        root.setBranchId("old-branch");
+        var row = occupied("old-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        activeBranch("old-branch");
+        listingLeftTheBranch();
+        service.propose("root", "owner", syncPayload());
+        var child = approve(proposals.getFirst()); assertHoldUntouched(row);
+        signaturesReady(child); service.signed(child);
+        assertHoldUntouched(row);
+        assertEquals("old-branch", child.getBranchId());
+        at("2026-11-14T03:00:00Z"); service.get("root", "owner");
+        assertEquals("old-branch", root.getBranchId());
+        // A later vehicle change still uses the pool that really holds the places.
+        service.propose("root", "owner", new AmendmentPayload(UUID.randomUUID().toString(), child.getCurrentRevisionId(), null,
+                LocalDate.of(2026, 12, 14), "Hai bên thỏa thuận thay đổi", Map.of("freeForm", true, "motorbikeCount", 2), List.of()));
+        var next = approve(proposals.getFirst()); signaturesReady(next); service.signed(next);
+        assertEquals("old-branch", next.getBranchId());
+        assertEquals(List.of("old-branch 1 2026-10-14 2026-12-14", "old-branch 2 2026-12-14 2027-01-14"), activePools());
+    }
+    @Test void keptAmendmentApprovedOnMasterReleasesItsStandaloneHoldAndKeepsTheRecordedBranch() {
+        root.setBranchId("old-branch");
+        var row = occupied("old-branch"); activeBranch("old-branch"); listingLeftTheBranch();
+        var child = approvedOnMaster(syncPayload(), 1);
+        service.validateSigning(child); service.signed(child);
+        assertEquals(List.of("old-branch 1 2026-10-14 2027-01-14"), activePools());
+        assertEquals(LocalDate.of(2027, 1, 14), row.getEndDateExclusive());
+        assertTrue(store.stream().noneMatch(r -> r.getStatus() == ParkingReservationStatus.HELD));
+        assertEquals("old-branch", child.getBranchId());
+        at("2026-11-14T03:00:00Z"); service.get("root", "owner");
+        assertEquals("old-branch", root.getBranchId());
+    }
+    // With a listing sync that only changes other content, or with no sync at all (a rent change).
+    AmendmentPayload leftBranchPayload(boolean synced) { return synced ? syncPayload() : payload(Map.of("rentAmount", "12000000")); }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"submit,true", "approval,true", "signing,true", "submit,false", "approval,false", "signing,false"})
+    void keptBranchDeletedAtAnyStageFallsBackToTheStandalonePool(String deletedBefore, boolean synced) {
+        root.setBranchId("old-branch");
+        var row = occupied("old-branch"); activeBranch("old-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        listingLeftTheBranch();
+        if (deletedBefore.equals("submit")) deleteBranch("old-branch");
+        service.propose("root", "owner", leftBranchPayload(synced));
+        if (deletedBefore.equals("submit")) assertEquals("{\"branchId\":null}", proposals.getFirst().getParkingTargetSnapshot());
+        if (deletedBefore.equals("approval")) deleteBranch("old-branch");
+        var child = approve(proposals.getFirst());
+        if (deletedBefore.equals("signing")) deleteBranch("old-branch");
+        signaturesReady(child); service.validateSigning(child); service.signed(child);
+        assertEquals(List.of("old-branch 1 2026-10-14 2026-11-14", "null 1 2026-11-14 2027-01-14"), activePools());
+        assertTrue(store.stream().noneMatch(r -> r.getStatus() == ParkingReservationStatus.HELD));
+        assertEquals(LocalDate.of(2026, 11, 14), row.getEndDateExclusive());
+        assertNull(child.getBranchId());
+        at("2026-11-14T03:00:00Z"); service.get("root", "owner");
+        assertNull(root.getBranchId());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"submit,true", "approval,true", "signing,true", "submit,false", "approval,false", "signing,false"})
+    void keptBranchDeletedWithAFullListingIsRefused(String deletedBefore, boolean synced) {
+        root.setBranchId("old-branch");
+        occupied("old-branch"); activeBranch("old-branch"); standalone.setMaxMotorbikeCount(0);
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        listingLeftTheBranch();
+        if (deletedBefore.equals("submit")) {
+            deleteBranch("old-branch");
+            assertNoRoom(() -> service.preview("root", "owner", leftBranchPayload(synced)));
+            assertNoRoom(() -> service.propose("root", "owner", leftBranchPayload(synced)));
+            return;
+        }
+        service.propose("root", "owner", leftBranchPayload(synced));
+        if (deletedBefore.equals("approval")) {
+            deleteBranch("old-branch");
+            assertNoRoom(() -> approve(proposals.getFirst()));
+            return;
+        }
+        var child = approve(proposals.getFirst()); deleteBranch("old-branch"); signaturesReady(child);
+        assertNoRoom(() -> service.validateSigning(child));
+        assertNoRoom(() -> service.signed(child));
+        assertEquals(List.of("old-branch 1 2026-10-14 2027-01-14"), activePools());
+    }
+
+    /** A signed renewal: the lease runs to 14/04 while the appendix terms still end on the original date. */
+    void renewedContractRecordingOldBranch() {
+        root.setBranchId("old-branch"); root.setEffectiveLeaseMonths(6); occupied("old-branch"); activeBranch("old-branch");
+        store.add(ParkingReservation.builder().contractId("root").rentalRequestId("rental").listingId("listing").branchId("old-branch")
+                .vehicleType(VehicleType.MOTORBIKE).quantity(1).startDate(LocalDate.of(2027, 1, 14))
+                .endDateExclusive(LocalDate.of(2027, 4, 14)).status(ParkingReservationStatus.ACTIVE).build());
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        listingLeftTheBranch();
+    }
+    @Test void replacingAListingSyncWithoutVehicleOrTermChangesKeepsTheRenewedParkingInTheLiveBranch() {
+        renewedContractRecordingOldBranch();
+        var before = activePools();
+        service.propose("root", "owner", syncPayload());
+        var first = proposals.getFirst();
+        var originalChild = approve(first);
+        signaturesReady(originalChild); service.signed(originalChild);
+        assertEquals(before, activePools());
+
+        listingLeftTheBranch("C");
+        service.propose("root", "owner", replace(first, syncPayload().changes()));
+        var replacement = approve(proposals.getFirst());
+        signaturesReady(replacement); service.signed(replacement);
+
+        assertEquals("old-branch", replacement.getBranchId());
+        assertEquals(1, store.stream().filter(r -> r.getStatus() == ParkingReservationStatus.ACTIVE
+                && "old-branch".equals(r.getBranchId()) && !r.getStartDate().isAfter(LocalDate.of(2027, 2, 14))
+                && r.getEndDateExclusive().equals(LocalDate.of(2027, 4, 14))).mapToInt(ParkingReservation::getQuantity).sum());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"submit,true", "approval,true", "signing,true", "submit,false", "approval,false", "signing,false"})
+    void branchFallbackKeepsEveryHeldSegmentToItsOwnEnd(String deletedBefore, boolean synced) {
+        renewedContractRecordingOldBranch();
+        if (deletedBefore.equals("submit")) deleteBranch("old-branch");
+        service.propose("root", "owner", leftBranchPayload(synced));
+        if (deletedBefore.equals("approval")) deleteBranch("old-branch");
+        var child = approve(proposals.getFirst());
+        if (deletedBefore.equals("signing")) deleteBranch("old-branch");
+        signaturesReady(child); service.validateSigning(child); service.signed(child);
+        assertEquals(List.of("null 1 2027-01-14 2027-04-14", "null 1 2026-11-14 2027-01-14", "old-branch 1 2026-10-14 2026-11-14")
+                .stream().sorted().toList(), activePools().stream().sorted().toList());
+        assertTrue(store.stream().allMatch(r -> r.getStatus() == ParkingReservationStatus.ACTIVE));
+        assertNull(child.getBranchId());
+    }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"submit,true", "approval,true", "signing,true", "submit,false", "approval,false", "signing,false"})
+    void branchFallbackChecksTheListingOverTheRenewalPeriodToo(String deletedBefore, boolean synced) {
+        renewedContractRecordingOldBranch(); standalone.setMaxMotorbikeCount(1);
+        store.add(ParkingReservation.builder().contractId("other").rentalRequestId("other-rental").listingId("listing")
+                .vehicleType(VehicleType.MOTORBIKE).quantity(1).startDate(LocalDate.of(2027, 2, 1))
+                .endDateExclusive(LocalDate.of(2027, 3, 1)).status(ParkingReservationStatus.ACTIVE).build());
+        var before = activePools();
+        Contract child = null;
+        if (deletedBefore.equals("submit")) {
+            deleteBranch("old-branch");
+            assertNoRoom(() -> service.preview("root", "owner", leftBranchPayload(synced)));
+            assertNoRoom(() -> service.propose("root", "owner", leftBranchPayload(synced)));
+        } else {
+            service.propose("root", "owner", leftBranchPayload(synced));
+            if (deletedBefore.equals("approval")) {
+                deleteBranch("old-branch");
+                assertNoRoom(() -> approve(proposals.getFirst()));
+            } else {
+                child = approve(proposals.getFirst()); deleteBranch("old-branch"); signaturesReady(child);
+                var approved = child;
+                assertNoRoom(() -> service.validateSigning(approved));
+                assertNoRoom(() -> service.signed(approved));
+            }
+        }
+        assertEquals(before, activePools());
     }
 
     @Test void branchLinkedAmendmentAboveListingLimitsChecksActualPoolThroughoutConsentAndSigning() {

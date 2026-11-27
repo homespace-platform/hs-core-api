@@ -161,6 +161,8 @@ public class ContractLifecycleService {
         Contract parent=contracts.findById(agreement.getParentContractId()).orElseThrow(this::notAllowed);
         if(!"APPROVED".equals(r.getStatus()) || parent.getStatus()!=ContractStatus.ACTIVE || terminationActive(parent)
                 || !end(parent).equals(r.getStartsOn()) || !time.now().isBefore(r.getSignBy())) throw notAllowed();
+        // Refuse before the provider signs what activation would reject.
+        parking.validateRenewalHold(agreement.getId(),parent.getId());
     }
 
     @Transactional public ContractLifecycleResponse proposeClosure(String id,String actor,ClosurePayload p) {

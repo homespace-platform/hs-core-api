@@ -309,6 +309,11 @@ class ContractLifecycleServiceTest {
         assertEquals(LocalDate.of(2027,4,12),service.get("root","tenant").endExclusive());
         assertEquals(new BigDecimal("20000000"),deposit.getHeldAmount());verify(parking,times(1)).activateRenewalHold(child.getId(),"root");
     }
+    @Test void renewalSigningIsRefusedBeforehandWhenItsParkingCouldNotActivate() {
+        Contract child=approve();service.validateAgreementSigning(child);verify(parking).validateRenewalHold(child.getId(),"root");
+        doThrow(new IllegalStateException("full")).when(parking).validateRenewalHold(child.getId(),"root");
+        assertThrows(IllegalStateException.class,()->service.validateAgreementSigning(child));
+    }
     @Test void rejectedAndExpiredRequestsCannotBeApprovedAndDoNotExtendLease() {
         var r=request(); service.decideRenewal("root",r.getId(),"owner",false);assertEquals("REJECTED",r.getStatus());
         verify(renewalNotices).other(root,"owner",RenewalNotificationWriter.Event.RENEWAL_REJECTED);

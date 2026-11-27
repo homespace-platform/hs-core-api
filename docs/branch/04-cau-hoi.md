@@ -25,6 +25,9 @@
 ## Chốt bổ sung 27/11 (thay một phần Q2)
 Hợp đồng bị trùng lịch **chỉ tạm** hiện trong khay; hết trùng thì **tự hiện lại** ở phòng đã xếp. Tính khi đọc (GET chỉ đọc), **không ghi** `room_id = null`, **không job / hook** đồng bộ. Gắn tay vào phòng đang trùng vẫn báo 409; tự gắn lúc tạo HĐ gặp trùng thì vẫn ghi liên kết chi nhánh với phòng null như thiết kế. Chỗ nào trong `01` nói "đưa vào khay ở đường ghi/job" nay hết hiệu lực.
 
+## Chủ dự án trả lời 27/11 · làm rõ Q15
+HĐ ghi chi nhánh A, tin đã rời A, phụ lục **không đổi số xe cũng không đổi thời hạn** (kể cả khi có đồng bộ tin chỉ đổi nội dung khác): **giữ chỗ ở A**, chi nhánh ghi trên phụ lục/hợp đồng cũng giữ A. A đã bị xóa mềm thì chuyển sang bãi độc lập, có kiểm giới hạn của tin. Phụ lục có đổi số xe hoặc thời hạn giữ như `master`. Xem [RECHECK-FIX](nhat-ky/RECHECK-FIX.md).
+
 ## Uỷ quyền 27/11 (chủ dự án đi ngủ)
 Nguyên văn: "bạn giúp tôi chạy đến khi hoàn thành không dừng nếu cần confirm bạn giúp tôi trả lời hợp lý miễn đúng nghiệp vụ". Nghĩa: làm tiếp đến hết Phase 5, **bỏ cổng dừng giữa các phase**. Câu hỏi mới: điều phối chọn phương án hợp nghiệp vụ, ít rủi ro cho luồng cũ, **ghi vào mục "Quyết định thay chủ dự án"** bên dưới. Không đổi: không commit/push/reset, không đọc .env, không đụng dữ liệu/hạ tầng thật, không thêm tính năng ngoài concept.
 
