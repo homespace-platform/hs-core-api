@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** Moves legacy citizen IDs to KYC and enforces uniqueness at their only storage location. */
+/** Moves legacy citizen IDs to KYC, widens PII columns and enforces uniqueness on the CCCD blind index. */
 @Component
 @Order(0)
 @RequiredArgsConstructor
@@ -46,7 +46,16 @@ public class CccdUniquenessInitializer implements CommandLineRunner {
                         """);
                 jdbc.execute("ALTER TABLE users DROP COLUMN cccd");
             }
-            jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_user_kyc_details_cccd ON user_kyc_details (cccd)");
+            // Ciphertext columns need room (ddl-auto=update never widens); idempotent.
+            for (String column : KycEncryptionMigration.PII_COLUMNS) {
+                jdbc.execute("ALTER TABLE user_kyc_details ALTER COLUMN " + column
+                        + " TYPE text");
+            }
+            jdbc.execute("ALTER TABLE user_kyc_details ADD COLUMN IF NOT EXISTS cccd_hash varchar(64)");
+            // Uniqueness now lives on the blind index; the old index on the (random) ciphertext is useless.
+            jdbc.execute("ALTER TABLE user_kyc_details DROP CONSTRAINT IF EXISTS uk_user_kyc_details_cccd");
+            jdbc.execute("DROP INDEX IF EXISTS uk_user_kyc_details_cccd");
+            jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS uk_user_kyc_details_cccd_hash ON user_kyc_details (cccd_hash)");
         });
     }
 

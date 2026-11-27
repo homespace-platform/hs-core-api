@@ -1,7 +1,12 @@
 package com.hs.user.model;
 
 import com.hs.user.dto.response.KycVerifiedDetailsResponse;
+import com.hs.common.security.SecretCrypto;
+import com.hs.user.security.KycCryptoConverter;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.ForeignKey;
@@ -15,7 +20,7 @@ import lombok.Setter;
 
 @Entity
 @Table(name = "user_kyc_details", uniqueConstraints = @jakarta.persistence.UniqueConstraint(
-        name = "uk_user_kyc_details_cccd", columnNames = "cccd"))
+        name = "uk_user_kyc_details_cccd_hash", columnNames = "cccd_hash"))
 @Getter @Setter @NoArgsConstructor
 public class UserKycDetails {
     @Id @Column(name = "user_id", length = 36, nullable = false)
@@ -23,21 +28,24 @@ public class UserKycDetails {
     @OneToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", insertable = false, updatable = false, foreignKey = @ForeignKey(name = "fk_user_kyc_details_user"))
     private User user;
-    @Column(length = 20)
+    @Convert(converter = KycCryptoConverter.class) @Column(columnDefinition = "text")
     private String cccd;
-    @Column(name = "full_name", columnDefinition = "text")
+    /** HMAC blind index of the normalized CCCD; the only column used for uniqueness and lookup. */
+    @Column(name = "cccd_hash", length = 64)
+    private String cccdHash;
+    @Convert(converter = KycCryptoConverter.class) @Column(name = "full_name", columnDefinition = "text")
     private String fullName;
-    @Column(name = "birth_date", length = 20)
+    @Convert(converter = KycCryptoConverter.class) @Column(name = "birth_date", columnDefinition = "text")
     private String birthDate;
-    @Column(name = "permanent_address", columnDefinition = "text")
+    @Convert(converter = KycCryptoConverter.class) @Column(name = "permanent_address", columnDefinition = "text")
     private String permanentAddress;
-    @Column(length = 20)
+    @Convert(converter = KycCryptoConverter.class) @Column(columnDefinition = "text")
     private String gender;
-    @Column(name = "issue_date", length = 20)
+    @Convert(converter = KycCryptoConverter.class) @Column(name = "issue_date", columnDefinition = "text")
     private String issueDate;
-    @Column(name = "expiration_date", length = 20)
+    @Convert(converter = KycCryptoConverter.class) @Column(name = "expiration_date", columnDefinition = "text")
     private String expirationDate;
-    @Column(name = "issue_place", columnDefinition = "text")
+    @Convert(converter = KycCryptoConverter.class) @Column(name = "issue_place", columnDefinition = "text")
     private String issuePlace;
     @Column(name = "face_match_percent")
     private Double faceMatchPercent;
@@ -54,6 +62,11 @@ public class UserKycDetails {
     private Boolean faceNotBlurred;
     private Boolean faceValid;
     private Boolean faceNotCovered;
+
+    @PrePersist @PreUpdate
+    void syncCccdHash() {
+        cccdHash = cccd == null || cccd.isBlank() ? null : SecretCrypto.get().cccdHash(cccd);
+    }
 
     public static UserKycDetails from(String userId, KycVerifiedDetailsResponse value) {
         var details = new UserKycDetails();

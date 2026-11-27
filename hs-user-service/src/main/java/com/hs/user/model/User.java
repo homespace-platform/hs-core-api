@@ -57,7 +57,14 @@ public class User extends BaseEntity {
     /** Read-only projection; the citizen ID is stored only in user_kyc_details. */
     @org.hibernate.annotations.Formula("(select k.cccd from user_kyc_details k where k.user_id = id)")
     @Setter(AccessLevel.NONE)
+    @Getter(AccessLevel.NONE)
     String cccd;
+
+    /** The formula reads the stored column, so decrypt here (plaintext legacy passes through). */
+    public String getCccd() {
+        return com.hs.common.security.SecretCrypto.isKycCiphertext(cccd)
+                ? com.hs.common.security.SecretCrypto.get().decryptKyc(cccd) : cccd;
+    }
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "role_id")

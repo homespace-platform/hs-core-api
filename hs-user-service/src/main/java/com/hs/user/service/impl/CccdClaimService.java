@@ -1,6 +1,7 @@
 package com.hs.user.service.impl;
 
 import com.hs.common.advice.entity.AppException;
+import com.hs.common.security.SecretCrypto;
 import com.hs.user.advice.entity.enums.UserErrorCode;
 import com.hs.user.model.UserKycDetails;
 import com.hs.user.repository.UserKycDetailsRepository;
@@ -33,8 +34,9 @@ public class CccdClaimService {
     }
 
     private boolean claim(String userId, String cccd) {
-        // Serialize competing claims before an ORM unique violation can log the identifier.
-        jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", cccd);
+        // Serialize competing claims before an ORM unique violation; lock on the hash, never the plain CCCD.
+        String hash = SecretCrypto.get().cccdHash(cccd);
+        jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", hash);
         if (!userRepository.existsById(userId)) {
             throw new AppException(UserErrorCode.USER_NOT_EXISTED);
         }
@@ -44,10 +46,10 @@ public class CccdClaimService {
             return row;
         });
 
-        if (cccd.equals(details.getCccd())) {
+        if (hash.equals(details.getCccdHash())) {
             return true;
         }
-        if (detailsRepository.existsByCccdAndUserIdNot(cccd, userId)) {
+        if (detailsRepository.existsByCccdHashAndUserIdNot(hash, userId)) {
             return false;
         }
 
