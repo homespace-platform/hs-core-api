@@ -98,3 +98,18 @@ Chọn **bảng riêng `membership_receipts`** thay vì mở rộng `payment_rec
 - Dùng lại renderer PDF (Gotenberg), lưu S3 và cơ chế tải có kiểm tra toàn vẹn của biên nhận hiện có; số phiếu `HS-MB-yyyyMMdd-xxxx`; bên nhận là HomeSpace; tạo đúng 1 phiếu khi đơn chuyển PAID (SePay, ETH, gói/nâng cấp/addon), unique theo `order_id`; backfill các đơn PAID cũ với ngày phát hành = `paidAt`.
 - Web "Lịch sử thanh toán" có 2 nhóm: **Thuê nhà** (như cũ) và **Gói hội viên** (chỉ người mua thấy).
 - Ngoài phạm vi lần này: đơn REVIEW (trả trùng/hết hạn) và hoàn tiền gói; hoá đơn điện tử VAT.
+
+## Chủ dự án 28/11: bỏ đối soát triệt để (membership)
+Không còn trạng thái chờ người xử lý. Mọi khoản tiền **hợp lệ** đã vào đều được áp dụng tự động và có biên nhận:
+1. **Trả sau khi đơn hết hạn/huỷ/thất bại** nhưng đúng số tiền → kích hoạt như bình thường (PAID + biên nhận).
+2. **Trả lần 2 cho đơn đã PAID** (giao dịch khác) → tạo đơn mới cùng loại (gói/lượt), `transactionNo` = giao dịch mới, kích hoạt như một lần mua mới theo luật mua gói hiện có; có biên nhận riêng.
+3. **Không kích hoạt được** (ví dụ khoản chênh lệch nâng cấp trả trùng, hoặc gói nền đã đổi) → quy đổi giá trị thành **lượt đăng mua thêm (ADDON)** theo đơn giá addon hiện hành, làm tròn xuống; phần dư (nếu có) ghi trên biên nhận. Không có trường hợp nào chờ admin.
+4. Giao dịch **không hợp lệ** (sai số tiền, sai người nhận, chưa đủ xác nhận on-chain) không phải tiền của đơn → giữ nguyên cách từ chối hiện tại, không tạo trạng thái chờ.
+5. Đơn `REVIEW` đã có trong DB → xử lý một lần lúc khởi động theo 1–3. `REVIEW` không còn được tạo mới; giữ giá trị enum để đọc dữ liệu cũ. Bỏ event `MEMBERSHIP_PAYMENT_REVIEW` (notification vẫn chấp nhận event cũ còn trong Kafka).
+
+### Sửa quyết định (chủ dự án 28/11): trả 2 lần là LỖI, phải chặn từ đầu
+Thay mục 2 và 3 ở trên:
+- **Chặn tạo đơn trùng (chống spam):** mỗi chủ tài khoản chỉ có tối đa **1 đơn PENDING còn hạn** cho cùng một mặt hàng (loại + gói + số lượng); gọi tạo đơn lặp lại (bấm nhiều lần, nhiều tab, gọi API liên tục) **trả lại đúng đơn đang chờ** thay vì tạo đơn mới. Bảo đảm bằng khoá theo chủ tài khoản + ràng buộc DB, không chỉ ở giao diện. Có giới hạn tần suất gọi tạo đơn. Có đơn PENDING mặt hàng khác thì huỷ đơn cũ trước khi tạo đơn mới (đơn đã huỷ mà vẫn nhận tiền đúng số → vẫn kích hoạt theo mục 1).
+- **Giao diện:** nút thanh toán khoá ngay khi bấm; quay lại trang thanh toán thì dùng lại đơn đang chờ.
+- **Xác nhận thanh toán idempotent:** cùng một mã giao dịch (SePay IPN gửi lại, ETH txHash) chỉ áp dụng 1 lần.
+- **Nếu vẫn có giao dịch thứ hai** cho đơn đã PAID, hoặc khoản đã vào nhưng không áp dụng được: **không cộng gói, không quy đổi**. Ghi nhận **khoản trả thừa – chờ hoàn tiền** (bản ghi riêng, có biên nhận ghi rõ "sẽ được hoàn lại"), báo cho khách, và hiện trong danh sách **Hoàn tiền** của admin để hoàn lại rồi bấm "Đã hoàn". Đây là việc hoàn tiền, không phải đối soát trạng thái đơn.

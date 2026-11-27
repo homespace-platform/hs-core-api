@@ -11,5 +11,8 @@ public interface MembershipOrderRepository extends JpaRepository<MembershipOrder
     Optional<MembershipOrder> lockById(@org.springframework.data.repository.query.Param("id") String id);
 
     boolean existsByOwnerIdAndStatusAndExpiresAtAfter(String ownerId, MembershipOrder.Status status, Instant now);
+    boolean existsByProviderAndTransactionNo(MembershipOrder.Provider provider, String transactionNo);
+    org.springframework.data.domain.Slice<MembershipOrder> findByStatusOrderById(MembershipOrder.Status status,
+            org.springframework.data.domain.Pageable page);
     List<MembershipOrder> findByOwnerIdAndStatus(String ownerId, MembershipOrder.Status status);
 }

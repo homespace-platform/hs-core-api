@@ -25,8 +25,10 @@ class MembershipCheckoutServiceTest {
     private final com.hs.payment.membership.notification.MembershipNotificationWriter notifications =
             mock(com.hs.payment.membership.notification.MembershipNotificationWriter.class);
     private final com.hs.payment.receipt.MembershipReceiptService receipts = mock(com.hs.payment.receipt.MembershipReceiptService.class);
+    private final MembershipOverpaymentRepository overpayments = mock(MembershipOverpaymentRepository.class);
+    private final MembershipPaymentApplier applier = new MembershipPaymentApplier(orders, overpayments, memberships, notifications, receipts);
     private final MembershipCheckoutService service = new MembershipCheckoutService(orders, memberships,
-            new SepaySigner("test-sepay-secret"), ethQuotes, ethChain, notifications, receipts);
+            new SepaySigner("test-sepay-secret"), ethQuotes, ethChain, applier);
 
     @Test
     void ethCheckoutNeedsNoSepayConfigurationAndKeepsOrderPending() {
@@ -100,7 +102,7 @@ class MembershipCheckoutServiceTest {
                 () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY)).getCode());
 
         var withoutSigningSecret = new MembershipCheckoutService(orders, memberships, new SepaySigner(""), ethQuotes, ethChain,
-                notifications, receipts);
+                applier);
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayMerchantId", "MERCHANT_TEST");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayCheckoutUrl", "https://pay-sandbox.sepay.vn/v1/checkout/init");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayReturnUrl", "https://example.test/dashboard/membership/return");
@@ -131,7 +133,7 @@ class MembershipCheckoutServiceTest {
     }
 
     @Test
-    void sepayIpnActivatesOnceAndLatePaymentGoesToReview() throws Exception {
+    void sepayIpnActivatesOnceAndSecondTransactionIsOverpayment() throws Exception {
         MembershipOrder order = sepayOrder();
         when(orders.findById("order1")).thenReturn(Optional.of(order));
         when(orders.lockById("order1")).thenReturn(Optional.of(order));
@@ -144,28 +146,35 @@ class MembershipCheckoutServiceTest {
         verify(receipts, times(1)).capture(order); // replayed IPN returns early
         verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false, "order1");
 
+        // A second distinct transaction is an overpayment to refund: no extra activation, no new order; replay adds nothing.
         assertTrue(service.sepayIpn(withTransaction(callback, "transaction_id", "tx456")));
-        assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
+        var over = org.mockito.ArgumentCaptor.forClass(MembershipOverpayment.class);
+        verify(overpayments).save(over.capture());
+        assertEquals("tx456", over.getValue().getTransactionNo());
+        assertEquals("order1", over.getValue().getOrderId());
+        assertEquals(49_000, over.getValue().getAmountVnd());
+        verify(receipts).captureOverpayment(over.getValue());
+        verify(notifications).enqueueOverpayment(over.getValue());
+        when(overpayments.existsByProviderAndTransactionNo(MembershipOrder.Provider.SEPAY, "tx456")).thenReturn(true);
+        assertTrue(service.sepayIpn(withTransaction(callback, "transaction_id", "tx456")));
+        verify(overpayments, times(1)).save(any());
+        assertEquals(MembershipOrder.Status.PAID, order.getStatus());
         assertEquals("tx123", order.getTransactionNo());
-        verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false, "order1");
-
-        order.setStatus(MembershipOrder.Status.CANCELLED);
-        assertTrue(service.sepayIpn(callback));
-        assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
-        verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false, "order1");
+        verify(memberships, times(1)).activate(anyString(), any(), anyBoolean(), anyString());
     }
 
     @Test
-    void sepayPaymentAfterExpiryIsHeldForReviewEvenIfStatusStillPending() throws Exception {
+    void sepayPaymentAfterExpiryOrCancelActivatesAsLatePayment() throws Exception {
         MembershipOrder order = sepayOrder();
         order.setExpiresAt(Instant.now().minusSeconds(1));
         when(orders.findById("order1")).thenReturn(Optional.of(order));
         when(orders.lockById("order1")).thenReturn(Optional.of(order));
 
         assertEquals("SEPAY", service.order("owner", "order1").provider());
+        when(memberships.activate("owner", MembershipTier.STARTER, false, "order1")).thenReturn(true);
         assertTrue(service.sepayIpn(sepayCallback()));
-        assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
-        verify(memberships, never()).activate(anyString(), any(), anyBoolean(), anyString());
+        assertEquals(MembershipOrder.Status.PAID, order.getStatus());
+        verify(receipts).capture(order);
     }
 
     @Test
@@ -236,14 +245,19 @@ class MembershipCheckoutServiceTest {
         assertEquals(24_000, ethCheckout.amountVnd());
         assertTrue(ethCheckout.formFields().isEmpty());
 
+        // Spam: the same item and provider returns the existing pending order; no new row.
         when(orders.findByOwnerIdAndStatus("owner", MembershipOrder.Status.PENDING))
                 .thenReturn(java.util.List.of(saved.getValue()));
-        assertEquals(ListingErrorCode.MEMBERSHIP_ORDER_PENDING.getCode(), assertThrows(AppException.class,
-                () -> service.addonCheckout("owner", 3, MembershipOrder.Provider.SEPAY)).getCode());
+        var again = service.addonCheckout("owner", 3, MembershipOrder.Provider.SEPAY);
+        assertEquals(saved.getValue().getId(), again.orderId());
+        verify(orders, times(2)).save(any()); // only the two orders created above
+
+        // A different item cancels the old pending order and creates a new one.
         when(memberships.quote("owner", MembershipTier.STARTER)).thenReturn(
                 new MembershipService.Quote("STARTER", 49_000, "NEW", 10, null, null, false));
-        assertEquals(ListingErrorCode.MEMBERSHIP_ORDER_PENDING.getCode(), assertThrows(AppException.class,
-                () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY)).getCode());
+        var plan = service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY);
+        assertNotEquals(saved.getValue().getId(), plan.orderId());
+        assertEquals(MembershipOrder.Status.CANCELLED, saved.getValue().getStatus());
     }
 
     @Test
@@ -268,20 +282,21 @@ class MembershipCheckoutServiceTest {
         assertEquals(MembershipOrder.Status.PAID, order.getStatus());
         verify(memberships, times(1)).activateAddon("owner", 2, "order1");
         assertTrue(service.sepayIpn(withTransaction(callback, "transaction_id", "tx456")));
-        assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
+        assertEquals(MembershipOrder.Status.PAID, order.getStatus());
+        verify(overpayments, times(1)).save(any());
         verify(memberships, times(1)).activateAddon("owner", 2, "order1");
         verify(memberships, never()).activate(anyString(), any(), anyBoolean(), anyString());
     }
 
     @Test
-    void paidSepayOrderWhoseActivationIsRefusedIsHeldForReview() throws Exception {
+    void paidSepayOrderWhoseActivationIsRefusedBecomesRefundableOverpayment() throws Exception {
         MembershipOrder order = sepayOrder();
         when(orders.findById("order1")).thenReturn(Optional.of(order));
         when(orders.lockById("order1")).thenReturn(Optional.of(order));
         assertTrue(service.sepayIpn(sepayCallback())); // activate() returns false.
-        assertEquals(MembershipOrder.Status.REVIEW, order.getStatus());
-        assertEquals("tx123", order.getTransactionNo());
-        assertNotNull(order.getPaidAt());
+        assertEquals(MembershipOrder.Status.FAILED, order.getStatus());
+        verify(overpayments).save(any());
+        verify(receipts, never()).capture(any());
     }
 
     private MembershipOrder legacyVnpayOrder() {

@@ -28,9 +28,11 @@ class MembershipNotificationAcceptanceTest {
     final MembershipNotificationWriter writer=new MembershipNotificationWriter(outbox,"test.membership.events");
     final EthPaymentQuoteRepository quotes=mock(EthPaymentQuoteRepository.class);
     final EthPaymentChainClient chain=mock(EthPaymentChainClient.class);
-    final MembershipCheckoutService sepay=new MembershipCheckoutService(orders,memberships,new SepaySigner("test-only"),quotes,chain,writer,mock(com.hs.payment.receipt.MembershipReceiptService.class));
+    final MembershipOverpaymentRepository overpayments=mock(MembershipOverpaymentRepository.class);
+    final MembershipPaymentApplier applier=new MembershipPaymentApplier(orders,overpayments,memberships,writer,mock(com.hs.payment.receipt.MembershipReceiptService.class));
+    final MembershipCheckoutService sepay=new MembershipCheckoutService(orders,memberships,new SepaySigner("test-only"),quotes,chain,applier);
     final EthPaymentService eth=new EthPaymentService(orders,memberships,mock(EthWalletChallengeRepository.class),quotes,
-        mock(EthVndPriceService.class),chain,mock(EthPaymentSignatures.class),writer,mock(com.hs.payment.receipt.MembershipReceiptService.class));
+        mock(EthVndPriceService.class),chain,mock(EthPaymentSignatures.class),applier);
     final String id="cb856b215fbf4d33b7f7fd54d5ce7867";
     final ObjectMapper json=new ObjectMapper();
     MembershipOrder order(MembershipOrder.Provider provider){
@@ -47,16 +49,16 @@ class MembershipNotificationAcceptanceTest {
     }
     List<MembershipNotificationOutbox> rows(int count){var c=ArgumentCaptor.forClass(MembershipNotificationOutbox.class);verify(outbox,times(count)).save(c.capture());return c.getAllValues();}
 
-    @Test void sepayActivationReplayAndSecondTransactionReviewExportExactContract() throws Exception {
+    @Test void sepayActivationReplayAndSecondTransactionExportExactContract() throws Exception {
         var o=order(MembershipOrder.Provider.SEPAY);when(memberships.activate(eq("persisted-owner"),eq(MembershipTier.STARTER),eq(false),anyString())).thenReturn(true);
         assertTrue(sepay.sepayIpn(callback("tx-one")));assertTrue(sepay.sepayIpn(callback("tx-one")));
-        assertTrue(sepay.sepayIpn(callback("tx-two")));assertTrue(sepay.sepayIpn(callback("tx-two")));
+        assertTrue(sepay.sepayIpn(callback("tx-two")));
         var rows=rows(2);verify(memberships,times(1)).activate(anyString(),any(),anyBoolean(),anyString());
-        assertEquals(MembershipOrder.Status.REVIEW,o.getStatus());assertNotNull(o.getPaidAt());assertEquals("tx-one",o.getTransactionNo());
+        assertEquals(MembershipOrder.Status.PAID,o.getStatus());assertNotNull(o.getPaidAt());assertEquals("tx-one",o.getTransactionNo());
         var fixtures=new ArrayList<Object>();
         for(int i=0;i<rows.size();i++){
             var row=rows.get(i);var e=json.readTree(row.getPayload());
-            assertEquals(i==0?"MEMBERSHIP_ACTIVATED":"MEMBERSHIP_PAYMENT_REVIEW",e.get("eventType").asText());
+            assertEquals(i==0?"MEMBERSHIP_ACTIVATED":"MEMBERSHIP_OVERPAYMENT_RECEIVED",e.get("eventType").asText());
             assertEquals("persisted-owner",e.get("recipients").get(0).asText());assertEquals(1,e.get("recipients").size());
             assertEquals(json.valueToTree(Map.of("orderId",id)),e.get("data"));assertEquals(id,row.getOrderId());
             assertTrue(e.get("occurredAt").asText().matches(".*\\.\\d{3}Z"));assertNull(row.getSentAt());
@@ -66,17 +68,17 @@ class MembershipNotificationAcceptanceTest {
         Path path=Path.of("target","membership-event-contracts.json");Files.createDirectories(path.getParent());Files.writeString(path,json.writeValueAsString(fixtures));
     }
     @ParameterizedTest @EnumSource(value=MembershipOrder.Status.class,names={"PENDING","CANCELLED","EXPIRED"})
-    void verifiedLateOrCancelledPaymentNeedsReviewNotActivation(MembershipOrder.Status before){
+    void verifiedLateOrCancelledPaymentActivates(MembershipOrder.Status before){
         var o=order(MembershipOrder.Provider.SEPAY);o.setStatus(before);o.setExpiresAt(Instant.now().minusSeconds(1));
+        when(memberships.activate(eq("persisted-owner"),eq(MembershipTier.STARTER),eq(false),anyString())).thenReturn(true);
         assertTrue(sepay.sepayIpn(callback("late")));assertTrue(sepay.sepayIpn(callback("late")));
-        assertEquals(MembershipOrder.Status.REVIEW,o.getStatus());assertTrue(rows(1).getFirst().getPayload().contains("MEMBERSHIP_PAYMENT_REVIEW"));
-        verify(memberships,never()).activate(anyString(),any(),anyBoolean(),anyString());
+        assertEquals(MembershipOrder.Status.PAID,o.getStatus());assertTrue(rows(1).getFirst().getPayload().contains("MEMBERSHIP_ACTIVATED"));
+        verify(memberships,times(1)).activate(anyString(),any(),anyBoolean(),anyString());
     }
-    @Test void refusedActivationAndInvalidCallbacksNeverClaimActivated(){
+    @Test void refusedActivationBecomesOverpaymentAndInvalidCallbacksNeverNotify(){
         var o=order(MembershipOrder.Provider.SEPAY);var bad=callback("invalid");bad.withObject("transaction").put("transaction_amount","1");
         assertFalse(sepay.sepayIpn(bad));verifyNoInteractions(outbox);
-        assertTrue(sepay.sepayIpn(callback("ok-review")));assertEquals(MembershipOrder.Status.REVIEW,o.getStatus());
-        assertTrue(rows(1).getFirst().getPayload().contains("MEMBERSHIP_PAYMENT_REVIEW"));
+        assertTrue(sepay.sepayIpn(callback("ok-refund")));assertEquals(MembershipOrder.Status.FAILED,o.getStatus());verify(overpayments).save(any());
     }
     @Test void ownershipFailedVerificationAndReplayForEthStayCorrect(){
         var o=order(MembershipOrder.Provider.ETH);var q=new EthPaymentQuote();q.setPaymentId("quote-id");q.setOrderId(id);q.setAmountVnd(BigDecimal.valueOf(49000));

@@ -5,7 +5,6 @@ import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.membership.MembershipKind;
 import com.hs.listing.membership.MembershipService;
 import com.hs.listing.membership.MembershipTier;
-import com.hs.payment.membership.notification.MembershipNotificationWriter;
 import com.hs.payment.repository.EthPaymentQuoteRepository;
 import com.hs.payment.service.EthPaymentChainClient;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -34,8 +33,7 @@ public class MembershipCheckoutService {
     private final SepaySigner sepaySigner;
     private final EthPaymentQuoteRepository ethQuotes;
     private final EthPaymentChainClient ethChain;
-    private final MembershipNotificationWriter notifications;
-    private final com.hs.payment.receipt.MembershipReceiptService receipts;
+    private final MembershipPaymentApplier applier;
     @PersistenceContext private EntityManager em;
     @Value("${homespace.membership.sepay.merchant-id}") private String sepayMerchantId;
     @Value("${homespace.membership.sepay.checkout-url}") private String sepayCheckoutUrl;
@@ -91,19 +89,20 @@ public class MembershipCheckoutService {
             throw new AppException(ListingErrorCode.MEMBERSHIP_PROVIDER_NOT_CONFIGURED);
     }
 
-    /** Caller holds the owner lock. Plan and add-on orders share the one-pending-order rule. */
+    /**
+     * Caller holds the owner lock. At most one live PENDING order per owner: the same item and provider returns the
+     * existing order (spam, double click, several tabs); a different item cancels the old order first.
+     */
     private Checkout place(MembershipOrder order, String ownerId, MembershipOrder.Provider provider,
                            String description) {
         Instant now = Instant.now();
-        boolean pending = false;
         for (MembershipOrder previous : orders.findByOwnerIdAndStatus(ownerId, MembershipOrder.Status.PENDING)) {
-            if (!previous.getExpiresAt().isAfter(now)) {
-                requireEthQuoteCleared(previous);
-                previous.setStatus(MembershipOrder.Status.EXPIRED);
-            } else pending = true;
+            requireEthQuoteCleared(previous);
+            if (previous.getExpiresAt().isAfter(now) && sameItem(previous, order, provider)) return checkoutOf(previous, description);
+            previous.setStatus(previous.getExpiresAt().isAfter(now)
+                    ? MembershipOrder.Status.CANCELLED : MembershipOrder.Status.EXPIRED);
         }
-        if (pending)
-            throw new AppException(ListingErrorCode.MEMBERSHIP_ORDER_PENDING);
+        orders.flush(); // free the one-pending-per-owner unique index before inserting
         order.setId(UUID.randomUUID().toString().replace("-", ""));
         order.setOwnerId(ownerId);
         order.setStatus(MembershipOrder.Status.PENDING);
@@ -111,6 +110,17 @@ public class MembershipCheckoutService {
         order.setCreatedAt(now);
         order.setExpiresAt(now.plus(15, java.time.temporal.ChronoUnit.MINUTES));
         orders.save(order);
+        return checkoutOf(order, description);
+    }
+
+    private static boolean sameItem(MembershipOrder a, MembershipOrder b, MembershipOrder.Provider provider) {
+        return a.getProvider() == provider && a.getKind() == b.getKind() && a.getTier() == b.getTier()
+                && java.util.Objects.equals(a.getQuantity(), b.getQuantity()) && a.isUpgrade() == b.isUpgrade()
+                && a.getAmountVnd() == b.getAmountVnd();
+    }
+
+    private Checkout checkoutOf(MembershipOrder order, String description) {
+        MembershipOrder.Provider provider = order.getProvider();
         if (provider == MembershipOrder.Provider.ETH)
             return new Checkout(order.getId(), "", order.getAmountVnd(), provider.name(), Map.of());
         String callback = sepayReturnUrl + (sepayReturnUrl.contains("?") ? "&" : "?") + "orderId=" + order.getId();
@@ -154,7 +164,7 @@ public class MembershipCheckoutService {
 
     /**
      * The unlocked preview read leaves the order in the first-level cache, so lockById returns that stale instance.
-     * Reload it under the lock so a concurrent winner's PAID/REVIEW/CANCELLED state is seen. Null in direct unit fixtures.
+     * Reload it under the lock so a concurrent winner's PAID/CANCELLED state is seen. Null in direct unit fixtures.
      */
     private void refresh(Object entity) {
         if (em != null) em.refresh(entity);
@@ -202,36 +212,8 @@ public class MembershipCheckoutService {
         if (o == null || o.getProvider() != MembershipOrder.Provider.SEPAY
                 || orderAmount.compareTo(BigDecimal.valueOf(o.getAmountVnd())) != 0
                 || transactionAmount.compareTo(BigDecimal.valueOf(o.getAmountVnd())) != 0) return false;
-        if (o.getStatus() == MembershipOrder.Status.PAID || o.getStatus() == MembershipOrder.Status.REVIEW) {
-            if (!transactionId.equals(o.getTransactionNo())) {
-                log.warn("SePay order {} received a second payment transaction: existing={}, incoming={}",
-                        id, o.getTransactionNo(), transactionId);
-                MembershipOrder.Status previous = o.getStatus();
-                o.setStatus(MembershipOrder.Status.REVIEW);
-                notifications.enqueueTransition(o, previous); // silent when it was already REVIEW
-            }
-            return true;
-        }
-        MembershipOrder.Status before = o.getStatus();
-        Instant now = Instant.now();
-        if (o.getStatus() != MembershipOrder.Status.PENDING || !o.getExpiresAt().isAfter(now)) {
-            o.setStatus(MembershipOrder.Status.REVIEW);
-        } else if (activate(o)) {
-            o.setStatus(MembershipOrder.Status.PAID);
-        } else {
-            o.setStatus(MembershipOrder.Status.REVIEW);
-        }
-        o.setTransactionNo(transactionId);
-        o.setPaidAt(now);
-        receipts.capture(o); // no-op unless PAID; same transaction as the transition
-        notifications.enqueueTransition(o, before);
+        applier.apply(o, transactionId); // late, repeated or unactivatable money is applied, never parked
         return true;
-    }
-
-    private boolean activate(MembershipOrder o) {
-        return o.getKind() == MembershipKind.ADDON
-                ? memberships.activateAddon(o.getOwnerId(), o.getQuantity(), o.getId())
-                : memberships.activate(o.getOwnerId(), o.getTier(), o.isUpgrade(), o.getId());
     }
 
     private static boolean isBlank(String value) {

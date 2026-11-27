@@ -134,4 +134,26 @@ class MembershipReceiptServiceTest {
     assertTrue(html.contains("****9abc"));
     assertTrue(html.contains("49.000"));
   }
+
+  @Test
+  void overpaymentReceiptSaysItWillBeRefundedAndIsIdempotent() {
+    var p = new com.hs.payment.membership.MembershipOverpayment();
+    p.setId("p".repeat(32));
+    p.setOrderId("a".repeat(32));
+    p.setOwnerId("owner");
+    p.setProvider(MembershipOrder.Provider.SEPAY);
+    p.setTransactionNo("tx-second-9999");
+    p.setAmountVnd(49_000);
+    p.setReceivedAt(Instant.parse("2026-11-28T10:00:00Z"));
+    var saved = new ArrayList<MembershipReceipt>();
+    when(repo.save(any())).thenAnswer(c -> { saved.add(c.getArgument(0)); return c.getArgument(0); });
+    service.captureOverpayment(p);
+    assertEquals(1, saved.size());
+    assertEquals(p.getId(), saved.get(0).getOrderId());
+    assertTrue(saved.get(0).getSnapshotJson().contains("sẽ được hoàn lại"));
+    assertTrue(saved.get(0).getSnapshotJson().contains("****9999"));
+    when(repo.findByOrderId(p.getId())).thenReturn(Optional.of(saved.get(0)));
+    service.captureOverpayment(p);
+    verify(repo, times(1)).save(any());
+  }
 }

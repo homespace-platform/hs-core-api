@@ -40,6 +40,7 @@ public final class Permissions {
     public static final String NEARBY_SCAN_MANAGE = "NEARBY_SCAN_MANAGE";
     public static final String NOTIFICATION_BROADCAST = "NOTIFICATION_BROADCAST";
     public static final String INCIDENT_VIEW = "INCIDENT_VIEW";
+    public static final String MEMBERSHIP_REFUND_MANAGE = "MEMBERSHIP_REFUND_MANAGE";
     public static final String STORAGE_VIEW = "STORAGE_VIEW";
 
     // User scope: feature toggles for the USER role (ADMIN also holds them for its own account).
@@ -93,6 +94,7 @@ public final class Permissions {
         m.put(NEARBY_SCAN_MANAGE, "Tạo, hủy job quét địa điểm lân cận");
         m.put(NOTIFICATION_BROADCAST, "Gửi thông báo toàn hệ thống");
         m.put(INCIDENT_VIEW, "Xem sự cố vận hành");
+        m.put(MEMBERSHIP_REFUND_MANAGE, "Xem và xác nhận hoàn tiền khoản trả thừa gói hội viên");
         m.put(STORAGE_VIEW, "Xem tệp của người dùng (quản trị)");
         m.put(LISTING_POST, "Đăng tin, đổi trạng thái/ẩn tin của mình, quản lý chi nhánh");
         m.put(APPOINTMENT_BOOK, "Đặt, đổi, hủy lịch xem nhà");

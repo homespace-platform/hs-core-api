@@ -2,14 +2,12 @@ package com.hs.payment.service;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.listing.advice.ListingErrorCode;
-import com.hs.listing.membership.MembershipKind;
 import com.hs.listing.membership.MembershipService;
 import com.hs.payment.advice.PaymentErrorCode;
 import com.hs.payment.dto.EthPaymentDtos;
 import com.hs.payment.membership.MembershipCheckoutService;
 import com.hs.payment.membership.MembershipOrder;
 import com.hs.payment.membership.MembershipOrderRepository;
-import com.hs.payment.membership.notification.MembershipNotificationWriter;
 import com.hs.payment.model.EthPaymentQuote;
 import com.hs.payment.model.EthWalletChallenge;
 import com.hs.payment.repository.EthPaymentQuoteRepository;
@@ -41,8 +39,7 @@ public class EthPaymentService {
     private final EthVndPriceService prices;
     private final EthPaymentChainClient chain;
     private final EthPaymentSignatures signatures;
-    private final MembershipNotificationWriter notifications;
-    private final com.hs.payment.receipt.MembershipReceiptService receipts;
+    private final com.hs.payment.membership.MembershipPaymentApplier applier;
     @PersistenceContext private EntityManager em;
 
     @Value("${homespace.eth-payment.recipient-address:}") private String recipientAddress;
@@ -174,24 +171,11 @@ public class EthPaymentService {
                 || order.getAmountVnd() != quote.getAmountVnd().intValueExact())
             throw new AppException(PaymentErrorCode.ETH_PAYMENT_INVALID);
         Instant now = Instant.now();
-        MembershipOrder.Status before = order.getStatus();
-        order.setStatus(order.getStatus() == MembershipOrder.Status.PENDING && activate(order)
-                ? MembershipOrder.Status.PAID : MembershipOrder.Status.REVIEW);
-        order.setTransactionNo(txHash.substring(2));
-        order.setPaidAt(now);
+        applier.apply(order, txHash.substring(2));
         quote.setTransactionHash(txHash);
         quote.setConfirmedAt(now);
-        orders.save(order);
-        receipts.capture(order); // no-op unless PAID; same transaction as the transition
         quotes.save(quote);
-        notifications.enqueueTransition(order, before); // after verified receipt and locked order/quote persistence
         return MembershipCheckoutService.OrderView.from(order);
-    }
-
-    private boolean activate(MembershipOrder order) {
-        return order.getKind() == MembershipKind.ADDON
-                ? memberships.activateAddon(order.getOwnerId(), order.getQuantity(), order.getId())
-                : memberships.activate(order.getOwnerId(), order.getTier(), order.isUpgrade(), order.getId());
     }
 
     private MembershipOrder payable(String orderId, String ownerId) {

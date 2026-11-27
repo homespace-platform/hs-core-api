@@ -39,6 +39,7 @@ public class MembershipOrder {
     @Column(length = 64)
     private String transactionNo;
 
+    /** REVIEW is legacy: kept to read old rows, never assigned (old rows are resolved at startup). */
     public enum Status { PENDING, PAID, FAILED, EXPIRED, CANCELLED, REVIEW }
     /** VNPAY retained for historical rows only. */
     public enum Provider { VNPAY, SEPAY, ETH }

@@ -69,7 +69,37 @@ public class MembershipReceiptService {
             o.getAmountVnd(),
             o.getProvider() == null ? null : o.getProvider().name(),
             mask(o.getTransactionNo()),
-            o.getPaidAt());
+            o.getPaidAt(),
+            null);
+    try {
+      r.setSnapshotJson(mapper.copy().findAndRegisterModules().writeValueAsString(snapshot));
+    } catch (Exception e) {
+      throw new IllegalStateException("Cannot freeze membership receipt", e);
+    }
+    r.setSnapshotHash(PaymentReceiptService.hash(r.getSnapshotJson()));
+    r.setNextAttemptAt(Instant.now());
+    receipts.save(r);
+  }
+
+  /** Receipt for an overpayment (second payment): keyed by the overpayment id, says it will be refunded. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void captureOverpayment(com.hs.payment.membership.MembershipOverpayment p) {
+    if (receipts.findByOrderId(p.getId()).isPresent()) return;
+    var r = new MembershipReceipt();
+    r.setId(UUID.randomUUID().toString());
+    r.setOrderId(p.getId());
+    r.setOwnerId(p.getOwnerId());
+    r.setIssuedAt(p.getReceivedAt());
+    r.setReceiptNumber(
+        "HS-MB-"
+            + p.getReceivedAt().atZone(ZoneId.of("Asia/Ho_Chi_Minh")).format(DateTimeFormatter.ofPattern("yyyyMMdd"))
+            + "-" + r.getId().replace("-", "").substring(0, 16).toUpperCase(Locale.ROOT));
+    var snapshot =
+        new MembershipReceiptSnapshot(
+            1, r.getReceiptNumber(), p.getOrderId(), buyerName(p.getOwnerId()), "HomeSpace",
+            "Khoản trả thừa – sẽ được hoàn lại", "OVERPAYMENT", null, 1, 0, p.getAmountVnd(),
+            p.getProvider() == null ? null : p.getProvider().name(), mask(p.getTransactionNo()), p.getReceivedAt(),
+            "Khoản trả thừa – sẽ được hoàn lại");
     try {
       r.setSnapshotJson(mapper.copy().findAndRegisterModules().writeValueAsString(snapshot));
     } catch (Exception e) {
@@ -192,6 +222,7 @@ public class MembershipReceiptService {
         s.provider(),
         s.transactionRef(),
         r.getIssuedAt(),
-        r.getPdfStatus());
+        r.getPdfStatus(),
+        s.note());
   }
 }

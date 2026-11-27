@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.payment.membership.MembershipOrder;
+import com.hs.payment.membership.MembershipOverpayment;
 
 /**
  * Enqueues v1 membership notifications for the persisted order owner when a verified provider outcome actually
@@ -24,7 +25,7 @@ import com.hs.payment.membership.MembershipOrder;
  */
 @Service
 public class MembershipNotificationWriter {
-    public enum Event { MEMBERSHIP_ACTIVATED, MEMBERSHIP_PAYMENT_REVIEW }
+    public enum Event { MEMBERSHIP_ACTIVATED, MEMBERSHIP_OVERPAYMENT_RECEIVED }
 
     private static final DateTimeFormatter TIMESTAMP = new DateTimeFormatterBuilder().appendInstant(3).toFormatter();
     private final ObjectMapper json = new ObjectMapper();
@@ -37,18 +38,25 @@ public class MembershipNotificationWriter {
         this.topic = topic;
     }
 
-    /** PAID -> MEMBERSHIP_ACTIVATED, REVIEW -> MEMBERSHIP_PAYMENT_REVIEW; no event when the status did not change. */
+    /** PAID -> MEMBERSHIP_ACTIVATED; no event when the status did not change. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void enqueueTransition(MembershipOrder order, MembershipOrder.Status before) {
         MembershipOrder.Status after = order.getStatus();
         if (after == before) return;
         Event type = switch (after) {
             case PAID -> Event.MEMBERSHIP_ACTIVATED;
-            case REVIEW -> Event.MEMBERSHIP_PAYMENT_REVIEW;
             default -> throw new IllegalStateException("Membership notification status unsupported");
         };
-        String orderId = order.getId();
-        String recipient = order.getOwnerId();
+        enqueue(type, order.getId(), order.getOwnerId());
+    }
+
+    /** Second or unappliable payment recorded for refund; the event carries the original order id only. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void enqueueOverpayment(MembershipOverpayment overpayment) {
+        enqueue(Event.MEMBERSHIP_OVERPAYMENT_RECEIVED, overpayment.getOrderId(), overpayment.getOwnerId());
+    }
+
+    private void enqueue(Event type, String orderId, String recipient) {
         if (orderId == null || orderId.isBlank()) throw new IllegalStateException("Membership order missing");
         if (recipient == null || recipient.isBlank()) throw new IllegalStateException("Membership owner missing");
         String eventId = UUID.randomUUID().toString();

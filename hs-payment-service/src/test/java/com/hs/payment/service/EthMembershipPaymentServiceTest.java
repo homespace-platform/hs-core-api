@@ -29,7 +29,7 @@ class EthMembershipPaymentServiceTest {
             mock(com.hs.payment.membership.notification.MembershipNotificationWriter.class);
     private final com.hs.payment.receipt.MembershipReceiptService receipts = mock(com.hs.payment.receipt.MembershipReceiptService.class);
     private final EthPaymentService service = new EthPaymentService(orders, memberships, challenges, quotes,
-            prices, chain, signatures, notifications, receipts);
+            prices, chain, signatures, new com.hs.payment.membership.MembershipPaymentApplier(orders, mock(com.hs.payment.membership.MembershipOverpaymentRepository.class), memberships, notifications, receipts));
 
     @Test
     void verifiedEthPaymentActivatesMembershipOnceAndStoresFullHashInQuote() {
@@ -60,7 +60,7 @@ class EthMembershipPaymentServiceTest {
     }
 
     @Test
-    void lateOrUnusableUpgradeGoesToReviewAfterVerifiedReceipt() {
+    void unusableUpgradeBecomesOverpaymentAndOrderFails() {
         MembershipOrder order = order();
         order.setUpgrade(true);
         EthPaymentQuote quote = quote();
@@ -74,8 +74,8 @@ class EthMembershipPaymentServiceTest {
         when(memberships.activate("owner", MembershipTier.STARTER, true, "order1")).thenReturn(false);
 
         var result = service.settle("order1", "owner", new EthPaymentDtos.Settle(quote.getPaymentId(), txHash));
-        assertEquals("REVIEW", result.status());
-        assertEquals(txHash, result.txHash());
+        assertEquals("FAILED", result.status());
+        assertEquals(txHash, quote.getTransactionHash());
         assertNotNull(quote.getConfirmedAt());
     }
 

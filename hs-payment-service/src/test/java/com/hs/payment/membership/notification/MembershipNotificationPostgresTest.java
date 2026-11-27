@@ -51,15 +51,16 @@ import static org.mockito.Mockito.*;
     "homespace.membership.sepay.merchant-id=test","homespace.membership.sepay.checkout-url=https://invalid.example",
     "homespace.membership.sepay.return-url=https://invalid.example","homespace.membership.sepay.ipn-secret=test-only"})
 @Transactional(propagation=Propagation.NOT_SUPPORTED)
-@Import({MembershipCheckoutService.class,MembershipService.class,com.hs.common.time.BillingTime.class,MembershipNotificationWriter.class,EthPaymentService.class})
+@Import({MembershipCheckoutService.class,MembershipService.class,com.hs.common.time.BillingTime.class,MembershipNotificationWriter.class,EthPaymentService.class,MembershipPaymentApplier.class})
 class MembershipNotificationPostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs") @EnableJpaAuditing
-    @EnableJpaRepositories(basePackageClasses={MembershipOrderRepository.class,
+    @EnableJpaRepositories(basePackageClasses={MembershipOrderRepository.class,MembershipOverpaymentRepository.class,
         UserRepository.class,MembershipPeriodRepository.class,EthPaymentQuoteRepository.class,
         com.hs.listing.repository.ListingStatusHistoryRepository.class})
     static class Config {@Bean SepaySigner signer(){return new SepaySigner("test-only");}}
     @Autowired UserRepository users;
     @Autowired MembershipOrderRepository orders;
+    @Autowired MembershipOverpaymentRepository overpayments;
     @Autowired MembershipPeriodRepository memberships;
     @Autowired MembershipEventRepository events;
     @Autowired MembershipNotificationOutboxRepository outbox;
@@ -69,6 +70,7 @@ class MembershipNotificationPostgresTest {
     @Autowired PlatformTransactionManager manager;
     @Autowired JdbcTemplate jdbc;
     @MockitoSpyBean MembershipNotificationWriter writer;
+    @MockitoBean com.hs.payment.receipt.MembershipReceiptService receipts;
     @MockitoBean EthPaymentChainClient chain;
     @MockitoBean EthVndPriceService prices;
     @MockitoBean EthPaymentSignatures signatures;
@@ -76,7 +78,7 @@ class MembershipNotificationPostgresTest {
     final ObjectMapper json=new ObjectMapper();
     MembershipOrder order;
     @BeforeEach void fixture(){
-        outbox.deleteAllInBatch();quotes.deleteAllInBatch();orders.deleteAllInBatch();events.deleteAllInBatch();memberships.deleteAllInBatch();users.deleteAllInBatch();
+        outbox.deleteAllInBatch();quotes.deleteAllInBatch();overpayments.deleteAllInBatch();orders.deleteAllInBatch();events.deleteAllInBatch();memberships.deleteAllInBatch();users.deleteAllInBatch();
         User u=new User();u.setId(UUID.randomUUID().toString());u.setUsername("membership-test");u.setEmail("membership@example.invalid");users.saveAndFlush(u);
         order=new MembershipOrder();order.setId(UUID.randomUUID().toString().replace("-",""));order.setOwnerId(u.getId());
         order.setTier(MembershipTier.STARTER);order.setAmountVnd(49000);order.setStatus(MembershipOrder.Status.PENDING);
@@ -110,12 +112,12 @@ class MembershipNotificationPostgresTest {
         var p=new MembershipPeriod();p.setOwnerId(order.getOwnerId());p.setKind(kind);p.setTier(tier);
         p.setStartAt(end.minusSeconds(30*86400L));p.setEndAt(end);p.setQuota(1);return p;
     }
-    @Test void businessActivationOrderAndNoticeCommitOnceAndSecondPaymentTriggersOneReview(){
+    @Test void businessActivationOrderAndNoticeCommitOnceAndSecondPaymentCreatesOneExtraOrder(){
         service.sepayIpn(callback("first"));service.sepayIpn(callback("first"));
         assertEquals(MembershipOrder.Status.PAID,orders.findById(order.getId()).orElseThrow().getStatus());
         assertEquals(MembershipTier.STARTER,memberships.findActivePaid(order.getOwnerId(),Instant.now()).getFirst().getTier());assertEquals(1,outbox.count());
         service.sepayIpn(callback("second"));service.sepayIpn(callback("second"));
-        assertEquals(MembershipOrder.Status.REVIEW,orders.findById(order.getId()).orElseThrow().getStatus());assertEquals(2,outbox.count());
+        assertEquals(MembershipOrder.Status.PAID,orders.findById(order.getId()).orElseThrow().getStatus());assertEquals(2,outbox.count());assertEquals(1,orders.count());assertEquals(1,overpayments.count());
     }
     @Test void failedOutboxWriteRollsBackActivationOrderAndNotice(){
         MembershipNotificationWriter target=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(writer);
@@ -142,9 +144,9 @@ class MembershipNotificationPostgresTest {
             go.countDown();assertTrue(ipn.get(15,TimeUnit.SECONDS));cancel.get(15,TimeUnit.SECONDS);
         }
         var status=orders.findById(order.getId()).orElseThrow().getStatus();
-        assertTrue(status==MembershipOrder.Status.PAID||status==MembershipOrder.Status.REVIEW);
+        assertEquals(MembershipOrder.Status.PAID,status);
         assertEquals(1,outbox.count());
-        assertTrue(outbox.findAll().getFirst().getPayload().contains(status==MembershipOrder.Status.PAID?"MEMBERSHIP_ACTIVATED":"MEMBERSHIP_PAYMENT_REVIEW"));
+        assertTrue(outbox.findAll().getFirst().getPayload().contains("MEMBERSHIP_ACTIVATED"));
     }
     EthPaymentQuote ethFixture(){
         order.setProvider(MembershipOrder.Provider.ETH);orders.saveAndFlush(order);
@@ -172,11 +174,22 @@ class MembershipNotificationPostgresTest {
         assertEquals(MembershipOrder.Status.PENDING,orders.findById(order.getId()).orElseThrow().getStatus());
         assertNull(quotes.findById(q.getPaymentId()).orElseThrow().getConfirmedAt());assertEquals(0,memberships.count());assertEquals(0,outbox.count());
     }
-    @Test void latePaymentOnlyRecordsReviewAndWriterRequiresTransaction(){
+    @Test void latePaymentActivatesAndWriterRequiresTransaction(){
         assertThrows(IllegalTransactionStateException.class,()->writer.enqueueTransition(order,MembershipOrder.Status.PENDING));
         order.setExpiresAt(Instant.now().minusSeconds(1));orders.saveAndFlush(order);service.sepayIpn(callback("late"));
-        assertEquals(MembershipOrder.Status.REVIEW,orders.findById(order.getId()).orElseThrow().getStatus());
-        assertEquals(0,memberships.count());assertEquals(1,outbox.count());
+        assertEquals(MembershipOrder.Status.PAID,orders.findById(order.getId()).orElseThrow().getStatus());
+        assertEquals(1,memberships.count());assertEquals(1,outbox.count());
+    }
+    @Test void concurrentCheckoutsReturnOneSharedPendingOrder() throws Exception{
+        var go=new CountDownLatch(1);
+        try(var pool=Executors.newFixedThreadPool(4)){
+            var calls=new java.util.ArrayList<Future<MembershipCheckoutService.Checkout>>();
+            for(int i=0;i<4;i++)calls.add(pool.submit(()->{assertTrue(go.await(10,TimeUnit.SECONDS));return service.addonCheckout(order.getOwnerId(),2,MembershipOrder.Provider.SEPAY);}));
+            go.countDown();var ids=new java.util.HashSet<String>();for(var c:calls)ids.add(c.get(20,TimeUnit.SECONDS).orderId());
+            assertEquals(1,ids.size());
+        }
+        assertEquals(1,orders.findByOwnerIdAndStatus(order.getOwnerId(),MembershipOrder.Status.PENDING).size());
+        assertEquals(MembershipOrder.Status.CANCELLED,orders.findById(order.getId()).orElseThrow().getStatus());
     }
     @SuppressWarnings("unchecked") KafkaTemplate<String,String> kafka(){return mock(KafkaTemplate.class);}
     @Test void kafkaFailureKeepsImmutableOrderedEventsForRetry(){

@@ -16,4 +16,5 @@ public record MembershipReceiptView(
     String provider,
     String transactionRef,
     Instant issuedAt,
-    PaymentReceipt.PdfStatus pdfStatus) {}
+    PaymentReceipt.PdfStatus pdfStatus,
+    String note) {}

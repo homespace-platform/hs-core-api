@@ -17,4 +17,6 @@ public record MembershipReceiptSnapshot(
     long amountVnd,
     String provider,
     String transactionRef,
-    Instant paidAt) {}
+    Instant paidAt,
+    /** What was applied when the payment was converted to add-on uses; null for a normal purchase. */
+    String note) {}

@@ -2,4 +2,6 @@ package com.hs.listing.membership;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
-public interface MembershipEventRepository extends JpaRepository<MembershipEvent, Long> {}
+public interface MembershipEventRepository extends JpaRepository<MembershipEvent, Long> {
+    boolean existsByOrderId(String orderId);
+}
