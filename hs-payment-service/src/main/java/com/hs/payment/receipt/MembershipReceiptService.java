@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.*;
 public class MembershipReceiptService {
   private final MembershipReceiptRepository receipts;
   private final MembershipOrderRepository orders;
+  private final com.hs.payment.membership.MembershipOverpaymentRepository overpayments;
   private final UserRepository users;
   private final ObjectMapper mapper;
   private final StorageService storage;
@@ -175,7 +176,9 @@ public class MembershipReceiptService {
             Math.max(0, page - 1),
             Math.min(100, Math.max(1, size)),
             Sort.by(Sort.Order.desc("issuedAt"), Sort.Order.desc("id")));
-    return new PageResponse<>(receipts.findByOwnerId(actor, pageable).map(this::view));
+    var found = receipts.findByOwnerId(actor, pageable);
+    var refunds = refundStatuses(found.getContent()); // one query for the whole page
+    return new PageResponse<>(found.map(r -> view(r, refunds)));
   }
 
   @Transactional
@@ -206,8 +209,20 @@ public class MembershipReceiptService {
     return storage.downloadDirect(file.getId());
   }
 
+  private Map<String, String> refundStatuses(java.util.Collection<MembershipReceipt> rows) {
+    var ids = rows.stream().filter(r -> snapshot(r).kind().equals("OVERPAYMENT")).map(MembershipReceipt::getOrderId).toList();
+    var out = new HashMap<String, String>();
+    if (!ids.isEmpty()) overpayments.findAllById(ids).forEach(p -> out.put(p.getId(), p.getStatus().name()));
+    return out;
+  }
+
   private MembershipReceiptView view(MembershipReceipt r) {
+    return view(r, refundStatuses(List.of(r)));
+  }
+
+  private MembershipReceiptView view(MembershipReceipt r, Map<String, String> refunds) {
     var s = snapshot(r);
+    boolean over = "OVERPAYMENT".equals(s.kind());
     return new MembershipReceiptView(
         r.getId(),
         r.getOrderId(),
@@ -223,6 +238,8 @@ public class MembershipReceiptService {
         s.transactionRef(),
         r.getIssuedAt(),
         r.getPdfStatus(),
-        s.note());
+        s.note(),
+        over ? "OVERPAYMENT" : "PURCHASE",
+        over ? refunds.get(r.getOrderId()) : null);
   }
 }

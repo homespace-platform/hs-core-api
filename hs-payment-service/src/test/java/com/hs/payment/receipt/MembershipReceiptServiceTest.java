@@ -20,10 +20,13 @@ import org.junit.jupiter.api.Test;
 class MembershipReceiptServiceTest {
   final MembershipReceiptRepository repo = mock(MembershipReceiptRepository.class);
   final UserRepository users = mock(UserRepository.class);
+  final com.hs.payment.membership.MembershipOverpaymentRepository overpayments =
+      mock(com.hs.payment.membership.MembershipOverpaymentRepository.class);
   final MembershipReceiptService service =
       new MembershipReceiptService(
           repo,
           mock(MembershipOrderRepository.class),
+          overpayments,
           users,
           new ObjectMapper().findAndRegisterModules(),
           mock(StorageService.class),
@@ -155,5 +158,28 @@ class MembershipReceiptServiceTest {
     when(repo.findByOrderId(p.getId())).thenReturn(Optional.of(saved.get(0)));
     service.captureOverpayment(p);
     verify(repo, times(1)).save(any());
+  }
+
+  @Test
+  void viewExposesTypeAndBatchedRefundStatus() {
+    var purchase = capture(paid());
+    var pay = new com.hs.payment.membership.MembershipOverpayment();
+    pay.setId("p".repeat(32)); pay.setOrderId("a".repeat(32)); pay.setOwnerId("owner");
+    pay.setProvider(MembershipOrder.Provider.SEPAY); pay.setTransactionNo("tx9999");
+    pay.setAmountVnd(49_000); pay.setReceivedAt(Instant.parse("2026-11-28T10:00:00Z"));
+    var saved = new ArrayList<MembershipReceipt>();
+    when(repo.save(any())).thenAnswer(c -> { saved.add(c.getArgument(0)); return c.getArgument(0); });
+    service.captureOverpayment(pay);
+    var refund = saved.get(0);
+    pay.setStatus(com.hs.payment.membership.MembershipOverpayment.Status.REFUNDED);
+    when(overpayments.findAllById(any())).thenReturn(List.of(pay));
+    when(repo.findByOwnerId(eq("owner"), any()))
+        .thenReturn(new org.springframework.data.domain.PageImpl<>(List.of(purchase, refund)));
+    var items = service.list("owner", 1, 10).getResult();
+    assertEquals("PURCHASE", items.get(0).type());
+    assertNull(items.get(0).refundStatus());
+    assertEquals("OVERPAYMENT", items.get(1).type());
+    assertEquals("REFUNDED", items.get(1).refundStatus());
+    verify(overpayments, times(1)).findAllById(any());
   }
 }

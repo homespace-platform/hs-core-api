@@ -17,4 +17,8 @@ public record MembershipReceiptView(
     String transactionRef,
     Instant issuedAt,
     PaymentReceipt.PdfStatus pdfStatus,
-    String note) {}
+    String note,
+    /** PURCHASE or OVERPAYMENT. */
+    String type,
+    /** Null for PURCHASE; REFUND_PENDING or REFUNDED for OVERPAYMENT. */
+    String refundStatus) {}
