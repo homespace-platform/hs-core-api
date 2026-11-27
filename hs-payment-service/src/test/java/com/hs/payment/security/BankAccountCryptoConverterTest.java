@@ -1,84 +1,56 @@
 package com.hs.payment.security;
 
+import com.hs.common.security.SecretCrypto;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-
-import java.util.Base64;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class BankAccountCryptoConverterTest {
 
-    private BankAccountCryptoConverter converter;
+    private final BankAccountCryptoConverter converter = new BankAccountCryptoConverter();
 
     @BeforeEach
     void setUp() {
-        converter = new BankAccountCryptoConverter();
+        SecretCrypto.configure("my-hs-secret-value");
     }
 
     @Test
-    @DisplayName("Encrypt and decrypt with default key returns original plaintext")
-    void defaultKey_RoundTrip() {
-        String accountNumber = "0987654321";
-        String encrypted = converter.convertToDatabaseColumn(accountNumber);
-
-        assertNotNull(encrypted);
-        assertNotEquals(accountNumber, encrypted);
-
-        String decrypted = converter.convertToEntityAttribute(encrypted);
-        assertEquals(accountNumber, decrypted);
+    void roundTrip() {
+        String encrypted = converter.convertToDatabaseColumn("0987654321");
+        assertNotEquals("0987654321", encrypted);
+        assertEquals("0987654321", converter.convertToEntityAttribute(encrypted));
     }
 
     @Test
-    @DisplayName("Encrypt and decrypt with custom passphrase (arbitrary length) succeeds via SHA-256 derivation")
-    void customPassphrase_RoundTrip() {
-        converter.setConfiguredKey("arbitrary-length-passphrase-that-is-not-32-chars");
-
-        String accountNumber = "9353999798";
-        String encrypted = converter.convertToDatabaseColumn(accountNumber);
-
-        assertNotNull(encrypted);
-        assertNotEquals(accountNumber, encrypted);
-
-        String decrypted = converter.convertToEntityAttribute(encrypted);
-        assertEquals(accountNumber, decrypted);
+    void ciphertextWrittenByOldCodeWithSameKeyStillDecrypts() {
+        assertEquals("0987654321",
+                converter.convertToEntityAttribute("Dl5oysTur7VD8pSMeAmB5EiB7nFz/Lta4Q+pIKidJHy8B+skoXE="));
     }
 
     @Test
-    @DisplayName("Encrypt and decrypt with Base64 encoded 256-bit key succeeds")
-    void base64Key_RoundTrip() {
-        byte[] rawKey = new byte[32];
-        for (int i = 0; i < 32; i++) {
-            rawKey[i] = (byte) (i + 1);
-        }
-        String b64Key = Base64.getEncoder().encodeToString(rawKey);
-        converter.setConfiguredKey(b64Key);
-
-        String accountNumber = "1234567890123456";
-        String encrypted = converter.convertToDatabaseColumn(accountNumber);
-
-        assertNotNull(encrypted);
-        String decrypted = converter.convertToEntityAttribute(encrypted);
-        assertEquals(accountNumber, decrypted);
-    }
-
-    @Test
-    @DisplayName("Null or blank string returns null or blank")
-    void nullOrBlank_ReturnsAsIs() {
+    void nullAndBlankPassThrough() {
         assertNull(converter.convertToDatabaseColumn(null));
-        assertEquals("", converter.convertToDatabaseColumn(""));
-        assertEquals("   ", converter.convertToDatabaseColumn("   "));
-
+        assertEquals(" ", converter.convertToDatabaseColumn(" "));
         assertNull(converter.convertToEntityAttribute(null));
         assertEquals("", converter.convertToEntityAttribute(""));
     }
 
     @Test
-    @DisplayName("Plain text legacy data returns original text when decryption fails")
-    void legacyPlainText_ReturnsOriginal() {
-        String plainLegacy = "123456";
-        String result = converter.convertToEntityAttribute(plainLegacy);
-        assertEquals(plainLegacy, result);
+    void legacyPlaintextIsReadThrough() {
+        assertEquals("123456", converter.convertToEntityAttribute("123456"));
+        assertEquals("Vietcombank 0123", converter.convertToEntityAttribute("Vietcombank 0123"));
+    }
+
+    @Test
+    void realCiphertextThatCannotBeDecryptedFailsInsteadOfLeakingCiphertext() {
+        String encrypted = converter.convertToDatabaseColumn("0987654321");
+        SecretCrypto.configure("another-secret");
+        assertThrows(IllegalStateException.class, () -> converter.convertToEntityAttribute(encrypted));
+    }
+
+    @Test
+    void missingSecretFailsClearly() {
+        assertThrows(IllegalStateException.class, () -> SecretCrypto.configure(null));
     }
 }
