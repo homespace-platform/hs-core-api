@@ -31,7 +31,7 @@ public record BranchOverviewResponse(String branchId, String month, Instant bill
     public enum MeterStatus { TODAY, UPCOMING, RECORDED }
 
     /** Declaration order is the display order. */
-    public enum ExpiryStatus { WITHIN_30, WITHIN_60 }
+    public enum ExpiryStatus { WITHIN_30, WITHIN_60, LONG }
 
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Room(String roomId, RoomStatus status, String tenantName, Target target, Stay nextStay,

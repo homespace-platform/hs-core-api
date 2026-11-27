@@ -12,6 +12,7 @@ import com.hs.contract.dto.billing.UnilateralTerminationNotice;
 import com.hs.contract.dto.branch.*;
 import com.hs.contract.dto.branch.BranchAttentionResponse.*;
 import com.hs.contract.dto.branch.BranchOverviewResponse.Clock;
+import com.hs.contract.dto.branch.BranchOverviewResponse.ExpiryStatus;
 import com.hs.contract.dto.branch.BranchOverviewResponse.Payment;
 import com.hs.contract.dto.branch.BranchOverviewResponse.PaymentKind;
 import com.hs.contract.dto.branch.BranchOverviewResponse.RoomStatus;
@@ -804,9 +805,9 @@ public class BranchAttentionService {
                     }
                 }
             }
-            // Same selector as the contract layer.
+            // Same selector as the contract layer, limited to the 30/60-day bands still ahead.
             var expiry = BranchMonitoringService.expiry(lease, s.today);
-            if (expiry != null) {
+            if (expiry != null && expiry.status() != ExpiryStatus.LONG && expiry.daysRemaining() >= 1) {
                 s.addForRoot(lease.id(), WorkType.LEASE_EXPIRING, lease.id(), null, startOfDay(end), Clock.BILLING,
                         expiry.target());
             }

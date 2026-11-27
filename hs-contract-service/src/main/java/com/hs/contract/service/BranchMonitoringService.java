@@ -104,14 +104,16 @@ public final class BranchMonitoringService {
         return false;
     }
 
-    /** The expiry line of a lease: active, moved in, not handed back, 1 to 60 days before its exclusive end. */
+    /**
+     * The expiry line of a lease still holding its room: active or expired, moved in, not handed back.
+     * Days may be 0 or negative for an expired lease; the 30/60 bands are the only ones that raise work.
+     */
     static Expiry expiry(BranchLeaseRow lease, LocalDate today) {
         LocalDate end = lease.endExclusive();
-        if (lease.status() != ContractStatus.ACTIVE || end == null || lease.handedOverAt() != null
+        if (!BranchOverviewService.billable(lease) || end == null
                 || lease.moveInDate() == null || lease.moveInDate().isAfter(today)) return null;
         long days = ChronoUnit.DAYS.between(today, end);
-        if (days < 1 || days > 60) return null;
-        return new Expiry(lease.id(), days <= 30 ? ExpiryStatus.WITHIN_30 : ExpiryStatus.WITHIN_60, end, (int) days,
+        return new Expiry(lease.id(), days > 60 ? ExpiryStatus.LONG : days <= 30 ? ExpiryStatus.WITHIN_30 : ExpiryStatus.WITHIN_60, end, (int) days,
                 new Target(TargetKind.CONTRACT, lease.id(),
                         BranchOverviewService.contractPath(lease.id()) + "?tab=end"));
     }

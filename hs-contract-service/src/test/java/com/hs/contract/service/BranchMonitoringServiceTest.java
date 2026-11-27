@@ -66,7 +66,9 @@ class BranchMonitoringServiceTest {
     void expiryHasExclusiveBoundariesAndSignedRenewalMovesThem() {
         var lease = lease(START, 3);
         LocalDate end = START.plusMonths(3);
-        assertNull(BranchMonitoringService.expiry(lease, end.minusDays(61)));
+        var long61 = BranchMonitoringService.expiry(lease, end.minusDays(61));
+        assertEquals(ExpiryStatus.LONG, long61.status());
+        assertEquals(61, long61.daysRemaining());
         var within60 = BranchMonitoringService.expiry(lease, end.minusDays(60));
         assertEquals(ExpiryStatus.WITHIN_60, within60.status());
         assertEquals(end, within60.endDateExclusive());
@@ -75,8 +77,48 @@ class BranchMonitoringServiceTest {
         var lastDay = BranchMonitoringService.expiry(lease, end.minusDays(1));
         assertEquals(1, lastDay.daysRemaining());
         assertTrue(lastDay.target().href().endsWith("?tab=end"));
-        assertNull(BranchMonitoringService.expiry(lease, end));
-        assertNull(BranchMonitoringService.expiry(lease(START, 6), end.minusDays(30)));
+        // A renewal or signed amendment moves the stored months:.
+        var renewed = BranchMonitoringService.expiry(lease(START, 6), end.minusDays(30));
+        assertEquals(ExpiryStatus.LONG, renewed.status());
+        assertEquals(START.plusMonths(6), renewed.endDateExclusive());
+    }
+
+    @Test
+    void expiredLeaseNotHandedOverKeepsARowWithNonPositiveDays() {
+        var lease = lease(START, 3);
+        LocalDate end = START.plusMonths(3);
+        var onEnd = BranchMonitoringService.expiry(lease, end);
+        assertEquals(0, onEnd.daysRemaining());
+        assertEquals(ExpiryStatus.WITHIN_30, onEnd.status());
+        var expired = BranchMonitoringService.expiry(row(ContractStatus.EXPIRED, null, null, null, null), end.plusDays(5));
+        assertEquals(-5, expired.daysRemaining());
+        assertEquals(end, expired.endDateExclusive());
+    }
+
+    @Test
+    void endUsesTheLifecycleCalculationAndOnlyLeasesStillHoldingTheRoomShowARow() {
+        // Applied renewal / signed amendment: effective months win over the requested ones.
+        var extended = row(ContractStatus.ACTIVE, null, null, 5, null);
+        assertEquals(ContractLeaseCalc.end(START, ContractLeaseCalc.months(5, 3)), extended.endExclusive());
+        assertEquals(START.plusMonths(5), BranchMonitoringService.expiry(extended, READ).endDateExclusive());
+        // Not-yet-signed changes never reach the stored months.
+        assertEquals(START.plusMonths(3), BranchMonitoringService.expiry(row(ContractStatus.ACTIVE, null, null, null, null), READ)
+                .endDateExclusive());
+        // Signed mutual early termination: the agreed end moves in.
+        LocalDate early = START.plusMonths(2);
+        var agreed = BranchMonitoringService.expiry(row(ContractStatus.ACTIVE, early, 2, 5, null), READ);
+        assertEquals(early, agreed.endDateExclusive());
+        assertEquals(early.toEpochDay() - READ.toEpochDay(), agreed.daysRemaining());
+        // Unilateral termination, closed or handed-over lease: no longer occupying.
+        assertNull(BranchMonitoringService.expiry(row(ContractStatus.TERMINATED, null, null, null, null), READ));
+        assertNull(BranchMonitoringService.expiry(row(ContractStatus.CLOSED, null, null, null, null), READ));
+        assertNull(BranchMonitoringService.expiry(row(ContractStatus.EXPIRED, null, null, null, Instant.EPOCH), READ));
+    }
+
+    private static BranchLeaseRow row(ContractStatus status, LocalDate agreedEnd, Integer agreedMonths,
+                                      Integer effectiveMonths, Instant handedOverAt) {
+        return new BranchLeaseRow("lease", "Test lease", status, agreedEnd, agreedMonths, effectiveMonths, START, 3,
+                "Tenant", handedOverAt);
     }
 
     private static BranchLeaseRow lease(LocalDate startsOn, int effectiveMonths) {

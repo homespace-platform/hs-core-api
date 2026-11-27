@@ -3,6 +3,7 @@ package com.hs.contract.dto.branch;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.contract.model.constant.ContractStatus;
+import com.hs.contract.service.ContractLeaseCalc;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -56,12 +57,13 @@ public record BranchLeaseRow(String id, String contractNumber, ContractStatus st
     public LocalDate endExclusive() {
         if (agreedEarlyEndExclusive != null) return agreedEarlyEndExclusive;
         Integer months = billingMonths();
-        return moveInDate == null || months == null ? null : moveInDate.plusMonths(months);
+        return moveInDate == null || months == null ? null : ContractLeaseCalc.end(moveInDate, months);
     }
 
     /** Effective number of lease months. */
     public Integer billingMonths() {
-        return agreedEarlyBillingMonths != null ? agreedEarlyBillingMonths
-                : effectiveLeaseMonths != null ? effectiveLeaseMonths : leaseMonths;
+        if (agreedEarlyBillingMonths != null) return agreedEarlyBillingMonths;
+        return effectiveLeaseMonths == null && leaseMonths == null ? null
+                : ContractLeaseCalc.months(effectiveLeaseMonths, leaseMonths);
     }
 }

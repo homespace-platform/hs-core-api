@@ -45,7 +45,7 @@ class BranchOverviewApiTest {
         var meter = new Meter("c", 0, MeterStatus.UPCOMING, LocalDate.of(2026, 12, 4),
                 Instant.parse("2026-12-04T17:00:00Z"),
                 new Target(TargetKind.CONTRACT, "c", "/dashboard/landlord/contracts/c?tab=payment&section=monthly"));
-        var expiry = new Expiry("c", ExpiryStatus.WITHIN_60, LocalDate.of(2027, 1, 5), 35,
+        var expiry = new Expiry("c", ExpiryStatus.LONG, LocalDate.of(2027, 1, 5), 90,
                 new Target(TargetKind.CONTRACT, "c", "/dashboard/landlord/contracts/c?tab=end"));
         var occupied = new Room("r1", RoomStatus.OCCUPIED, "Tenant", contract,
                 new Stay(null, LocalDate.of(2026, 12, 12), rental), new PaymentLayer(receipt.status(), 1, List.of(receipt)),
@@ -74,7 +74,7 @@ class BranchOverviewApiTest {
                              "meters":[{"contractId":"c","periodIndex":0,"status":"UPCOMING","meterDate":"2026-12-04",
                                "deadlineAt":"2026-12-04T17:00:00Z",
                                "target":{"kind":"CONTRACT","id":"c","href":"/dashboard/landlord/contracts/c?tab=payment&section=monthly"}}],
-                             "contracts":[{"contractId":"c","status":"WITHIN_60","endDateExclusive":"2027-01-05","daysRemaining":35,
+                             "contracts":[{"contractId":"c","status":"LONG","endDateExclusive":"2027-01-05","daysRemaining":90,
                                "target":{"kind":"CONTRACT","id":"c","href":"/dashboard/landlord/contracts/c?tab=end"}}],
                              "listingStatus":null},
                             {"roomId":"r2","status":"VACANT","tenantName":null,

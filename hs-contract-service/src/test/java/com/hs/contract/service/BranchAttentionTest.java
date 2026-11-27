@@ -245,6 +245,11 @@ class BranchAttentionTest {
         exit.setProposedBy(OWNER);
         lease(TODAY.plusDays(61), null);
         absent(AMENDMENT_RESPONSE, TERMINATION_RESPONSE, LEASE_EXPIRING);
+        // The overview now lists these leases (LONG, expired), but they still raise no work.
+        lease(TODAY, null);
+        absent(LEASE_EXPIRING);
+        lease(TODAY.minusDays(3), null);
+        absent(LEASE_EXPIRING);
         lease(TODAY.plusDays(30), null);
         assertEquals(midnight(TODAY.plusDays(30)), one(LEASE_EXPIRING).dueAt());
     }

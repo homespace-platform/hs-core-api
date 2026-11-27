@@ -341,7 +341,11 @@ class BranchOverviewPostgresTest {
         contracts.saveAndFlush(renewable);
         var updated = read(branch.getId());
         assertThat(findRoom(updated, today).meters()).extracting(m -> m.status()).containsExactly(MeterStatus.RECORDED);
-        assertThat(findRoom(updated, upcoming).contracts()).isEmpty();
+        // The applied renewal moves the shown end out: still listed, now beyond 60 days.
+        assertThat(findRoom(updated, upcoming).contracts()).singleElement().satisfies(e -> {
+            assertEquals(ExpiryStatus.LONG, e.status());
+            assertEquals(LocalDate.of(2026, 11, 5).plusMonths(5), e.endDateExclusive());
+        });
     }
 
     @Test
