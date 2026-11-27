@@ -42,6 +42,7 @@ public class EthPaymentService {
     private final EthPaymentChainClient chain;
     private final EthPaymentSignatures signatures;
     private final MembershipNotificationWriter notifications;
+    private final com.hs.payment.receipt.MembershipReceiptService receipts;
     @PersistenceContext private EntityManager em;
 
     @Value("${homespace.eth-payment.recipient-address:}") private String recipientAddress;
@@ -181,6 +182,7 @@ public class EthPaymentService {
         quote.setTransactionHash(txHash);
         quote.setConfirmedAt(now);
         orders.save(order);
+        receipts.capture(order); // no-op unless PAID; same transaction as the transition
         quotes.save(quote);
         notifications.enqueueTransition(order, before); // after verified receipt and locked order/quote persistence
         return MembershipCheckoutService.OrderView.from(order);

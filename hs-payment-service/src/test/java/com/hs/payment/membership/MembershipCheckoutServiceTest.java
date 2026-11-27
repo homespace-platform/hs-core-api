@@ -24,8 +24,9 @@ class MembershipCheckoutServiceTest {
     private final com.hs.payment.service.EthPaymentChainClient ethChain = mock(com.hs.payment.service.EthPaymentChainClient.class);
     private final com.hs.payment.membership.notification.MembershipNotificationWriter notifications =
             mock(com.hs.payment.membership.notification.MembershipNotificationWriter.class);
+    private final com.hs.payment.receipt.MembershipReceiptService receipts = mock(com.hs.payment.receipt.MembershipReceiptService.class);
     private final MembershipCheckoutService service = new MembershipCheckoutService(orders, memberships,
-            new SepaySigner("test-sepay-secret"), ethQuotes, ethChain, notifications);
+            new SepaySigner("test-sepay-secret"), ethQuotes, ethChain, notifications, receipts);
 
     @Test
     void ethCheckoutNeedsNoSepayConfigurationAndKeepsOrderPending() {
@@ -99,7 +100,7 @@ class MembershipCheckoutServiceTest {
                 () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY)).getCode());
 
         var withoutSigningSecret = new MembershipCheckoutService(orders, memberships, new SepaySigner(""), ethQuotes, ethChain,
-                notifications);
+                notifications, receipts);
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayMerchantId", "MERCHANT_TEST");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayCheckoutUrl", "https://pay-sandbox.sepay.vn/v1/checkout/init");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayReturnUrl", "https://example.test/dashboard/membership/return");
@@ -138,7 +139,9 @@ class MembershipCheckoutServiceTest {
         JsonNode callback = sepayCallback();
         assertTrue(service.sepayIpn(callback));
         assertEquals(MembershipOrder.Status.PAID, order.getStatus());
+        verify(receipts, times(1)).capture(order);
         assertTrue(service.sepayIpn(callback));
+        verify(receipts, times(1)).capture(order); // replayed IPN returns early
         verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false, "order1");
 
         assertTrue(service.sepayIpn(withTransaction(callback, "transaction_id", "tx456")));

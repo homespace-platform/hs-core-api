@@ -27,8 +27,9 @@ class EthMembershipPaymentServiceTest {
     private final EthPaymentSignatures signatures = mock(EthPaymentSignatures.class);
     private final com.hs.payment.membership.notification.MembershipNotificationWriter notifications =
             mock(com.hs.payment.membership.notification.MembershipNotificationWriter.class);
+    private final com.hs.payment.receipt.MembershipReceiptService receipts = mock(com.hs.payment.receipt.MembershipReceiptService.class);
     private final EthPaymentService service = new EthPaymentService(orders, memberships, challenges, quotes,
-            prices, chain, signatures, notifications);
+            prices, chain, signatures, notifications, receipts);
 
     @Test
     void verifiedEthPaymentActivatesMembershipOnceAndStoresFullHashInQuote() {
@@ -55,6 +56,7 @@ class EthMembershipPaymentServiceTest {
         var retry = service.settle("order1", "owner", new EthPaymentDtos.Settle(quote.getPaymentId(), txHash));
         assertEquals("PAID", retry.status());
         verify(memberships, times(1)).activate("owner", MembershipTier.STARTER, false, "order1");
+        verify(receipts, times(1)).capture(order); // retry of a settled quote returns early
     }
 
     @Test

@@ -28,9 +28,9 @@ class MembershipNotificationAcceptanceTest {
     final MembershipNotificationWriter writer=new MembershipNotificationWriter(outbox,"test.membership.events");
     final EthPaymentQuoteRepository quotes=mock(EthPaymentQuoteRepository.class);
     final EthPaymentChainClient chain=mock(EthPaymentChainClient.class);
-    final MembershipCheckoutService sepay=new MembershipCheckoutService(orders,memberships,new SepaySigner("test-only"),quotes,chain,writer);
+    final MembershipCheckoutService sepay=new MembershipCheckoutService(orders,memberships,new SepaySigner("test-only"),quotes,chain,writer,mock(com.hs.payment.receipt.MembershipReceiptService.class));
     final EthPaymentService eth=new EthPaymentService(orders,memberships,mock(EthWalletChallengeRepository.class),quotes,
-        mock(EthVndPriceService.class),chain,mock(EthPaymentSignatures.class),writer);
+        mock(EthVndPriceService.class),chain,mock(EthPaymentSignatures.class),writer,mock(com.hs.payment.receipt.MembershipReceiptService.class));
     final String id="cb856b215fbf4d33b7f7fd54d5ce7867";
     final ObjectMapper json=new ObjectMapper();
     MembershipOrder order(MembershipOrder.Provider provider){

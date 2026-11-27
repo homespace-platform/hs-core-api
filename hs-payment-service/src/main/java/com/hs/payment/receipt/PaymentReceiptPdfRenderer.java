@@ -86,10 +86,28 @@ public class PaymentReceiptPdfRenderer {
     return engine.process(resource("template.html"), context);
   }
 
+  public String membershipHtml(MembershipReceiptSnapshot s, String hash) {
+    var context = new Context(Locale.forLanguageTag("vi-VN"));
+    context.setVariable("receipt", s);
+    context.setVariable("hash", hash);
+    context.setVariable("money", money(java.math.BigDecimal.valueOf(s.amountVnd()), "VND"));
+    context.setVariable("paid", stamp(s.paidAt()));
+    context.setVariable("providerLabel", "ETH".equals(s.provider()) ? "Ví ETH (Sepolia)" : "SePay");
+    return engine.process(resource("membership-template.html"), context);
+  }
+
   public byte[] render(PaymentReceiptSnapshot snapshot, String hash) {
+    return renderHtml(html(snapshot, hash));
+  }
+
+  public byte[] renderMembership(MembershipReceiptSnapshot snapshot, String hash) {
+    return renderHtml(membershipHtml(snapshot, hash));
+  }
+
+  private byte[] renderHtml(String html) {
     if (!enabled) throw new IllegalStateException("Receipt PDF converter is disabled");
     var body = new LinkedMultiValueMap<String, Object>();
-    body.add("files", file("index.html", html(snapshot, hash).getBytes(StandardCharsets.UTF_8)));
+    body.add("files", file("index.html", html.getBytes(StandardCharsets.UTF_8)));
     for (var asset : ASSETS) body.add("files", file(asset, bytes("assets/" + asset)));
     body.add("preferCssPageSize", "true");
     body.add("printBackground", "true");

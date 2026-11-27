@@ -35,6 +35,7 @@ public class MembershipCheckoutService {
     private final EthPaymentQuoteRepository ethQuotes;
     private final EthPaymentChainClient ethChain;
     private final MembershipNotificationWriter notifications;
+    private final com.hs.payment.receipt.MembershipReceiptService receipts;
     @PersistenceContext private EntityManager em;
     @Value("${homespace.membership.sepay.merchant-id}") private String sepayMerchantId;
     @Value("${homespace.membership.sepay.checkout-url}") private String sepayCheckoutUrl;
@@ -222,6 +223,7 @@ public class MembershipCheckoutService {
         }
         o.setTransactionNo(transactionId);
         o.setPaidAt(now);
+        receipts.capture(o); // no-op unless PAID; same transaction as the transition
         notifications.enqueueTransition(o, before);
         return true;
     }
