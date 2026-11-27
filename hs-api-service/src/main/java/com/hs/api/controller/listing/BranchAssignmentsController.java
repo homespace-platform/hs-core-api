@@ -30,7 +30,7 @@ public class BranchAssignmentsController {
     private final BranchAssignmentService assignmentService;
     private final BranchRoomLinkService roomLinkService;
 
-    public record RoomListingLink(String listingId, String roomId) {}
+    public record RoomListingLink(String listingId, String roomId, String contractId, String contractNote) {}
 
     public record RoomStatus(String roomId, RoomManualStatus manualStatus) {}
 
@@ -51,8 +51,10 @@ public class BranchAssignmentsController {
     @PutMapping("/rooms/{roomId}/listings/{listingId}")
     public ApiResponse<RoomListingLink> linkListing(@PathVariable String branchId, @PathVariable String roomId,
             @PathVariable String listingId) {
-        roomLinkService.link(branchId, CurrentUser.requireUserId(), roomId, listingId);
-        return ok(new RoomListingLink(listingId, roomId));
+        String userId = CurrentUser.requireUserId();
+        roomLinkService.link(branchId, userId, roomId, listingId);
+        var lease = roomLinkService.attachListingLease(branchId, userId, roomId, listingId);
+        return ok(new RoomListingLink(listingId, roomId, lease.contractId(), lease.note()));
     }
 
     @RequiresCompleteProfile

@@ -165,6 +165,24 @@ class BranchAssociationsPostgresTest {
     @MockitoBean InvoiceNotificationWriter invoiceNotifications;
 
     @Test
+    void linkingAListingAttachesOnlyItsEffectiveLeaseNeverAnOldEndedOne() {
+        var map = map();
+        var listing = listing(map.id(), OWNER);
+        lease(rental(listing, TODAY.minusMonths(8)), ContractStatus.CLOSED);
+        lease(rental(listing, TODAY.minusMonths(6)), ContractStatus.TERMINATED);
+        var effective = lease(rental(listing, TODAY.minusMonths(1)), ContractStatus.ACTIVE);
+        roomLinks.link(map.id(), OWNER, map.room(), listing.getId());
+        var result = roomLinks.attachListingLease(map.id(), OWNER, map.room(), listing.getId());
+        assertEquals(effective.getId(), result.contractId());
+        assertNull(result.note());
+        assertEquals(List.of(effective.getId()), links.findAllByManagementBranchId(map.id()).stream()
+                .map(a -> a.getContractId()).toList());
+        assertEquals(map.room(), links.findById(effective.getId()).orElseThrow().getRoomId());
+        // Second call changes nothing and reports nothing.
+        assertNull(roomLinks.attachListingLease(map.id(), OWNER, map.room(), listing.getId()).contractId());
+    }
+
+    @Test
     void repeatedReadsRunProjectionsAndCountQueriesWithoutDmlLocksOrChangedRows() {
         var map = map();
         var listing = listing(map.id(), OWNER);

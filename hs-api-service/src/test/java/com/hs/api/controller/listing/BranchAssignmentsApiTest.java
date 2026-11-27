@@ -13,6 +13,7 @@ import com.hs.contract.service.BranchAssignmentService;
 import com.hs.listing.model.constant.ListingStatus;
 import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.model.constant.RoomManualStatus;
+import com.hs.listing.service.BranchContractLinkGuard;
 import com.hs.listing.service.BranchRoomLinkService;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -137,8 +138,12 @@ class BranchAssignmentsApiTest {
         login(true);
         when(assignments.attach("b", "owner", "c", null)).thenReturn(new BranchContractLinkResponse("c", "b", null));
         when(rooms.setManualStatus("b", "owner", "r", RoomManualStatus.REPAIR)).thenReturn(RoomManualStatus.REPAIR);
+        when(rooms.attachListingLease("b", "owner", "r", "l"))
+                .thenReturn(new BranchContractLinkGuard.ListingLease("c", null));
         mvc.perform(put(LISTING).param("ownerId", "other")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.result.listingId").value("l")).andExpect(jsonPath("$.result.roomId").value("r"));
+                .andExpect(jsonPath("$.result.listingId").value("l")).andExpect(jsonPath("$.result.roomId").value("r"))
+                .andExpect(jsonPath("$.result.contractId").value("c"))
+                .andExpect(jsonPath("$.result.contractNote").doesNotExist());
         mvc.perform(delete(LISTING)).andExpect(status().isOk());
         mvc.perform(body(CONTRACT, "{\"roomId\":null,\"ownerId\":\"other\"}")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.managementBranchId").value("b"));
@@ -146,6 +151,7 @@ class BranchAssignmentsApiTest {
         mvc.perform(body(FLAG, "{\"status\":\"REPAIR\"}")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.manualStatus").value("REPAIR"));
         verify(rooms).link("b", "owner", "r", "l");
+        verify(rooms).attachListingLease("b", "owner", "r", "l");
         verify(rooms).unlink("b", "owner", "r", "l");
         verify(assignments).attach("b", "owner", "c", null);
         verify(assignments).detach("b", "owner", "c");

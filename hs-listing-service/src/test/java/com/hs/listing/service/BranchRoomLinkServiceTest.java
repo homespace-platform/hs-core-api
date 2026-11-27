@@ -54,6 +54,17 @@ class BranchRoomLinkServiceTest {
     }
 
     @Test
+    void leaseAttachFailureNeverFailsTheListingLinkAndBecomesANote() {
+        when(guard.attachListingLease("b", "owner", "r", "l")).thenReturn(new BranchContractLinkGuard.ListingLease("c", null))
+                .thenThrow(new IllegalStateException("boom"));
+        ReflectionTestUtils.setField(service, "contractLinks", guard);
+        assertEquals("c", service.attachListingLease("b", "owner", "r", "l").contractId());
+        var failed = service.attachListingLease("b", "owner", "r", "l");
+        assertNull(failed.contractId());
+        assertNotNull(failed.note());
+    }
+
+    @Test
     void rejectsForeignOwnerCrossBranchAndAisle() {
         var branch = ownBranch();
         // A foreign owner's listing is not found by the owner-scoped query.

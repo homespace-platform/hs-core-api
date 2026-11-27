@@ -13,6 +13,7 @@ import com.hs.listing.repository.BranchRoomListingRepository;
 import com.hs.listing.repository.BranchSlotRepository;
 import com.hs.listing.repository.PropertyBranchRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,7 @@ import java.util.stream.Collectors;
  * locks branch then listing while acceptance locks listing then branch (see PropertyBranchRepository).
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class BranchRoomLinkService {
 
@@ -81,6 +83,22 @@ public class BranchRoomLinkService {
             if (!contractLinks.occupiedRooms(List.of(roomId)).isEmpty()) {
                 throw new AppException(ListingErrorCode.BRANCH_ROOM_STATUS_CONFLICT);
             }
+        }
+    }
+
+    /**
+     * Not transactional on purpose: call it after {@link #link}, so a failure here can never undo the listing link
+     * (on PostgreSQL a failed statement would poison a shared transaction).
+     */
+    public BranchContractLinkGuard.ListingLease attachListingLease(String branchId, String ownerId, String roomId,
+                                                                   String listingId) {
+        if (contractLinks == null) return BranchContractLinkGuard.ListingLease.NONE;
+        try {
+            return contractLinks.attachListingLease(branchId, ownerId, roomId, listingId);
+        } catch (RuntimeException failure) {
+            log.warn("BRANCH_LISTING_LEASE_FAILED listing={} room={}", listingId, roomId, failure);
+            return new BranchContractLinkGuard.ListingLease(null,
+                    "Chưa gắn được hợp đồng của tin này, hãy gắn hợp đồng thủ công.");
         }
     }
 

@@ -5,7 +5,7 @@ import com.hs.contract.dto.branch.BranchLeaseRow;
 import com.hs.contract.dto.branch.BranchRoomContract;
 import com.hs.contract.repository.BranchContractAssignmentRepository;
 import com.hs.listing.service.BranchContractLinkGuard;
-import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -13,10 +13,22 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Component
-@RequiredArgsConstructor
 public class BranchAssignmentGuard implements BranchContractLinkGuard {
 
     private final BranchContractAssignmentRepository assignments;
+    private final BranchAssignmentService assignmentService;
+
+    // Lazy: the assignment service needs the room link service, which holds this guard.
+    public BranchAssignmentGuard(BranchContractAssignmentRepository assignments,
+                                 @Lazy BranchAssignmentService assignmentService) {
+        this.assignments = assignments;
+        this.assignmentService = assignmentService;
+    }
+
+    @Override
+    public ListingLease attachListingLease(String branchId, String ownerId, String roomId, String listingId) {
+        return assignmentService.attachListingLease(branchId, ownerId, roomId, listingId);
+    }
 
     @Override
     public long countContractLinks(String branchId) {

@@ -17,6 +17,7 @@ import com.hs.listing.model.constant.RoomManualStatus;
 import com.hs.listing.repository.BranchRoomListingRepository;
 import com.hs.listing.repository.BranchSlotRepository;
 import com.hs.listing.repository.PropertyBranchRepository;
+import com.hs.listing.service.BranchContractLinkGuard.ListingLease;
 import com.hs.listing.service.BranchRoomLinkService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -170,6 +171,58 @@ public class BranchAssignmentService {
             assignment.setRoomId(roomId);
         }
         return new BranchContractLinkResponse(contractId, branchId, roomId);
+    }
+
+    /**
+     * Attaches the one effective root lease of a listing (ACTIVE or EXPIRED, moved in, not handed over) to the room
+     * the listing was just linked to. A lease elsewhere, in another branch or clashing with the room is only reported.
+     * Same lock order as attach: contract first, then the branch.
+     */
+    @Transactional
+    public ListingLease attachListingLease(String branchId, String ownerId, String roomId, String listingId) {
+        if (roomListings.findById(listingId).filter(k -> roomId.equals(k.getRoomId())).isEmpty()) {
+            return ListingLease.NONE;
+        }
+        List<BranchLeaseRow> effective = effectiveLeases(listingId, ownerId);
+        if (effective.isEmpty()) return ListingLease.NONE;
+        if (effective.size() > 1) {
+            return new ListingLease(null, "Tin này có nhiều hợp đồng đang hiệu lực, hãy gắn hợp đồng thủ công.");
+        }
+        String contractId = effective.getFirst().id();
+        requireOwnRootLease(contractId, ownerId);
+        rooms.lockBranch(branchId, ownerId);
+        // The lease may have ended while we waited for the locks.
+        if (leaseRows(List.of(contractId)).values().stream().noneMatch(this::effectiveNow)) return ListingLease.NONE;
+        BranchContractAssignment assignment = assignments.findById(contractId).orElse(null);
+        if (assignment != null && !assignment.getManagementBranchId().equals(branchId)) {
+            return new ListingLease(null, "Hợp đồng đang hiệu lực của tin này thuộc chi nhánh khác, nên không thay đổi.");
+        }
+        if (assignment != null && roomId.equals(assignment.getRoomId())) return ListingLease.NONE;
+        if (assignment != null && assignment.getRoomId() != null) {
+            String code = slots.findById(assignment.getRoomId()).map(BranchSlot::getRoomCode).orElse("khác");
+            return new ListingLease(null, "Hợp đồng đang hiệu lực của tin này đang ở phòng " + code
+                    + ", nên không chuyển sang phòng này.");
+        }
+        Fit fit = fit(rooms.requireRoom(branchId, roomId), contractId);
+        if (fit == Fit.FLAGGED) {
+            return new ListingLease(null, "Phòng đang đặt trạng thái thủ công, nên chưa gắn hợp đồng đang hiệu lực.");
+        }
+        if (fit == Fit.BUSY) {
+            return new ListingLease(null, "Trùng lịch với hợp đồng đang ở phòng này, nên không gắn hợp đồng của tin.");
+        }
+        if (assignment == null) assignments.save(new BranchContractAssignment(contractId, branchId, roomId));
+        else assignment.setRoomId(roomId);
+        return new ListingLease(contractId, null);
+    }
+
+    private List<BranchLeaseRow> effectiveLeases(String listingId, String ownerId) {
+        List<String> ids = assignments.findEffectiveRootIds(listingId, ownerId);
+        return ids.isEmpty() ? List.of() : leaseRows(ids).values().stream().filter(this::effectiveNow)
+                .sorted(Comparator.comparing(BranchLeaseRow::id)).toList();
+    }
+
+    private boolean effectiveNow(BranchLeaseRow lease) {
+        return BranchOverviewService.billable(lease) && BranchRoomSchedule.living(lease, billingTime.today());
     }
 
     @Transactional

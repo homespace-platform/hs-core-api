@@ -16,4 +16,15 @@ public interface BranchContractLinkGuard {
 
     /** Moves every contract of these rooms to the unplaced tray. */
     void unplaceContracts(Collection<String> roomIds);
+
+    /** @param contractId the lease just attached, or null; @param note why none was attached (Vietnamese), or null */
+    record ListingLease(String contractId, String note) {
+        public static final ListingLease NONE = new ListingLease(null, null);
+    }
+
+    /**
+     * Attaches the effective root lease of a listing already linked to this room. Never moves or overrides a link.
+     * Runs in its own transaction, after the listing link committed, so the contract lock precedes the branch lock.
+     */
+    ListingLease attachListingLease(String branchId, String ownerId, String roomId, String listingId);
 }

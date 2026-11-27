@@ -44,6 +44,14 @@ public interface BranchContractAssignmentRepository extends JpaRepository<Branch
     List<com.hs.contract.model.Contract> findManagedRoots(@Param("branchId") String branchId,
                                                           @Param("ownerId") String ownerId);
 
+    /** The owner's root leases of a listing that can occupy a room (ACTIVE or EXPIRED); the caller checks the rest. */
+    @Query("select c.id from Contract c where c.listingId = :listingId and c.landlordId = :ownerId "
+            + "and c.active = true and c.parentContractId is null "
+            + "and (c.agreementKind is null or c.agreementKind <> 'DEPOSIT') "
+            + "and c.status in (com.hs.contract.model.constant.ContractStatus.ACTIVE, "
+            + "com.hs.contract.model.constant.ContractStatus.EXPIRED) order by c.id")
+    List<String> findEffectiveRootIds(@Param("listingId") String listingId, @Param("ownerId") String ownerId);
+
     @Query("select new com.hs.contract.dto.branch.BranchRentalRow(r.id, r.listing.id, r.renterId, r.renterName, "
             + "r.moveInDate, r.status, r.active) from RentalRequest r where r.id in :ids and r.ownerId = :ownerId")
     List<com.hs.contract.dto.branch.BranchRentalRow> findOwnerRentals(@Param("ids") Collection<String> rentalIds,
