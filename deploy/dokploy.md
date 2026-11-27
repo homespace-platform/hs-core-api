@@ -42,7 +42,7 @@ Cần `driver=overlay attachable=true`. Nếu chưa có mạng, hoàn tất infr
 | `CONTRACT_GOTENBERG_URL` | `http://gotenberg:3000` |
 | `GATEWAY_INTERNAL_SECRET` | Giống Gateway; không đổi để vượt lỗi auth |
 | `PAYMENT_PROOF_UPLOAD_PUBLIC_BASE_URL` | `https://api.homespace.id.vn` |
-| `SEPAY_RETURN_URL` | `https://homespace.id.vn/dashboard/membership/return` |
+| `PAYMENT_SEPAY_RETURN_URL` | `https://homespace.id.vn/dashboard/membership/return` |
 
 Database `homespace_core` phải tồn tại. Init SQL chỉ chạy khi volume trống; nếu thiếu DB, kiểm tra bằng pgAdmin và xử lý có chủ đích, không reset/xóa volume để ép init.
 

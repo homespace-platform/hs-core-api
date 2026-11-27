@@ -17,29 +17,29 @@ Không dùng API Token trong mục API Access cho tích hợp Cổng thanh toán
 Điền vào `hs-core-api/.env` (đã có sẵn các dòng trống):
 
 ```dotenv
-SEPAY_MERCHANT_ID=<Merchant ID Sandbox>
-SEPAY_SECRET_KEY=<Secret Key merchant Sandbox>
-SEPAY_CHECKOUT_URL=https://pay-sandbox.sepay.vn/v1/checkout/init
-SEPAY_RETURN_URL=https://<frontend-public-host>/dashboard/membership/return
-SEPAY_IPN_SECRET=<Secret Key IPN do bạn đặt trong SePay>
+PAYMENT_SEPAY_MERCHANT_ID=<Merchant ID Sandbox>
+PAYMENT_SEPAY_SECRET_KEY=<Secret Key merchant Sandbox>
+PAYMENT_SEPAY_CHECKOUT_URL=https://pay-sandbox.sepay.vn/v1/checkout/init
+PAYMENT_SEPAY_RETURN_URL=https://<frontend-public-host>/dashboard/membership/return
+PAYMENT_SEPAY_IPN_SECRET=<Secret Key IPN do bạn đặt trong SePay>
 ```
 
-`SEPAY_SECRET_KEY` dùng để ký form checkout HMAC-SHA256; `SEPAY_IPN_SECRET` dùng để kiểm tra header IPN. Không dùng chung hai khóa. `SEPAY_RETURN_URL` là URL trang kết quả phía frontend, không phải URL IPN. Backend gắn `orderId` vào URL khi tạo từng đơn. Cấu hình `.env` cần được nạp lại bằng cách khởi động lại Core API.
+`PAYMENT_SEPAY_SECRET_KEY` dùng để ký form checkout HMAC-SHA256; `PAYMENT_SEPAY_IPN_SECRET` dùng để kiểm tra header IPN. Không dùng chung hai khóa. `PAYMENT_SEPAY_RETURN_URL` là URL trang kết quả phía frontend, không phải URL IPN. Backend gắn `orderId` vào URL khi tạo từng đơn. Cấu hình `.env` cần được nạp lại bằng cách khởi động lại Core API.
 
 Schema hiện tại thêm cột `membership_orders.provider` bằng Hibernate khi `JPA_DDL_AUTO=update`. Nếu môi trường dùng `validate` hoặc `none`, hãy thêm cột `provider varchar(16)` (cho phép `NULL` để các đơn legacy trước SePay vẫn đọc được) theo quy trình migration của môi trường đó **trước** khi khởi động phiên bản Core API mới. Đơn lịch sử có `provider=VNPAY` hoặc `NULL` vẫn hiển thị đúng; không được đổi nhãn chúng thành SePay. Backend không còn endpoint IPN VNPay.
 
 ## 3. Mở URL callback công khai trên máy local
 
-Cần **hai cửa sổ terminal riêng**, mỗi cửa sổ chạy một tunnel và giữ mở trong suốt lúc thanh toán thử. `3000` và `8080` là cổng HTTP **trên máy bạn**; Cloudflare cấp một URL HTTPS công khai khác nhau cho mỗi tunnel. Không cần tunnel thứ ba cho `SEPAY_CHECKOUT_URL`: đó là trang do SePay vận hành.
+Cần **hai cửa sổ terminal riêng**, mỗi cửa sổ chạy một tunnel và giữ mở trong suốt lúc thanh toán thử. `3000` và `8080` là cổng HTTP **trên máy bạn**; Cloudflare cấp một URL HTTPS công khai khác nhau cho mỗi tunnel. Không cần tunnel thứ ba cho `PAYMENT_SEPAY_CHECKOUT_URL`: đó là trang do SePay vận hành.
 
 | Cửa sổ | Lệnh tự chạy | Lấy URL HTTPS in ra để cấu hình |
 | --- | --- | --- |
-| 1 — frontend | `cloudflared tunnel --url http://localhost:3000` | Trong `hs-core-api/.env`: `SEPAY_RETURN_URL=https://<host-frontend>/dashboard/membership/return` |
+| 1 — frontend | `cloudflared tunnel --url http://localhost:3000` | Trong `hs-core-api/.env`: `PAYMENT_SEPAY_RETURN_URL=https://<host-frontend>/dashboard/membership/return` |
 | 2 — gateway/backend | `cloudflared tunnel --url http://localhost:8080` | Trên SePay, vào **Cổng thanh toán → Cấu hình → IPN** và đặt **IPN URL** thành `https://<host-backend>/api/v1/membership/sepay/ipn` |
 
-Thực hiện theo thứ tự: bảo đảm frontend và gateway đang chạy ở hai cổng trên; mở hai tunnel; sao chép **đúng hostname của từng cửa sổ** vào hai chỗ trong bảng; tại SePay chọn **Auth Type: Secret Key**, điền cùng giá trị với `SEPAY_IPN_SECRET`, chọn `application/json`, bật IPN rồi bấm **Cập nhật**; cuối cùng khởi động lại **Core API** để nạp `SEPAY_RETURN_URL` mới. Chỉ khởi động lại gateway nếu bạn sửa cấu hình route của gateway. Khi các URL chưa được điền đúng, không tạo giao dịch thử mới.
+Thực hiện theo thứ tự: bảo đảm frontend và gateway đang chạy ở hai cổng trên; mở hai tunnel; sao chép **đúng hostname của từng cửa sổ** vào hai chỗ trong bảng; tại SePay chọn **Auth Type: Secret Key**, điền cùng giá trị với `PAYMENT_SEPAY_IPN_SECRET`, chọn `application/json`, bật IPN rồi bấm **Cập nhật**; cuối cùng khởi động lại **Core API** để nạp `PAYMENT_SEPAY_RETURN_URL` mới. Chỉ khởi động lại gateway nếu bạn sửa cấu hình route của gateway. Khi các URL chưa được điền đúng, không tạo giao dịch thử mới.
 
-`SEPAY_RETURN_URL` là trang trình duyệt quay về (`success_url`, `error_url`, `cancel_url`). **IPN URL** là endpoint SePay gọi trực tiếp để báo thanh toán; không nhập URL frontend vào ô IPN. Trang kết quả chỉ tra cứu trạng thái đơn từ HomeSpace, không xác nhận thanh toán dựa vào tham số redirect. Trong **Nhật ký IPN** của SePay, callback hợp lệ phải đến endpoint gateway ở trên và nhận HTTP `200` từ backend.
+`PAYMENT_SEPAY_RETURN_URL` là trang trình duyệt quay về (`success_url`, `error_url`, `cancel_url`). **IPN URL** là endpoint SePay gọi trực tiếp để báo thanh toán; không nhập URL frontend vào ô IPN. Trang kết quả chỉ tra cứu trạng thái đơn từ HomeSpace, không xác nhận thanh toán dựa vào tham số redirect. Trong **Nhật ký IPN** của SePay, callback hợp lệ phải đến endpoint gateway ở trên và nhận HTTP `200` từ backend.
 
 Khi chạy Next.js ở chế độ development qua `*.trycloudflare.com`, route kết quả chuyển trình duyệt về `localhost:3000` để giữ phiên đăng nhập và API local; chỉ thử trên cùng máy đang chạy frontend. Quick Tunnel đổi hostname mỗi lần tạo lại: nếu một tunnel dừng hoặc xuất hiện lỗi Cloudflare `1033`, hãy chạy lại lệnh tương ứng, cập nhật URL ở `.env` hoặc SePay theo bảng, và khởi động lại Core API nếu đã sửa `.env`. Khi cần URL ổn định, dùng named tunnel và hostname riêng.
 
@@ -58,4 +58,4 @@ Thông báo IPN `TRANSACTION_VOID` hiện được từ chối và chưa tự đ
 
 ## 5. Chuyển sang Production
 
-Sau khi hoàn tất Sandbox và được SePay cấp thông tin Production, thay Merchant ID/Secret Key, đổi `SEPAY_CHECKOUT_URL` thành `https://pay.sepay.vn/v1/checkout/init`, cấu hình lại IPN URL và Secret Key IPN trong môi trường Production, rồi kiểm thử một giao dịch nhỏ. Không dùng key Sandbox ở Production.
+Sau khi hoàn tất Sandbox và được SePay cấp thông tin Production, thay Merchant ID/Secret Key, đổi `PAYMENT_SEPAY_CHECKOUT_URL` thành `https://pay.sepay.vn/v1/checkout/init`, cấu hình lại IPN URL và Secret Key IPN trong môi trường Production, rồi kiểm thử một giao dịch nhỏ. Không dùng key Sandbox ở Production.
