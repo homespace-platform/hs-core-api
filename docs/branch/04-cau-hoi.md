@@ -90,3 +90,9 @@ Nguyên văn: "hãy điều phối agent tự động tôi ko điều khiển m�
 - Lớp Hợp đồng trên sơ đồ: chỉ còn 2 bộ lọc **Có hợp đồng** / **Không có hợp đồng**; ô vẫn ghi số ngày và ngày hết hạn; màu ô theo mức gấp giữ nguyên.
 - Ngày hết hạn và số ngày còn lại phải giống trang chi tiết hợp đồng, và giống nhau ở mọi chỗ trên sơ đồ (ô, bảng phòng, liên kết). Đồng hồ theo quy tắc hiện có của hợp đồng/hoá đơn.
 - Điều phối chọn thêm (agent đề xuất, chấp nhận tạm): chỉ HĐ **đã dọn vào** mới tự gắn; tin có nhiều HĐ đủ điều kiện thì không gắn, chỉ báo; phòng đang đánh dấu thủ công thì chỉ báo. Khoá: HĐ trước, chi nhánh sau (cùng thứ tự với gắn HĐ thủ công). Ngày lệch 26/01 và 26/05: mọi đường chi nhánh đã dùng chung `ContractLeaseCalc.end`; nghi do gia hạn 2→6 tháng giữa hai lần chụp. Sửa thêm: màn onboarding HĐ bỏ sót `agreedEarlyBillingMonths`.
+
+## Rà đồng bộ web/mobile trước merge (27/11) · điều phối chốt
+- Chữ chuẩn chung: dòng HĐ trong thẻ Liên kết ghi **"từ dd/MM/yyyy đến hết dd/MM/yyyy"** (ngày cuối = endDateExclusive − 1), không dùng "đến trước". Trạng thái tin ở lớp Phòng và trong bảng phòng dùng **cùng một bộ nhãn**: nhãn của trang Quản lý tin trên web (nguồn chuẩn), trạng thái lạ → "Đang cập nhật".
+- Cả hai client chặn trước khi lưu theo Q12: tối đa 10 dãy/tầng, 100 ô/dãy, 1500 ô toàn sơ đồ (cùng câu báo).
+- Mobile theo web: ghi chú lớp Hợp đồng, dòng "Hợp đồng: Còn N ngày · hết …" trong bảng phòng, nút chính phòng chỉ có HĐ đã kết thúc → mở HĐ, khoá tạo/sửa/xoá chi nhánh theo quyền LISTING_POST, câu cảnh báo/thông báo mã phòng giống web.
+- Giữ khác biệt có chủ đích: mobile không có tab Tổng quan, không có "Thêm phòng mới" (dùng "Đăng tin cho phòng này" từ ô).

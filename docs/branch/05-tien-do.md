@@ -167,3 +167,4 @@ JUnit chạy bằng `mvnw.cmd -o -B` với các tham số `-D` được quote. L
 - 2026-11-27 · Lượt 3 xong: core `b23e25f` (UNLINKED/VACANT), `0679927` (roomCode); web `b5560d9`, `6f33ec1`, `e2c3ba0`; mobile `51979bd`, `02d25da`. Đã push cả ba. Chưa merge `master`; chưa thử tay giao diện mới.
 - 2026-11-27 · Lớp Hợp đồng ghi rõ ngày: core `364a90d` (ExpiryStatus LONG, dùng ContractLeaseCalc thay công thức riêng), web `922dde4`, mobile `2a482e5`. Ghi chú: phụ lục đổi thời hạn cập nhật ngày kết thúc khi ký xong (giống vòng đời HĐ và hoá đơn), không đợi ngày hiệu lực.
 - 2026-11-27 · Gắn tin tự gắn HĐ hiệu lực: core `69f16ce`, `7e8c021`; web `37dc436`; mobile `a4df175`. Lọc lớp Hợp đồng còn 2 nhóm.
+- 2026-11-27 · Rà đồng bộ web/mobile trước merge: web `6db5d35`, mobile `9cc1ca0` (chữ HĐ "đến hết", nhãn trạng thái tin chung, giới hạn Q12 phía client, mobile bù 9 chỗ lệch).
