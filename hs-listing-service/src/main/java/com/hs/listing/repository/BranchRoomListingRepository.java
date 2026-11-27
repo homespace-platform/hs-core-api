@@ -41,8 +41,8 @@ public interface BranchRoomListingRepository extends JpaRepository<BranchRoomLis
     @Query("select l.branchId from Listing l where l.id = :id and l.ownerId = :ownerId and l.active = true")
     Optional<String> findActiveListingBranchId(@Param("id") String listingId, @Param("ownerId") String ownerId);
 
-    @Query("select new com.hs.listing.dto.response.BranchListingRow(l.id, l.title, l.status, l.reviewOperationalStatus) "
-            + "from Listing l where l.branchId = :branchId and l.ownerId = :ownerId and l.active = true order by l.id")
+    @Query("select new com.hs.listing.dto.response.BranchListingRow(l.id, l.title, l.status, l.reviewOperationalStatus, "
+            + "coalesce(rd.roomCode, ad.unitCode)) from Listing l left join l.roomDetail rd left join l.apartmentDetail ad where l.branchId = :branchId and l.ownerId = :ownerId and l.active = true order by l.id")
     List<BranchListingRow> findBranchListings(@Param("branchId") String branchId, @Param("ownerId") String ownerId);
 
     @Query("select new com.hs.listing.dto.response.BranchOverviewListingRow(l.id, l.status, "
@@ -51,8 +51,8 @@ public interface BranchRoomListingRepository extends JpaRepository<BranchRoomLis
     List<com.hs.listing.dto.response.BranchOverviewListingRow> findOverviewListings(
             @Param("branchId") String branchId, @Param("ownerId") String ownerId);
 
-    @Query(value = "select new com.hs.listing.dto.response.BranchListingRow(l.id, l.title, l.status, l.reviewOperationalStatus) "
-            + "from Listing l where l.branchId = :branchId and l.ownerId = :ownerId and l.active = true order by l.id",
+    @Query(value = "select new com.hs.listing.dto.response.BranchListingRow(l.id, l.title, l.status, l.reviewOperationalStatus, "
+            + "coalesce(rd.roomCode, ad.unitCode)) from Listing l left join l.roomDetail rd left join l.apartmentDetail ad where l.branchId = :branchId and l.ownerId = :ownerId and l.active = true order by l.id",
             countQuery = "select count(l) from Listing l where l.branchId = :branchId and l.ownerId = :ownerId and l.active = true")
     Page<BranchListingRow> findBranchListingPage(@Param("branchId") String branchId, @Param("ownerId") String ownerId,
                                                  Pageable pageable);

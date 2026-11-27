@@ -250,6 +250,53 @@ class BranchAssociationsPostgresTest {
     }
 
     @Test
+    void declaredRoomCodeComesFromTheDetailRowInOneQueryPerRead() {
+        var map = map();
+        var room = withDetail(listing(map.id(), OWNER), " P101 ", null);
+        var unit = withDetail(listingBuilder(map.id(), OWNER).category(ListingCategory.APARTMENT).build(), null, "A-12");
+        var blank = withDetail(listing(map.id(), OWNER), "   ", null);
+        var house = listings.saveAndFlush(listingBuilder(map.id(), OWNER).category(ListingCategory.HOUSE).build());
+        roomLinks.link(map.id(), OWNER, map.room(), room.getId());
+        Map<String, String> expected = new HashMap<>();
+        expected.put(room.getId(), "P101");
+        expected.put(unit.getId(), "A-12");
+        expected.put(blank.getId(), null);
+        expected.put(house.getId(), null);
+
+        var sql = new ArrayList<String>();
+        SqlTrace.statements.set(sql);
+        try {
+            var placed = service.assignments(map.id(), OWNER, 0, 100);
+            assertEquals("P101", placed.rooms().getFirst().listings().getFirst().roomCode());
+            var unplaced = placed.unplaced().items();
+            assertEquals(3, unplaced.size());
+            var candidates = service.candidates(map.id(), OWNER, "LISTING", 0, 100).items();
+            assertEquals(expected, candidates.stream().collect(HashMap::new, (m, i) -> m.put(i.id(), i.roomCode()), Map::putAll));
+        } finally {
+            SqlTrace.statements.remove();
+        }
+        // ownership + slots + listings + links, then ownership + listing page + count + links: nothing per listing.
+        assertTrue(sql.size() <= 12, sql.toString());
+    }
+
+    private Listing withDetail(Listing base, String roomCode, String unitCode) {
+        if (roomCode != null) {
+            var detail = new ListingRoomDetail();
+            detail.setListing(base);
+            detail.setRoomCode(roomCode);
+            detail.setRestroomType(ListingEnums.RestroomType.PRIVATE);
+            detail.setFurnishingStatus(FurnishingStatus.BASIC);
+            detail.setMaxOccupants(2);
+            base.setRoomDetail(detail);
+        }
+        if (unitCode != null) {
+            base.setApartmentDetail(ListingApartmentDetail.builder().listing(base).projectName("Dự án").unitCode(unitCode)
+                    .floorNumber(3).bedroomCount(1).bathroomCount(1).furnishingStatus(FurnishingStatus.BASIC).build());
+        }
+        return listings.saveAndFlush(base);
+    }
+
+    @Test
     void uniqueAndForeignKeysEnforceListingAndContractLinks() {
         var map = map();
         var listing = listing(map.id(), OWNER);

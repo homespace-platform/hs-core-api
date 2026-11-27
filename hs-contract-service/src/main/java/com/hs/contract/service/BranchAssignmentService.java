@@ -81,7 +81,8 @@ public class BranchAssignmentService {
                 unplaced.add(new BranchAssignmentsResponse.Item("LISTING", listing.id(), listing.title()));
             } else {
                 listingsByRoom.computeIfAbsent(roomId, k -> new ArrayList<>()).add(
-                        new BranchAssignmentsResponse.Listing(listing.id(), listing.title(), listing.operationalStatus()));
+                        new BranchAssignmentsResponse.Listing(listing.id(), listing.title(), listing.operationalStatus(),
+                                listing.roomCode()));
             }
         }
         Map<String, List<BranchAssignmentsResponse.Contract>> contractsByRoom = new HashMap<>();
@@ -121,7 +122,7 @@ public class BranchAssignmentService {
             Page<BranchListingRow> found = roomListings.findBranchListingPage(branchId, ownerId, PageRequest.of(page, size));
             Map<String, String> listingRooms = listingRooms(branchId);
             return new BranchCandidatesResponse(found.getContent().stream()
-                    .map(l -> new BranchCandidatesResponse.Item(l.id(), l.title(), listingRooms.get(l.id())))
+                    .map(l -> new BranchCandidatesResponse.Item(l.id(), l.title(), listingRooms.get(l.id()), l.roomCode()))
                     .toList(), page, size, found.getTotalElements());
         }
         if ("CONTRACT".equals(kind)) {
@@ -129,7 +130,7 @@ public class BranchAssignmentService {
             Map<String, BranchLeaseRow> leases = leaseRows(ids.getContent());
             Map<String, String> placedRooms = placement(branchId, ownerId).rooms();
             return new BranchCandidatesResponse(ids.getContent().stream()
-                    .map(id -> new BranchCandidatesResponse.Item(id, label(leases.get(id)), placedRooms.get(id)))
+                    .map(id -> new BranchCandidatesResponse.Item(id, label(leases.get(id)), placedRooms.get(id), null))
                     .toList(), page, size, ids.getTotalElements());
         }
         throw invalid("kind phải là LISTING hoặc CONTRACT");

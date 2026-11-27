@@ -10,6 +10,7 @@ import com.hs.contract.dto.branch.BranchAssignmentsResponse;
 import com.hs.contract.dto.branch.BranchCandidatesResponse;
 import com.hs.contract.dto.branch.BranchContractLinkResponse;
 import com.hs.contract.service.BranchAssignmentService;
+import com.hs.listing.model.constant.ListingStatus;
 import com.hs.listing.advice.ListingErrorCode;
 import com.hs.listing.model.constant.RoomManualStatus;
 import com.hs.listing.service.BranchRoomLinkService;
@@ -82,7 +83,7 @@ class BranchAssignmentsApiTest {
         when(assignments.assignments("b", "owner", 0, 20)).thenReturn(
                 new BranchAssignmentsResponse(List.of(), new BranchAssignmentsResponse.Unplaced(List.of(), 0, 20, 0)));
         when(assignments.candidates("b", "owner", "CONTRACT", 2, 30)).thenReturn(
-                new BranchCandidatesResponse(List.of(new BranchCandidatesResponse.Item("c", "HĐ c", "r")), 2, 30, 71));
+                new BranchCandidatesResponse(List.of(new BranchCandidatesResponse.Item("c", "HĐ c", "r", null)), 2, 30, 71));
         mvc.perform(get(BRANCH + "/assignments").param("ownerId", "other"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.result.rooms").isEmpty())
                 .andExpect(jsonPath("$.result.unplaced.totalElements").value(0));
@@ -92,6 +93,26 @@ class BranchAssignmentsApiTest {
         verify(assignments).assignments("b", "owner", 0, 20);
         verify(assignments).candidates("b", "owner", "CONTRACT", 2, 30);
         verifyNoMoreInteractions(assignments, rooms);
+    }
+
+    @Test
+    void listingsExposeNullableRoomCodeInAssignmentsAndCandidates() throws Exception {
+        login(false);
+        var listings = List.of(
+                new BranchAssignmentsResponse.Listing("l1", "T1", ListingStatus.PUBLISHED, "P101"),
+                new BranchAssignmentsResponse.Listing("l2", "T2", ListingStatus.PUBLISHED, null));
+        when(assignments.assignments("b", "owner", 0, 20)).thenReturn(new BranchAssignmentsResponse(
+                List.of(new BranchAssignmentsResponse.Room("r", RoomManualStatus.NONE, listings, List.of(), List.of())),
+                new BranchAssignmentsResponse.Unplaced(List.of(), 0, 20, 0)));
+        when(assignments.candidates("b", "owner", "LISTING", 0, 20)).thenReturn(new BranchCandidatesResponse(
+                List.of(new BranchCandidatesResponse.Item("l1", "T1", null, "P101"),
+                        new BranchCandidatesResponse.Item("l2", "T2", "r", null)), 0, 20, 2));
+        mvc.perform(get(BRANCH + "/assignments")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.rooms[0].listings[0].roomCode").value("P101"))
+                .andExpect(jsonPath("$.result.rooms[0].listings[1]", org.hamcrest.Matchers.hasKey("roomCode")));
+        mvc.perform(get(BRANCH + "/assignment-candidates").param("kind", "LISTING")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.result.items[0].roomCode").value("P101"))
+                .andExpect(jsonPath("$.result.items[1]", org.hamcrest.Matchers.hasKey("roomCode")));
     }
 
     @Test

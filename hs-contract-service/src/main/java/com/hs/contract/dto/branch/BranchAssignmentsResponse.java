@@ -13,7 +13,7 @@ public record BranchAssignmentsResponse(List<Room> rooms, Unplaced unplaced) {
                        List<Contract> contracts, List<Hold> holds) {
     }
 
-    public record Listing(String id, String title, ListingStatus operationalStatus) {
+    public record Listing(String id, String title, ListingStatus operationalStatus, String roomCode) {
     }
 
     public record Contract(String id, ContractStatus status, LocalDate startDate, LocalDate endDateExclusive,
