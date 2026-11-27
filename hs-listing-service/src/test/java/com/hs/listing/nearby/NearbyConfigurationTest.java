@@ -22,7 +22,7 @@ class NearbyConfigurationTest {
             properties.load(reader);
         } catch (Exception error) { throw new IllegalStateException(error); }
         // Offline fixture: never load the developer's .env or system credentials.
-        properties.setProperty("TOMTOM_API_KEY", "offline-test-only");
+        properties.setProperty("MAP_TOMTOM_API_KEY", "offline-test-only");
         return properties;
     }
 
@@ -61,7 +61,7 @@ class NearbyConfigurationTest {
             assertThrows(BeanCreationException.class, () -> configured(missing), key);
         }
         Properties missingSecret = properties();
-        missingSecret.remove("TOMTOM_API_KEY");
+        missingSecret.remove("MAP_TOMTOM_API_KEY");
         assertThrows(BeanCreationException.class, () -> configured(missingSecret));
     }
 

@@ -7,7 +7,7 @@ Không tạo service location riêng. Không thay đổi giao diện đơn giả
 
 - Gateway local: `http://localhost:8080/api/v1` (đổi host/port theo môi trường).
 - Header: `Authorization: Bearer <access_token>` của người dùng đã đăng nhập, tài khoản active.
-- Core đọc `VIETMAP_API_KEY` từ môi trường. Không truyền API key Vietmap trên client hay trong collection Gateway.
+- Core đọc `MAP_VIETMAP_API_KEY` từ môi trường. Không truyền API key Vietmap trên client hay trong collection Gateway.
 - Tất cả endpoint bên dưới là GET chỉ tra cứu; không tự lưu User/Listing/Branch hoặc tự chọn kết quả đầu tiên.
 - Chỉ địa chỉ mới sau sáp nhập: backend cố định `display_type=1`, không dùng `data_old`.
 

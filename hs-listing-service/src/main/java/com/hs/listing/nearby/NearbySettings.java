@@ -75,6 +75,6 @@ public class NearbySettings {
    throw new IllegalStateException("Invalid nearby configuration");
   if((syncEnabled || queryEnabled) && !permitted())
    throw new IllegalStateException("Nearby requires explicit storage, reuse, AI and map rights plus a license-policy-id");
-  if(syncEnabled && (apiKey==null || apiKey.isBlank())) throw new IllegalStateException("Configure TOMTOM_API_KEY on the backend before enabling sync");
+  if(syncEnabled && (apiKey==null || apiKey.isBlank())) throw new IllegalStateException("Configure MAP_TOMTOM_API_KEY on the backend before enabling sync");
  }
 }

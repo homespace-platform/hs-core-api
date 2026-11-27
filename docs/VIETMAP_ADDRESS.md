@@ -112,7 +112,7 @@ Tìm kiếm AI/native SQL và JPQL lịch xem đã chuyển sang listing_address
 
 ## Chạy với CSDL mới
 
-1. Cấu hình `VIETMAP_API_KEY` ở môi trường chạy Core; `.env.example` chỉ chứa placeholder, không chứa key thật.
+1. Cấu hình `MAP_VIETMAP_API_KEY` ở môi trường chạy Core; `.env.example` chỉ chứa placeholder, không chứa key thật.
 2. Trỏ Core vào CSDL mới và khởi động với cấu hình JPA tạo schema như môi trường dev hiện tại.
 3. Khởi động Web/Admin/Gateway cùng phiên bản code mới. Không cần khởi động hs-location-service.
 4. Chọn địa chỉ qua Vietmap trước khi lưu hồ sơ, Branch hoặc tin mới.

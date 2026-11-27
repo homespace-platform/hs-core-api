@@ -219,7 +219,7 @@ class ListingSeedPostgresTest {
         try(var reader=Files.newBufferedReader(root.resolve("hs-api-service/src/main/resources/application.properties"),StandardCharsets.UTF_8)) {
             properties.load(reader);
         }
-        properties.setProperty("TOMTOM_API_KEY","offline-seed-test-only");
+        properties.setProperty("MAP_TOMTOM_API_KEY","offline-seed-test-only");
         properties.setProperty("nearby.sync-enabled","true");
         properties.setProperty("nearby.query-enabled","true");
         properties.setProperty("nearby.tomtom.license-approved","true");

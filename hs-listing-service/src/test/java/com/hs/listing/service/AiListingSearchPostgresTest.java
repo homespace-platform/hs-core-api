@@ -333,7 +333,7 @@ class AiListingSearchPostgresTest {
         try (var reader = Files.newBufferedReader(root.resolve("hs-api-service/src/main/resources/application.properties"), StandardCharsets.UTF_8)) {
             properties.load(reader);
         }
-        properties.setProperty("TOMTOM_API_KEY", "offline-ai-search-test-only");
+        properties.setProperty("MAP_TOMTOM_API_KEY", "offline-ai-search-test-only");
         properties.setProperty("nearby.query-enabled", "true");
         properties.setProperty("nearby.tomtom.license-approved", "true");
         try (var context = new AnnotationConfigApplicationContext()) {
