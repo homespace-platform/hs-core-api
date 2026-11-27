@@ -259,8 +259,11 @@ public class ParkingReservationService {
     @Transactional
     public void activateReservationsForRequest(String rentalRequestId, String contractId) {
         List<ParkingReservation> reservations = parkingReservationRepository.findByRentalRequestId(rentalRequestId);
+        // R-B: same branch lock as the hold paths, then re-read; a branch deleted meanwhile means the standalone pool, with its limit.
+        var gone = deletedUnderLock(reservations.stream().filter(r -> r.getStatus() == ParkingReservationStatus.HELD).toList());
         for (ParkingReservation r : reservations) {
             if (r.getStatus() == ParkingReservationStatus.HELD) {
+                if (gone.contains(r.getBranchId())) { validateStandalone(r); r.setBranchId(null); }
                 r.setStatus(ParkingReservationStatus.ACTIVE);
                 r.setContractId(contractId);
                 r.setHoldExpiresAt(null);
@@ -313,10 +316,33 @@ public class ParkingReservationService {
             parkingReservationRepository.save(r);
         }
     }
+    /** Locks each recorded branch in id order and returns the ones that no longer exist. */
+    private Set<String> deletedUnderLock(List<ParkingReservation> rows) {
+        var gone = new HashSet<String>();
+        rows.stream().map(ParkingReservation::getBranchId).filter(Objects::nonNull).distinct().sorted()
+                .forEach(id -> { if (lockBranchPool(id) == null) gone.add(id); });
+        return gone;
+    }
+
+    /** Listing limit for places of one rental moving to the standalone pool; the rental's own rows are not counted twice. */
+    private void validateStandalone(ParkingReservation r) {
+        var listing = listingRepository.findById(r.getListingId()).orElseThrow();
+        // The caller holds rental/contract rows; acceptance locks Listing before Rental, so only a version check here.
+        entityManager.lock(listing, jakarta.persistence.LockModeType.OPTIMISTIC);
+        Integer cap = r.getVehicleType() == VehicleType.MOTORBIKE ? listing.getMaxMotorbikeCount() : listing.getMaxCarCount();
+        var others = parkingReservationRepository.findOverlappingListingReservations(listing.getId(), r.getVehicleType(), ACTIVE_STATUSES,
+                r.getStartDate(), r.getEndDateExclusive()).stream()
+                .filter(o -> !Objects.equals(o.getRentalRequestId(), r.getRentalRequestId()) && inListingPool(o)).toList();
+        int available = Math.max(0, (cap == null ? 0 : cap) - calculatePeakUsage(others, r.getStartDate(), r.getEndDateExclusive()));
+        if (r.getQuantity() > available) throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,
+                "Chi nhánh đã bị xóa; bài đăng chỉ còn " + available + " chỗ trong thời gian thuê.");
+    }
+
     /** A branch soft-deleted since approval sends the renewal to the standalone pool, under the fallback appendix check. */
     @Transactional public void validateRenewalHold(String agreementId,String rootId) {
-        var stranded=parkingReservationRepository.findByContractId(agreementId).stream()
-                .filter(r->r.getStatus()==ParkingReservationStatus.HELD && isDeleted(r.getBranchId())).toList();
+        var held=parkingReservationRepository.findByContractId(agreementId).stream().filter(r->r.getStatus()==ParkingReservationStatus.HELD).toList();
+        var gone=deletedUnderLock(held); // R-B: lock and re-read the branch before writing ACTIVE places
+        var stranded=held.stream().filter(r->gone.contains(r.getBranchId())).toList();
         if(stranded.isEmpty()) return;
         var first=stranded.get(0);
         var listing=listingRepository.findByIdForUpdate(first.getListingId()).orElseThrow();

@@ -638,4 +638,61 @@ class ParkingReservationServiceTest {
         assertEquals("contract-999", res.getContractId());
         assertNull(res.getHoldExpiresAt());
     }
+
+    private ParkingReservation heldInBranch(String branchId, int quantity) {
+        var hold = ParkingReservation.builder().rentalRequestId("req-1").branchId(branchId).listingId("listing")
+                .vehicleType(VehicleType.MOTORBIKE).quantity(quantity).startDate(amendmentStart).endDateExclusive(amendmentEnd)
+                .status(ParkingReservationStatus.HELD).holdExpiresAt(Instant.now().plusSeconds(900)).build();
+        when(parkingReservationRepository.findByRentalRequestId("req-1")).thenReturn(List.of(hold));
+        return hold;
+    }
+
+    /** R-B (Q14): signing takes the same branch lock the hold paths take. */
+    @Test
+    void signingLocksTheRecordedBranchBeforeWritingActivePlaces() {
+        var hold = heldInBranch("branch", 1);
+        when(propertyBranchRepository.findByIdForUpdate("branch")).thenReturn(java.util.Optional.of(PropertyBranch.builder().id("branch").build()));
+
+        service.activateReservationsForRequest("req-1", "contract");
+
+        verify(propertyBranchRepository).findByIdForUpdate("branch");
+        assertEquals("branch", hold.getBranchId());
+        assertEquals(ParkingReservationStatus.ACTIVE, hold.getStatus());
+    }
+
+    /** R-B: a branch soft-deleted since acceptance sends the places to the standalone pool, under the listing limit. */
+    @Test
+    void signingAfterTheBranchWasDeletedChecksTheListingLimitAndGoesStandalone() {
+        var listing = Listing.builder().id("listing").ownerId("owner").maxMotorbikeCount(2).build();
+        when(listingRepository.findById("listing")).thenReturn(java.util.Optional.of(listing));
+        when(propertyBranchRepository.isSoftDeleted("deleted")).thenReturn(true);
+        var hold = heldInBranch("deleted", 2);
+        var other = ParkingReservation.builder().rentalRequestId("other").listingId("listing").vehicleType(VehicleType.MOTORBIKE)
+                .quantity(1).startDate(amendmentStart).endDateExclusive(amendmentEnd).status(ParkingReservationStatus.ACTIVE).build();
+        when(parkingReservationRepository.findOverlappingListingReservations(any(), Mockito.eq(VehicleType.MOTORBIKE), any(), any(), any()))
+                .thenReturn(List.of(hold, other));
+
+        var full = assertThrows(com.hs.common.advice.entity.AppException.class, () -> service.activateReservationsForRequest("req-1", "contract"));
+        assertEquals(com.hs.listing.advice.ListingErrorCode.PARKING_CAPACITY_CHANGED.getCode(), full.getCode());
+        assertEquals(ParkingReservationStatus.HELD, hold.getStatus());
+
+        listing.setMaxMotorbikeCount(3);
+        service.activateReservationsForRequest("req-1", "contract");
+        assertNull(hold.getBranchId());
+        assertEquals(ParkingReservationStatus.ACTIVE, hold.getStatus());
+        assertEquals("contract", hold.getContractId());
+    }
+
+    @Test
+    void renewalSigningLocksTheRecordedBranch() {
+        amendmentPool(10, 0);
+        var hold = ParkingReservation.builder().contractId("renewal").branchId("branch").listingId("listing").vehicleType(VehicleType.MOTORBIKE)
+                .quantity(1).startDate(amendmentStart).endDateExclusive(amendmentEnd).status(ParkingReservationStatus.HELD).build();
+        amendmentBookings.add(hold);
+
+        service.activateRenewalHold("renewal", "root");
+
+        verify(propertyBranchRepository).findByIdForUpdate("branch");
+        assertEquals("branch", hold.getBranchId());
+    }
 }

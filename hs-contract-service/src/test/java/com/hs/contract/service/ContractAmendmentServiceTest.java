@@ -640,9 +640,10 @@ class ContractAmendmentServiceTest {
     }
     /** An approved listing that has left every branch, changing neither vehicles nor term. */
     void listingLeftTheBranch() { listingLeftTheBranch("B"); }
-    void listingLeftTheBranch(String amenities) {
+    void listingLeftTheBranch(String amenities) { listingMovedTo(null, amenities); }
+    void listingMovedTo(String branchId, String amenities) {
         var terms = new LinkedHashMap<String,Object>();
-        terms.put("listingBranchId", null);
+        terms.put("listingBranchId", branchId);
         when(listingSync.preview(any(), any(), any())).thenReturn(new ContractListingSync.Preview("left", "original", terms, null, null,
                 List.of(new AmendmentComparison("amenities", "Tiện ích", "A", amenities)), List.of()));
         when(listingSync.mergeListingPolicies(anyMap(), anyMap())).thenAnswer(i -> i.getArgument(0));
@@ -834,6 +835,34 @@ class ContractAmendmentServiceTest {
         assertEquals(List.of("old-branch 1 2026-10-14 2026-11-14", "null 2 2026-11-14 2027-01-14"), activePools());
     }
 
+    /** R-C: the listing moved from A to B, no vehicle or term change: the hold stays in A, like Q15. */
+    @Test void listingMovedToAnotherBranchWithoutVehicleOrTermChangeKeepsTheHoldInTheRecordedBranch() {
+        root.setBranchId("old-branch");
+        var row = occupied("old-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        activeBranch("old-branch"); activeBranch("new-branch", 0);
+        listingMovedTo("new-branch", "B");
+        service.propose("root", "owner", syncPayload());
+        var child = approve(proposals.getFirst()); assertHoldUntouched(row);
+        signaturesReady(child); service.signed(child);
+        assertHoldUntouched(row);
+        assertEquals("old-branch", child.getBranchId());
+    }
+    /** R-C: when A is gone the places follow the listing to B, under B's capacity. */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void listingMovedToAnotherBranchAfterTheRecordedOneWasDeletedUsesTheNewBranchCapacity(boolean roomInNewBranch) {
+        root.setBranchId("old-branch");
+        occupied("old-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        deleteBranch("old-branch"); activeBranch("new-branch", roomInNewBranch ? 1 : 0);
+        listingMovedTo("new-branch", "B");
+        if (!roomInNewBranch) { assertNoRoom(() -> service.propose("root", "owner", syncPayload())); return; }
+        service.propose("root", "owner", syncPayload());
+        var child = approve(proposals.getFirst()); signaturesReady(child); service.signed(child);
+        assertEquals("new-branch", child.getBranchId());
+        assertTrue(activePools().stream().anyMatch(x -> x.startsWith("new-branch 1 ")));
+    }
     // RECHECK finding 3 (owner, 27/11): the contract records branch A, the listing left A, no vehicle or term change.
     @Test void syncLeavingTheRecordedBranchWithoutVehicleOrTermChangeKeepsTheHoldAndTheRecordedBranch() {
         root.setBranchId("old-branch");
@@ -942,6 +971,21 @@ class ContractAmendmentServiceTest {
         assertEquals(1, store.stream().filter(r -> r.getStatus() == ParkingReservationStatus.ACTIVE
                 && "old-branch".equals(r.getBranchId()) && !r.getStartDate().isAfter(LocalDate.of(2027, 2, 14))
                 && r.getEndDateExclusive().equals(LocalDate.of(2027, 4, 14))).mapToInt(ParkingReservation::getQuantity).sum());
+    }
+    /** R-A (Q13): a vehicle change after a renewal keeps parking to the renewed end, not to the old snapshot's end. */
+    @Test void vehicleChangeAfterARenewalHoldsTheRenewalPeriodToo() {
+        renewedContractRecordingOldBranch(); when(listingSync.preview(any(), any(), any())).thenReturn(null);
+        service.propose("root", "owner", payload(Map.of("freeForm", true, "motorbikeCount", 2)));
+        var child = approve(proposals.getFirst()); signaturesReady(child); service.signed(child);
+        assertEquals(List.of("old-branch 2 2026-11-14 2027-04-14", "old-branch 1 2026-10-14 2026-11-14").stream().sorted().toList(),
+                activePools().stream().sorted().toList());
+    }
+    /** R-A: the capacity check covers the renewal period. */
+    @Test void vehicleChangeAfterARenewalChecksCapacityOverTheRenewalPeriod() {
+        renewedContractRecordingOldBranch(); when(listingSync.preview(any(), any(), any())).thenReturn(null); activeBranch("old-branch", 2);
+        store.add(ParkingReservation.builder().contractId("other").listingId("listing").branchId("old-branch").vehicleType(VehicleType.MOTORBIKE)
+                .quantity(1).startDate(LocalDate.of(2027, 2, 1)).endDateExclusive(LocalDate.of(2027, 3, 1)).status(ParkingReservationStatus.ACTIVE).build());
+        assertNoRoom(() -> service.propose("root", "owner", payload(Map.of("freeForm", true, "motorbikeCount", 2))));
     }
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"submit,true", "approval,true", "signing,true", "submit,false", "approval,false", "signing,false"})

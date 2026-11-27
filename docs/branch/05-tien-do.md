@@ -157,3 +157,4 @@ JUnit chạy bằng `mvnw.cmd -o -B` với các tham số `-D` được quote. L
 - Đã sửa 6 lỗi `RECHECK.md`, 2 lỗi `RECHECK-2.md` và lỗi `RECHECK-3.md` (chi tiết `nhat-ky/RECHECK-FIX.md`). Lần sửa RECHECK-3 được kiểm bằng test đỏ của Codex chuyển xanh, Codex chưa rà lại.
 - Đã commit và push cả 4 repo trên `feature/branch-monitoring`. CHƯA merge `master`.
 - Còn để sau: Q13 (phụ lục đổi xe/thời hạn/bãi sau gia hạn), Q14, các ca ghi đồng thời. Việc chủ dự án làm cuối: thử tay, xem quyết định, merge, deploy (notification, core, web).
+- 27/11 · Lượt 2 (Opus giám sát, Sonnet code, không dùng Codex): sửa R-A..R-D theo cuối `04-cau-hoi.md`. Nhật ký `nhat-ky/R2-*.md`.

@@ -116,6 +116,8 @@ public class PropertyBranchService {
 
     @Transactional
     public PropertyBranchResponse updateBranch(String id, String ownerId, CreatePropertyBranchRequest request) {
+        // R-B (Q14): same row lock the hold paths take, before reading the branch and counting usage.
+        branchRepository.findByIdForUpdate(id);
         PropertyBranch branch = branchRepository.findByIdAndOwnerIdAndActiveTrue(id, ownerId)
                 .orElseThrow(() -> new AppException(404, "Không tìm thấy chi nhánh", HttpStatus.NOT_FOUND));
 

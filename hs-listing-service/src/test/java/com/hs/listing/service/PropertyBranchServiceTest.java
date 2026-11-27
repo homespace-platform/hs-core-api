@@ -29,6 +29,7 @@ import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 class PropertyBranchServiceTest {
@@ -201,5 +202,23 @@ class PropertyBranchServiceTest {
         assertEquals(new BigDecimal("3000"), l1.getCharges().getFirst().getAmount());
         assertTrue(l2.getCharges().isEmpty());
         verify(listingRepository, never()).saveAll(any());
+    }
+
+    /** R-B (Q14): the branch row is locked before current usage is counted, like the hold paths do. */
+    @Test
+    void reducingCapacityLocksTheBranchBeforeCountingUsage() {
+        PropertyBranch branch = PropertyBranch.builder().id("b1").ownerId("o1").name("B").category(ListingCategory.ROOM)
+                .motorbikeParkingCapacity(10).carParkingCapacity(0).defaultCharges(new ArrayList<>()).build();
+        when(branchRepository.findByIdAndOwnerIdAndActiveTrue("b1", "o1")).thenReturn(Optional.of(branch));
+        when(branchRepository.findByIdForUpdate("b1")).thenReturn(Optional.of(branch));
+        when(parkingReservationService.getMaxConcurrentUsage(any(), any())).thenReturn(10);
+        var req = CreatePropertyBranchRequest.builder().name("B").category(ListingCategory.ROOM).refId("vm:test")
+                .motorbikeParkingCapacity(8).carParkingCapacity(0).build();
+
+        assertThrows(com.hs.common.advice.entity.AppException.class, () -> service.updateBranch("b1", "o1", req));
+
+        var order = inOrder(branchRepository, parkingReservationService);
+        order.verify(branchRepository).findByIdForUpdate("b1");
+        order.verify(parkingReservationService).getMaxConcurrentUsage(eq("b1"), any());
     }
 }

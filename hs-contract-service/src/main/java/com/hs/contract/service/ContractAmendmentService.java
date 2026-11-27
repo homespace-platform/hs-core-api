@@ -526,7 +526,8 @@ public class ContractAmendmentService {
     }
     private LocalDate proposedEnd(Contract c,Map<String,Object> newTerms,Map<String,Object> changes) {
         var lease=builder.object(newTerms.get("lease"));
-        return lease.get("endDateText")!=null?FreeFormAmendmentTerms.date(lease.get("endDateText")).plusDays(1):end(c);
+        // R-A: the terms hold an old snapshot; without a term change the current lease (renewals applied) decides.
+        return leaseChanged(changes) && lease.get("endDateText")!=null?FreeFormAmendmentTerms.date(lease.get("endDateText")).plusDays(1):end(c);
     }
     private void validateBusinessTerms(Contract c,ContractRevision base,Map<String,Object> next,Map<String,Object> changes,LocalDate effectiveOn) {
         validateBusinessTerms(c,base,next,changes,effectiveOn,null);
@@ -579,8 +580,10 @@ public class ContractAmendmentService {
     }
     /** Owner, 27/11 (Q15): without a vehicle or term change, a listing that left the recorded branch does not move the hold. */
     private boolean keepsRecordedBranch(Contract c,ContractListingSync.Preview source,Map<String,Object> changes) {
+        // R-C: also a listing moved to another branch B; once A is deleted the places follow the listing (B's capacity applies).
         return c.getBranchId()!=null && source!=null && source.terms().containsKey("listingBranchId")
-                && source.terms().get("listingBranchId")==null && !vehiclesChanged(changes) && !leaseChanged(changes);
+                && (source.terms().get("listingBranchId")==null || parking.liveBranch(c.getBranchId())!=null)
+                && !vehiclesChanged(changes) && !leaseChanged(changes);
     }
     private void keepRecordedBranch(Contract c,Map<String,Object> next,ContractListingSync.Preview source,Map<String,Object> changes) {
         if(keepsRecordedBranch(c,source,changes))next.put("listingBranchId",c.getBranchId());

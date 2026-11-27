@@ -37,3 +37,16 @@ Nguyên văn: "bạn giúp tôi chạy đến khi hoàn thành không dừng n�
 - 27/11 · P4-R1 (tránh sót): khoản bù cọc người thuê phải trả chủ nhà (`DEPOSIT_ADJUSTMENT`, chiều TENANT_TO_LANDLORD) hiện ở lớp Thu tiền (kind `DEPOSIT_ADJUSTMENT`); "Cần chú ý" loại chờ xác nhận và quá hạn bao gồm cả `SETTLEMENT_BALANCE` và `DEPOSIT_ADJUSTMENT`. Tiền chủ nhà phải hoàn vẫn là loại việc riêng OWNER_REFUND như thiết kế. Không đếm một khoản hai lần.
 - 27/11 · P4-R2 (tránh sót): thêm vào "Cần chú ý" ba việc đang có nút xử lý của chủ nhà ở luồng cũ: đối soát cọc giữ chỗ bị từ chối chứng từ; quyết định yêu cầu huỷ trước khi thuê; mở lại thời hạn ký. Chỉ khi nguồn dữ liệu cho thấy đúng là đến lượt chủ nhà; đích là trang hồ sơ thuê/trang gốc đang có nút đó.
 - 27/11 · PRE-MERGE-2 (điều phối quyết, cần xem lại): chi nhánh đang giữ chỗ xe đã bị xóa mềm thì sửa nháp và gửi/duyệt/ký phụ lục không được lỗi; coi như tin độc lập (giới hạn của tin, pool `branch_id = null`) như `master` đang làm. Gia hạn áp cùng quy tắc vì cùng đường khóa chi nhánh. Xem [PRE-MERGE-FIX](nhat-ky/PRE-MERGE-FIX.md).
+
+## Chủ dự án 27/11 (lượt 2)
+- **Đồng ý tạm thời** mọi quyết định điều phối chọn thay ở trên và ở cuối `07`.
+- Sửa các rủi ro còn lại; điều phối (Opus 5.5) quyết như sau:
+  - **R-A (Q13):** phụ lục đổi xe/thời hạn/bãi sau khi gia hạn phải giữ chỗ cho kỳ gia hạn: ngày kết thúc lấy theo kỳ thuê **hiện hành** (đã gồm gia hạn đã áp dụng), không theo bản chụp cũ.
+  - **R-B (Q14):** giảm sức chứa bãi khoá chi nhánh trước khi đếm chỗ đang giữ; ký/kích hoạt chỗ xe khoá và đọc lại chi nhánh, nếu đã xoá thì đi đường bãi độc lập có kiểm sức chứa.
+  - **R-C:** tin chuyển chi nhánh A → B mà **không đổi xe/thời hạn**: giữ chỗ ở A (nhất quán Q15). Nếu A đã xoá: chuyển theo bãi hiện tại của tin (B) có kiểm sức chứa.
+  - **R-D:** chống gỡ liên kết ngoài ý muốn khi lưu sơ đồ, bằng xác nhận phía server (hợp đồng API dưới).
+
+### Hợp đồng API R-D (PUT `/branches/{id}/layout`)
+- Request thêm trường **tùy chọn** `acknowledgedDetach: { listingIds: string[], contractIds: string[] }`: các liên kết người dùng đã đồng ý cho gỡ (tin trên phòng bị bỏ; HĐ lịch sử bị đưa về khay).
+- Server tính tập sẽ bị gỡ dưới khoá chi nhánh. Nếu trường **có mặt** và tập sẽ gỡ **không nằm trọn** trong tập đã đồng ý → **409, code 4093** `BRANCH_LAYOUT_LINKS_CHANGED`, không ghi gì, revision không đổi. Nếu trường **vắng mặt** → hành vi cũ (tương thích client cũ). HĐ hiệu lực/giữ chỗ vẫn 409/4075 như trước.
+- Client mới **luôn gửi** trường này (danh sách rỗng khi không bỏ phòng nào). Gặp 4093: giữ nháp, đọc lại assignments, hỏi lại rồi gửi lại.
