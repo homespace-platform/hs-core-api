@@ -574,7 +574,7 @@ public class ContractLifecycleService {
     }
     @Transactional public void cancelPendingRenewalsForClosedParent(Contract c) { syncLocked(c); }
     private boolean terminationActive(Contract c) { return c.getMutualTerminationWorkflowId()!=null || c.getTerminationProposedAt()!=null && c.getTerminationCancelledAt()==null && c.getTerminationDeclinedAt()==null && c.getTerminationCompletedAt()==null; }
-    private LocalDate end(Contract c) { return c.getAgreedEarlyEndExclusive()!=null?c.getAgreedEarlyEndExclusive():ContractLeaseCalc.end(rental(c).getMoveInDate(), months(c)); }
+    private LocalDate end(Contract c) { return ContractLeaseCalc.end(c, rental(c)); }
     private Instant opens(Contract c) { return ContractLeaseCalc.renewalOpens(end(c)); }
     private Instant signBy(Contract c) { return ContractLeaseCalc.renewalSignBy(end(c)); }
     private int months(Contract c) { return c.getAgreedEarlyBillingMonths()!=null?c.getAgreedEarlyBillingMonths():ContractLeaseCalc.months(c, rental(c)); }

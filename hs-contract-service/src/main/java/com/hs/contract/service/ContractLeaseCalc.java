@@ -26,6 +26,22 @@ public final class ContractLeaseCalc {
 
     public static LocalDate end(LocalDate moveIn, int months) { return moveIn.plusMonths(months); }
 
+    /**
+     * The one lease end (exclusive) every screen must show: the agreed early end, else move-in plus the months in
+     * force. Contract lifecycle, onboarding and the branch map all go through this formula.
+     */
+    public static LocalDate end(LocalDate agreedEnd, Integer agreedMonths, Integer effectiveMonths,
+                                Integer requestedMonths, LocalDate moveIn) {
+        if (agreedEnd != null) return agreedEnd;
+        Integer months = agreedMonths != null ? agreedMonths : effectiveMonths != null ? effectiveMonths : requestedMonths;
+        return moveIn == null || months == null ? null : end(moveIn, months);
+    }
+
+    public static LocalDate end(Contract c, RentalRequest rental) {
+        return end(c.getAgreedEarlyEndExclusive(), c.getAgreedEarlyBillingMonths(), c.getEffectiveLeaseMonths(),
+                rental.getLeaseMonths(), rental.getMoveInDate());
+    }
+
     /** Renewal requests open 30 days before the exclusive end. */
     public static Instant renewalOpens(LocalDate end) {
         return end.minusDays(RENEWAL_WINDOW_DAYS).atStartOfDay(BillingTime.ZONE).toInstant();

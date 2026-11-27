@@ -289,8 +289,7 @@ public class RentalOnboardingService {
         var end=originalEnd;
         String termSource=null;
         if(contract!=null && contract.getSignedAt()!=null) {
-            end=contract.getAgreedEarlyEndExclusive()!=null?contract.getAgreedEarlyEndExclusive()
-                :ContractLeaseCalc.end(r.getMoveInDate(),ContractLeaseCalc.months(contract,r));
+            end=ContractLeaseCalc.end(contract,r);
             if(!end.equals(originalEnd))termSource=contract.getAgreedEarlyEndExclusive()!=null?"EARLY_EXIT":"SIGNED_ADJUSTMENT";
         }
         return new View(time.now(),BillingTime.ZONE.toString(),stage,r.getMoveInDate(),end,

@@ -55,9 +55,8 @@ public record BranchLeaseRow(String id, String contractNumber, ContractStatus st
     }
 
     public LocalDate endExclusive() {
-        if (agreedEarlyEndExclusive != null) return agreedEarlyEndExclusive;
-        Integer months = billingMonths();
-        return moveInDate == null || months == null ? null : ContractLeaseCalc.end(moveInDate, months);
+        return ContractLeaseCalc.end(agreedEarlyEndExclusive, agreedEarlyBillingMonths, effectiveLeaseMonths,
+                leaseMonths, moveInDate);
     }
 
     /** Effective number of lease months. */
