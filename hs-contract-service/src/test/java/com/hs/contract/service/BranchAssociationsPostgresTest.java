@@ -59,6 +59,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.*;
+import org.springframework.test.util.ReflectionTestUtils;
 import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -113,6 +114,7 @@ class BranchAssociationsPostgresTest {
     private static final BigDecimal RENT = new BigDecimal("3000000");
 
     @Autowired BranchAssignmentService service;
+    @Autowired BranchContractAutoLink autoLink;
     @Autowired BranchRoomLinkService roomLinks;
     @Autowired BranchLayoutService layouts;
     @Autowired PropertyBranchService propertyBranches;
@@ -592,13 +594,16 @@ class BranchAssociationsPostgresTest {
         UserContextHolder.set(new UserContext(OWNER, null));
         try {
             var manual = creation.createDraft(new CreateContractDraftRequest(first.getId()));
+            awaitAutoLinks();
             assertEquals(map.room(), links.findById(manual.getId()).orElseThrow().getRoomId());
             var automatic = creation.createDraftAutomatically(next.getId());
+            awaitAutoLinks();
             assertEquals(map.id(), links.findById(automatic.getId()).orElseThrow().getManagementBranchId());
             assertNull(links.findById(automatic.getId()).orElseThrow().getRoomId());
             var before = businessSnapshot();
             service.detach(map.id(), OWNER, manual.getId());
             assertEquals(manual.getId(), creation.createDraft(new CreateContractDraftRequest(first.getId())).getId());
+            awaitAutoLinks();
             assertTrue(links.findById(manual.getId()).isEmpty());
             assertEquals(before, businessSnapshot());
         } finally {
@@ -616,6 +621,7 @@ class BranchAssociationsPostgresTest {
                 + "check (management_branch_id <> '" + map.id() + "') not valid");
         try {
             var draft = creation.createDraftAutomatically(rental.getId());
+            awaitAutoLinks();
             var saved = contracts.findById(draft.getId()).orElseThrow();
             assertNotNull(saved.getCurrentRevisionId());
             assertTrue(revisions.existsById(saved.getCurrentRevisionId()));
@@ -626,6 +632,12 @@ class BranchAssociationsPostgresTest {
         } finally {
             jdbc.execute("alter table branch_contract_assignments drop constraint p2_test_link_failure");
         }
+    }
+
+    /** The queue is single-threaded and FIFO: once a later task has run, every queued link has finished. */
+    private void awaitAutoLinks() {
+        var queue = (ExecutorService) ReflectionTestUtils.getField(autoLink, "links");
+        assertDoesNotThrow(() -> queue.submit(() -> {}).get(10, TimeUnit.SECONDS));
     }
 
     private void stubCreationInputs() {

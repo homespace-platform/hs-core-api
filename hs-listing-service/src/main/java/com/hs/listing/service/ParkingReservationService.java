@@ -289,14 +289,14 @@ public class ParkingReservationService {
                 .filter(r->r.getStatus()==ParkingReservationStatus.ACTIVE && start.equals(r.getEndDateExclusive())).toList();
         if(current.isEmpty()) return;
         String listingId=current.get(0).getListingId(), branchId=current.get(0).getBranchId();
-        PropertyBranch branch=branchId==null?null:propertyBranchRepository.findByIdForUpdate(branchId).orElseThrow();
+        PropertyBranch branch=lockBranchPool(branchId);
         Listing listing=listingRepository.findByIdForUpdate(listingId).orElseThrow();
         Map<VehicleType,Integer> counts=new EnumMap<>(VehicleType.class);
         current.forEach(r->counts.merge(r.getVehicleType(),r.getQuantity(),Integer::sum));
         for(var item:counts.entrySet()) {
             if(getAvailability(branch,listing,item.getKey(),start,end).available()<item.getValue())
                 throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,"Không đủ chỗ xe trong thời gian gia hạn; cần đối soát trước khi duyệt.");
-            parkingReservationRepository.save(ParkingReservation.builder().branchId(branchId).listingId(listingId)
+            parkingReservationRepository.save(ParkingReservation.builder().branchId(poolId(branch)).listingId(listingId)
                     .rentalRequestId(current.get(0).getRentalRequestId()).contractId(agreementId)
                     .vehicleType(item.getKey()).quantity(item.getValue()).startDate(start).endDateExclusive(end)
                     .status(ParkingReservationStatus.HELD).holdExpiresAt(deadline).build());
@@ -343,7 +343,7 @@ public class ParkingReservationService {
         // The caller already holds the rental lock. Acceptance locks Listing before Rental;
         // do not wait for that Listing here. The branch lock serializes inventory and an
         // optimistic Listing check rolls back if approval changes its limits or branch.
-        var branch=targetBranchId==null?null:propertyBranchRepository.findByIdForUpdate(targetBranchId).orElseThrow();
+        var branch=lockBranchPool(targetBranchId);
         if(branch!=null && !Objects.equals(listing.getOwnerId(),branch.getOwnerId()))
             throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,"Chi nhánh không thuộc chủ nhà của hồ sơ thuê.");
         entityManager.lock(listing,jakarta.persistence.LockModeType.OPTIMISTIC);
@@ -373,10 +373,19 @@ public class ParkingReservationService {
         }
         for(var type:VehicleType.values()) {
             int desired=type==VehicleType.MOTORBIKE?bikes:cars;if(desired==0)continue;
-            parkingReservationRepository.save(ParkingReservation.builder().listingId(listing.getId()).branchId(targetBranchId)
+            parkingReservationRepository.save(ParkingReservation.builder().listingId(listing.getId()).branchId(poolId(branch))
                     .rentalRequestId(request.getId()).vehicleType(type).quantity(desired).startDate(start).endDateExclusive(end)
                     .status(ParkingReservationStatus.HELD).holdExpiresAt(deadline).build());
         }
+    }
+
+    /** Null for no branch and for a soft-deleted one: its rentals fall back to the standalone listing pool. */
+    private PropertyBranch lockBranchPool(String branchId) {
+        return branchId==null?null:propertyBranchRepository.findByIdForUpdate(branchId).orElse(null);
+    }
+
+    private static String poolId(PropertyBranch branch) {
+        return branch==null?null:branch.getId();
     }
 
     /** Pool already allocated to an unsigned rental. The listing's current branch only seeds a first allocation. */
@@ -392,6 +401,12 @@ public class ParkingReservationService {
 
     /** Pool the signed rental occupies just before an appendix takes effect. */
     public String amendmentPool(String rootId, String listingId, LocalDate effectiveOn, boolean pinned, String pinnedBranchId) {
+        String pool = recordedAmendmentPool(rootId, listingId, effectiveOn, pinned, pinnedBranchId);
+        // An appendix must not record a soft-deleted branch as its destination. Scalar query: loads no entity to go stale.
+        return pool != null && propertyBranchRepository.isSoftDeleted(pool) ? null : pool;
+    }
+
+    private String recordedAmendmentPool(String rootId, String listingId, LocalDate effectiveOn, boolean pinned, String pinnedBranchId) {
         // The day before: a replaced, still scheduled appendix already owns the segment starting on effectiveOn.
         LocalDate day = effectiveOn.minusDays(1);
         ParkingReservation last = null;
@@ -419,7 +434,7 @@ public class ParkingReservationService {
 
     private AmendmentPool lockSelectedPool(String listingId,String branchId) {
         var listing=listingRepository.findById(listingId).orElseThrow();
-        var branch=branchId==null?null:propertyBranchRepository.findByIdForUpdate(branchId).orElseThrow();
+        var branch=lockBranchPool(branchId);
         if(branch!=null && !Objects.equals(listing.getOwnerId(),branch.getOwnerId()))
             throw new AppException(ListingErrorCode.PARKING_CAPACITY_CHANGED,"Chi nhánh không thuộc chủ nhà của hợp đồng.");
         entityManager.lock(listing,jakarta.persistence.LockModeType.OPTIMISTIC);

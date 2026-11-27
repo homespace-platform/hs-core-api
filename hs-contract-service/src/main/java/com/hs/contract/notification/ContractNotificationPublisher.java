@@ -55,34 +55,25 @@ public class ContractNotificationPublisher {
 
     @Scheduled(fixedDelayString = "${notification.outbox.poll-delay-ms:1000}")
     public void publishPending() {
-        boolean contractsClean = publishContracts();
-        // Notices committed while a digest was in flight do not wait for the next poll.
-        if (publishDigests() && contractsClean) publishContracts();
-    }
-
-    /** @return false when the round stopped on a failure, which is retried at the next poll. */
-    private boolean publishContracts() {
         for (int i = 0; i < 20; i++) {
             try {
-                if (!Boolean.TRUE.equals(transaction.execute(status -> publishOne(CLAIM_SQL, null)))) return true;
+                if (!Boolean.TRUE.equals(transaction.execute(status -> publishOne(CLAIM_SQL, null)))) return;
             } catch (RuntimeException failure) {
                 log.warn("Contract notification publish deferred ({})", failure.getClass().getSimpleName());
-                return false;
+                return;
             }
         }
-        return true;
     }
 
     /**
+     * A task of its own on the shared scheduler, so a slow digest ACK never holds back the contract poll.
      * Stops at the first failure; that row then cools down, so later polls reach the other digests. The time budget
-     * hands the thread back to contract notices when sends are slow.
-     *
-     * @return whether any digest was claimed.
+     * hands the scheduler thread back when sends are slow.
      */
-    private boolean publishDigests() {
+    @Scheduled(fixedDelayString = "${notification.outbox.poll-delay-ms:1000}")
+    public void publishDigests() {
         long start = System.nanoTime();
         digestRetryAt.values().removeIf(retryAt -> start - retryAt >= 0);
-        boolean claimedAny = false;
         for (int i = 0; i < 20 && System.nanoTime() - start < DIGEST_BUDGET_NANOS; i++) {
             var claimed = new AtomicLong();
             String cooling = digestRetryAt.isEmpty() ? "" : digestRetryAt.keySet().stream()
@@ -90,15 +81,13 @@ public class ContractNotificationPublisher {
             try {
                 if (!Boolean.TRUE.equals(transaction.execute(status ->
                         publishOne(DIGEST_CLAIM_SQL.formatted(DIGEST_ROW, cooling), claimed)))) break;
-                claimedAny = true;
             } catch (RuntimeException failure) {
                 log.warn("Branch digest publish deferred ({})", failure.getClass().getSimpleName());
                 // Covers the send, the sent_at update and the commit.
                 if (claimed.get() != 0) digestRetryAt.put(claimed.get(), System.nanoTime() + DIGEST_COOLDOWN_NANOS);
-                return true;
+                return;
             }
         }
-        return claimedAny;
     }
 
     private boolean publishOne(String claimSql, AtomicLong claimed) {

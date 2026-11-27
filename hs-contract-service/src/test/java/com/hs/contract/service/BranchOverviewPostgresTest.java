@@ -386,8 +386,8 @@ class BranchOverviewPostgresTest {
         doThrow(new IllegalStateException("after broker ack")).when(failing)
                 .update("UPDATE contract_notification_outbox SET sent_at = CURRENT_TIMESTAMP WHERE id = ?", id);
         try {
-            new ContractNotificationPublisher(failing, kafka, transactions).publishPending();
-            new ContractNotificationPublisher(jdbc, kafka, transactions).publishPending();
+            new ContractNotificationPublisher(failing, kafka, transactions).publishDigests();
+            new ContractNotificationPublisher(jdbc, kafka, transactions).publishDigests();
             verify(kafka, times(2)).send(anyString(), eq(key), eq(bodies.getFirst()));
             assertFalse(digest.write(owner, day, 4));
             assertEquals(0L, jdbc.queryForObject(
@@ -420,7 +420,9 @@ class BranchOverviewPostgresTest {
                     return CompletableFuture.failedFuture(new IllegalStateException("digest send failed"));
                 }).when(kafka).send(eq("events"), eq(digestKey), anyString());
 
-                new ContractNotificationPublisher(jdbc, kafka, transactions).publishPending();
+                var publisher = new ContractNotificationPublisher(jdbc, kafka, transactions);
+                publisher.publishDigests();
+                publisher.publishPending();
 
                 var order = inOrder(kafka);
                 order.verify(kafka).send(eq("events"), eq(oldKey), anyString());

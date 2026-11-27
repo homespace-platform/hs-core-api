@@ -136,3 +136,18 @@ JUnit chạy bằng `mvnw.cmd -o -B` với các tham số `-D` được quote. L
 - 2026-11-27 · Codex rà cuối P5. 382 ca offline đạt. Publisher còn lỗi thứ tự và retry digest sau ACK. `GET /branches` Core ẩn danh trả danh sách rỗng theo mã có từ `HEAD`. [Biên bản](nhat-ky/P5-REVIEW.md#rà-cuối-bản-sửa-p5).
 - 2026-11-27 · Codex rà cuối: còn lỗi publisher (thứ tự thông báo hợp đồng sau digest lỗi). Đang giao Sonnet sửa. Unit liên quan 382/382. Web: 875 test, 790 đạt, 85 lỗi (trước: 739/85 của 824), branch 51/51, tsc 1 lỗi sẵn, eslint sạch.
 - 2026-11-27 · Sửa lỗi publisher cuối (contract 1329/0 lỗi; PG BranchOverview 10, MonthlyInvoiceNotification 12, Attention 1 đạt). Điều phối đọc diff: đường thông báo hợp đồng như HEAD, chỉ thêm lọc bỏ digest. Đã xoá container test `hs-branch-test-pg`. **KẾT THÚC đợt chạy uỷ quyền: P1–P5 xong code + test tự động; CHƯA commit; chờ chủ dự án thử tay.**
+
+## 27/11 · Yêu cầu mới của chủ dự án
+- Rà các repo, tạo nhánh và push (chưa merge `master`; chủ dự án sẽ yêu cầu merge sau). Đã push `feature/branch-monitoring`: core-api (`269c077`, `a6272c8`), web-app (`f37a370`), notification-service (`de4ce6e`). CI chỉ chạy khi push/PR vào `master`.
+- Làm giao diện chi nhánh cho **mobile** (thay ghi chú "để sau" ở `00`), dùng skill ui-ux-pro-max, ưu tiên đẹp và dễ dùng, chia sub-agent song song. Tài liệu mobile: `hs-mobile-app/docs/chi-nhanh/` (nhánh cùng tên).
+- Đang chạy: rà trước merge (Codex, `nhat-ky/PRE-MERGE-REVIEW.md`), build web + notification, kiểm lại toàn bộ test core, nền mobile.
+
+## Việc chủ dự án làm SAU CÙNG (khi mọi việc khác xong)
+- [ ] Thử tay trên web, kể cả luồng cũ
+- [ ] Xem lại các quyết định điều phối chọn thay (cuối `04-cau-hoi.md`, `07`)
+- [ ] Yêu cầu merge `feature/branch-monitoring` vào `master`
+- [ ] Deploy: notification-service trước, core sau
+
+## 27/11 · ĐIỂM DỪNG (hết hạn mức)
+- Bản sửa 4 lỗi core (`nhat-ky/PRE-MERGE-FIX.md`) đã commit lên nhánh. Codex rà lại: **6 lỗi còn mở** ở core, mobile, web, xem `nhat-ky/RECHECK.md`. CHƯA repo nào được merge (notification không nằm trong lượt rà lại).
+- Bước tiếp: đọc `RECHECK.md`; Sonnet sửa từng lỗi (test đỏ trước); Codex rà lại; commit, push nhánh `feature/branch-monitoring`. Không merge khi chưa được yêu cầu.

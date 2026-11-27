@@ -16,6 +16,10 @@ public interface PropertyBranchRepository extends JpaRepository<PropertyBranch, 
     Optional<PropertyBranch> findByIdAndActiveTrue(String id);
     boolean existsByCode(String code);
 
+    @org.springframework.data.jpa.repository.Query("select count(b) > 0 from PropertyBranch b "
+            + "where b.id = :id and b.active = false")
+    boolean isSoftDeleted(@org.springframework.data.repository.query.Param("id") String id);
+
     @org.springframework.data.jpa.repository.Query("select b.id from PropertyBranch b "
             + "where b.ownerId = :ownerId and b.active = true")
     List<String> findActiveIds(@org.springframework.data.repository.query.Param("ownerId") String ownerId);

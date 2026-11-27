@@ -450,6 +450,45 @@ class ParkingReservationServiceTest {
     }
 
     @Test
+    void draftEditOfAHoldInASoftDeletedBranchUsesTheStandaloneListingLimits() {
+        var listing = Listing.builder().id("listing").ownerId("owner").maxMotorbikeCount(2).maxCarCount(0).build();
+        when(listingRepository.findById("listing")).thenReturn(java.util.Optional.of(listing));
+        var rental = RentalRequest.builder().id("rental").listing(listing).moveInDate(amendmentStart).leaseMonths(2).build();
+        var held = ParkingReservation.builder().rentalRequestId("rental").branchId("deleted").listingId("listing")
+                .vehicleType(VehicleType.MOTORBIKE).quantity(1).startDate(amendmentStart).endDateExclusive(amendmentEnd)
+                .status(ParkingReservationStatus.HELD).build();
+        when(parkingReservationRepository.findByRentalRequestId("rental")).thenReturn(List.of(held));
+
+        service.replaceDraftHoldInBranch(rental, 2, 0, "deleted");
+
+        var saved = ArgumentCaptor.forClass(ParkingReservation.class);
+        verify(parkingReservationRepository, times(2)).save(saved.capture());
+        assertEquals(ParkingReservationStatus.RELEASED, held.getStatus());
+        assertNull(saved.getAllValues().getLast().getBranchId());
+        assertEquals(2, saved.getAllValues().getLast().getQuantity());
+        var overLimit = assertThrows(com.hs.common.advice.entity.AppException.class,
+                () -> service.replaceDraftHoldInBranch(rental, 3, 0, "deleted"));
+        assertEquals(com.hs.listing.advice.ListingErrorCode.PARKING_CAPACITY_CHANGED.getCode(), overLimit.getCode());
+    }
+
+    @Test
+    void renewalOfAHoldInASoftDeletedBranchUsesTheStandaloneListingPool() {
+        var listing = Listing.builder().id("listing").ownerId("owner").maxMotorbikeCount(2).build();
+        when(listingRepository.findByIdForUpdate("listing")).thenReturn(java.util.Optional.of(listing));
+        var current = ParkingReservation.builder().contractId("root").rentalRequestId("rental").branchId("deleted")
+                .listingId("listing").vehicleType(VehicleType.MOTORBIKE).quantity(1).startDate(amendmentStart)
+                .endDateExclusive(amendmentEnd).status(ParkingReservationStatus.ACTIVE).build();
+        when(parkingReservationRepository.findByContractId("root")).thenReturn(List.of(current));
+
+        service.holdForRenewal("root", "renewal", amendmentEnd, amendmentEnd.plusMonths(2), Instant.now().plusSeconds(3600));
+
+        var saved = ArgumentCaptor.forClass(ParkingReservation.class);
+        verify(parkingReservationRepository).save(saved.capture());
+        assertNull(saved.getValue().getBranchId());
+        assertEquals("renewal", saved.getValue().getContractId());
+    }
+
+    @Test
     void zeroVehicleRentalIgnoresThePoolOfAReplacedAmendmentSegment() {
         var start = LocalDate.of(2026, 10, 1);
         var standalone = ParkingReservation.builder().contractId("root").startDate(start)

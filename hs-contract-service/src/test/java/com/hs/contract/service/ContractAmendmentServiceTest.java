@@ -586,6 +586,134 @@ class ContractAmendmentServiceTest {
                 });
     }
 
+    /** Real parking service over an in-memory store. Only branches stubbed as active can be locked. */
+    List<ParkingReservation> store = new ArrayList<>();
+    PropertyBranchRepository branchRepository = mock(PropertyBranchRepository.class);
+    ParkingReservationService realParking() {
+        var bookings = mock(ParkingReservationRepository.class);
+        var listings = mock(ListingRepository.class);
+        var listing = Listing.builder().id("listing").ownerId("owner").build();
+        when(listings.findById("listing")).thenReturn(Optional.of(listing));
+        when(listings.findByIdForUpdate("listing")).thenReturn(Optional.of(listing));
+        when(bookings.findByContractId(anyString())).thenAnswer(i -> store.stream()
+                .filter(r -> Objects.equals(r.getContractId(), i.getArgument(0))).toList());
+        when(bookings.save(any())).thenAnswer(i -> { ParkingReservation r = i.getArgument(0); if (!store.contains(r)) store.add(r); return r; });
+        var real = new ParkingReservationService(bookings, branchRepository, listings);
+        ReflectionTestUtils.setField(real, "entityManager", mock(jakarta.persistence.EntityManager.class));
+        return real;
+    }
+    void activeBranch(String id) {
+        when(branchRepository.findByIdForUpdate(id)).thenReturn(Optional.of(
+                PropertyBranch.builder().id(id).ownerId("owner").motorbikeParkingCapacity(5).build()));
+    }
+    ParkingReservation occupied(String branchId) {
+        var tenant = builder.map(original.getTenantSnapshot());
+        tenant.put("motorbikeCount", 1);
+        original.setTenantSnapshot(builder.write(tenant));
+        original.setLeaseSnapshot("{\"startDateText\":\"14/10/2026\",\"endDateText\":\"13/01/2027\",\"durationMonths\":3}");
+        var row = ParkingReservation.builder().contractId("root").rentalRequestId("rental").listingId("listing")
+                .branchId(branchId).vehicleType(VehicleType.MOTORBIKE).quantity(1).startDate(LocalDate.of(2026, 10, 14))
+                .endDateExclusive(LocalDate.of(2027, 1, 14)).status(ParkingReservationStatus.ACTIVE).build();
+        store.add(row);
+        return row;
+    }
+    /** An approved listing that has left every branch, changing neither vehicles nor term. */
+    void listingLeftTheBranch() { listingLeftTheBranch("B"); }
+    void listingLeftTheBranch(String amenities) {
+        var terms = new LinkedHashMap<String,Object>();
+        terms.put("listingBranchId", null);
+        when(listingSync.preview(any(), any(), any())).thenReturn(new ContractListingSync.Preview("left", "original", terms, null, null,
+                List.of(new AmendmentComparison("amenities", "Tiện ích", "A", amenities)), List.of()));
+        when(listingSync.mergeListingPolicies(anyMap(), anyMap())).thenAnswer(i -> i.getArgument(0));
+    }
+    AmendmentPayload syncPayload() { return payload(Map.of("freeForm", true, "listingSourceVersion", "left")); }
+    void assertHoldUntouched(ParkingReservation row) {
+        assertEquals(1, store.size(), () -> "rows: " + store.stream().map(r -> r.getBranchId() + " " + r.getStatus()).toList());
+        assertEquals("old-branch", row.getBranchId());
+        assertEquals(ParkingReservationStatus.ACTIVE, row.getStatus());
+        assertEquals(LocalDate.of(2027, 1, 14), row.getEndDateExclusive());
+    }
+    List<ParkingReservation> activeExcept(ParkingReservation row) {
+        return store.stream().filter(r -> r.getStatus() == ParkingReservationStatus.ACTIVE && r != row).toList();
+    }
+    @Test void listingLeavingTheBranchWithoutVehicleOrTermChangeKeepsTheHoldInTheOldBranch() {
+        var row = occupied("old-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        activeBranch("old-branch");
+        listingLeftTheBranch();
+        service.propose("root", "owner", syncPayload());
+        var child = approve(proposals.getFirst()); assertHoldUntouched(row);
+        signaturesReady(child); service.signed(child);
+        assertHoldUntouched(row);
+        assertNull(child.getBranchId());
+    }
+    @Test void amendmentApprovedBeforeDeployAndSignedAfterKeepsTheHoldInTheOldBranch() {
+        var row = occupied("old-branch");
+        listingLeftTheBranch();
+        service.propose("root", "owner", syncPayload());
+        var child = approve(proposals.getFirst());
+        // master stored neither a target snapshot nor an appendix hold for this appendix.
+        proposals.getFirst().setParkingTargetSnapshot(null);
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        activeBranch("old-branch");
+        signaturesReady(child); service.signed(child);
+        assertHoldUntouched(row);
+    }
+
+    @Test void replacingAScheduledListingSyncStillKeepsTheHoldInTheOldBranch() {
+        occupied("old-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        activeBranch("old-branch");
+        listingLeftTheBranch();
+        service.propose("root", "owner", syncPayload());
+        var first = proposals.getFirst(); var oldChild = approve(first); signaturesReady(oldChild); service.signed(oldChild);
+        listingLeftTheBranch("C");
+        var next = syncPayload();
+        service.propose("root", "owner", new AmendmentPayload(next.requestId(), "original", first.getId(), next.effectiveOn(), next.reason(),
+                next.changes(), List.of()));
+        var child = approve(proposals.getFirst()); signaturesReady(child); service.signed(child);
+        var active = store.stream().filter(r -> r.getStatus() == ParkingReservationStatus.ACTIVE).toList();
+        assertTrue(active.stream().allMatch(r -> "old-branch".equals(r.getBranchId())),
+                () -> "branches: " + active.stream().map(ParkingReservation::getBranchId).toList());
+        assertEquals(LocalDate.of(2027, 1, 14), active.stream().map(ParkingReservation::getEndDateExclusive).max(Comparator.naturalOrder()).orElseThrow());
+    }
+    @Test void syncStillMovesTheHoldWhenTheContractBranchDiffersFromTheSyncedTarget() {
+        root.setBranchId("old-branch");
+        var row = occupied("old-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        listingLeftTheBranch();
+        service.propose("root", "owner", syncPayload());
+        var child = approve(proposals.getFirst()); signaturesReady(child); service.signed(child);
+        assertEquals(LocalDate.of(2026, 11, 14), row.getEndDateExclusive());
+        assertEquals(1, activeExcept(row).size()); assertNull(activeExcept(row).getFirst().getBranchId());
+    }
+    @Test void softDeletedReservationBranchIsTreatedAsStandaloneThroughSubmitApprovalAndSigning() {
+        var row = occupied("deleted-branch");
+        when(branchRepository.isSoftDeleted("deleted-branch")).thenReturn(true);
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        var changes = Map.<String,Object>of("freeForm", true, "motorbikeCount", 2);
+        service.preview("root", "owner", payload(changes));
+        service.propose("root", "owner", payload(changes));
+        var child = approve(proposals.getFirst());
+        assertNull(child.getBranchId());
+        signaturesReady(child); service.signed(child);
+        assertEquals(LocalDate.of(2026, 11, 14), row.getEndDateExclusive());
+        assertEquals(1, activeExcept(row).size()); assertNull(activeExcept(row).getFirst().getBranchId());
+        assertEquals(2, activeExcept(row).getFirst().getQuantity());
+    }
+    @Test void branchSoftDeletedBetweenApprovalAndSigningDoesNotBlockSigning() {
+        root.setBranchId("old-branch");
+        var row = occupied("old-branch");
+        ReflectionTestUtils.setField(service, "parking", realParking());
+        activeBranch("old-branch");
+        service.propose("root", "owner", payload(Map.of("freeForm", true, "motorbikeCount", 2)));
+        var child = approve(proposals.getFirst());
+        when(branchRepository.findByIdForUpdate("old-branch")).thenReturn(Optional.empty());
+        signaturesReady(child);
+        assertDoesNotThrow(() -> { service.validateSigning(child); service.signed(child); });
+        assertEquals(1, activeExcept(row).size()); assertNull(activeExcept(row).getFirst().getBranchId());
+    }
+
     @Test void branchLinkedAmendmentAboveListingLimitsChecksActualPoolThroughoutConsentAndSigning() {
         root.setBranchId("branch");
         var bookings=mock(com.hs.listing.repository.ParkingReservationRepository.class);

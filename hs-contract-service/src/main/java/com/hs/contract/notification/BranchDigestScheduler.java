@@ -30,7 +30,7 @@ public class BranchDigestScheduler {
     private final BranchAttentionService attention;
     private final BranchDigestOutboxWriter writer;
 
-    // shortcut: occupies one of the 4 shared scheduler threads for the whole run; give it its own executor
+    // shortcut: occupies one of the shared scheduler threads for the whole run; give it its own executor
     // if a run ever takes minutes.
     @Scheduled(cron = "0 0 8 * * *", zone = "Asia/Ho_Chi_Minh")
     public void sendDaily() {

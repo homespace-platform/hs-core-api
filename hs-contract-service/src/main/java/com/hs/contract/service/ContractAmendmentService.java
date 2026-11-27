@@ -273,9 +273,9 @@ public class ContractAmendmentService {
                 a.setAgreementContractId(agreement.getId()); a.setTermsRevisionId(revision.getId()); a.setStatus("APPROVED");
                 a.setSignBy(min(a.getSignBy(), time.now().plus(Duration.ofHours(signingHours))));
                 var changes = businessChanges(builder.map(a.getChangesSnapshot()),replacing,readListingSource(a));
-                if (parkingChanged(c,t,changes,a.getEffectiveOn())) {
+                if (parkingChanged(c,t,changes)) {
                     Map<String,Object> tenant = builder.object(t.get("tenant"));
-                    parking.holdForAmendmentInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),targetBranch(t),
+                    parking.holdForAmendmentInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),parkingPool(c,t,changes,a.getEffectiveOn()),
                             a.getEffectiveOn(), proposedEnd(c,t,changes), count(tenant.get("motorbikeCount"), 0, 100), count(tenant.get("carCount"), 0, 100), a.getSignBy());
                 }
             }
@@ -320,9 +320,9 @@ public class ContractAmendmentService {
         var newTerms=builder.snapshot(terms.require(a.getTermsRevisionId()));
         newTerms.put("listingBranchId",agreement.getBranchId()); // frozen at approval; no lazy revision.contract read
         validateBusinessTerms(c,terms.require(a.getBaseRevisionId()),newTerms,changes,a.getEffectiveOn(),agreement.getId());
-        if (parkingChanged(c,newTerms,changes,a.getEffectiveOn())) {
+        if (parkingChanged(c,newTerms,changes)) {
             var tenant = builder.map(terms.require(a.getTermsRevisionId()).getTenantSnapshot());
-            parking.activateAmendmentHoldInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),targetBranch(newTerms), a.getEffectiveOn(), proposedEnd(c,newTerms,changes),
+            parking.activateAmendmentHoldInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),parkingPool(c,newTerms,changes,a.getEffectiveOn()), a.getEffectiveOn(), proposedEnd(c,newTerms,changes),
                     count(tenant.get("motorbikeCount"), 0, 100), count(tenant.get("carCount"), 0, 100));
         }
         if(leaseChanged(changes)) {
@@ -548,9 +548,9 @@ public class ContractAmendmentService {
         }
     }
     private void validateParking(Contract c,Map<String,Object> next,Map<String,Object> changes,LocalDate effectiveOn,String agreementId) {
-        if (!parkingChanged(c,next,changes,effectiveOn)) return;
+        if (!parkingChanged(c,next,changes)) return;
         var tenant=builder.object(next.get("tenant"));
-        parking.validateAmendmentCapacityInBranch(c.getId(),agreementId,c.getListingId(),targetBranch(next),effectiveOn,proposedEnd(c,next,changes),
+        parking.validateAmendmentCapacityInBranch(c.getId(),agreementId,c.getListingId(),parkingPool(c,next,changes,effectiveOn),effectiveOn,proposedEnd(c,next,changes),
                 count(tenant.get("motorbikeCount"),0,100),count(tenant.get("carCount"),0,100));
     }
     /** An attached approved listing decides the pool (null = leaves the branch); otherwise keep the occupied one. */
@@ -571,10 +571,14 @@ public class ContractAmendmentService {
     private boolean touchesParking(Map<String,Object> changes) {
         return vehiclesChanged(changes)||leaseChanged(changes)||Boolean.TRUE.equals(changes.get("refreshParkingPool"));
     }
-    private boolean parkingChanged(Contract c,Map<String,Object> next,Map<String,Object> changes,LocalDate effectiveOn) {
-        // A synced destination is compared with the occupied pool; the root's own branch field may still be null.
-        return touchesParking(changes) || !Objects.equals(
-                changes.containsKey("listingSourceVersion")?currentPool(c,effectiveOn):c.getBranchId(),targetBranch(next));
+    private boolean parkingChanged(Contract c,Map<String,Object> next,Map<String,Object> changes) {
+        // The contract's own branch, not the occupied pool: a listing merely leaving its branch keeps the hold (Q15).
+        return touchesParking(changes) || !Objects.equals(c.getBranchId(),targetBranch(next));
+    }
+    /** Q15 also covers rebuilding a replaced appendix: without a vehicle or term change, "left the branch" stays put. */
+    private String parkingPool(Contract c,Map<String,Object> next,Map<String,Object> changes,LocalDate effectiveOn) {
+        boolean stays=!vehiclesChanged(changes) && !leaseChanged(changes) && c.getBranchId()==null && targetBranch(next)==null;
+        return stays?currentPool(c,effectiveOn):targetBranch(next);
     }
     private void createDepositDelta(Contract c,ContractAmendment a) {
         var changes=businessChanges(builder.map(a.getChangesSnapshot()),null,readListingSource(a));
