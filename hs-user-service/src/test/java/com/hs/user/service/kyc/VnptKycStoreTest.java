@@ -97,8 +97,8 @@ class VnptKycStoreTest {
         assertThrows(AppException.class,()->store.prepare("alice","attempt",call,List.of("face-hash","face-hash","scan-hash")));
         when(steps.existsByProviderAndAttemptIdAndUploadHashAndStateAndKind(KycProvider.VNPT,"attempt","scan-hash","DONE","scan3d")).thenReturn(true);
         store.prepare("alice","attempt",call,List.of("face-hash","face-hash","scan-hash"));
-        verify(steps,atLeastOnce()).existsByAttemptIdAndUploadHashAndStateAndKind("attempt","face-hash","DONE","upload");
-        verify(steps,atLeastOnce()).existsByAttemptIdAndUploadHashAndStateAndKind("attempt","scan-hash","DONE","scan3d");
+        verify(steps,atLeastOnce()).existsByProviderAndAttemptIdAndUploadHashAndStateAndKind(KycProvider.VNPT,"attempt","face-hash","DONE","upload");
+        verify(steps,atLeastOnce()).existsByProviderAndAttemptIdAndUploadHashAndStateAndKind(KycProvider.VNPT,"attempt","scan-hash","DONE","scan3d");
         verify(steps).saveAndFlush(call);
     }
     @Test void coherentEvidenceClaimsLeadingZeroIdOnce() throws Exception {

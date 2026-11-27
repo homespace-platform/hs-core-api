@@ -45,7 +45,7 @@ public class KycServiceImpl implements KycService {
     public KycVerifiedDetailsResponse getVerifiedDetails(String userId) {
         requireUser(userId);
         return kycVerificationRepository.findFirstByUserIdAndStatusOrderByVerifiedAtDesc(userId, KycStatus.VERIFIED)
-                .filter(v -> v.getProvider() == KycProvider.VNPT)
+                .filter(v -> v.getProvider() == KycProvider.VNPT || v.getProvider() == KycProvider.ADMIN)
                 .flatMap(v -> details.findById(userId))
                 .map(UserKycDetails::toResponse).orElse(null);
     }

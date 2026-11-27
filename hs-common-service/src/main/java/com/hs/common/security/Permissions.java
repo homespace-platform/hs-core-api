@@ -25,6 +25,7 @@ public final class Permissions {
     public static final String PERMISSION_VIEW = "PERMISSION_VIEW";
     public static final String PERMISSION_UPDATE = "PERMISSION_UPDATE";
     public static final String KYC_VIEW = "KYC_VIEW";
+    public static final String KYC_MANAGE = "KYC_MANAGE";
     public static final String LISTING_VIEW = "LISTING_VIEW";
     public static final String LISTING_CREATE = "LISTING_CREATE";
     public static final String LISTING_UPDATE = "LISTING_UPDATE";
@@ -77,6 +78,7 @@ public final class Permissions {
         m.put(PERMISSION_VIEW, "Xem quyền hạn");
         m.put(PERMISSION_UPDATE, "Cập nhật mô tả quyền hạn");
         m.put(KYC_VIEW, "Xem trạng thái KYC của người dùng");
+        m.put(KYC_MANAGE, "Nhập thủ công thông tin xác thực KYC cho người dùng");
         m.put(LISTING_VIEW, "Xem tin đăng (quản trị)");
         m.put(LISTING_CREATE, "Tạo tin đăng (quản trị)");
         m.put(LISTING_UPDATE, "Sửa tin đăng (quản trị)");

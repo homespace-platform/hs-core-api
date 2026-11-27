@@ -33,7 +33,7 @@ python scripts/setup-vnpt-sdk.py D:/approved-artifacts/web-sdk-version-3.2.1.0.z
 Script kiểm checksum ZIP và main bundle; chỉ lấy các asset nằm trong allowlist, không lấy `index.html` chứa credential mẫu. Asset được đặt trong `public/vendor/vnpt/` đã ignore Git. Môi trường build/deploy cần cấp artifact được phép phân phối và chạy bước này trước khi đóng gói. Khi đổi version phải review contract rồi cập nhật checksum/asset list.
 
 3. Restart Core API và Gateway. Web nhận code mới qua dev server; restart web nếu không có hot reload.
-4. Schema: `kyc_verifications` giữ trạng thái và thời điểm xác minh; `user_kyc_details` lưu thông tin CCCD và kết quả kiểm tra VNPT theo `user_id`; `vnpt_kyc_steps` lưu bằng chứng tạm thời. Môi trường local cần tạo lại schema trước khi chạy bản này vì không có migration/backfill cho cột `verified_details` cũ.
+4. Schema: `kyc_verifications` giữ trạng thái và thời điểm xác minh; `user_kyc_details` lưu thông tin CCCD và kết quả kiểm tra VNPT theo `user_id`; `kyc_provider_steps` lưu bằng chứng tạm thời. Môi trường local cần tạo lại schema trước khi chạy bản này vì không có migration/backfill cho cột `verified_details` cũ.
 5. Đăng nhập tài khoản chưa VERIFIED, mở Tài khoản và bảo mật → chọn VNPT eKYC → Xác minh ngay.
 
 Khi chạy `next dev`, màn hình VNPT có thêm lựa chọn tải ảnh giấy tờ lên để thử nghiệm (`PHOTO_AND_UPLOAD` theo bundle SDK 3.2.1.0; tài liệu gọi lựa chọn này là `BOTH`). Bản build production chỉ hiện chụp trực tiếp. Ảnh JPEG/PNG tối đa 1 MB theo giới hạn backend hiện tại.

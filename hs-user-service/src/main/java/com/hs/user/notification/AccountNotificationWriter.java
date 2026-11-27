@@ -66,6 +66,7 @@ public class AccountNotificationWriter {
     @Transactional(propagation = Propagation.MANDATORY)
     public void enqueueKyc(com.hs.user.model.KycVerification attempt, KycEvent type) {
         if(attempt.getProvider()!=com.hs.user.model.constant.KycProvider.VNPT
+                && !(attempt.getProvider()==com.hs.user.model.constant.KycProvider.ADMIN && type==KycEvent.KYC_VERIFIED)
                 || type==KycEvent.KYC_VERIFIED && attempt.getStatus()!=com.hs.user.model.constant.KycStatus.VERIFIED
                 || type==KycEvent.KYC_REJECTED && attempt.getStatus()!=com.hs.user.model.constant.KycStatus.REJECTED
                 || type==KycEvent.KYC_RETRY_REQUIRED && attempt.getStatus()!=com.hs.user.model.constant.KycStatus.PENDING
