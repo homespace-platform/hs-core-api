@@ -184,7 +184,7 @@ class MembershipNotificationPostgresTest {
         var go=new CountDownLatch(1);
         try(var pool=Executors.newFixedThreadPool(4)){
             var calls=new java.util.ArrayList<Future<MembershipCheckoutService.Checkout>>();
-            for(int i=0;i<4;i++)calls.add(pool.submit(()->{assertTrue(go.await(10,TimeUnit.SECONDS));return service.addonCheckout(order.getOwnerId(),2,MembershipOrder.Provider.SEPAY);}));
+            for(int i=0;i<4;i++)calls.add(pool.submit(()->{assertTrue(go.await(10,TimeUnit.SECONDS));return service.addonCheckout(order.getOwnerId(),2,MembershipOrder.Provider.SEPAY, false);}));
             go.countDown();var ids=new java.util.HashSet<String>();for(var c:calls)ids.add(c.get(20,TimeUnit.SECONDS).orderId());
             assertEquals(1,ids.size());
         }

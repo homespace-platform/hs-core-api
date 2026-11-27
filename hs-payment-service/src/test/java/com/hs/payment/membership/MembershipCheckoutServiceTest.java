@@ -34,12 +34,52 @@ class MembershipCheckoutServiceTest {
     void ethCheckoutNeedsNoSepayConfigurationAndKeepsOrderPending() {
         when(memberships.quote("owner", MembershipTier.STARTER)).thenReturn(
                 new MembershipService.Quote("STARTER", 49_000, "NEW", 10, null, null, false));
-        var checkout = service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.ETH);
+        var checkout = service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.ETH, false);
         assertEquals("ETH", checkout.provider());
         assertEquals(49_000, checkout.amountVnd());
         assertTrue(checkout.formFields().isEmpty());
         verify(orders).save(argThat(o -> o.getProvider() == MembershipOrder.Provider.ETH
                 && o.getStatus() == MembershipOrder.Status.PENDING));
+    }
+
+    private MembershipOrder paidAgo(MembershipTier tier, Integer quantity, long minutes) {
+        MembershipOrder o = new MembershipOrder();
+        o.setTier(tier);
+        o.setKind(quantity == null ? MembershipKind.PLAN : MembershipKind.ADDON);
+        o.setQuantity(quantity);
+        o.setStatus(MembershipOrder.Status.PAID);
+        o.setPaidAt(Instant.now().minusSeconds(minutes * 60));
+        return o;
+    }
+
+    @Test
+    void justPaidSameItemNeedsExplicitConfirmation() {
+        when(memberships.quote("owner", MembershipTier.STARTER)).thenReturn(
+                new MembershipService.Quote("STARTER", 49_000, "NEW", 10, null, null, false));
+        when(orders.findByOwnerIdAndStatusAndPaidAtAfter(eq("owner"), eq(MembershipOrder.Status.PAID), any()))
+                .thenReturn(java.util.List.of(paidAgo(MembershipTier.STARTER, null, 2)));
+        AppException e = assertThrows(AppException.class,
+                () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.ETH, false));
+        assertEquals(ListingErrorCode.MEMBERSHIP_RECENTLY_PAID.getCode(), e.getCode());
+        assertEquals(409, e.getStatusCode().value());
+        assertTrue(e.getErrorMessage().startsWith("Bạn vừa thanh toán gói này lúc "));
+        verify(orders, never()).save(any());
+        service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.ETH, true);
+        verify(orders).save(any());
+    }
+
+    @Test
+    void repeatGuardIgnoresDifferentItemAndOldPayments() {
+        // The 10 minute cutoff is applied by the repository query, so an old payment is simply not returned.
+        when(memberships.quote("owner", MembershipTier.STARTER)).thenReturn(
+                new MembershipService.Quote("STARTER", 49_000, "NEW", 10, null, null, false));
+        when(memberships.addonAmountVnd(3)).thenReturn(24_000);
+        when(orders.findByOwnerIdAndStatusAndPaidAtAfter(eq("owner"), eq(MembershipOrder.Status.PAID), any()))
+                .thenReturn(java.util.List.of(paidAgo(MembershipTier.PRO, null, 1), paidAgo(null, 2, 1)));
+        service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.ETH, false);
+        service.addonCheckout("owner", 3, MembershipOrder.Provider.ETH, false);
+        verify(orders, times(2)).save(any());
+        assertThrows(AppException.class, () -> service.addonCheckout("owner", 2, MembershipOrder.Provider.ETH, false));
     }
 
     @Test
@@ -72,8 +112,8 @@ class MembershipCheckoutServiceTest {
                 new MembershipService.Quote("STARTER", 49_000, "NEW", 10, null, null, false));
 
         assertThrows(AppException.class, () -> service.checkout("owner", MembershipTier.STARTER,
-                MembershipOrder.Provider.VNPAY));
-        var checkout = service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY);
+                MembershipOrder.Provider.VNPAY, false));
+        var checkout = service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY, false);
         assertEquals("SEPAY", checkout.provider());
         assertEquals(49_000, checkout.amountVnd());
         assertEquals("https://pay-sandbox.sepay.vn/v1/checkout/init", checkout.paymentUrl());
@@ -94,12 +134,12 @@ class MembershipCheckoutServiceTest {
 
         ReflectionTestUtils.setField(service, "sepayMerchantId", "");
         AppException error = assertThrows(AppException.class,
-                () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY));
+                () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY, false));
         assertEquals(ListingErrorCode.MEMBERSHIP_PROVIDER_NOT_CONFIGURED.getCode(), error.getCode());
         ReflectionTestUtils.setField(service, "sepayMerchantId", "MERCHANT_TEST");
         ReflectionTestUtils.setField(service, "sepayIpnSecret", "");
         assertEquals(error.getCode(), assertThrows(AppException.class,
-                () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY)).getCode());
+                () -> service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY, false)).getCode());
 
         var withoutSigningSecret = new MembershipCheckoutService(orders, memberships, new SepaySigner(""), ethQuotes, ethChain,
                 applier);
@@ -108,7 +148,7 @@ class MembershipCheckoutServiceTest {
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayReturnUrl", "https://example.test/dashboard/membership/return");
         ReflectionTestUtils.setField(withoutSigningSecret, "sepayIpnSecret", "ipn-secret");
         assertEquals(error.getCode(), assertThrows(AppException.class,
-                () -> withoutSigningSecret.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY)).getCode());
+                () -> withoutSigningSecret.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY, false)).getCode());
         verifyNoInteractions(orders, memberships);
     }
 
@@ -220,13 +260,13 @@ class MembershipCheckoutServiceTest {
         ReflectionTestUtils.setField(service, "sepayIpnSecret", "test-ipn-secret");
         when(memberships.addonAmountVnd(3)).thenReturn(24_000);
         assertEquals(ListingErrorCode.MEMBERSHIP_PROVIDER_UNAVAILABLE.getCode(), assertThrows(AppException.class,
-                () -> service.addonCheckout("owner", 3, MembershipOrder.Provider.VNPAY)).getCode());
+                () -> service.addonCheckout("owner", 3, MembershipOrder.Provider.VNPAY, false)).getCode());
         when(memberships.addonAmountVnd(11))
                 .thenThrow(new AppException(ListingErrorCode.MEMBERSHIP_ADDON_QUANTITY_INVALID));
-        assertThrows(AppException.class, () -> service.addonCheckout("owner", 11, MembershipOrder.Provider.SEPAY));
+        assertThrows(AppException.class, () -> service.addonCheckout("owner", 11, MembershipOrder.Provider.SEPAY, false));
         verify(orders, never()).save(any());
 
-        var checkout = service.addonCheckout("owner", 3, MembershipOrder.Provider.SEPAY);
+        var checkout = service.addonCheckout("owner", 3, MembershipOrder.Provider.SEPAY, false);
         assertEquals(24_000, checkout.amountVnd());
         assertEquals("SEPAY", checkout.provider());
         assertEquals("24000", checkout.formFields().get("order_amount"));
@@ -240,7 +280,7 @@ class MembershipCheckoutServiceTest {
         assertEquals(3, view.quantity());
         assertNull(view.tier());
         verify(memberships).lockOwner("owner");
-        var ethCheckout = service.addonCheckout("owner", 3, MembershipOrder.Provider.ETH);
+        var ethCheckout = service.addonCheckout("owner", 3, MembershipOrder.Provider.ETH, false);
         assertEquals("ETH", ethCheckout.provider());
         assertEquals(24_000, ethCheckout.amountVnd());
         assertTrue(ethCheckout.formFields().isEmpty());
@@ -248,14 +288,14 @@ class MembershipCheckoutServiceTest {
         // Spam: the same item and provider returns the existing pending order; no new row.
         when(orders.findByOwnerIdAndStatus("owner", MembershipOrder.Status.PENDING))
                 .thenReturn(java.util.List.of(saved.getValue()));
-        var again = service.addonCheckout("owner", 3, MembershipOrder.Provider.SEPAY);
+        var again = service.addonCheckout("owner", 3, MembershipOrder.Provider.SEPAY, false);
         assertEquals(saved.getValue().getId(), again.orderId());
         verify(orders, times(2)).save(any()); // only the two orders created above
 
         // A different item cancels the old pending order and creates a new one.
         when(memberships.quote("owner", MembershipTier.STARTER)).thenReturn(
                 new MembershipService.Quote("STARTER", 49_000, "NEW", 10, null, null, false));
-        var plan = service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY);
+        var plan = service.checkout("owner", MembershipTier.STARTER, MembershipOrder.Provider.SEPAY, false);
         assertNotEquals(saved.getValue().getId(), plan.orderId());
         assertEquals(MembershipOrder.Status.CANCELLED, saved.getValue().getStatus());
     }

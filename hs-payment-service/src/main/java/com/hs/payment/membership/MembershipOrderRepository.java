@@ -15,4 +15,5 @@ public interface MembershipOrderRepository extends JpaRepository<MembershipOrder
     org.springframework.data.domain.Slice<MembershipOrder> findByStatusOrderById(MembershipOrder.Status status,
             org.springframework.data.domain.Pageable page);
     List<MembershipOrder> findByOwnerIdAndStatus(String ownerId, MembershipOrder.Status status);
+    List<MembershipOrder> findByOwnerIdAndStatusAndPaidAtAfter(String ownerId, MembershipOrder.Status status, java.time.Instant after);
 }

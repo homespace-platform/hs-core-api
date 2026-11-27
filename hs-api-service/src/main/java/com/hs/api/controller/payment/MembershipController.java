@@ -35,10 +35,10 @@ public class MembershipController {
     private final MembershipCheckoutService checkout;
     private final EthPaymentService ethPayment;
 
-    public record CheckoutRequest(@NotNull MembershipTier tier, @NotNull MembershipOrder.Provider provider) {}
+    public record CheckoutRequest(@NotNull MembershipTier tier, @NotNull MembershipOrder.Provider provider, boolean confirmRepeat) {}
 
     // BigDecimal + @Digits so 10.9 is rejected instead of being truncated to 10.
-    public record AddonCheckoutRequest(@NotNull @Digits(integer = 3, fraction = 0) BigDecimal quantity, @NotNull MembershipOrder.Provider provider) {}
+    public record AddonCheckoutRequest(@NotNull @Digits(integer = 3, fraction = 0) BigDecimal quantity, @NotNull MembershipOrder.Provider provider, boolean confirmRepeat) {}
 
     @GetMapping("/addons")
     public ApiResponse<MembershipService.AddonOffer> addons() {
@@ -50,7 +50,7 @@ public class MembershipController {
     @PostMapping("/addons/checkout")
     public ApiResponse<MembershipCheckoutService.Checkout> addonCheckout(@RequestBody @Valid AddonCheckoutRequest request) {
         return ApiResponse.<MembershipCheckoutService.Checkout>builder()
-                .result(checkout.addonCheckout(requireUserId(), request.quantity().intValueExact(), request.provider())).build();
+                .result(checkout.addonCheckout(requireUserId(), request.quantity().intValueExact(), request.provider(), request.confirmRepeat())).build();
     }
 
     @GetMapping("/plans")
@@ -73,7 +73,7 @@ public class MembershipController {
     @PostMapping("/checkout")
     public ApiResponse<MembershipCheckoutService.Checkout> checkout(@RequestBody @Valid CheckoutRequest request) {
         return ApiResponse.<MembershipCheckoutService.Checkout>builder()
-                .result(checkout.checkout(requireUserId(), request.tier(), request.provider())).build();
+                .result(checkout.checkout(requireUserId(), request.tier(), request.provider(), request.confirmRepeat())).build();
     }
 
     @GetMapping("/orders/{id}")

@@ -56,7 +56,8 @@ public class MembershipCheckoutService {
     }
 
     @Transactional
-    public Checkout checkout(String ownerId, MembershipTier tier, MembershipOrder.Provider provider) {
+    public Checkout checkout(String ownerId, MembershipTier tier, MembershipOrder.Provider provider,
+                             boolean confirmRepeat) {
         requireProvider(provider);
         MembershipService.Quote quote = memberships.quote(ownerId, tier); // Locks owner for concurrent orders.
         MembershipOrder order = new MembershipOrder();
@@ -65,12 +66,13 @@ public class MembershipCheckoutService {
         order.setUpgrade(quote.upgrade());
         // The ETH quote expiry is capped by this value, so it is stored on the gateway (real) clock.
         order.setUpgradeDeadline(quote.upgrade() ? memberships.realTimeOf(quote.upgradeDeadline()) : null);
-        return place(order, ownerId, provider, "HomeSpace membership " + tier.name());
+        return place(order, ownerId, provider, "HomeSpace membership " + tier.name(), confirmRepeat);
     }
 
     /** Same providers and order rules as plans. The amount is computed here from the validated quantity. */
     @Transactional
-    public Checkout addonCheckout(String ownerId, int quantity, MembershipOrder.Provider provider) {
+    public Checkout addonCheckout(String ownerId, int quantity, MembershipOrder.Provider provider,
+                                  boolean confirmRepeat) {
         requireProvider(provider);
         int amountVnd = memberships.addonAmountVnd(quantity);
         memberships.lockOwner(ownerId);
@@ -78,7 +80,7 @@ public class MembershipCheckoutService {
         order.setKind(MembershipKind.ADDON);
         order.setQuantity(quantity);
         order.setAmountVnd(amountVnd);
-        return place(order, ownerId, provider, "HomeSpace extra listing uses x" + quantity);
+        return place(order, ownerId, provider, "HomeSpace extra listing uses x" + quantity, confirmRepeat);
     }
 
     private void requireProvider(MembershipOrder.Provider provider) {
@@ -94,8 +96,9 @@ public class MembershipCheckoutService {
      * existing order (spam, double click, several tabs); a different item cancels the old order first.
      */
     private Checkout place(MembershipOrder order, String ownerId, MembershipOrder.Provider provider,
-                           String description) {
+                           String description, boolean confirmRepeat) {
         Instant now = Instant.now();
+        if (!confirmRepeat) rejectRecentRepeat(order, ownerId, now);
         for (MembershipOrder previous : orders.findByOwnerIdAndStatus(ownerId, MembershipOrder.Status.PENDING)) {
             requireEthQuoteCleared(previous);
             if (previous.getExpiresAt().isAfter(now) && sameItem(previous, order, provider)) return checkoutOf(previous, description);
@@ -111,6 +114,21 @@ public class MembershipCheckoutService {
         order.setExpiresAt(now.plus(15, java.time.temporal.ChronoUnit.MINUTES));
         orders.save(order);
         return checkoutOf(order, description);
+    }
+
+    /** A just-PAID identical item is most likely a retry after a payment the user thought failed, so make them confirm. */
+    private static final java.time.Duration REPEAT_WINDOW = java.time.Duration.ofMinutes(10);
+
+    private void rejectRecentRepeat(MembershipOrder order, String ownerId, Instant now) {
+        for (MembershipOrder paid : orders.findByOwnerIdAndStatusAndPaidAtAfter(ownerId, MembershipOrder.Status.PAID,
+                now.minus(REPEAT_WINDOW))) {
+            if (paid.getKind() == order.getKind() && paid.getTier() == order.getTier()
+                    && java.util.Objects.equals(paid.getQuantity(), order.getQuantity()))
+                throw new AppException(ListingErrorCode.MEMBERSHIP_RECENTLY_PAID,
+                        "Bạn vừa thanh toán gói này lúc " + paid.getPaidAt().atZone(java.time.ZoneId.of("Asia/Ho_Chi_Minh"))
+                                .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+                                + ". Nếu vẫn muốn mua thêm, hãy xác nhận lại.");
+        }
     }
 
     private static boolean sameItem(MembershipOrder a, MembershipOrder b, MembershipOrder.Provider provider) {
