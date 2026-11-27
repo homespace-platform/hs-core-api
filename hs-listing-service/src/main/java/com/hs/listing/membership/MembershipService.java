@@ -26,11 +26,12 @@ import java.util.Optional;
 @Service
 @RequiredArgsConstructor
 public class MembershipService {
-    private static final Duration PERIOD = Duration.ofDays(30);
+    public static final int PERIOD_DAYS = 30;
+    private static final Duration PERIOD = Duration.ofDays(PERIOD_DAYS);
     private static final Duration UPGRADE_WINDOW = Duration.ofHours(24);
     private static final int ADDON_UNIT_PRICE_VND = 8_000;
     private static final int ADDON_MAX_QUANTITY = 10;
-    private static final int ADDON_VALID_DAYS = 90;
+    public static final int ADDON_VALID_DAYS = 90;
 
     private final MembershipPeriodRepository periods;
     private final MembershipEventRepository events;

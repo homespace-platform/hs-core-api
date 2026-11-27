@@ -74,7 +74,7 @@ class MembershipReceiptPostgresTest {
   MembershipOrder order(String id, MembershipOrder.Status status, Instant paidAt) {
     var o = new MembershipOrder();
     o.setId(id);
-    o.setOwnerId("owner-" + id);
+    o.setOwnerId("owner-" + id.substring(0, 8));
     o.setKind(MembershipKind.PLAN);
     o.setTier(MembershipTier.STARTER);
     o.setAmountVnd(49_000);

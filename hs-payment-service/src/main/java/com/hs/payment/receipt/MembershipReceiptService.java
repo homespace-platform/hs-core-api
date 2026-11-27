@@ -65,8 +65,7 @@ public class MembershipReceiptService {
             o.getKind().name(),
             tier,
             quantity,
-            // shortcut: mirrors MembershipService PERIOD / ADDON_VALID_DAYS (private); change both together.
-            addon ? 90 : 30,
+            addon ? com.hs.listing.membership.MembershipService.ADDON_VALID_DAYS : com.hs.listing.membership.MembershipService.PERIOD_DAYS,
             o.getAmountVnd(),
             o.getProvider() == null ? null : o.getProvider().name(),
             mask(o.getTransactionNo()),
