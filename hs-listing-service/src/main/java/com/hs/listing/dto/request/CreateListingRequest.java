@@ -36,7 +36,21 @@ public record CreateListingRequest(
         @NotEmpty List<@Valid ListingMediaRequest> media,
         List<DayOfWeek> viewingDays,
         List<ViewingSlot> viewingSlots,
-        List<@Valid ListingPolicyRequest> policies) {
+        List<@Valid ListingPolicyRequest> policies,
+        /* Creation only: links the new listing to a room of its branch. */
+        @Size(max = 36) String roomId) {
+
+    public CreateListingRequest(String id,String duplicateSourceListingId,String branchId,ListingSubmissionAction submissionAction,
+            String title,String description,ListingCategory category,LocalDate availableFrom,BigDecimal areaM2,
+            Integer maxMotorbikeCount,Integer maxCarCount,ListingPricingRequest pricing,ApartmentDetailRequest apartmentDetail,
+            HouseDetailRequest houseDetail,OfficeDetailRequest officeDetail,CommercialDetailRequest commercialDetail,
+            RoomDetailRequest roomDetail,List<String> amenityCodes,List<String> customAmenities,List<ListingFurnishingRequest> furnishings,
+            List<ListingChargeRequest> charges,ListingAddressSourceRequest addressSource,List<ListingMediaRequest> media,
+            List<DayOfWeek> viewingDays,List<ViewingSlot> viewingSlots,List<ListingPolicyRequest> policies) {
+        this(id,duplicateSourceListingId,branchId,submissionAction,title,description,category,availableFrom,areaM2,
+                maxMotorbikeCount,maxCarCount,pricing,apartmentDetail,houseDetail,officeDetail,commercialDetail,roomDetail,
+                amenityCodes,customAmenities,furnishings,charges,addressSource,media,viewingDays,viewingSlots,policies,null);
+    }
 
     public CreateListingRequest(String id,String duplicateSourceListingId,String branchId,ListingSubmissionAction submissionAction,
             String title,String description,ListingCategory category,LocalDate availableFrom,BigDecimal areaM2,
@@ -53,7 +67,7 @@ public record CreateListingRequest(
     public CreateListingRequest withPolicies(List<ListingPolicyRequest> values) {
         return new CreateListingRequest(id,duplicateSourceListingId,branchId,submissionAction,title,description,category,availableFrom,areaM2,
                 maxMotorbikeCount,maxCarCount,pricing,apartmentDetail,houseDetail,officeDetail,commercialDetail,roomDetail,
-                amenityCodes,customAmenities,furnishings,charges,addressSource,media,viewingDays,viewingSlots,values);
+                amenityCodes,customAmenities,furnishings,charges,addressSource,media,viewingDays,viewingSlots,values,roomId);
     }
 
     public CreateListingRequest(

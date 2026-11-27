@@ -69,7 +69,17 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     RENTAL_REQUEST_ALREADY_PAID(4066, "Rental request has already been paid and cannot be cancelled or rejected normally", HttpStatus.CONFLICT),
     BRANCH_CHARGES_INCOMPLETE(4070, "Biểu phí chi nhánh chưa hoàn chỉnh. Vui lòng cập nhật đầy đủ biểu phí chi nhánh trước khi đăng tin.", HttpStatus.BAD_REQUEST),
     BRANCH_COVER_IMAGE_INVALID(4071, "Ảnh bìa chi nhánh không hợp lệ hoặc chưa sẵn sàng", HttpStatus.BAD_REQUEST),
-    CITY_REQUIRED(4072, "Chọn tỉnh/thành phố trước khi tìm tin. Không hỗ trợ tìm toàn quốc.", HttpStatus.BAD_REQUEST);
+    CITY_REQUIRED(4072, "Chọn tỉnh/thành phố trước khi tìm tin. Không hỗ trợ tìm toàn quốc.", HttpStatus.BAD_REQUEST),
+    BRANCH_LAYOUT_INVALID(4073, "Sơ đồ chi nhánh không hợp lệ", HttpStatus.BAD_REQUEST),
+    BRANCH_LAYOUT_STALE(4074, "Sơ đồ đã được thay đổi ở nơi khác. Vui lòng tải lại rồi áp dụng lại thay đổi.", HttpStatus.CONFLICT),
+    BRANCH_ROOM_IN_USE(4075, "Phòng còn hợp đồng hiệu lực hoặc khách đang giữ chỗ", HttpStatus.CONFLICT),
+    BRANCH_HAS_CONTRACT_LINKS(4076, "Chi nhánh còn hợp đồng đang gắn. Hãy gỡ liên kết hợp đồng trước khi xóa chi nhánh.", HttpStatus.CONFLICT),
+    BRANCH_ROOM_NOT_ASSIGNABLE(4077, "Ô trống không nhận liên kết", HttpStatus.BAD_REQUEST),
+    LISTING_BRANCH_MISMATCH(4078, "Tin đăng không thuộc chi nhánh này. Hãy đổi chi nhánh của tin trước.", HttpStatus.CONFLICT),
+    LISTING_ALREADY_IN_ROOM(4079, "Tin đăng đang gắn phòng khác. Hãy gỡ khỏi phòng đó trước.", HttpStatus.CONFLICT),
+    BRANCH_ROOM_STATUS_CONFLICT(4090, "Trạng thái thuê ngoài/sửa chữa mâu thuẫn với lượt thuê đang có ở phòng này.", HttpStatus.CONFLICT),
+    LISTING_ROOM_INVALID(4091, "Phòng được chọn không hợp lệ hoặc không còn trong sơ đồ chi nhánh. Chỉ được gắn phòng khi tạo tin mới; vui lòng chọn lại phòng.", HttpStatus.BAD_REQUEST),
+    BRANCH_ASSIGNMENT_INVALID(4092, "Yêu cầu liên kết phòng không hợp lệ", HttpStatus.BAD_REQUEST);
 
     private final int code;
     private final String message;

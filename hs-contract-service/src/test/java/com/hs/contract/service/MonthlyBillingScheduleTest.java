@@ -1,14 +1,40 @@
 package com.hs.contract.service;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import java.time.Instant;
 import java.time.LocalDate;
+import com.hs.common.advice.entity.AppException;
 import com.hs.common.time.BillingTime;
+import com.hs.contract.advice.ContractErrorCode;
 import java.math.BigDecimal;
 import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MonthlyBillingScheduleTest {
+    @ParameterizedTest
+    @CsvSource(value = {
+            "2026-11-05,-,2026-11-05T16:59:59Z",
+            "2026-11-06,-,2026-12-05T16:59:59Z",
+            "2026-11-30,0,2026-11-30T16:59:59Z",
+            "2026-11-30,4,2026-12-04T16:59:59Z",
+            "2026-11-30,30,2026-12-30T16:59:59Z"
+    }, nullValues = "-")
+    void signedDueDatesPreserveLegacyFifthDayAndExplicitOffsets(LocalDate end, Integer offset, Instant expected) {
+        var financial = offset == null ? Map.<String, Object>of() : Map.<String, Object>of("paymentDueOffsetDays", offset);
+        assertEquals(expected, MonthlyBillingSchedule.signedDueAt(financial, end));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"-1", "31", "4.0", "invalid"})
+    void invalidSignedOffsetStillReturnsInvoiceTermsError(String offset) {
+        var error = assertThrows(AppException.class, () -> MonthlyBillingSchedule.signedDueAt(
+                Map.of("paymentDueOffsetDays", offset), LocalDate.of(2026, 11, 30)));
+        assertEquals(ContractErrorCode.INVOICE_TERMS_INCOMPLETE.getCode(), error.getCode());
+    }
+
     @Test void autoRolloverStartsAfterTenCompleteLocalOverdueDays() {
         Instant due = MonthlyBillingSchedule.dueAt(LocalDate.of(2026, 11, 12));
         assertEquals(Instant.parse("2026-11-16T16:59:59Z"), due);

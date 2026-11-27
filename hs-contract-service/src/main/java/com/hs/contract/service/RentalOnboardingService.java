@@ -107,15 +107,89 @@ public class RentalOnboardingService {
     }
     private PaymentRequest payment(String id,PaymentType type) { return payments.findByRentalRequestIdAndType(id,type).orElse(null); }
     private boolean confirmed(PaymentRequest p) { return p!=null&&p.getStatus()==PaymentStatus.CONFIRMED; }
-    private boolean unresolved(PaymentRequest p) {
+    private boolean unresolved(PaymentRequest p) { return unresolved(p,time.now()); }
+    private static boolean unresolved(PaymentRequest p,Instant now) {
         return p!=null&&p.getStatus()==PaymentStatus.REJECTED
-            || p!=null&&p.getStatus()==PaymentStatus.TRANSFER_REPORTED&&p.getConfirmationDueAt()!=null&&!time.now().isBefore(p.getConfirmationDueAt());
+            || p!=null&&p.getStatus()==PaymentStatus.TRANSFER_REPORTED&&p.getConfirmationDueAt()!=null&&!now.isBefore(p.getConfirmationDueAt());
     }
     private boolean depositReady(RentalRequest r) {
-        var deposit=payment(r.getId(),PaymentType.RESERVATION_DEPOSIT);
-        if(com.hs.contract.deposit.DepositAgreementService.isExempt(r))return deposit==null||confirmed(deposit);
-        return confirmed(deposit)||confirmed(payment(r.getId(),PaymentType.INITIAL));
+        return depositReady(com.hs.contract.deposit.DepositAgreementService.isExempt(r),
+            payment(r.getId(),PaymentType.RESERVATION_DEPOSIT),()->payment(r.getId(),PaymentType.INITIAL));
     }
+    private boolean depositReady(boolean exempt,PaymentRequest deposit,java.util.function.Supplier<PaymentRequest> initial) {
+        if(exempt)return deposit==null||confirmed(deposit);
+        return confirmed(deposit)||confirmed(initial.get());
+    }
+    /** The window a confirmed first rent opens; a landlord-signed lease carries its own. */
+    private Instant baseSigningDue(PaymentRequest rent,com.hs.contract.model.Contract lease) {
+        if(lease!=null&&lease.getTenantSigningDueAt()!=null)return lease.getTenantSigningDueAt();
+        return rent!=null&&rent.getConfirmedAt()!=null?(rent.getContractDueAt()!=null?rent.getContractDueAt():rent.getConfirmedAt().plus(Duration.ofHours(signingHours))):null;
+    }
+    /** A still-matching, undisputed final signing notice gives the tenant until its response deadline. */
+    private Instant withFinalNotice(RentalRequest r,com.hs.contract.model.Contract contract,Instant signDue) {
+        return contract!=null&&contract.getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING&&r.getDefaultRespondBy()!=null
+                &&"TENANT_SIGNING".equals(r.getDefaultNoticeKind())&&r.getDefaultDisputedAt()==null
+                &&(signDue==null||signDue.isBefore(r.getDefaultRespondBy()))
+                &&defaultFingerprint(r,"TENANT_SIGNING").equals(r.getDefaultNoticeFingerprint())
+                ?r.getDefaultRespondBy():signDue;
+    }
+    private static boolean signingWindowOpen(boolean listingReserved,boolean paid,boolean depositSigned,Instant clock,Instant opens,Instant due) {
+        return listingReserved&&paid&&depositSigned&&!clock.isBefore(opens)&&due!=null&&clock.isBefore(due);
+    }
+    /** Stored facts of one pre-tenancy flow, already loaded by a batch reader. {@code paused}: a cancellation, an approved refund, a pre-tenancy resolution or a completed default. */
+    public record SigningFacts(boolean accepted,boolean paused,boolean listingReserved,LocalDate moveInDate,
+                               java.math.BigDecimal depositAmount,PaymentRequest deposit,PaymentRequest rent,
+                               com.hs.contract.model.Contract depositDocument,com.hs.contract.model.Contract lease) {}
+    /** Read-only twin of the two landlord signing steps of {@link #nextAction}; reads and writes nothing. */
+    public Optional<NextAction> landlordSigningStep(SigningFacts f,Instant now) {
+        boolean exempt=f.depositAmount()!=null&&f.depositAmount().signum()==0;
+        if(!f.accepted()||f.paused()||unresolved(f.deposit(),now)||unresolved(f.rent(),now)
+            ||exempt&&f.deposit()!=null&&!confirmed(f.deposit())||!depositReady(exempt,f.deposit(),f::rent))return Optional.empty();
+        var document=f.depositDocument();
+        if(!exempt&&(document==null||document.getStatus()!=ContractStatus.ACTIVE||document.getSignedAt()==null)) {
+            // Same conditions DepositAgreementService.overview allows signing under.
+            return document!=null&&document.getStatus()!=ContractStatus.TENANT_SIGNATURE_PENDING&&document.getStatus()!=ContractStatus.CLOSED
+                &&f.listingReserved()&&f.depositAmount()!=null&&f.depositAmount().signum()>0
+                ?Optional.of(new NextAction("LANDLORD",NextActionCode.SIGN_DEPOSIT_LANDLORD,null)):Optional.empty();
+        }
+        if(f.lease()==null||f.lease().getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING||f.moveInDate()==null
+            ||!confirmed(f.rent())||f.deposit()!=null&&!confirmed(f.deposit()))return Optional.empty();
+        var due=baseSigningDue(f.rent(),f.lease());
+        return signingWindowOpen(f.listingReserved(),true,true,now,f.moveInDate().atStartOfDay(BillingTime.ZONE).toInstant(),due)
+            ?Optional.of(new NextAction("LANDLORD",NextActionCode.SIGN_LEASE_LANDLORD,due)):Optional.empty();
+    }
+    /** Read-only twin of the DECIDE_CANCELLATION and REVIEW_PAYMENT steps. {@code closing}: completed default, approved refund or resolution. */
+    public static Optional<NextAction> landlordDecisionStep(boolean accepted,boolean closing,boolean cancellationRequested,
+            PaymentRequest deposit,PaymentRequest rent,Instant now) {
+        if(!accepted||closing)return Optional.empty();
+        if(cancellationRequested)return Optional.of(new NextAction("LANDLORD",NextActionCode.DECIDE_CANCELLATION,null));
+        return unresolved(deposit,now)||unresolved(rent,now)
+            ?Optional.of(new NextAction("LANDLORD",NextActionCode.REVIEW_PAYMENT,null)):Optional.empty();
+    }
+    /** The document whose signing window has to be reopened, and the deadline that passed. */
+    public record OverdueSigning(com.hs.contract.model.Contract document,Instant dueAt) {}
+    /** Read-only twin of SIGNING_OVERDUE, only where a stored deadline has passed and the reopen action accepts the file. */
+    public Optional<OverdueSigning> landlordSigningOverdue(SigningFacts f,Instant now) {
+        boolean exempt=f.depositAmount()!=null&&f.depositAmount().signum()==0;
+        if(!f.accepted()||f.paused()||unresolved(f.deposit(),now)||unresolved(f.rent(),now)
+            ||exempt&&f.deposit()!=null&&!confirmed(f.deposit())||!depositReady(exempt,f.deposit(),f::rent))return Optional.empty();
+        var document=f.depositDocument();
+        if(!exempt&&(document==null||document.getStatus()!=ContractStatus.ACTIVE||document.getSignedAt()==null)) {
+            // DepositAgreementService.reopen also needs the listing still reserved.
+            return document!=null&&document.getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING&&f.listingReserved()
+                &&passed(document.getTenantSigningDueAt(),now)
+                ?Optional.of(new OverdueSigning(document,document.getTenantSigningDueAt())):Optional.empty();
+        }
+        if(f.lease()==null||!confirmed(f.rent())||f.deposit()!=null&&!confirmed(f.deposit()))return Optional.empty();
+        var due=baseSigningDue(f.rent(),f.lease());
+        // The rental is only read for a pending lease that would otherwise count as overdue.
+        if(f.lease().getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING&&(due==null||passed(due,now))) {
+            var r=rentals.findById(f.rent().getRentalRequestId()).orElse(null);
+            if(r!=null)due=withFinalNotice(r,f.lease(),due);
+        }
+        return passed(due,now)?Optional.of(new OverdueSigning(f.lease(),due)):Optional.empty();
+    }
+    private static boolean passed(Instant due,Instant now) { return due!=null&&!now.isBefore(due); }
     @Transactional public View refresh(String id,String actor) {
         var r=rental(id,actor); sync(r); return view(r,actor);
     }
@@ -161,21 +235,16 @@ public class RentalOnboardingService {
         var rent=payment(r.getId(),PaymentType.INITIAL);
         var refunds=payments.findByRentalRequestIdAndTypeIn(r.getId(),List.of(PaymentType.INITIAL_PAYMENT_REFUND));
         var opens=r.getMoveInDate().atStartOfDay(BillingTime.ZONE).toInstant();
-        var signDue=rent!=null&&rent.getConfirmedAt()!=null?(rent.getContractDueAt()!=null?rent.getContractDueAt():rent.getConfirmedAt().plus(Duration.ofHours(signingHours))):null;
         var contract=contracts.findByRentalRequestId(r.getId()).orElse(null);
-        if(contract!=null&&contract.getTenantSigningDueAt()!=null)signDue=contract.getTenantSigningDueAt();
-        if(contract!=null&&contract.getStatus()==ContractStatus.TENANT_SIGNATURE_PENDING && r.getDefaultRespondBy()!=null
-                && "TENANT_SIGNING".equals(r.getDefaultNoticeKind()) && r.getDefaultDisputedAt()==null
-                && defaultFingerprint(r,"TENANT_SIGNING").equals(r.getDefaultNoticeFingerprint())
-                && (signDue==null||signDue.isBefore(r.getDefaultRespondBy())))signDue=r.getDefaultRespondBy();
+        var signDue=withFinalNotice(r,contract,baseSigningDue(rent,contract));
         boolean depositExempt=com.hs.contract.deposit.DepositAgreementService.isExempt(r);
         boolean depositSigned=depositExempt || depositAgreements==null || depositAgreements.signedOrExempt(r);
         var depositDocument=depositAgreements==null?null:depositAgreements.find(r.getId()).orElse(null);
         if(!depositSigned||r.getCancellationRefundApprovedAt()!=null)signDue=null;
         boolean paid=confirmed(rent)&&(deposit==null||confirmed(deposit));
         boolean signingOpen=r.getStatus()==RentalRequestStatus.ACCEPTED&&r.getCancellationRequestedAt()==null&&r.getResolutionWorkflowId()==null
-            &&r.getListing().getOperationalStatus()==com.hs.listing.model.constant.ListingStatus.RESERVED
-            &&paid&&depositSigned&&!signingClock.isBefore(opens)&&signDue!=null&&signingClock.isBefore(signDue);
+            &&signingWindowOpen(r.getListing().getOperationalStatus()==com.hs.listing.model.constant.ListingStatus.RESERVED,
+                paid,depositSigned,signingClock,opens,signDue);
         String stage,message;
         if(r.getStatus()==RentalRequestStatus.COMPLETED){stage="COMPLETED";message="Đã ký đủ và bắt đầu hợp đồng.";}
         else if(r.getDefaultCompletedAt()!=null){

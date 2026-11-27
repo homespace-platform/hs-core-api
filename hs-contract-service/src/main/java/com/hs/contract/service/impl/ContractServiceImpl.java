@@ -89,6 +89,7 @@ public class ContractServiceImpl implements ContractService {
     @Autowired private ContractDraftIntegrity draftIntegrity;
     @Autowired private com.hs.contract.service.ContractListingSync listingSync;
     @Autowired private com.hs.contract.service.ContractDraftResidents draftResidents;
+    @Autowired(required=false) private com.hs.contract.service.BranchContractAutoLink branchAutoLink;
     @Autowired(required=false) private com.hs.contract.service.RentalOnboardingService onboarding;
     @Autowired private com.hs.contract.deposit.DepositAgreementService depositAgreements;
     @Autowired private com.hs.contract.notification.AgreementSigningNotificationWriter signingNotices;
@@ -314,6 +315,8 @@ public class ContractServiceImpl implements ContractService {
         contract = contractRepository.save(contract);
         // Only the system-created draft cues the landlord; a landlord who created it manually already knows.
         if (currentUserId == null) signingNotices.reviewReady(contract);
+        // First creation only (the existing-contract return above never relinks); never fails the creation.
+        if (branchAutoLink != null) branchAutoLink.afterCommit(contract.getId());
 
         log.info("Created Contract id={}, contractNumber={}, revision 1", contract.getId(), contractNumber);
         return toContractResponse(contract);
@@ -591,6 +594,7 @@ public class ContractServiceImpl implements ContractService {
             request.setMeters(sourceMeters);
             request.setPolicies(listingSync.mergeListingPolicies(request.getPolicies(), sync.terms()));
             listingSync.applyDraftTerm(contract, sync);
+            request.setListingSourceVersion(sourceVersion); // prepareUpdate drops it; draftResidents needs it
             if (sync.proposedMonths() != null) {
                 var rental = rentalRequestRepository.findById(contract.getRentalRequestId()).orElseThrow();
                 request.setLease(ContractDataBuilder.leaseTerms(rental));

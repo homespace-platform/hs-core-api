@@ -18,6 +18,8 @@ import com.hs.contract.repository.ContractDocumentRepository;
 import com.hs.contract.repository.ContractRepository;
 import com.hs.contract.repository.ContractRevisionRepository;
 import com.hs.contract.repository.ContractTemplateVersionRepository;
+import com.hs.contract.repository.MonthlyInvoiceRepository;
+import com.hs.contract.service.ContractDraftResidents;
 import com.hs.contract.service.converter.DocumentConversionService;
 import com.hs.contract.service.engine.ContractDataBuilder;
 import com.hs.contract.service.engine.ContractFieldCatalog;
@@ -30,13 +32,24 @@ import com.hs.contract.dto.request.CreateContractDraftRequest;
 import com.hs.contract.dto.request.UpdateContractRevisionRequest;
 import com.hs.listing.repository.RentalRequestRepository;
 import com.hs.listing.model.Listing;
+import com.hs.listing.model.ParkingReservation;
+import com.hs.listing.model.PropertyBranch;
 import com.hs.listing.model.RentalRequest;
 import com.hs.listing.model.constant.ListingStatus;
+import com.hs.listing.model.constant.ParkingReservationStatus;
 import com.hs.listing.model.constant.RentalRequestStatus;
+import com.hs.listing.model.constant.VehicleType;
+import com.hs.listing.repository.ListingRepository;
+import com.hs.listing.repository.ParkingReservationRepository;
+import com.hs.listing.repository.PropertyBranchRepository;
 import com.hs.listing.service.ListingStatusService;
+import com.hs.listing.service.ParkingReservationService;
 import com.hs.storage.service.StorageService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -45,9 +58,12 @@ import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Path;
 import jakarta.persistence.criteria.Root;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -420,6 +436,74 @@ class ContractServiceImplTest {
         request.setSpecialTerms("bên cho thuê vẫn có thể thực hiện quyền chấm dứt đã thỏa thuận");
         var withClause = service.updateRevision("contract-1", request);
         assertEquals(true, withClause.getPolicies().get("overdueLandlordTerminationAfterFiveDays"));
+    }
+
+    @ParameterizedTest(name = "reserved branch: {0}")
+    @NullSource
+    @ValueSource(strings = "reserved-branch")
+    void draftEditWithoutListingSyncKeepsExistingParkingPool(String heldBranchId) {
+        var contracts = mock(ContractRepository.class);
+        var revisions = mock(ContractRevisionRepository.class);
+        var rentals = mock(RentalRequestRepository.class);
+        var listings = mock(ListingRepository.class);
+        var branches = mock(PropertyBranchRepository.class);
+        var bookings = mock(ParkingReservationRepository.class);
+        var service = createService(contracts, revisions, mock(ContractDocumentRepository.class),
+                mock(ContractTemplateVersionRepository.class), rentals, mock(ListingStatusService.class));
+        var parking = new ParkingReservationService(bookings, branches, listings);
+        org.springframework.test.util.ReflectionTestUtils.setField(parking, "entityManager", mock(jakarta.persistence.EntityManager.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "draftResidents",
+                new ContractDraftResidents(rentals, mock(MonthlyInvoiceRepository.class), parking, new ObjectMapper()));
+        var contract = Contract.builder().id("contract").listingId("listing").rentalRequestId("rental")
+                .landlordId("owner").tenantId("tenant").status(ContractStatus.DRAFT).currentRevisionId("original").build();
+        var revision = ContractRevision.builder().id("original").contract(contract).build();
+        when(contracts.findById("contract")).thenReturn(Optional.of(contract));
+        when(contracts.findByIdForUpdate("contract")).thenReturn(Optional.of(contract));
+        when(revisions.findById("original")).thenReturn(Optional.of(revision));
+        when(revisions.save(any())).thenAnswer(call -> {
+            ContractRevision saved = call.getArgument(0);
+            saved.setId("revised");
+            return saved;
+        });
+
+        var listing = Listing.builder().id("listing").ownerId("owner").status(ListingStatus.RESERVED)
+                .branchId(heldBranchId == null ? null : "current-branch").maxMotorbikeCount(3).build();
+        var start = LocalDate.of(2027, 1, 14);
+        var deadline = Instant.parse("2027-01-10T00:00:00Z");
+        var rental = RentalRequest.builder().id("rental").listing(listing).status(RentalRequestStatus.ACCEPTED)
+                .moveInDate(start).leaseMonths(3).occupantCount(1).motorbikeCount(1).carCount(0)
+                .depositAmount(BigDecimal.ZERO).listingSnapshot("{\"priceUnit\":\"MONTH\"}").build();
+        var held = ParkingReservation.builder().rentalRequestId("rental").listingId("listing").branchId(heldBranchId)
+                .startDate(start).endDateExclusive(start.plusMonths(3)).vehicleType(VehicleType.MOTORBIKE)
+                .quantity(1).status(ParkingReservationStatus.HELD).holdExpiresAt(deadline).build();
+        when(rentals.findById("rental")).thenReturn(Optional.of(rental));
+        when(rentals.findByIdForUpdate("rental")).thenReturn(Optional.of(rental));
+        when(listings.findById("listing")).thenReturn(Optional.of(listing));
+        List<ParkingReservation> store = new ArrayList<>(List.of(held));
+        when(bookings.findByRentalRequestId("rental")).thenAnswer(call -> List.copyOf(store));
+        when(bookings.save(any())).thenAnswer(call -> {
+            ParkingReservation row = call.getArgument(0);
+            if (!store.contains(row)) store.add(row);
+            return row;
+        });
+        if (heldBranchId != null) {
+            when(branches.findByIdForUpdate(heldBranchId)).thenReturn(Optional.of(PropertyBranch.builder()
+                    .id(heldBranchId).ownerId("owner").motorbikeParkingCapacity(3).build()));
+        }
+        var tenant = Map.<String, Object>of("occupantCount", 2, "motorbikeCount", 2, "carCount", 0);
+        var request = UpdateContractRevisionRequest.builder().baseRevisionId("original")
+                .draftContent(new UpdateContractRevisionRequest.DraftContent(null, tenant, null, null, null))
+                .tenant(tenant).property(Map.of()).financial(Map.of("amountValue", "3000000")).charges(List.of()).build();
+        UserContextHolder.set(new UserContext("owner", "owner@example.com"));
+
+        service.updateRevision("contract", request);
+
+        var remaining = store.stream().filter(r -> r.getStatus() == ParkingReservationStatus.HELD).toList();
+        assertEquals(1, remaining.size());
+        var replacement = remaining.getFirst();
+        assertEquals(2, replacement.getQuantity());
+        assertEquals(deadline, replacement.getHoldExpiresAt());
+        assertEquals(heldBranchId, replacement.getBranchId(), "Draft edit must keep the pool selected at acceptance");
     }
 
     @Test

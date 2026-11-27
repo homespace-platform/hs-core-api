@@ -70,7 +70,7 @@ public class ContractAmendmentService {
         if (!base.getId().equals(p.baseRevisionId())) throw invalid("Điều khoản đã thay đổi. Tải lại để đối chiếu.");
         if (options != null && !Boolean.TRUE.equals(p.changes().get("freeForm"))) options.validate(c,builder.snapshot(base),p.changes());
         var source=listingSource(c,base,p.changes());
-        var result=buildTerms(base,p.changes(),replacing,source);validateBusinessTerms(c,base,result.terms(),businessChanges(p.changes(),replacing,source),p.effectiveOn());return result;
+        var result=buildTerms(base,p.changes(),replacing,source);pinPool(c,result.terms(),source,businessChanges(p.changes(),replacing,source),p.effectiveOn());validateBusinessTerms(c,base,result.terms(),businessChanges(p.changes(),replacing,source),p.effectiveOn());return result;
     }
 
     @Transactional public AmendmentResponse propose(String id, String actor, AmendmentPayload p) {
@@ -113,6 +113,7 @@ public class ContractAmendmentService {
         if (options != null && !Boolean.TRUE.equals(p.changes().get("freeForm"))) options.validate(c,builder.snapshot(base),p.changes());
         var source = listingSource(c, base, p.changes());
         var result = buildTerms(base, p.changes(),replacing,source);
+        pinPool(c,result.terms(),source,businessChanges(p.changes(),replacing,source),p.effectiveOn());
         validateBusinessTerms(c,base,result.terms(),businessChanges(p.changes(),replacing,source),p.effectiveOn());
         String reason = text(p.reason(), 10, 2000);
         List<String> evidence = validateEvidence(c, actor, p.evidenceIds());
@@ -124,6 +125,7 @@ public class ContractAmendmentService {
                 .proposerId(actor).recipientId(other(c, actor)).status("REQUESTED")
                 .effectiveOn(p.effectiveOn()).immediateEffect(false).reason(reason).changesSnapshot(builder.write(p.changes()))
                 .listingSyncSnapshot(source == null ? null : builder.write(source))
+                .parkingTargetSnapshot(builder.write(Collections.singletonMap("branchId",targetBranch(result.terms()))))
                 .comparisonSnapshot(builder.write(result.comparison())).evidenceSnapshot(builder.write(evidence))
                 .submittedAt(time.now()).respondBy(min(time.now().plus(Duration.ofHours(responseHours)), cutoff)).signBy(cutoff).build());
         notices.other(c, actor, com.hs.contract.notification.AmendmentNotificationWriter.Event.AMENDMENT_RESPONSE_NEEDED);
@@ -248,10 +250,12 @@ public class ContractAmendmentService {
                 ContractRevision base = terms.require(a.getBaseRevisionId());
                 var replacing=replacement(c,a.getPreviousProposalId());
                 var result = buildTerms(base, builder.map(a.getChangesSnapshot()),replacing,readListingSource(a));
+                if(a.getParkingTargetSnapshot()!=null)result.terms().put("listingBranchId",builder.map(a.getParkingTargetSnapshot()).get("branchId"));
+                else pinPool(c,result.terms(),readListingSource(a),businessChanges(builder.map(a.getChangesSnapshot()),replacing,readListingSource(a)),a.getEffectiveOn());
                 validateBusinessTerms(c,base,result.terms(),businessChanges(builder.map(a.getChangesSnapshot()),replacing,readListingSource(a)),a.getEffectiveOn());
                 Contract agreement = contracts.save(Contract.builder().contractNumber(c.getContractNumber() + "-PL-" + a.getId().substring(0, 8))
                         .parentContractId(c.getId()).agreementKind("AMENDMENT").rentalRequestId(c.getRentalRequestId())
-                        .listingId(c.getListingId()).branchId(targetBranch(c,result.terms())).landlordId(c.getLandlordId()).tenantId(c.getTenantId())
+                        .listingId(c.getListingId()).branchId(targetBranch(result.terms())).landlordId(c.getLandlordId()).tenantId(c.getTenantId())
                         .templateId(c.getTemplateId()).templateVersionId(c.getTemplateVersionId())
                         .paymentStatus(c.getPaymentStatus()).rentalPaymentId(c.getRentalPaymentId()).paidAt(c.getPaidAt())
                         .status(ContractStatus.DRAFT).build());
@@ -269,9 +273,9 @@ public class ContractAmendmentService {
                 a.setAgreementContractId(agreement.getId()); a.setTermsRevisionId(revision.getId()); a.setStatus("APPROVED");
                 a.setSignBy(min(a.getSignBy(), time.now().plus(Duration.ofHours(signingHours))));
                 var changes = businessChanges(builder.map(a.getChangesSnapshot()),replacing,readListingSource(a));
-                if (parkingChanged(c,t,changes)) {
+                if (parkingChanged(c,t,changes,a.getEffectiveOn())) {
                     Map<String,Object> tenant = builder.object(t.get("tenant"));
-                    parking.holdForAmendmentInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),targetBranch(c,t),
+                    parking.holdForAmendmentInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),targetBranch(t),
                             a.getEffectiveOn(), proposedEnd(c,t,changes), count(tenant.get("motorbikeCount"), 0, 100), count(tenant.get("carCount"), 0, 100), a.getSignBy());
                 }
             }
@@ -314,10 +318,11 @@ public class ContractAmendmentService {
         var replacing=replacement(c,a.getPreviousProposalId());
         var changes = businessChanges(builder.map(a.getChangesSnapshot()),replacing,readListingSource(a));
         var newTerms=builder.snapshot(terms.require(a.getTermsRevisionId()));
+        newTerms.put("listingBranchId",agreement.getBranchId()); // frozen at approval; no lazy revision.contract read
         validateBusinessTerms(c,terms.require(a.getBaseRevisionId()),newTerms,changes,a.getEffectiveOn(),agreement.getId());
-        if (parkingChanged(c,newTerms,changes)) {
+        if (parkingChanged(c,newTerms,changes,a.getEffectiveOn())) {
             var tenant = builder.map(terms.require(a.getTermsRevisionId()).getTenantSnapshot());
-            parking.activateAmendmentHoldInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),targetBranch(c,newTerms), a.getEffectiveOn(), proposedEnd(c,newTerms,changes),
+            parking.activateAmendmentHoldInBranch(c.getId(), agreement.getId(), c.getRentalRequestId(), c.getListingId(),targetBranch(newTerms), a.getEffectiveOn(), proposedEnd(c,newTerms,changes),
                     count(tenant.get("motorbikeCount"), 0, 100), count(tenant.get("carCount"), 0, 100));
         }
         if(leaseChanged(changes)) {
@@ -543,17 +548,33 @@ public class ContractAmendmentService {
         }
     }
     private void validateParking(Contract c,Map<String,Object> next,Map<String,Object> changes,LocalDate effectiveOn,String agreementId) {
-        if (!parkingChanged(c,next,changes)) return;
+        if (!parkingChanged(c,next,changes,effectiveOn)) return;
         var tenant=builder.object(next.get("tenant"));
-        parking.validateAmendmentCapacityInBranch(c.getId(),agreementId,c.getListingId(),targetBranch(c,next),effectiveOn,proposedEnd(c,next,changes),
+        parking.validateAmendmentCapacityInBranch(c.getId(),agreementId,c.getListingId(),targetBranch(next),effectiveOn,proposedEnd(c,next,changes),
                 count(tenant.get("motorbikeCount"),0,100),count(tenant.get("carCount"),0,100));
     }
-    private String targetBranch(Contract c,Map<String,Object> next) {
-        return next.containsKey("listingBranchId")?(String)next.get("listingBranchId"):c.getBranchId();
+    /** An attached approved listing decides the pool (null = leaves the branch); otherwise keep the occupied one. */
+    private void pinPool(Contract c,Map<String,Object> next,ContractListingSync.Preview source,Map<String,Object> changes,LocalDate effectiveOn) {
+        if(source!=null && source.terms().containsKey("listingBranchId"))return;
+        // Appendices that never touch parking leave the contract's recorded branch exactly as it is.
+        next.put("listingBranchId",touchesParking(changes)?currentPool(c,effectiveOn):c.getBranchId());
     }
-    private boolean parkingChanged(Contract c,Map<String,Object> next,Map<String,Object> changes) {
-        return vehiclesChanged(changes)||leaseChanged(changes)||Boolean.TRUE.equals(changes.get("refreshParkingPool"))
-                || !Objects.equals(c.getBranchId(),targetBranch(c,next));
+    private String currentPool(Contract c,LocalDate effectiveOn) {
+        // Once an approved listing sync fixed the destination, a null contract branch means standalone.
+        boolean pinned=c.getBranchId()!=null || history(c).stream().anyMatch(a->"APPLIED".equals(a.getStatus()) && a.getListingSyncSnapshot()!=null)
+                || terms.require(c.getCurrentRevisionId()).getListingSourceVersion()!=null;
+        return parking.amendmentPool(c.getId(),c.getListingId(),effectiveOn,pinned,c.getBranchId());
+    }
+    private String targetBranch(Map<String,Object> next) {
+        return (String)next.get("listingBranchId");
+    }
+    private boolean touchesParking(Map<String,Object> changes) {
+        return vehiclesChanged(changes)||leaseChanged(changes)||Boolean.TRUE.equals(changes.get("refreshParkingPool"));
+    }
+    private boolean parkingChanged(Contract c,Map<String,Object> next,Map<String,Object> changes,LocalDate effectiveOn) {
+        // A synced destination is compared with the occupied pool; the root's own branch field may still be null.
+        return touchesParking(changes) || !Objects.equals(
+                changes.containsKey("listingSourceVersion")?currentPool(c,effectiveOn):c.getBranchId(),targetBranch(next));
     }
     private void createDepositDelta(Contract c,ContractAmendment a) {
         var changes=businessChanges(builder.map(a.getChangesSnapshot()),null,readListingSource(a));

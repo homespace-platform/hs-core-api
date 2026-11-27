@@ -53,6 +53,8 @@ public class ListingService {
     private com.hs.user.repository.AddressRepository userAddresses;
     @org.springframework.beans.factory.annotation.Autowired
     private com.hs.common.location.VietmapService vietmap;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private BranchRoomLinkService roomLinks; // absent only in test contexts that import this service alone
 
     /** Compatibility for standalone service fixtures; Spring uses the full injected constructor. */
     public ListingService(ListingRepository listings,ListingAddressRepository addresses,StorageObjectRepository storage,
@@ -69,7 +71,10 @@ public class ListingService {
         if (updating && r.duplicateSourceListingId() != null && !r.duplicateSourceListingId().isBlank()) {
             throw error(400, "DUPLICATE_INVALID_REQUEST", "Cannot specify duplicateSourceListingId when updating an existing listing");
         }
+        if (r.roomId() != null && (updating || r.roomId().isBlank() || r.branchId() == null || r.branchId().isBlank()))
+            throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_ROOM_INVALID);
         Listing l = upsertTarget(ownerId, r.id());
+        String previousBranchId = l.getBranchId();
         if (updating) {
             if (l.getStatus() == ListingStatus.RENTED && r.submissionAction() == ListingSubmissionAction.SAVE_DRAFT)
                 throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_HAS_ACTIVE_CONTRACT);
@@ -111,7 +116,7 @@ public class ListingService {
         }
 
         applyCommonFields(l, ownerId, r);
-        ensureSlug(l);
+        if (!updating) ensureSlug(l);
         attachDetail(l, r);
         attachCatalogs(l, r);
         attachCharges(l, r);
@@ -122,12 +127,18 @@ public class ListingService {
         Listing saved = listingRepository.save(l);
         linkStorageObjects(saved);
         upsertAddress(saved, ownerId, r.addressSource());
+        requireBranchStillActive(saved, previousBranchId);
+        if (r.roomId() != null) roomLinks.linkNewListing(saved, ownerId, r.roomId());
+        else if (updating) dropRoomLinkOutsideBranch(saved, previousBranchId);
+        // A legacy slug changes a unique key, so take branch locks before it can block the room link's FK.
+        if (updating) ensureSlug(saved);
         return response(saved);
     }
 
     @Transactional
     public CreateListingResponse createByAdmin(String adminId, String ownerId, CreateListingRequest request) {
         requireActor(adminId);
+        rejectRoomId(request);
         if (ownerId == null || ownerId.isBlank())
             throw error(400, "OWNER_REQUIRED", "ownerId is required");
         validate(request, null);
@@ -139,6 +150,7 @@ public class ListingService {
         Listing saved = listingRepository.save(listing);
         linkStorageObjects(saved);
         upsertAddress(saved, ownerId, request.addressSource());
+        requireBranchStillActive(saved, null);
         // Draft or pending only: creation never claims approval. Suppressed when the admin is the owner.
         notifications.enqueue(saved, adminId, com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_CREATED);
         return response(saved);
@@ -147,6 +159,7 @@ public class ListingService {
     @Transactional
     public CreateListingResponse updateByAdmin(String adminId, String listingId, CreateListingRequest request) {
         requireActor(adminId);
+        rejectRoomId(request);
         Listing listing = listingRepository.findByIdForUpdate(listingId)
                 .orElseThrow(() -> error(404, "LISTING_NOT_FOUND", "Listing not found"));
         if (listing.getPendingEditId() != null)
@@ -164,6 +177,7 @@ public class ListingService {
             policyService.attach(policyTarget,request.policies(),true);
         }
         validate(request, listing);
+        String previousBranchId = listing.getBranchId();
         ListingStatus preservedStatus = listing.getStatus();
         clearOwnedData(listing);
         listingRepository.flush();
@@ -177,7 +191,29 @@ public class ListingService {
         // Policy: every accepted admin save is an update (new snapshot/revision), so separate saves each notify.
         notifications.enqueue(saved, adminId, com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_UPDATED);
         listingStatusService.notifySavedContentUpdated(saved, adminId);
+        requireBranchStillActive(saved, previousBranchId);
+        dropRoomLinkOutsideBranch(saved, previousBranchId);
         return response(saved);
+    }
+
+    private void rejectRoomId(CreateListingRequest request) {
+        if (request.roomId() != null) throw new AppException(com.hs.listing.advice.ListingErrorCode.LISTING_ROOM_INVALID);
+    }
+
+    /**
+     * The branch was validated without a lock. Before a listing moves into one, lock it and look again, so a
+     * concurrent delete either sees this listing or makes this write fail.
+     */
+    private void requireBranchStillActive(Listing listing, String previousBranchId) {
+        String branchId = listing.getBranchId();
+        if (branchId != null && !branchId.equals(previousBranchId)
+                && branchRepository.lockForListingWrite(branchId).filter(active -> !active).isPresent()) {
+            throw error(400, "INVALID_BRANCH", "Chi nhánh không tồn tại hoặc không thuộc sở hữu của bạn");
+        }
+    }
+
+    private void dropRoomLinkOutsideBranch(Listing listing, String previousBranchId) {
+        if (roomLinks != null) roomLinks.dropLinkOutsideBranch(listing.getId(), previousBranchId, listing.getBranchId());
     }
 
     private void applyContent(Listing listing, String ownerId, CreateListingRequest request) {
@@ -249,6 +285,7 @@ public class ListingService {
                 .orElseThrow(() -> error(404, "LISTING_NOT_FOUND", "Không tìm thấy bài đăng."));
         if (editId == null || !editId.equals(listing.getPendingEditId()))
             throw error(409, "LISTING_EDIT_STALE", "Bản sửa đã thay đổi hoặc đã được xử lý.");
+        String previousBranchId = listing.getBranchId();
         if (approve) {
             if (!CONTENT_REVIEW.contains(listing.getOperationalStatus()))
                 throw error(409, "LISTING_EDIT_BLOCKED", "Trạng thái hiện tại không cho phép duyệt bản sửa.");
@@ -275,7 +312,11 @@ public class ListingService {
         notifications.enqueue(saved, adminId, approve
                 ? com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_EDIT_APPROVED
                 : com.hs.listing.notification.ListingNotificationWriter.Event.LISTING_EDIT_REJECTED, editId, null);
-        if (approve) listingStatusService.notifySavedContentUpdated(saved, adminId);
+        if (approve) {
+            listingStatusService.notifySavedContentUpdated(saved, adminId);
+            requireBranchStillActive(saved, previousBranchId);
+            dropRoomLinkOutsideBranch(saved, previousBranchId);
+        }
         return saved;
     }
 

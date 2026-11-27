@@ -886,6 +886,92 @@ class ListingServiceTest {
     }
 
     @Test
+    void createsRoomLinkOnlyWhenRequestedAndAnOldDuplicateDoesNotCopyIt() {
+        var f = new NotificationFixture();
+        var links = mock(BranchRoomLinkService.class);
+        ReflectionTestUtils.setField(f.service, "roomLinks", links);
+        f.branch("new-branch");
+        var request = createDummyRequest(null, null, "PublicCode", ListingSubmissionAction.SAVE_DRAFT,
+                "new-branch", "layout-room");
+        var created = f.service.upsert("persisted-owner", request);
+        verify(links).linkNewListing(argThat(listing -> created.id().equals(listing.getId())
+                && "new-branch".equals(listing.getBranchId())), eq("persisted-owner"), eq("layout-room"));
+        clearInvocations(links);
+
+        when(f.listings.findByIdAndActiveTrue("listing")).thenReturn(Optional.of(f.listing));
+        f.service.upsert("persisted-owner", createDummyRequest("listing", null));
+        f.service.upsert("persisted-owner", createDummyRequest(null, null));
+        var invalid = createDummyRequest(null, "listing", "R202", ListingSubmissionAction.SAVE_DRAFT,
+                "new-branch", "layout-room");
+        assertEquals(com.hs.listing.advice.ListingErrorCode.LISTING_ROOM_INVALID.getCode(),
+                assertThrows(AppException.class, () -> f.service.upsert("persisted-owner", invalid)).getCode());
+        verifyNoInteractions(links);
+    }
+
+    @Test
+    void movingLegacyListingTakesBranchLocksBeforeAssigningItsSlug() {
+        var f = new NotificationFixture();
+        var links = mock(BranchRoomLinkService.class);
+        ReflectionTestUtils.setField(f.service, "roomLinks", links);
+        f.branch("new-branch");
+        f.listing.setBranchId("old-branch");
+        f.listing.setSlug(null);
+        var request = createDummyRequest(null, "listing", "R202", ListingSubmissionAction.SAVE_DRAFT,
+                "new-branch", null);
+
+        var result = f.service.upsert("persisted-owner", request);
+
+        var ordered = inOrder(f.branches, links, f.listings);
+        ordered.verify(f.branches).lockForListingWrite("new-branch");
+        ordered.verify(links).dropLinkOutsideBranch("listing", "old-branch", "new-branch");
+        ordered.verify(f.listings).existsBySlug(anyString());
+        assertNotNull(result.slug());
+        assertEquals(result.slug(), f.listing.getSlug());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"true,new-branch", "false,old-branch"})
+    void onlyLiveBranchChangeRunsLinkCleanupDuringEditModeration(boolean approve, String expectedBranch) {
+        var f = new NotificationFixture();
+        var links = mock(BranchRoomLinkService.class);
+        ReflectionTestUtils.setField(f.service, "roomLinks", links);
+        f.branch("new-branch");
+        f.listing.setBranchId("old-branch");
+        f.listing.setStatus(ListingStatus.PUBLISHED);
+        var request = createDummyRequest(null, "listing", "R202", ListingSubmissionAction.SUBMIT_FOR_REVIEW,
+                "new-branch", null);
+        var pending = f.service.upsert("persisted-owner", request);
+        assertEquals("old-branch", f.listing.getBranchId());
+        verifyNoInteractions(links);
+        verify(f.branches, never()).lockForListingWrite(anyString());
+        when(f.branches.lockForListingWrite("new-branch")).thenReturn(Optional.of(true));
+        f.service.decideEdit("admin", "listing", pending.pendingEditId(), approve, "Cần bổ sung");
+        assertEquals(expectedBranch, f.listing.getBranchId());
+        verify(f.branches, times(approve ? 1 : 0)).lockForListingWrite("new-branch");
+        verify(links, times(approve ? 1 : 0)).dropLinkOutsideBranch("listing", "old-branch", "new-branch");
+        verifyNoMoreInteractions(links);
+    }
+
+    @Test
+    void approvingAnEditRejectsADestinationDeletedAfterBranchValidation() {
+        var f = new NotificationFixture();
+        var links = mock(BranchRoomLinkService.class);
+        ReflectionTestUtils.setField(f.service, "roomLinks", links);
+        f.branch("new-branch");
+        f.listing.setBranchId("old-branch");
+        f.listing.setStatus(ListingStatus.PUBLISHED);
+        var request = createDummyRequest(null, "listing", "R202", ListingSubmissionAction.SUBMIT_FOR_REVIEW,
+                "new-branch", null);
+        var pending = f.service.upsert("persisted-owner", request);
+        when(f.branches.lockForListingWrite("new-branch")).thenReturn(Optional.of(false));
+
+        var rejected = assertThrows(AppException.class,
+                () -> f.service.decideEdit("admin", "listing", pending.pendingEditId(), true, null));
+        assertEquals(400, rejected.getStatusCode().value());
+        verifyNoInteractions(links);
+    }
+
+    @Test
     void contentFailuresNeverEnqueueASuccessNotification() {
         var f = new NotificationFixture(); f.listing.setStatus(ListingStatus.PUBLISHED);
         when(f.snapshots.buildListingSnapshotJson(any())).thenReturn(null);
@@ -940,6 +1026,7 @@ class ListingServiceTest {
         final ListingNotificationOutboxRepository outbox = mock(ListingNotificationOutboxRepository.class);
         final RentalRequestService snapshots = mock(RentalRequestService.class);
         final ListingFavoriteRepository favorites = mock(ListingFavoriteRepository.class);
+        final PropertyBranchRepository branches = mock(PropertyBranchRepository.class);
         final com.hs.common.location.VietmapService vietmap = mock(com.hs.common.location.VietmapService.class);
         final Listing listing = Listing.builder().id("listing").ownerId("persisted-owner").category(ListingCategory.ROOM)
                 .status(ListingStatus.DRAFT).title("Published content").expiresAt(java.time.Instant.now().plusSeconds(86400)).build();
@@ -958,7 +1045,7 @@ class ListingServiceTest {
             ReflectionTestUtils.setField(statuses, "notifications", notifications);
             ReflectionTestUtils.setField(statuses, "favorites", favorites);
             service = new ListingService(listings, mock(ListingAddressRepository.class), storage, mock(com.hs.storage.service.StorageService.class),
-                    mock(AmenityRepository.class), mock(FurnishingItemRepository.class), statuses, mock(PropertyBranchRepository.class), mock(ListingPolicyService.class));
+                    mock(AmenityRepository.class), mock(FurnishingItemRepository.class), statuses, branches, mock(ListingPolicyService.class));
             ReflectionTestUtils.setField(service, "notifications", notifications);
             ReflectionTestUtils.setField(service, "listingSnapshots", snapshots);
             ReflectionTestUtils.setField(service, "vietmap", vietmap);
@@ -966,6 +1053,15 @@ class ListingServiceTest {
         }
         ListingNotificationOutbox event() {
             var row = ArgumentCaptor.forClass(ListingNotificationOutbox.class); verify(outbox).save(row.capture()); return row.getValue();
+        }
+
+        void branch(String id) {
+            var address = new com.hs.listing.model.BranchAddress();
+            address.setRefId("vm:branch");
+            address.setDisplay("Branch address");
+            var branch = com.hs.listing.model.PropertyBranch.builder().id(id).ownerId("persisted-owner")
+                    .category(ListingCategory.ROOM).address(address).build();
+            when(branches.findByIdAndOwnerIdAndActiveTrue(id, "persisted-owner")).thenReturn(Optional.of(branch));
         }
     }
 
@@ -978,6 +1074,11 @@ class ListingServiceTest {
     }
 
     private com.hs.listing.dto.request.CreateListingRequest createDummyRequest(String duplicateSourceListingId, String id, String roomCode, com.hs.listing.model.constant.ListingSubmissionAction action) {
+        return createDummyRequest(duplicateSourceListingId, id, roomCode, action, null, null);
+    }
+
+    private com.hs.listing.dto.request.CreateListingRequest createDummyRequest(String duplicateSourceListingId, String id,
+            String roomCode, ListingSubmissionAction action, String branchId, String roomId) {
         var pricing = new com.hs.listing.dto.request.ListingPricingRequest(
                 java.math.BigDecimal.valueOf(4000000), "VND", com.hs.listing.model.constant.PriceUnit.MONTH,
                 false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
@@ -1000,7 +1101,7 @@ class ListingServiceTest {
                 2, 2, com.hs.listing.model.constant.ListingEnums.ParkingPolicy.FREE);
 
         return new com.hs.listing.dto.request.CreateListingRequest(
-                id, duplicateSourceListingId, null, action,
+                id, duplicateSourceListingId, branchId, action,
                 "Title", "Description of property listing",
                 com.hs.listing.model.constant.ListingCategory.ROOM,
                 java.time.LocalDate.now(), java.math.BigDecimal.valueOf(25),
@@ -1008,7 +1109,7 @@ class ListingServiceTest {
                 pricing, null, null, null, null, roomDetail, null, null, null, null,
                 addressSource, java.util.List.of(
                         new com.hs.listing.dto.request.ListingMediaRequest("st-dummy", null, com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE, 0, true)),
-                java.util.List.of(), java.util.List.of());
+                java.util.List.of(), java.util.List.of(), java.util.List.of(), roomId);
     }
 
     private boolean hasDeclaredField(Class<?> clazz, String fieldName) {

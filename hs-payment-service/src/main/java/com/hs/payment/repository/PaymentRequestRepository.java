@@ -82,6 +82,24 @@ public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, 
     @Query("SELECT p FROM PaymentRequest p WHERE p.invoiceId = :invoiceId")
     Optional<PaymentRequest> findByInvoiceIdForUpdate(@Param("invoiceId") String invoiceId);
 
+    // Batch reads for the branch monitoring views; never locked.
+    List<PaymentRequest> findByActiveTrueAndInvoiceIdIn(Collection<String> invoiceIds);
+    List<PaymentRequest> findByActiveTrueAndRentalRequestIdInAndType(Collection<String> rentalRequestIds, PaymentType type);
+    List<PaymentRequest> findByActiveTrueAndContractIdInAndType(Collection<String> contractIds, PaymentType type);
+
+    /** Transfers of these requests in the given states, plus the onboarding receipts in any state. */
+    @Query("select p from PaymentRequest p where p.rentalRequestId in :rentalRequestIds and (p.status in :statuses "
+            + "or p.type in :anyStatusTypes)")
+    List<PaymentRequest> findAttentionByRentals(@Param("rentalRequestIds") Collection<String> rentalRequestIds,
+            @Param("statuses") Collection<PaymentStatus> statuses,
+            @Param("anyStatusTypes") Collection<PaymentType> anyStatusTypes);
+
+    List<PaymentRequest> findByContractIdInAndType(Collection<String> contractIds, PaymentType type);
+
+    @Query("select p from PaymentRequest p where p.contractId in :contractIds and p.status in :statuses")
+    List<PaymentRequest> findAttentionByContracts(@Param("contractIds") Collection<String> contractIds,
+            @Param("statuses") Collection<PaymentStatus> statuses);
+
     boolean existsByTransferReference(String transferReference);
 
     List<PaymentRequest> findByRentalRequestIdInAndType(Collection<String> rentalRequestIds, PaymentType type);

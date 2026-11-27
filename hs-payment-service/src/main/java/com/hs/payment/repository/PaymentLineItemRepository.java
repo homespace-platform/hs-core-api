@@ -10,4 +10,7 @@ import java.util.List;
 public interface PaymentLineItemRepository extends JpaRepository<PaymentLineItem, String> {
 
     List<PaymentLineItem> findByPaymentRequestIdOrderBySortOrderAsc(String paymentRequestId);
+
+    List<PaymentLineItem> findByPaymentRequestIdInAndTypeIn(java.util.Collection<String> paymentRequestIds,
+                                                            java.util.Collection<String> types);
 }

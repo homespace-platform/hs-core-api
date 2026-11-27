@@ -379,6 +379,34 @@ public class ParkingReservationService {
         }
     }
 
+    /** Pool already allocated to an unsigned rental. The listing's current branch only seeds a first allocation. */
+    public String draftPool(RentalRequest request, boolean pinned, String pinnedBranchId) {
+        var own = parkingReservationRepository.findByRentalRequestId(request.getId());
+        // Null is a real pool (standalone listing), so pick the row first and read its branch afterwards.
+        for (var r : own)
+            if (r.getStatus() == ParkingReservationStatus.HELD && r.getContractId() == null) return r.getBranchId();
+        if (pinned) return pinnedBranchId;
+        // Released rows of a never-synced draft still name the accepted pool (vehicles 2 -> 0 -> 2).
+        return own.isEmpty() ? request.getListing().getBranchId() : own.get(0).getBranchId();
+    }
+
+    /** Pool the signed rental occupies just before an appendix takes effect. */
+    public String amendmentPool(String rootId, String listingId, LocalDate effectiveOn, boolean pinned, String pinnedBranchId) {
+        // The day before: a replaced, still scheduled appendix already owns the segment starting on effectiveOn.
+        LocalDate day = effectiveOn.minusDays(1);
+        ParkingReservation last = null;
+        for (var r : parkingReservationRepository.findByContractId(rootId)) {
+            // RELEASED root rows are segments a later appendix replaced before they ever applied.
+            if (r.getStatus() == ParkingReservationStatus.RELEASED || r.getStartDate().isAfter(day)) continue;
+            if (r.getStatus() == ParkingReservationStatus.ACTIVE && r.getEndDateExclusive().isAfter(day)) return r.getBranchId();
+            if (last == null || r.getEndDateExclusive().isAfter(last.getEndDateExclusive())) last = r;
+        }
+        if (pinned) return pinnedBranchId;
+        // No vehicles at that date: the rental's last own segment still names its pool, even a null one.
+        if (last != null) return last.getBranchId();
+        return listingRepository.findById(listingId).map(Listing::getBranchId).orElse(null);
+    }
+
     private AmendmentPool lockAmendmentPool(String listingId) {
         Listing candidate = listingRepository.findById(listingId).orElseThrow();
         String branchId = candidate.getBranchId();

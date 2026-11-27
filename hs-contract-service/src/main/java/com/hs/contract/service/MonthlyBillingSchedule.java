@@ -1,6 +1,8 @@
 package com.hs.contract.service;
 
+import com.hs.common.advice.entity.AppException;
 import com.hs.common.time.BillingTime;
+import com.hs.contract.advice.ContractErrorCode;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -33,6 +35,21 @@ public final class MonthlyBillingSchedule {
     public static Instant dueAt(LocalDate periodEndExclusive) {
         return periodEndExclusive.plusDays(PAYMENT_WINDOW_DAYS)
                 .atTime(23, 59, 59).atZone(BillingTime.ZONE).toInstant();
+    }
+
+    /** Due date under signed terms: their own offset, else the fifth-day term of older signed contracts. */
+    public static Instant signedDueAt(Map<String,Object> financial, LocalDate periodEndExclusive) {
+        if (financial.get("paymentDueOffsetDays") != null) {
+            int offset;
+            try { offset = Integer.parseInt(String.valueOf(financial.get("paymentDueOffsetDays"))); }
+            catch (NumberFormatException ex) { throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE); }
+            if (offset < 0 || offset > 30)
+                throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
+            return periodEndExclusive.plusDays(offset).atTime(23,59,59).atZone(BillingTime.ZONE).toInstant();
+        }
+        LocalDate fifth = periodEndExclusive.withDayOfMonth(5);
+        if (fifth.isBefore(periodEndExclusive)) fifth = fifth.plusMonths(1);
+        return fifth.atTime(23, 59, 59).atZone(BillingTime.ZONE).toInstant();
     }
 
     public static Instant actionRequiredAt(Instant dueAt) {

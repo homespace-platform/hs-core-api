@@ -73,6 +73,91 @@ class RentalOnboardingServiceTest {
         org.springframework.test.util.ReflectionTestUtils.setField(service,"depositAgreements",mock(com.hs.contract.deposit.DepositAgreementService.class));
     }
 
+    @Test void readOnlyLeaseSigningKeepsTheOldActorAndExclusiveDeadline() {
+        exemptWithoutDepositPayment();
+        now = Instant.parse("2026-10-31T17:00:00Z");
+        var lease = Contract.builder().id("lease").status(ContractStatus.DRAFT).build();
+        var rent = rent(PaymentStatus.CONFIRMED);
+        Instant due = now.plusSeconds(3600);
+        rent.setContractDueAt(due);
+        when(rentals.findById("rental")).thenReturn(Optional.of(rental));
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(lease));
+        var facts = new RentalOnboardingService.SigningFacts(true, false, true, rental.getMoveInDate(),
+                BigDecimal.ZERO, null, rent, null, lease);
+
+        assertTrue(service.landlordSigningStep(facts, now.minusNanos(1)).isEmpty());
+        assertEquals(new RentalOnboardingService.NextAction("LANDLORD",
+                RentalOnboardingService.NextActionCode.SIGN_LEASE_LANDLORD, due), service.get("rental", "owner").nextAction());
+        assertEquals(service.get("rental", "owner").nextAction(), service.landlordSigningStep(facts, now).orElseThrow());
+        lease.setStatus(ContractStatus.TENANT_SIGNATURE_PENDING);
+        assertEquals(RentalOnboardingService.NextActionCode.SIGN_LEASE_TENANT, service.get("rental", "tenant").nextAction().code());
+        assertTrue(service.landlordSigningStep(facts, now).isEmpty());
+        now = due;
+        assertFalse(service.get("rental", "tenant").canSign());
+        assertEquals(RentalOnboardingService.NextActionCode.SIGNING_OVERDUE, service.get("rental", "owner").nextAction().code());
+        verify(rentals, never()).findByIdForUpdate(any());
+        verify(contracts, never()).save(any());
+    }
+
+    @Test void readOnlyRecoveryStepsAgreeWithTheOnboardingScreen() {
+        exemptWithoutDepositPayment();
+        now = Instant.parse("2026-10-31T17:00:00Z");
+        var lease = Contract.builder().id("lease").status(ContractStatus.DRAFT).build();
+        var rent = rent(PaymentStatus.CONFIRMED);
+        rent.setContractDueAt(now);
+        when(rentals.findById("rental")).thenReturn(Optional.of(rental));
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(lease));
+        var facts = new RentalOnboardingService.SigningFacts(true, false, true, rental.getMoveInDate(),
+                BigDecimal.ZERO, null, rent, null, lease);
+        assertTrue(service.landlordSigningOverdue(facts, now.minusNanos(1)).isEmpty());
+        assertEquals(new RentalOnboardingService.OverdueSigning(lease, now),
+                service.landlordSigningOverdue(facts, now).orElseThrow());
+        assertEquals(RentalOnboardingService.NextActionCode.SIGNING_OVERDUE,
+                service.get("rental", "owner").nextAction().code());
+
+        rent.setStatus(PaymentStatus.REJECTED);
+        assertTrue(service.landlordSigningOverdue(facts, now).isEmpty());
+        assertEquals(service.get("rental", "owner").nextAction(), RentalOnboardingService
+                .landlordDecisionStep(true, false, false, null, rent, now).orElseThrow());
+        rental.setCancellationRequestedAt(now);
+        assertEquals(service.get("rental", "owner").nextAction(), RentalOnboardingService
+                .landlordDecisionStep(true, false, true, null, rent, now).orElseThrow());
+        assertTrue(RentalOnboardingService.landlordDecisionStep(true, true, true, null, rent, now).isEmpty());
+    }
+
+    @Test void legacyFinalNoticeStillGivesTheTenantTimeToSignBeforeOwnerReopen() {
+        exemptWithoutDepositPayment();
+        now = Instant.parse("2026-11-01T04:00:00Z");
+        var oldDue = now.minusSeconds(60);
+        var responseDue = now.plusSeconds(3600);
+        var lease = Contract.builder().id("lease").status(ContractStatus.TENANT_SIGNATURE_PENDING)
+                .currentRevisionId("revision").tenantSigningDueAt(oldDue).build();
+        var revision = com.hs.contract.model.ContractRevision.builder().id("revision").build();
+        var rent = rent(PaymentStatus.CONFIRMED);
+        rent.setContractDueAt(oldDue);
+        when(rentals.findById("rental")).thenReturn(Optional.of(rental));
+        when(contracts.findByRentalRequestId("rental")).thenReturn(Optional.of(lease));
+        when(revisions.findById("revision")).thenReturn(Optional.of(revision));
+        rental.setDefaultNoticeAt(oldDue);
+        rental.setDefaultNoticeKind("TENANT_SIGNING");
+        rental.setDefaultRespondBy(responseDue);
+        rental.setDefaultNoticeFingerprint(String.join(":", "TENANT_SIGNING", revision.getId(),
+                ContractPreviewIdentity.fingerprint(revision, "INTERNAL"), oldDue.toString(), rent.getId(),
+                String.valueOf(rent.getDueAt()), oldDue.toString(), rent.getStatus().name()));
+        var facts = new RentalOnboardingService.SigningFacts(true, false, true, rental.getMoveInDate(),
+                BigDecimal.ZERO, null, rent, null, lease);
+
+        var original = service.get("rental", "owner");
+        assertEquals(responseDue, original.signingDueAt());
+        assertEquals("TENANT", original.nextAction().actor());
+        assertTrue(service.landlordSigningOverdue(facts, now).isEmpty());
+
+        now = responseDue;
+        assertFalse(service.get("rental", "tenant").canSign());
+        assertEquals(new RentalOnboardingService.OverdueSigning(lease, responseDue),
+                service.landlordSigningOverdue(facts, now).orElseThrow());
+    }
+
     @Test void completedLeaseShowsTheSignedEarlyEndInsteadOfTheOriginalReservationEnd() {
         rental.setStatus(RentalRequestStatus.COMPLETED);
         rental.setMoveInDate(LocalDate.of(2026,11,17));

@@ -27,6 +27,8 @@ public class ContractAmendment extends BaseEntity {
     @Column(name = "immediate_effect", nullable = false) private boolean immediateEffect = false;
     @Column(name = "changes_snapshot", nullable = false, columnDefinition = "TEXT") private String changesSnapshot;
     @Column(columnDefinition = "TEXT") private String listingSyncSnapshot;
+    /** {"branchId":...} checked at submit; approval must not pick another. Null column = submitted before it was saved. */
+    @Column(columnDefinition = "TEXT") private String parkingTargetSnapshot;
     @Column(name = "comparison_snapshot", nullable = false, columnDefinition = "TEXT") private String comparisonSnapshot;
     @Column(name = "evidence_snapshot", columnDefinition = "TEXT") private String evidenceSnapshot;
     @Column(nullable = false, length = 2000) private String reason;

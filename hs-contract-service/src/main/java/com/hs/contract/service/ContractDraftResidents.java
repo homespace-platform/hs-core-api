@@ -74,7 +74,10 @@ public class ContractDraftResidents {
         }).toList();
         String costSnapshot;
         try{costSnapshot=mapper.writeValueAsString(costRows);}catch(Exception e){throw invalid("Không cập nhật được bảng phí của hồ sơ thuê.");}
-        parking.replaceDraftHoldInBranch(rental, bikes, cars,contract.getBranchId());
+        // A sync in this save has already put its approved destination (possibly standalone) on the contract.
+        String pool=expected.getListingSourceVersion()!=null?contract.getBranchId():parking.draftPool(rental,
+                contract.getBranchId()!=null || current.getListingSourceVersion()!=null,contract.getBranchId());
+        parking.replaceDraftHoldInBranch(rental, bikes, cars,pool);
         rental.setOccupantCount(people);rental.setMotorbikeCount(bikes);rental.setCarCount(cars);
         rental.setEstimatedMonthlyCharges(monthly);
         rental.setCostBreakdownSnapshot(costSnapshot);

@@ -41,6 +41,8 @@ public class PropertyBranchService {
     private final StorageProperties storageProperties;
     @org.springframework.beans.factory.annotation.Autowired
     private com.hs.common.location.VietmapService vietmap;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private BranchContractLinkGuard contractLinks;
 
     private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final java.security.SecureRandom SECURE_RANDOM = new java.security.SecureRandom();
@@ -180,12 +182,21 @@ public class PropertyBranchService {
 
     @Transactional
     public void deleteBranch(String id, String ownerId) {
-        PropertyBranch branch = branchRepository.findByIdAndOwnerIdAndActiveTrue(id, ownerId)
+        // Blocks link writes and listings moving in, so neither can be orphaned while the branch is being deleted.
+        branchRepository.lockExclusive(id);
+        PropertyBranch branch = branchRepository.findByIdForUpdate(id)
+                .filter(b -> b.getOwnerId().equals(ownerId))
                 .orElseThrow(() -> new AppException(404, "Không tìm thấy chi nhánh", HttpStatus.NOT_FOUND));
 
         long activeRooms = listingRepository.countByBranchIdAndActiveTrue(id);
         if (activeRooms > 0) {
             throw new AppException(400, "Chi nhánh đang có " + activeRooms + " phòng/căn hộ. Vui lòng chuyển hoặc xóa hết các phòng trước khi xóa chi nhánh!", HttpStatus.BAD_REQUEST);
+        }
+
+        long linkedContracts = contractLinks == null ? 0 : contractLinks.countContractLinks(id);
+        if (linkedContracts > 0) {
+            throw new AppException(ListingErrorCode.BRANCH_HAS_CONTRACT_LINKS, "Chi nhánh còn " + linkedContracts
+                    + " hợp đồng đang gắn (kể cả hợp đồng chưa xếp phòng hoặc đã kết thúc). Hãy gỡ liên kết hợp đồng trước khi xóa chi nhánh.");
         }
 
         branch.setActive(false);

@@ -967,19 +967,7 @@ public class MonthlyBillingService {
         invoice.setIssuedAt(time.now());
         // Preserve the fifth-day term on already-signed contracts; new revisions
         // explicitly anchor the payment window to the end of each lease period.
-        Instant scheduledDue;
-        if (financial.get("paymentDueOffsetDays") != null) {
-            int offset;
-            try { offset = Integer.parseInt(String.valueOf(financial.get("paymentDueOffsetDays"))); }
-            catch (NumberFormatException ex) { throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE); }
-            if (offset < 0 || offset > 30)
-                throw new AppException(ContractErrorCode.INVOICE_TERMS_INCOMPLETE);
-            scheduledDue = invoice.getPeriodEndExclusive().plusDays(offset).atTime(23,59,59).atZone(BillingTime.ZONE).toInstant();
-        } else {
-            LocalDate fifth = invoice.getPeriodEndExclusive().withDayOfMonth(5);
-            if (fifth.isBefore(invoice.getPeriodEndExclusive())) fifth = fifth.plusMonths(1);
-            scheduledDue = fifth.atTime(23, 59, 59).atZone(BillingTime.ZONE).toInstant();
-        }
+        Instant scheduledDue = MonthlyBillingSchedule.signedDueAt(financial, invoice.getPeriodEndExclusive());
         // A scheduler catch-up represents missed billing milestones, not a new
         // payment grace period. Keep the signed due date even if it has passed.
         // Manual late publication still gives the payer at least one day.

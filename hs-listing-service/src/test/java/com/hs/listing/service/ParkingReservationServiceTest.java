@@ -450,6 +450,19 @@ class ParkingReservationServiceTest {
     }
 
     @Test
+    void zeroVehicleRentalIgnoresThePoolOfAReplacedAmendmentSegment() {
+        var start = LocalDate.of(2026, 10, 1);
+        var standalone = ParkingReservation.builder().contractId("root").startDate(start)
+                .endDateExclusive(start.plusMonths(1)).status(ParkingReservationStatus.ACTIVE).build();
+        var replaced = ParkingReservation.builder().contractId("root").branchId("never-applied").startDate(start.plusMonths(2))
+                .endDateExclusive(start.plusMonths(6)).status(ParkingReservationStatus.RELEASED).build();
+        when(parkingReservationRepository.findByContractId("root")).thenReturn(List.of(standalone, replaced));
+
+        assertNull(service.amendmentPool("root", "listing", start.plusMonths(3), false, null));
+        verifyNoInteractions(listingRepository);
+    }
+
+    @Test
     @DisplayName("12. Contract ACTIVE chuyển reservation sang ACTIVE và liên kết contractId")
     void testContractActiveTransitionsReservationToActive() {
         ParkingReservation res = ParkingReservation.builder()

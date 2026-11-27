@@ -74,7 +74,10 @@ public enum ContractErrorCode implements AppException.ErrorCode {
     COMPLAINT_STALE(6075, "Hồ sơ đã thay đổi. Tải lại trước khi phản hồi hoặc quyết định.", HttpStatus.CONFLICT),
     COMPLAINT_NOT_ALLOWED(6076, "Thao tác chưa phù hợp trạng thái khiếu nại", HttpStatus.CONFLICT),
     TERMINATION_NOTICE_INVALID(6077, "Thông báo/khiếu nại chấm dứt cần lý do 10–1000 ký tự và phương án hợp lệ", HttpStatus.BAD_REQUEST),
-    TERMINATION_NOTICE_STALE(6078, "Quyết định chấm dứt đã thay đổi. Vui lòng tải lại hồ sơ.", HttpStatus.CONFLICT);
+    TERMINATION_NOTICE_STALE(6078, "Quyết định chấm dứt đã thay đổi. Vui lòng tải lại hồ sơ.", HttpStatus.CONFLICT),
+    CONTRACT_NOT_ASSIGNABLE(6090, "Chỉ gắn được hợp đồng thuê gốc; hợp đồng cọc, phụ lục và gia hạn đi theo hợp đồng gốc.", HttpStatus.BAD_REQUEST),
+    CONTRACT_IN_OTHER_BRANCH(6091, "Hợp đồng đang gắn chi nhánh khác. Hãy gỡ liên kết ở chi nhánh đó trước.", HttpStatus.CONFLICT),
+    BRANCH_ROOM_SCHEDULE_CONFLICT(6092, "Phòng đã có hợp đồng khác trùng thời gian thuê. Hãy chọn phòng khác hoặc để hợp đồng ở mục Chưa xếp phòng.", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;
