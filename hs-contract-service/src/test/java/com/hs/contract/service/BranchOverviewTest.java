@@ -112,7 +112,7 @@ class BranchOverviewTest {
                 item("real", PENDING_CONFIRMATION, real, real.plusSeconds(59), Clock.REAL)).sorted(order).toList();
         assertThat(items).extracting(Payment::id)
                 .containsExactly("late", "real", "a", "b", "missing", "soon", "blue", "draft", "paid");
-        var layer = room("room", RoomManualStatus.NONE, List.of(), List.of(), List.of(), List.of(), items, TODAY).payments();
+        var layer = room("room", RoomManualStatus.NONE, List.of(), List.of(), List.of(), List.of(), List.of(), items, TODAY).payments();
         assertEquals(new PaymentLayer(OVERDUE, items.size(), items), layer);
     }
 
@@ -123,20 +123,39 @@ class BranchOverviewTest {
         var later = stay("later", TODAY.plusDays(2));
         var sooner = stay("sooner", TODAY.plusDays(1));
         var live = List.of("listing-z", "listing-a");
-        var occupied = room("r", RoomManualStatus.REPAIR, List.of(tenant), List.of(later, hold), List.of(sooner), live, List.of(), TODAY);
+        var occupied = room("r", RoomManualStatus.REPAIR, List.of(tenant), List.of(later, hold), List.of(sooner), live, List.of(), List.of(), TODAY);
         assertEquals(OCCUPIED, occupied.status());
         assertEquals(tenant.target(), occupied.target());
         assertEquals(new Stay(sooner.tenantName(), sooner.moveInDate(), sooner.target()), occupied.nextStay());
         assertEquals(new PaymentLayer(NONE, 0, List.of()), occupied.payments());
-        assertEquals(RESERVED, room("r", RoomManualStatus.REPAIR, List.of(), List.of(hold), List.of(sooner), live, List.of(), TODAY).status());
-        assertEquals(MOVING_IN, room("r", RoomManualStatus.EXTERNAL_RENT, List.of(), List.of(later), List.of(), live, List.of(), TODAY).status());
+        assertEquals(RESERVED, room("r", RoomManualStatus.REPAIR, List.of(), List.of(hold), List.of(sooner), live, List.of(), List.of(), TODAY).status());
+        assertEquals(MOVING_IN, room("r", RoomManualStatus.EXTERNAL_RENT, List.of(), List.of(later), List.of(), live, List.of(), List.of(), TODAY).status());
         for (var flag : List.of(RoomManualStatus.REPAIR, RoomManualStatus.EXTERNAL_RENT)) {
-            assertEquals(RoomStatus.valueOf(flag.name()), room("r", flag, List.of(), List.of(), List.of(), live, List.of(), TODAY).status());
+            assertEquals(RoomStatus.valueOf(flag.name()), room("r", flag, List.of(), List.of(), List.of(), live, List.of(), List.of(), TODAY).status());
         }
-        var advertised = room("r", RoomManualStatus.NONE, List.of(), List.of(), List.of(), live, List.of(), TODAY);
+        var advertised = room("r", RoomManualStatus.NONE, List.of(), List.of(), List.of(), live, List.of(), List.of(), TODAY);
         assertEquals(ADVERTISED, advertised.status());
         assertEquals("/dashboard/properties/view?id=listing-a", advertised.target().href());
-        assertEquals(VACANT, room("r", RoomManualStatus.NONE, List.of(), List.of(), List.of(), List.of(), List.of(), TODAY).status());
+        var unlinked = room("r", RoomManualStatus.NONE, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), TODAY);
+        assertEquals(UNLINKED, unlinked.status());
+        assertNull(unlinked.target());
+        assertNull(unlinked.listingStatus());
+    }
+
+    @Test
+    void vacantNeedsALinkedListingAndPointsAtTheLowestIdWithItsOperationalStatus() {
+        var hidden = new BranchOverviewListingRow("b", ListingStatus.HIDDEN, null, null);
+        var revision = new BranchOverviewListingRow("a", ListingStatus.PENDING_REVIEW, ListingStatus.EXPIRED, null);
+        var vacant = room("r", RoomManualStatus.NONE, List.of(), List.of(), List.of(), List.of(), List.of(hidden, revision), List.of(), TODAY);
+        assertEquals(VACANT, vacant.status());
+        assertEquals("/dashboard/properties/view?id=a", vacant.target().href());
+        assertEquals("EXPIRED", vacant.listingStatus());
+        var single = room("r", RoomManualStatus.NONE, List.of(), List.of(), List.of(), List.of(), List.of(hidden), List.of(), TODAY);
+        assertEquals("HIDDEN", single.listingStatus());
+        // A manual flag still beats the linked listing, and nothing but VACANT carries listingStatus.
+        var repair = room("r", RoomManualStatus.REPAIR, List.of(), List.of(), List.of(), List.of(), List.of(hidden), List.of(), TODAY);
+        assertEquals(REPAIR, repair.status());
+        assertNull(repair.listingStatus());
     }
 
     @Test

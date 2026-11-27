@@ -870,6 +870,7 @@ public class BranchAttentionService {
         s.rooms.keySet().forEach(id -> facts.put(id, new BranchOverviewService.RoomFacts()));
         s.listingRooms.forEach((listingId, roomId) -> {
             ListingRow listing = s.listings.get(listingId);
+            facts.get(roomId).linkedListings.add(overviewRow(listing));
             if (overviewRow(listing).publiclyListed(s.realNow)) facts.get(roomId).publicListings.add(listingId);
         });
         BranchOverviewService.addStays(s.roots, s.leases, s.leaseRooms, s.rootRentals, s.uncontracted,
@@ -877,8 +878,10 @@ public class BranchAttentionService {
 
         s.rooms.forEach((roomId, slot) -> {
             var room = facts.get(roomId);
-            if (BranchOverviewService.room(roomId, BranchRoomLinkService.flagOf(slot), room.occupants, room.holds,
-                    room.upcoming, room.publicListings, List.of(), s.today).status() == RoomStatus.VACANT) {
+            // Both "no listing linked" and "linked but not shown" count: the attention item set is unchanged.
+            RoomStatus status = BranchOverviewService.room(roomId, BranchRoomLinkService.flagOf(slot), room.occupants,
+                    room.holds, room.upcoming, room.publicListings, room.linkedListings, List.of(), s.today).status();
+            if (status == RoomStatus.VACANT || status == RoomStatus.UNLINKED) {
                 String branchId = s.roomBranches.get(roomId);
                 s.add(branchId, WorkType.ROOM_VACANT_UNLISTED, roomId, roomId, null, null, null, Clock.REAL,
                         new Target(TargetKind.ROOM, roomId, "/dashboard/properties/new?branchId="

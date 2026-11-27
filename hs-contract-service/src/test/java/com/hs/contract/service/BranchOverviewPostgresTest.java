@@ -141,6 +141,11 @@ class BranchOverviewPostgresTest {
         liveListing.setExpiresAt(Instant.now().plusSeconds(3600));
         listings.saveAndFlush(liveListing);
         listingLinks.saveAndFlush(new BranchRoomListing(liveListing.getId(), advertisedRoom.getId()));
+        var hiddenRoom = room(row, "104");
+        var hiddenListing = listing(branch, OWNER);
+        hiddenListing.setStatus(ListingStatus.HIDDEN);
+        listings.saveAndFlush(hiddenListing);
+        listingLinks.saveAndFlush(new BranchRoomListing(hiddenListing.getId(), hiddenRoom.getId()));
         var firstRoom = room(row, "103");
         var first = populateActiveRoom(branch, firstRoom);
         var draft = invoice(contracts.findById(first.getContractId()).orElseThrow(), 1, MonthlyInvoiceStatus.DRAFT, null);
@@ -158,8 +163,12 @@ class BranchOverviewPostgresTest {
         assertEquals("2026-12", initial.result().month());
         assertEquals(NOW, initial.result().billingNow());
         assertEquals(ADVERTISED, findRoom(initial, advertisedRoom).status());
+        var hidden = findRoom(initial, hiddenRoom);
+        assertEquals(VACANT, hidden.status());
+        assertEquals("HIDDEN", hidden.listingStatus());
+        assertEquals(hiddenListing.getId(), hidden.target().id());
         var debt = findRoom(initial, debtRoom);
-        assertEquals(VACANT, debt.status());
+        assertEquals(UNLINKED, debt.status());
         assertThat(debt.payments().items()).extracting(Payment::id).containsExactly(overdue.getId());
         assertEquals(OVERDUE, debt.payments().status());
         var active = findRoom(initial, firstRoom);
@@ -180,7 +189,7 @@ class BranchOverviewPostgresTest {
 
         for (int i = 0; i < 25; i++) populateActiveRoom(branch, room(row, "extra-" + i));
         var expanded = read(branch.getId());
-        assertEquals(28, expanded.result().rooms().size());
+        assertEquals(29, expanded.result().rooms().size());
         assertEquals(25, expanded.result().rooms().stream().flatMap(r -> r.payments().items().stream())
                 .filter(p -> p.kind() == BranchOverviewResponse.PaymentKind.PROJECTED).count());
         assertEquals(initial.sqlCount(), expanded.sqlCount(), "each room adds a lease with an invoice, transfer and first-rent lines");
@@ -257,7 +266,7 @@ class BranchOverviewPostgresTest {
                 .acceptedAt(NOW.minusSeconds(86400)).balancePaymentId(balance.getId()).balanceAmount(RENT).build());
 
         var read = read(branch.getId());
-        assertEquals(VACANT, findRoom(read, slot).status());
+        assertEquals(UNLINKED, findRoom(read, slot).status());
         assertThat(findRoom(read, slot).payments().items()).extracting(Payment::status).containsExactly(OVERDUE);
     }
 
@@ -286,7 +295,7 @@ class BranchOverviewPostgresTest {
         root.setLandlordId(OWNER);
         assign(branch, slot, contracts.saveAndFlush(root));
 
-        assertEquals(VACANT, findRoom(read(branch.getId()), slot).status());
+        assertEquals(UNLINKED, findRoom(read(branch.getId()), slot).status());
     }
 
     @Test

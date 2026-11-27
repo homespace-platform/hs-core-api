@@ -11,7 +11,7 @@ import java.util.List;
 public record BranchOverviewResponse(String branchId, String month, Instant billingNow, Instant realNow,
                                      List<Room> rooms, List<Payment> unplacedPayments) {
 
-    public enum RoomStatus { OCCUPIED, RESERVED, MOVING_IN, EXTERNAL_RENT, REPAIR, ADVERTISED, VACANT }
+    public enum RoomStatus { OCCUPIED, RESERVED, MOVING_IN, EXTERNAL_RENT, REPAIR, ADVERTISED, VACANT, UNLINKED }
 
     /** Declaration order is the display order of payments; NONE only describes a room without any. */
     public enum PaymentStatus { OVERDUE, PENDING_CONFIRMATION, DUE_SOON, NOT_DUE, UNISSUED, PAID, NONE }
@@ -35,11 +35,11 @@ public record BranchOverviewResponse(String branchId, String month, Instant bill
 
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Room(String roomId, RoomStatus status, String tenantName, Target target, Stay nextStay,
-                       PaymentLayer payments, List<Meter> meters, List<Expiry> contracts) {
+                       PaymentLayer payments, List<Meter> meters, List<Expiry> contracts, String listingStatus) {
 
         public Room(String roomId, RoomStatus status, String tenantName, Target target, Stay nextStay,
                     PaymentLayer payments) {
-            this(roomId, status, tenantName, target, nextStay, payments, List.of(), List.of());
+            this(roomId, status, tenantName, target, nextStay, payments, List.of(), List.of(), null);
         }
     }
 

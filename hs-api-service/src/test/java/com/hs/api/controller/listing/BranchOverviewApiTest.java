@@ -49,10 +49,13 @@ class BranchOverviewApiTest {
                 new Target(TargetKind.CONTRACT, "c", "/dashboard/landlord/contracts/c?tab=end"));
         var occupied = new Room("r1", RoomStatus.OCCUPIED, "Tenant", contract,
                 new Stay(null, LocalDate.of(2026, 12, 12), rental), new PaymentLayer(receipt.status(), 1, List.of(receipt)),
-                List.of(meter), List.of(expiry));
-        var vacant = new Room("r2", RoomStatus.VACANT, null, null, null, new PaymentLayer(PaymentStatus.NONE, 0, List.of()));
+                List.of(meter), List.of(expiry), null);
+        var vacant = new Room("r2", RoomStatus.VACANT, null,
+                new Target(TargetKind.LISTING, "l2", "/dashboard/properties/view?id=l2"), null,
+                new PaymentLayer(PaymentStatus.NONE, 0, List.of()), List.of(), List.of(), "HIDDEN");
+        var unlinked = new Room("r3", RoomStatus.UNLINKED, null, null, null, new PaymentLayer(PaymentStatus.NONE, 0, List.of()));
         when(service.overview("branch", "owner", DEC)).thenReturn(
-                new BranchOverviewResponse("branch", "2026-12", BILLING, REAL, List.of(occupied, vacant), List.of(unplaced)));
+                new BranchOverviewResponse("branch", "2026-12", BILLING, REAL, List.of(occupied, vacant, unlinked), List.of(unplaced)));
 
         mvc.perform(authenticated("owner", "USER").param("month", "2026-12").param("ownerId", "other"))
                 .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "private, no-store"))
@@ -72,9 +75,15 @@ class BranchOverviewApiTest {
                                "deadlineAt":"2026-12-04T17:00:00Z",
                                "target":{"kind":"CONTRACT","id":"c","href":"/dashboard/landlord/contracts/c?tab=payment&section=monthly"}}],
                              "contracts":[{"contractId":"c","status":"WITHIN_60","endDateExclusive":"2027-01-05","daysRemaining":35,
-                               "target":{"kind":"CONTRACT","id":"c","href":"/dashboard/landlord/contracts/c?tab=end"}}]},
-                            {"roomId":"r2","status":"VACANT","tenantName":null,"target":null,"nextStay":null,
-                             "payments":{"status":"NONE","count":0,"items":[]},"meters":[],"contracts":[]}],
+                               "target":{"kind":"CONTRACT","id":"c","href":"/dashboard/landlord/contracts/c?tab=end"}}],
+                             "listingStatus":null},
+                            {"roomId":"r2","status":"VACANT","tenantName":null,
+                             "target":{"kind":"LISTING","id":"l2","href":"/dashboard/properties/view?id=l2"},"nextStay":null,
+                             "payments":{"status":"NONE","count":0,"items":[]},"meters":[],"contracts":[],
+                             "listingStatus":"HIDDEN"},
+                            {"roomId":"r3","status":"UNLINKED","tenantName":null,"target":null,"nextStay":null,
+                             "payments":{"status":"NONE","count":0,"items":[]},"meters":[],"contracts":[],
+                             "listingStatus":null}],
                           "unplacedPayments":[{"id":"first-rent:q","kind":"INITIAL","contractId":null,"status":"OVERDUE",
                             "dueAt":"2026-11-30T17:00:00Z","confirmationDueAt":null,"clock":"BILLING",
                             "target":{"kind":"RENTAL_REQUEST","id":"rental","href":"/dashboard/rental-requests?requestId=rental"}}]}}

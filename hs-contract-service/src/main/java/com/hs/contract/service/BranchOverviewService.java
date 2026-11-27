@@ -84,6 +84,7 @@ public class BranchOverviewService {
         final List<StayRow> holds = new ArrayList<>();
         final List<StayRow> upcoming = new ArrayList<>(); // signed leases that have not started
         final List<String> publicListings = new ArrayList<>();
+        final List<BranchOverviewListingRow> linkedListings = new ArrayList<>();
         final List<Payment> payments = new ArrayList<>();
     }
 
@@ -111,6 +112,7 @@ public class BranchOverviewService {
                 .filter(k -> listings.containsKey(k.getListingId()) && facts.containsKey(k.getRoomId()))
                 .collect(Collectors.toMap(BranchRoomListing::getListingId, BranchRoomListing::getRoomId));
         listingRooms.forEach((listingId, roomId) -> {
+            facts.get(roomId).linkedListings.add(listings.get(listingId));
             if (listings.get(listingId).publiclyListed(realNow)) facts.get(roomId).publicListings.add(listingId);
         });
 
@@ -154,10 +156,10 @@ public class BranchOverviewService {
             RoomFacts room = facts.get(slot.getId());
             room.payments.sort(order);
             Room view = room(slot.getId(), BranchRoomLinkService.flagOf(slot), room.occupants, room.holds,
-                    room.upcoming, room.publicListings, room.payments, today);
+                    room.upcoming, room.publicListings, room.linkedListings, room.payments, today);
             return new Room(view.roomId(), view.status(), view.tenantName(), view.target(), view.nextStay(),
                     view.payments(), meters.getOrDefault(slot.getId(), List.of()),
-                    expiries.getOrDefault(slot.getId(), List.of()));
+                    expiries.getOrDefault(slot.getId(), List.of()), view.listingStatus());
         }).toList();
         return new BranchOverviewResponse(branchId, selected.toString(), now, realNow, rooms, unplaced);
     }
@@ -250,9 +252,10 @@ public class BranchOverviewService {
         }
     }
 
-    /** Room status precedence: living tenant, hold reached, move-in ahead, manual flag, public listing, vacant. */
+    /** Room status precedence: living tenant, hold reached, move-in ahead, manual flag, public listing, vacant (linked listing), unlinked. */
     static Room room(String roomId, RoomManualStatus flag, List<StayRow> occupants, List<StayRow> holds,
-                     List<StayRow> upcoming, List<String> publicListings, List<Payment> items, LocalDate today) {
+                     List<StayRow> upcoming, List<String> publicListings, List<BranchOverviewListingRow> linked,
+                     List<Payment> items, LocalDate today) {
         PaymentLayer layer = new PaymentLayer(
                 items.isEmpty() ? BranchOverviewResponse.PaymentStatus.NONE : items.getFirst().status(),
                 items.size(), List.copyOf(items));
@@ -278,7 +281,11 @@ public class BranchOverviewService {
             return new Room(roomId, RoomStatus.ADVERTISED, null, new Target(TargetKind.LISTING, listingId,
                     "/dashboard/properties/view?id=" + encode(listingId)), null, layer);
         }
-        return new Room(roomId, RoomStatus.VACANT, null, null, null, layer);
+        BranchOverviewListingRow first = linked.stream().min(Comparator.comparing(BranchOverviewListingRow::id)).orElse(null);
+        if (first == null) return new Room(roomId, RoomStatus.UNLINKED, null, null, null, layer);
+        return new Room(roomId, RoomStatus.VACANT, null, new Target(TargetKind.LISTING, first.id(),
+                "/dashboard/properties/view?id=" + encode(first.id())), null, layer, List.of(), List.of(),
+                first.operationalStatus().name());
     }
 
     // The add* methods are shared with the attention list; public so a call through the transactional proxy reaches

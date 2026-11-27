@@ -7,9 +7,13 @@ import java.time.Instant;
 /** Column projection for the branch overview. */
 public record BranchOverviewListingRow(String id, ListingStatus status, ListingStatus reviewOperationalStatus,
                                        Instant expiresAt) {
-    public boolean publiclyListed(Instant realNow) {
-        ListingStatus operational = status == ListingStatus.PENDING_REVIEW && reviewOperationalStatus != null
+    /** Same rule as Listing.getOperationalStatus(). */
+    public ListingStatus operationalStatus() {
+        return status == ListingStatus.PENDING_REVIEW && reviewOperationalStatus != null
                 ? reviewOperationalStatus : status;
-        return operational == ListingStatus.PUBLISHED && (expiresAt == null || realNow.isBefore(expiresAt));
+    }
+
+    public boolean publiclyListed(Instant realNow) {
+        return operationalStatus() == ListingStatus.PUBLISHED && (expiresAt == null || realNow.isBefore(expiresAt));
     }
 }
