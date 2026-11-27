@@ -29,9 +29,10 @@ public abstract class AddressFields extends BaseEntity {
     @Version private Long version;
     @PrePersist protected void initializeId() { if(id==null || id.isBlank()) id=UUID.randomUUID().toString(); }
     public void copyAddressFrom(AddressFields s) {
-        refId=s.refId; display=s.display; name=s.name; houseNumber=s.houseNumber; street=s.street;
-        address=s.address; cityId=s.cityId; city=s.city; districtId=s.districtId; district=s.district;
-        wardId=s.wardId; ward=s.ward; latitude=s.latitude; longitude=s.longitude;
-        addressNote=s.addressNote; resolvedAt=s.resolvedAt;
+        // Read through getters: a lazy Hibernate proxy keeps its own fields null.
+        refId=s.getRefId(); display=s.getDisplay(); name=s.getName(); houseNumber=s.getHouseNumber(); street=s.getStreet();
+        address=s.getAddress(); cityId=s.getCityId(); city=s.getCity(); districtId=s.getDistrictId(); district=s.getDistrict();
+        wardId=s.getWardId(); ward=s.getWard(); latitude=s.getLatitude(); longitude=s.getLongitude();
+        addressNote=s.getAddressNote(); resolvedAt=s.getResolvedAt();
     }
 }

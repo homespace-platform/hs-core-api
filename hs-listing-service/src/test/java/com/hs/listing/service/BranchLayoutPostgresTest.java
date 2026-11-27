@@ -56,7 +56,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class BranchLayoutPostgresTest {
     @SpringBootConfiguration
     @EntityScan("com.hs")
-    @EnableJpaRepositories(basePackageClasses = PropertyBranchRepository.class)
+    @EnableJpaRepositories(basePackageClasses = {PropertyBranchRepository.class, com.hs.storage.repository.StorageObjectRepository.class})
     static class Config {}
 
     private static final String OWNER = "owner-a";
@@ -64,6 +64,9 @@ class BranchLayoutPostgresTest {
     @Autowired BranchLayoutService service;
     @Autowired PropertyBranchRepository branches;
     @Autowired JdbcTemplate jdbc;
+    @Autowired com.hs.storage.repository.StorageObjectRepository storage;
+    @Autowired com.hs.listing.repository.ListingRepository listings;
+    @Autowired com.hs.listing.repository.ListingAddressRepository listingAddresses;
     @Autowired PlatformTransactionManager transactions;
 
     @Test
@@ -185,6 +188,59 @@ class BranchLayoutPostgresTest {
 
         assertTrue(branches.findByIdAndOwnerIdAndActiveTrue(id, OWNER).isPresent());
         assertEquals(new BranchLayoutResponse(0, List.of()), service.getLayout(id, OWNER));
+    }
+
+    @Test
+    void newBranchListingCopiesTheLazyBranchAddress() {
+        var a = new com.hs.listing.model.BranchAddress();
+        a.setRefId("vm:branch"); a.setDisplay("Branch display"); a.setStreet("Le Loi"); a.setAddress("1 Le Loi");
+        a.setCityId("c1"); a.setCity("City"); a.setWardId("w1"); a.setWard("Ward");
+        a.setLatitude(new java.math.BigDecimal("10.1234567")); a.setLongitude(new java.math.BigDecimal("106.1234567"));
+        a.setResolvedAt(java.time.Instant.now());
+        var b = PropertyBranch.builder().id(UUID.randomUUID().toString()).ownerId(OWNER).name("B")
+                .category(ListingCategory.ROOM).address(a).build();
+        branches.saveAndFlush(b);
+        var statuses = org.mockito.Mockito.mock(ListingStatusService.class);
+        org.mockito.Mockito.doAnswer(c -> { ((com.hs.listing.model.Listing) c.getArgument(0))
+                .setStatus(com.hs.listing.model.constant.ListingStatus.DRAFT); return null; })
+                .when(statuses).applySubmission(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        
+        var object = new com.hs.storage.model.StorageObject(); object.setId(UUID.randomUUID().toString()); object.setOwnerId(OWNER);
+        object.setStatus(com.hs.storage.model.constant.StorageStatus.READY); object.setActive(true);
+        object.setPurpose(com.hs.storage.model.constant.StoragePurpose.LISTING_IMAGE); object.setContentType("image/jpeg");
+        object.setObjectKey("listings/" + object.getId()); object.setOriginalName("t.jpg"); object.setBucketName("b"); object.setSizeBytes(1L); object.setVisibility(com.hs.storage.model.constant.StorageVisibility.PRIVATE);
+        storage.saveAndFlush(object);
+        var service = new ListingService(listings, listingAddresses, storage,
+                org.mockito.Mockito.mock(com.hs.storage.service.StorageService.class),
+                org.mockito.Mockito.mock(com.hs.listing.repository.AmenityRepository.class),
+                org.mockito.Mockito.mock(com.hs.listing.repository.FurnishingItemRepository.class),
+                statuses, branches, org.mockito.Mockito.mock(ListingPolicyService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "mapper", new com.fasterxml.jackson.databind.ObjectMapper());
+        var pricing = new com.hs.listing.dto.request.ListingPricingRequest(java.math.BigDecimal.valueOf(4000000), "VND",
+                com.hs.listing.model.constant.PriceUnit.MONTH, false, com.hs.listing.model.constant.DepositType.FIXED_AMOUNT,
+                java.math.BigDecimal.valueOf(4000000), null, com.hs.listing.model.constant.PaymentCycle.MONTHLY, 12, false);
+        var room = new com.hs.listing.dto.request.RoomDetailRequest("R1", 2,
+                com.hs.listing.model.constant.ListingEnums.RestroomType.PRIVATE, com.hs.listing.model.constant.ListingEnums.KitchenType.PRIVATE,
+                true, com.hs.listing.model.constant.ListingEnums.BalconyType.PRIVATE, false,
+                com.hs.listing.model.constant.FurnishingStatus.UNFURNISHED, com.hs.listing.model.constant.ListingEnums.AccessType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.AccessHoursType.FLEXIBLE, com.hs.listing.model.constant.ListingEnums.MeterType.PRIVATE,
+                com.hs.listing.model.constant.ListingEnums.MeterType.PRIVATE, 2, 2, com.hs.listing.model.constant.ListingEnums.ParkingPolicy.FREE);
+        var source = new com.hs.listing.dto.request.ListingAddressSourceRequest(
+                com.hs.listing.model.constant.ListingEnums.AddressSourceType.NEW, null,
+                new com.hs.listing.dto.request.ListingAddressRequest("vm:ignored", null));
+        var req = new com.hs.listing.dto.request.CreateListingRequest(null, null, b.getId(),
+                com.hs.listing.model.constant.ListingSubmissionAction.SAVE_DRAFT, "Title", "Description of property listing",
+                ListingCategory.ROOM, java.time.LocalDate.now(), java.math.BigDecimal.valueOf(25), null, null, pricing,
+                null, null, null, null, room, null, null, null, null, source, List.of(new com.hs.listing.dto.request.ListingMediaRequest(object.getId(), null,
+                com.hs.listing.model.constant.ListingEnums.MediaType.IMAGE, 0, true)), List.of(), List.of(), List.of(), null);
+
+        // A new transaction has an empty persistence context, so the branch address is a lazy proxy.
+        var id = new TransactionTemplate(transactions).execute(s -> service.upsert(OWNER, req).id());
+
+        assertEquals(List.of("vm:branch|Branch display|1 Le Loi|Ward"), jdbc.query(
+                "select ref_id||'|'||display||'|'||address||'|'||ward from listing_addresses where listing_id = ?",
+                (rs, i) -> rs.getString(1), id));
     }
 
     private void assertOtherOwnerCannotAccess(String branchId, long revision) {
