@@ -53,7 +53,7 @@ class VnptKycPostgresTest {
     @Autowired jakarta.persistence.EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager manager;
-    @BeforeEach void reset(){steps.deleteAllInBatch();details.deleteAllInBatch();verifications.deleteAllInBatch();users.deleteAllInBatch();jdbc.execute("ALTER TABLE users DROP COLUMN IF EXISTS cccd");}
+    @BeforeEach void reset(){com.hs.common.security.SecretCrypto.configure("pg-test-secret");steps.deleteAllInBatch();details.deleteAllInBatch();verifications.deleteAllInBatch();users.deleteAllInBatch();jdbc.execute("ALTER TABLE users DROP COLUMN IF EXISTS cccd");}
     void user(String id){User u=new User();u.setId(id);u.setUsername(id);u.setEmail(id+"@example.invalid");users.saveAndFlush(u);}
     @Test void expiryNoticeQuerySuppressesOlderAttemptsAndExplicitlyCancelledSessions() {
         user("alice");var now=Instant.now();var page=org.springframework.data.domain.PageRequest.of(0,100);
@@ -128,7 +128,7 @@ class VnptKycPostgresTest {
 
     @Test void detailsWriteFailureRollsBackCitizenClaimAndVerification() {
         user("alice");String id=store.start("alice").sessionId();proof(id);
-        jdbc.execute("ALTER TABLE user_kyc_details ADD CONSTRAINT test_details_failure CHECK (cccd <> '001234567890')");
+        jdbc.execute("ALTER TABLE user_kyc_details ADD CONSTRAINT test_details_failure CHECK (cccd_hash IS NULL)");
         try {
             assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->store.finalizeAttempt("alice",id));
             assertNull(users.findById("alice").orElseThrow().getCccd());
@@ -161,6 +161,33 @@ class VnptKycPostgresTest {
         assertThrows(IllegalStateException.class, () -> new com.hs.user.config.database.CccdUniquenessInitializer(jdbc, manager).run());
         assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM users WHERE cccd IS NOT NULL", Integer.class));
         assertEquals(0, details.count());
+    }
+
+    @Test void cccdIsEncryptedAtRestAndHashIsUniqueAcrossUsers() {
+        user("alice");user("bob");
+        var a=new UserKycDetails();a.setUserId("alice");a.setCccd("001234567890");a.setFullName("Nguyen A");details.saveAndFlush(a);
+        assertTrue(jdbc.queryForObject("SELECT cccd FROM user_kyc_details WHERE user_id='alice'",String.class).startsWith("v1:"));
+        assertTrue(jdbc.queryForObject("SELECT full_name FROM user_kyc_details WHERE user_id='alice'",String.class).startsWith("v1:"));
+        entityManager.clear();
+        assertEquals("001234567890",details.findById("alice").orElseThrow().getCccd());
+        assertEquals("001234567890",users.findById("alice").orElseThrow().getCccd());
+        var b=new UserKycDetails();b.setUserId("bob");b.setCccd(" 001234567890");
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class,()->details.saveAndFlush(b));
+    }
+
+    @Test void legacyPlaintextRowsAreEncryptedIdempotently() {
+        user("alice");
+        jdbc.update("INSERT INTO user_kyc_details (user_id, cccd, full_name) VALUES ('alice','001234567890','Nguyen A')");
+        var init=new com.hs.user.config.database.CccdUniquenessInitializer(jdbc, manager);
+        var job=new com.hs.user.config.database.KycEncryptionMigration(jdbc, manager);
+        init.run();job.run();
+        String once=jdbc.queryForObject("SELECT cccd FROM user_kyc_details WHERE user_id='alice'",String.class);
+        init.run();job.run();
+        assertEquals(once,jdbc.queryForObject("SELECT cccd FROM user_kyc_details WHERE user_id='alice'",String.class));
+        assertTrue(once.startsWith("v1:"));
+        assertNotNull(jdbc.queryForObject("SELECT cccd_hash FROM user_kyc_details WHERE user_id='alice'",String.class));
+        entityManager.clear();
+        assertEquals("Nguyen A",details.findById("alice").orElseThrow().getFullName());
     }
 
     private void proof(String attempt) {
