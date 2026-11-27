@@ -165,3 +165,4 @@ JUnit chạy bằng `mvnw.cmd -o -B` với các tham số `-D` được quote. L
 - Còn lại: draft sync (`ContractListingSync`) khi tin chuyển A→B vẫn theo master; khoá lúc ký chỉ có unit test, chưa test đua PostgreSQL; chưa thử tay.
 - 2026-11-27 · Lượt 3 (Opus điều phối tự động, Sonnet code, không Codex): xem cuối `04-cau-hoi.md`.
 - 2026-11-27 · Lượt 3 xong: core `b23e25f` (UNLINKED/VACANT), `0679927` (roomCode); web `b5560d9`, `6f33ec1`, `e2c3ba0`; mobile `51979bd`, `02d25da`. Đã push cả ba. Chưa merge `master`; chưa thử tay giao diện mới.
+- 2026-11-27 · Lớp Hợp đồng ghi rõ ngày: core `364a90d` (ExpiryStatus LONG, dùng ContractLeaseCalc thay công thức riêng), web `922dde4`, mobile `2a482e5`. Ghi chú: phụ lục đổi thời hạn cập nhật ngày kết thúc khi ký xong (giống vòng đời HĐ và hoá đơn), không đợi ngày hiệu lực.

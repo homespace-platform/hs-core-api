@@ -78,3 +78,8 @@ Nguyên văn: "hãy điều phối agent tự động tôi ko điều khiển m�
 - Web: ở lớp **Phòng**, bấm ô luôn mở bảng phòng (tới hợp đồng thêm 1 lần bấm "Mở hợp đồng"); các lớp khác vẫn mở thẳng trang đích. Lý do: bảng phòng là nơi duy nhất có đủ thao tác gắn/gỡ.
 - Web: danh sách chọn tin tải 100 mục/trang, ô tìm kiếm chỉ lọc trong trang đã tải (API chưa có tham số tìm). Đủ cho chi nhánh vừa và nhỏ; cần tìm phía server nếu có chi nhánh trên 100 tin.
 - Web: không cho thoát chế độ Sửa sơ đồ khi còn thay đổi chưa lưu.
+
+## Chủ dự án 27/11 · Lớp Hợp đồng ghi rõ ngày
+- API overview: `ExpiryStatus` thêm **`LONG`** (còn trên 60 ngày). `rooms[].contracts[]` trả một dòng cho **mỗi HĐ gốc đang chiếm phòng** (như hiện nay nhưng bỏ ngưỡng 60 ngày), luôn kèm `endDateExclusive` và `daysRemaining` (có thể ≤ 0 khi HĐ đã hết hạn mà chưa bàn giao).
+- "Cần chú ý" (LEASE_EXPIRING) và thông báo gộp vẫn chỉ tính WITHIN_30/WITHIN_60, không đổi số việc.
+- Client: nhãn ô theo từng dòng: `daysRemaining > 0` → "Còn N ngày · hết dd/MM/yyyy" (ngày cuối = endDateExclusive − 1); `≤ 0` → "Hết hạn dd/MM/yyyy · chưa bàn giao". Danh sách rỗng: phòng OCCUPIED → "Còn hạn trên 60 ngày" (server cũ), khác → "Không có hợp đồng". Nhóm chú giải: ≤30, 31–60, trên 60, không có hợp đồng.
