@@ -89,7 +89,7 @@ class VnptKycPostgresTest {
             var b=pool.submit(()->{start.await();return new TransactionTemplate(manager).execute(tx->claims.claimInCurrentTransaction("bob","001234567890"));});start.countDown();
             assertNotEquals(a.get(15,TimeUnit.SECONDS),b.get(15,TimeUnit.SECONDS));
         }
-        assertEquals(1,jdbc.queryForObject("select count(*) from user_kyc_details where cccd = '001234567890'",Integer.class));
+        assertEquals(1,jdbc.queryForObject("select count(*) from user_kyc_details where cccd_hash is not null and user_id in ('alice','bob')",Integer.class));
     }
     @Test void cancelBlocksLateProviderResultAndDuplicateReservationCannotSpendAgain() {
         user("alice");String id=store.start("alice").sessionId();
