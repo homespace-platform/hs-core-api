@@ -158,3 +158,8 @@ JUnit chạy bằng `mvnw.cmd -o -B` với các tham số `-D` được quote. L
 - Đã commit và push cả 4 repo trên `feature/branch-monitoring`. CHƯA merge `master`.
 - Còn để sau: Q13 (phụ lục đổi xe/thời hạn/bãi sau gia hạn), Q14, các ca ghi đồng thời. Việc chủ dự án làm cuối: thử tay, xem quyết định, merge, deploy (notification, core, web).
 - 27/11 · Lượt 2 (Opus giám sát, Sonnet code, không dùng Codex): sửa R-A..R-D theo cuối `04-cau-hoi.md`. Nhật ký `nhat-ky/R2-*.md`.
+
+## 27/11 · Lượt 2 xong (Opus giám sát, Sonnet code)
+- R-A, R-B, R-C (`nhat-ky/R2-PARKING.md`) và R-D (`nhat-ky/R2-LAYOUT.md`) đã sửa, điều phối review diff. Core gộp: unit 7 module 0 lỗi; PG BranchAssociations 22/22 trên bản gộp; BranchCapacityRace 1/1, Phase03 31/31, RentalWorkflowHttp 1/1, BranchLayout 4/4 chạy trước khi gộp.
+- Web `19d4e56`, mobile `04712a4` gửi `acknowledgedDetach`. Đã push cả 4 repo trên `feature/branch-monitoring`; CHƯA merge `master`.
+- Còn lại: draft sync (`ContractListingSync`) khi tin chuyển A→B vẫn theo master; khoá lúc ký chỉ có unit test, chưa test đua PostgreSQL; chưa thử tay.
