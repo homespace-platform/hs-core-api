@@ -108,6 +108,23 @@ class BranchLayoutServiceTest {
     }
 
     @Test
+    void acknowledgementIsCheckedAfterStaleRevisionAndValidationAndSizeCapped() {
+        fixture();
+        var ack = new SaveBranchLayoutRequest.AcknowledgedDetach(List.of("l"), List.of());
+        var stale = new SaveBranchLayoutRequest(4L, List.of(), ack);
+        assertEquals(ListingErrorCode.BRANCH_LAYOUT_STALE.getCode(),
+                assertThrows(AppException.class, () -> service.saveLayout(BRANCH, OWNER, stale)).getCode());
+        var tooMany = new SaveBranchLayoutRequest.AcknowledgedDetach(
+                java.util.Collections.nCopies(5001, "l"), List.of());
+        var nullId = new SaveBranchLayoutRequest.AcknowledgedDetach(List.of(), Arrays.asList("c", null));
+        for (var bad : List.of(tooMany, nullId)) {
+            assertEquals(ListingErrorCode.BRANCH_LAYOUT_INVALID.getCode(), assertThrows(AppException.class,
+                    () -> service.saveLayout(BRANCH, OWNER, new SaveBranchLayoutRequest(5L, List.of(), bad))).getCode());
+        }
+        verifyNoInteractions(floors, rows, slots);
+    }
+
+    @Test
     void staleRevisionDoesNotReadOrModifyTheTree() {
         fixture();
         var error = assertThrows(AppException.class,

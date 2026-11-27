@@ -79,7 +79,8 @@ public enum ListingErrorCode implements AppException.ErrorCode {
     LISTING_ALREADY_IN_ROOM(4079, "Tin đăng đang gắn phòng khác. Hãy gỡ khỏi phòng đó trước.", HttpStatus.CONFLICT),
     BRANCH_ROOM_STATUS_CONFLICT(4090, "Trạng thái thuê ngoài/sửa chữa mâu thuẫn với lượt thuê đang có ở phòng này.", HttpStatus.CONFLICT),
     LISTING_ROOM_INVALID(4091, "Phòng được chọn không hợp lệ hoặc không còn trong sơ đồ chi nhánh. Chỉ được gắn phòng khi tạo tin mới; vui lòng chọn lại phòng.", HttpStatus.BAD_REQUEST),
-    BRANCH_ASSIGNMENT_INVALID(4092, "Yêu cầu liên kết phòng không hợp lệ", HttpStatus.BAD_REQUEST);
+    BRANCH_ASSIGNMENT_INVALID(4092, "Yêu cầu liên kết phòng không hợp lệ", HttpStatus.BAD_REQUEST),
+    BRANCH_LAYOUT_LINKS_CHANGED(4093, "Các liên kết tin đăng/hợp đồng của phòng bị bỏ đã thay đổi so với lúc bạn xem. Vui lòng tải lại rồi xác nhận lại.", HttpStatus.CONFLICT);
 
     private final int code;
     private final String message;

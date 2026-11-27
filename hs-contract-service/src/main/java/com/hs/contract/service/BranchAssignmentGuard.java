@@ -41,6 +41,12 @@ public class BranchAssignmentGuard implements BranchContractLinkGuard {
     }
 
     @Override
+    public Set<String> contractsInRooms(Collection<String> roomIds) {
+        return assignments.findRoomContracts(roomIds).stream().map(BranchRoomContract::contractId)
+                .collect(Collectors.toSet());
+    }
+
+    @Override
     public void unplaceContracts(Collection<String> roomIds) {
         assignments.unplaceRooms(roomIds);
     }

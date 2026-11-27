@@ -16,7 +16,18 @@ import java.util.List;
  */
 public record SaveBranchLayoutRequest(
         @JsonDeserialize(using = StrictLong.class) Long expectedRevision,
-        List<Floor> floors) {
+        List<Floor> floors,
+        AcknowledgedDetach acknowledgedDetach) {
+
+    public SaveBranchLayoutRequest(Long expectedRevision, List<Floor> floors) {
+        this(expectedRevision, floors, null);
+    }
+
+    /** Links the user agreed to detach; the whole field absent means an old client that is not asking. */
+    public record AcknowledgedDetach(
+            @JsonDeserialize(contentUsing = StrictString.class) List<String> listingIds,
+            @JsonDeserialize(contentUsing = StrictString.class) List<String> contractIds) {
+    }
 
     public record Floor(
             @JsonDeserialize(using = StrictString.class) String id,

@@ -29,6 +29,8 @@ import org.springframework.test.web.servlet.ResultActions;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -122,6 +124,35 @@ class BranchLayoutApiTest {
         when(service.saveLayout(eq("branch-a"), eq("owner-a"), any()))
                 .thenThrow(new AppException(ListingErrorCode.BRANCH_LAYOUT_STALE));
         putLayout(BODY).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value(4074));
+    }
+
+    @Test
+    void bindsAcknowledgedDetachAndKeepsItAbsentWhenOmitted() throws Exception {
+        login("owner-a", "USER", Permissions.LISTING_POST);
+        when(service.saveLayout(eq("branch-a"), eq("owner-a"), any())).thenReturn(new BranchLayoutResponse(1, List.of()));
+        putLayout(BODY.replace("\"expectedRevision\":0,", "\"expectedRevision\":0,\"acknowledgedDetach\":"
+                + "{\"listingIds\":[\"l1\"],\"contractIds\":[]},")).andExpect(status().isOk());
+        putLayout(BODY).andExpect(status().isOk());
+        var captor = org.mockito.ArgumentCaptor.forClass(SaveBranchLayoutRequest.class);
+        verify(service, times(2)).saveLayout(eq("branch-a"), eq("owner-a"), captor.capture());
+        assertEquals(new SaveBranchLayoutRequest.AcknowledgedDetach(List.of("l1"), List.of()),
+                captor.getAllValues().get(0).acknowledgedDetach());
+        assertNull(captor.getAllValues().get(1).acknowledgedDetach());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"listingIds\":[1],\"contractIds\":[]}", "{\"listingIds\":[true],\"contractIds\":[]}",
+            "{\"listingIds\":[],\"contractIds\":[null,{}]}", "{\"listingIds\":\"l1\",\"contractIds\":[]}", "[]", "\"x\""})
+    void rejectsWrongAcknowledgedDetachTypes(String ack) throws Exception {
+        assertRejectsBody(BODY.replace("\"expectedRevision\":0,", "\"expectedRevision\":0,\"acknowledgedDetach\":" + ack + ","));
+    }
+
+    @Test
+    void linksChangedIs409With4093() throws Exception {
+        login("owner-a", "USER", Permissions.LISTING_POST);
+        when(service.saveLayout(eq("branch-a"), eq("owner-a"), any()))
+                .thenThrow(new AppException(ListingErrorCode.BRANCH_LAYOUT_LINKS_CHANGED));
+        putLayout(BODY).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value(4093));
     }
 
     @ParameterizedTest

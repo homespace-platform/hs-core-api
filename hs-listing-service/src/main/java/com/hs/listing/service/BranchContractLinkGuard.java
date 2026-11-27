@@ -11,6 +11,9 @@ public interface BranchContractLinkGuard {
     /** Rooms that hold an effective lease or an accepted rental request still waiting for its lease. */
     Set<String> occupiedRooms(Collection<String> roomIds);
 
+    /** Contracts that unplaceContracts would move to the tray. */
+    Set<String> contractsInRooms(Collection<String> roomIds);
+
     /** Moves every contract of these rooms to the unplaced tray. */
     void unplaceContracts(Collection<String> roomIds);
 }

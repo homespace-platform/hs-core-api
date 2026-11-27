@@ -296,6 +296,35 @@ class BranchAssociationsPostgresTest {
     }
 
     @Test
+    void layoutSaveWithAcknowledgementRejectsLinksAddedAfterTheReadAndWritesNothing() {
+        var map = map();
+        var first = listing(map.id(), OWNER);
+        var ended = lease(rental(listing(null, OWNER), TODAY), ContractStatus.EXPIRED);
+        closures.saveAndFlush(ContractClosure.builder().contractId(ended.getId()).status("REFUND_PENDING")
+                .acceptedAt(TODAY.atStartOfDay(BillingTime.ZONE).toInstant()).build());
+        roomLinks.link(map.id(), OWNER, map.room(), first.getId());
+        service.attach(map.id(), OWNER, ended.getId(), map.room());
+        var acknowledged = new SaveBranchLayoutRequest.AcknowledgedDetach(List.of(first.getId()), List.of(ended.getId()));
+        // Another transaction links one more listing after the user looked.
+        var added = listing(map.id(), OWNER);
+        roomLinks.link(map.id(), OWNER, map.room(), added.getId());
+        var save = map.removeFirst();
+        var stale = new SaveBranchLayoutRequest(save.expectedRevision(), save.floors(), acknowledged);
+        assertEquals(ListingErrorCode.BRANCH_LAYOUT_LINKS_CHANGED.getCode(),
+                assertThrows(AppException.class, () -> layouts.saveLayout(map.id(), OWNER, stale)).getCode());
+        assertTrue(slots.existsById(map.room()));
+        assertEquals(2, listingLinks.findAllInBranch(map.id()).size());
+        assertEquals(map.room(), links.findById(ended.getId()).orElseThrow().getRoomId());
+        assertEquals(map.tree().revision(), layouts.getLayout(map.id(), OWNER).revision());
+
+        var exact = new SaveBranchLayoutRequest(save.expectedRevision(), save.floors(),
+                new SaveBranchLayoutRequest.AcknowledgedDetach(List.of(first.getId(), added.getId()), List.of(ended.getId())));
+        layouts.saveLayout(map.id(), OWNER, exact);
+        assertTrue(listingLinks.findAllInBranch(map.id()).isEmpty());
+        assertNull(links.findById(ended.getId()).orElseThrow().getRoomId());
+    }
+
+    @Test
     void endedLeaseInTrayBlocksBranchDeleteUntilDetached() {
         var map = map();
         var ended = lease(rental(listing(null, OWNER), TODAY), ContractStatus.CLOSED);

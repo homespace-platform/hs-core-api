@@ -2,6 +2,7 @@ package com.hs.listing.service;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.listing.advice.ListingErrorCode;
+import com.hs.listing.dto.request.SaveBranchLayoutRequest;
 import com.hs.listing.dto.response.ListingBranchRef;
 import com.hs.listing.model.BranchRoomListing;
 import com.hs.listing.model.BranchSlot;
@@ -135,6 +136,11 @@ public class BranchRoomLinkService {
 
     /** Rooms leaving the layout. Runs under the branch lock and throws before anything is written. */
     public void releaseRooms(Collection<BranchSlot> rooms) {
+        releaseRooms(rooms, null);
+    }
+
+    /** With a non-null acknowledgement, everything this would detach must be inside it, else 4093 and nothing changes. */
+    public void releaseRooms(Collection<BranchSlot> rooms, SaveBranchLayoutRequest.AcknowledgedDetach ack) {
         Map<String, String> codes = rooms.stream()
                 .collect(Collectors.toMap(BranchSlot::getId, BranchSlot::getRoomCode));
         if (contractLinks != null) {
@@ -144,9 +150,20 @@ public class BranchRoomLinkService {
                 throw new AppException(ListingErrorCode.BRANCH_ROOM_IN_USE, "Không thể bỏ phòng " + names
                         + " vì còn hợp đồng hiệu lực hoặc khách đang giữ chỗ. Hãy chuyển hoặc gỡ liên kết trước.");
             }
-            contractLinks.unplaceContracts(codes.keySet());
         }
+        if (ack != null) {
+            if (!orEmpty(ack.listingIds()).containsAll(linkRepository.findListingIdsByRoomIds(codes.keySet()))
+                    || contractLinks != null
+                    && !orEmpty(ack.contractIds()).containsAll(contractLinks.contractsInRooms(codes.keySet()))) {
+                throw new AppException(ListingErrorCode.BRANCH_LAYOUT_LINKS_CHANGED);
+            }
+        }
+        if (contractLinks != null) contractLinks.unplaceContracts(codes.keySet());
         linkRepository.deleteByRoomIds(codes.keySet());
+    }
+
+    private static Set<String> orEmpty(List<String> ids) {
+        return ids == null ? Set.of() : new HashSet<>(ids);
     }
 
     public static RoomManualStatus flagOf(BranchSlot room) {

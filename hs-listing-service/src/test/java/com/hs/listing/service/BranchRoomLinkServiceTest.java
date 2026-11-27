@@ -2,6 +2,7 @@ package com.hs.listing.service;
 
 import com.hs.common.advice.entity.AppException;
 import com.hs.listing.advice.ListingErrorCode;
+import com.hs.listing.dto.request.SaveBranchLayoutRequest;
 import com.hs.listing.dto.response.ListingBranchRef;
 import com.hs.listing.model.BranchRoomListing;
 import com.hs.listing.model.BranchSlot;
@@ -87,6 +88,38 @@ class BranchRoomLinkServiceTest {
         var ordered = inOrder(guard, links);
         ordered.verify(guard).unplaceContracts(Set.of("r"));
         ordered.verify(links).deleteByRoomIds(Set.of("r"));
+    }
+
+    @Test
+    void acknowledgedDetachMustCoverEveryLinkOrNothingIsWritten() {
+        ReflectionTestUtils.setField(service, "contractLinks", guard);
+        var room = slot(null, "r", "101");
+        when(links.findListingIdsByRoomIds(anyCollection())).thenReturn(List.of("l1", "l2"));
+        when(guard.contractsInRooms(anyCollection())).thenReturn(Set.of("c1"));
+        java.util.function.BiConsumer<List<String>, List<String>> save = (l, c) ->
+                service.releaseRooms(List.of(room), new SaveBranchLayoutRequest.AcknowledgedDetach(l, c));
+        for (var bad : List.of(List.of(List.of("l1"), List.of("c1")), List.of(List.of("l1", "l2"), List.<String>of()))) {
+            assertEquals(ListingErrorCode.BRANCH_LAYOUT_LINKS_CHANGED.getCode(),
+                    assertThrows(AppException.class, () -> save.accept(bad.get(0), bad.get(1))).getCode());
+        }
+        verify(guard, never()).unplaceContracts(anyCollection());
+        verify(links, never()).deleteByRoomIds(anyCollection());
+        save.accept(List.of("l1", "l2", "extra"), List.of("c1", "extra"));
+        verify(guard).unplaceContracts(Set.of("r"));
+        verify(links).deleteByRoomIds(Set.of("r"));
+    }
+
+    @Test
+    void absentAcknowledgementKeepsOldBehaviourAndOccupiedRoomStill4075() {
+        ReflectionTestUtils.setField(service, "contractLinks", guard);
+        var room = slot(null, "r", "101");
+        service.releaseRooms(List.of(room), null);
+        verify(links, never()).findListingIdsByRoomIds(anyCollection());
+        verify(links).deleteByRoomIds(Set.of("r"));
+        when(guard.occupiedRooms(anyCollection())).thenReturn(Set.of("r"));
+        var ack = new SaveBranchLayoutRequest.AcknowledgedDetach(List.of(), List.of());
+        assertEquals(ListingErrorCode.BRANCH_ROOM_IN_USE.getCode(),
+                assertThrows(AppException.class, () -> service.releaseRooms(List.of(room), ack)).getCode());
     }
 
     @Test

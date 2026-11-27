@@ -25,6 +25,9 @@ public interface BranchRoomListingRepository extends JpaRepository<BranchRoomLis
     @Query("delete from BranchRoomListing k where k.listingId = :listingId")
     void deleteLink(@Param("listingId") String listingId);
 
+    @Query("select k.listingId from BranchRoomListing k where k.roomId in :roomIds")
+    List<String> findListingIdsByRoomIds(@Param("roomIds") Collection<String> roomIds);
+
     @Modifying(flushAutomatically = true)
     @Query("delete from BranchRoomListing k where k.roomId in :roomIds")
     void deleteByRoomIds(@Param("roomIds") Collection<String> roomIds);

@@ -33,6 +33,7 @@ public class BranchLayoutService {
     private static final int MAX_ROWS_PER_FLOOR = 10;
     private static final int MAX_SLOTS_PER_ROW = 100;
     private static final int MAX_SLOTS = 1500;
+    private static final int MAX_ACK_IDS = 5000;
 
     private final PropertyBranchRepository branchRepository;
     private final BranchLayoutRepository layoutRepository;
@@ -95,7 +96,7 @@ public class BranchLayoutService {
         List<BranchSlot> removedRooms = oldSlots.values().stream()
                 .filter(s -> s.getRoomCode() != null && finalCodes.get(s.getId()) == null)
                 .toList();
-        if (roomLinks != null && !removedRooms.isEmpty()) roomLinks.releaseRooms(removedRooms);
+        if (roomLinks != null && !removedRooms.isEmpty()) roomLinks.releaseRooms(removedRooms, request.acknowledgedDetach());
 
         // Hibernate flushes inserts, then updates, then deletes, and PostgreSQL checks the unique room code
         // per statement. So first flush removed slots and release every code that changes; only then write
@@ -162,6 +163,14 @@ public class BranchLayoutService {
 
     // Runs before any tree is loaded; null nodes are left for validate() to reject. Aisles count as slots.
     private void checkSize(SaveBranchLayoutRequest request) {
+        var ack = request.acknowledgedDetach();
+        if (ack != null) {
+            for (var ids : java.util.Arrays.asList(ack.listingIds(), ack.contractIds())) {
+                if (ids == null) continue;
+                if (ids.size() > MAX_ACK_IDS) throw invalid("Danh sách liên kết xác nhận quá dài");
+                if (ids.stream().anyMatch(java.util.Objects::isNull)) throw invalid("Mã liên kết xác nhận không hợp lệ");
+            }
+        }
         if (request.floors() == null) return;
         if (request.floors().size() > MAX_FLOORS) throw invalid("Sơ đồ tối đa " + MAX_FLOORS + " tầng/khu");
         int total = 0;
