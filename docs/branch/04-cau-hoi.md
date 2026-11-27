@@ -50,3 +50,31 @@ Nguyên văn: "bạn giúp tôi chạy đến khi hoàn thành không dừng n�
 - Request thêm trường **tùy chọn** `acknowledgedDetach: { listingIds: string[], contractIds: string[] }`: các liên kết người dùng đã đồng ý cho gỡ (tin trên phòng bị bỏ; HĐ lịch sử bị đưa về khay).
 - Server tính tập sẽ bị gỡ dưới khoá chi nhánh. Nếu trường **có mặt** và tập sẽ gỡ **không nằm trọn** trong tập đã đồng ý → **409, code 4093** `BRANCH_LAYOUT_LINKS_CHANGED`, không ghi gì, revision không đổi. Nếu trường **vắng mặt** → hành vi cũ (tương thích client cũ). HĐ hiệu lực/giữ chỗ vẫn 409/4075 như trước.
 - Client mới **luôn gửi** trường này (danh sách rỗng khi không bỏ phòng nào). Gặp 4093: giữ nháp, đọc lại assignments, hỏi lại rồi gửi lại.
+
+## Chủ dự án 27/11 · Tách trạng thái "Trống"
+Hợp đồng API (overview, lớp Phòng), áp dụng song song core, web, mobile:
+- `RoomStatus` thêm giá trị **`UNLINKED`** ("Chưa gắn tin"): phòng không có tin nào gắn, không có HĐ/giữ chỗ/khách sắp vào, không đánh dấu thuê ngoài/sửa chữa.
+- **`VACANT`** ("Trống") giờ chỉ dành cho phòng **đã gắn ít nhất một tin** nhưng chưa ai thuê và không có tin đang hiển thị. `target` trỏ tới tin đó (`/dashboard/properties/view?id=…`) và thêm trường mới, nullable, **`listingStatus`** = trạng thái vận hành của tin (`getOperationalStatus()`: DRAFT, PENDING_REVIEW, HIDDEN, EXPIRED, REJECTED…). Client hiển thị "Trống · <nhãn trạng thái tin>". Nhiều tin: lấy tin có `id` nhỏ nhất (giống ADVERTISED).
+- Thứ tự ưu tiên giữ nguyên: đang thuê > giữ chỗ > sắp vào > đánh dấu tay > đang đăng tin > trống > chưa gắn tin.
+- "Cần chú ý" loại phòng trống chưa đăng tin vẫn tính cả UNLINKED và VACANT như hiện tại (không đổi số việc).
+
+## Chủ dự án 27/11 · Mã phòng: sơ đồ là chuẩn
+- API: `GET /branches/{id}/assignments` → `rooms[].listings[]` thêm `roomCode: string|null`; `GET /assignment-candidates?kind=LISTING` → `items[]` thêm `roomCode: string|null`. `roomCode` là mã do tin khai báo: phòng trọ = `roomDetail.roomCode`, căn hộ = `apartmentDetail.unitCode`, nhà nguyên căn = null. So khớp sau khi trim và không phân biệt hoa thường.
+- Gắn tin có mã khác mã ô: cảnh báo, nút **"Đổi mã ô thành <mã tin>"** (lưu sơ đồ, hiệu lực ngay) và **"Sửa mã trên tin"** (mở form sửa tin; tin đang hiển thị phải duyệt lại). Không chặn gắn.
+- Danh sách chọn tin hiện mã của từng tin; tin trùng mã ô xếp lên đầu.
+- Ô có tin lệch mã: hiện dấu nhắc nhỏ trên sơ đồ.
+- Đăng tin từ ô: tự điền sẵn mã phòng (trọ) hoặc số căn (căn hộ) bằng mã ô, sửa được. Không đưa mã vào tiêu đề (Q3 giữ nguyên).
+
+## Uỷ quyền 27/11 (lượt 3, chủ dự án treo máy)
+Nguyên văn: "hãy điều phối agent tự động tôi ko điều khiển máy tính! cần câu hỏi thì hãy tự chọn giải pháp và báo đề xuất cho tôi nắm!". Việc: (1) tách "Chưa gắn tin"/"Trống"; (2) mã phòng, sơ đồ là chuẩn; (3) tối ưu giao diện sơ đồ + bảng phòng (web, mobile) cho dễ dùng. Quyết định điều phối chọn thay ghi ngay dưới đây.
+
+### Quyết định điều phối chọn thay (lượt 3)
+- **Tối ưu giao diện (web + mobile)**, mục tiêu "dễ dùng" theo ảnh chủ dự án (bảng phòng quá dài, trộn xem/gắn/sửa ô):
+  - Hai chế độ rõ: **Xem** (mặc định, giám sát) và **Sửa sơ đồ**. Đổi mã, chuyển, xoá ô, đổi thành lối đi chỉ có ở chế độ Sửa.
+  - Bảng phòng ở chế độ Xem theo thứ tự: trạng thái + người thuê/HĐ/tin → **một nút chính** theo tình huống (Mở hợp đồng / Mở tin / Gắn tin / Đăng tin cho phòng này) → mục "Liên kết" (tin, HĐ, gắn/gỡ) → "Đánh dấu phòng". Cảnh báo lệch mã nằm ngay dưới tin liên quan.
+  - Chọn tin/HĐ để gắn: ô tìm kiếm, hiện mã của tin, trùng mã ô lên đầu, mục không gắn được thì ghi lý do ngắn.
+  - Ô sơ đồ: mã to, trạng thái bằng chữ + màu, tên khách khi có, dấu nhắc lệch mã.
+  - Không thêm tính năng ngoài concept, không đổi API ngoài hợp đồng đã ghi.
+- Web: ở lớp **Phòng**, bấm ô luôn mở bảng phòng (tới hợp đồng thêm 1 lần bấm "Mở hợp đồng"); các lớp khác vẫn mở thẳng trang đích. Lý do: bảng phòng là nơi duy nhất có đủ thao tác gắn/gỡ.
+- Web: danh sách chọn tin tải 100 mục/trang, ô tìm kiếm chỉ lọc trong trang đã tải (API chưa có tham số tìm). Đủ cho chi nhánh vừa và nhỏ; cần tìm phía server nếu có chi nhánh trên 100 tin.
+- Web: không cho thoát chế độ Sửa sơ đồ khi còn thay đổi chưa lưu.

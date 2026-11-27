@@ -163,3 +163,5 @@ JUnit chạy bằng `mvnw.cmd -o -B` với các tham số `-D` được quote. L
 - R-A, R-B, R-C (`nhat-ky/R2-PARKING.md`) và R-D (`nhat-ky/R2-LAYOUT.md`) đã sửa, điều phối review diff. Core gộp: unit 7 module 0 lỗi; PG BranchAssociations 22/22 trên bản gộp; BranchCapacityRace 1/1, Phase03 31/31, RentalWorkflowHttp 1/1, BranchLayout 4/4 chạy trước khi gộp.
 - Web `19d4e56`, mobile `04712a4` gửi `acknowledgedDetach`. Đã push cả 4 repo trên `feature/branch-monitoring`; CHƯA merge `master`.
 - Còn lại: draft sync (`ContractListingSync`) khi tin chuyển A→B vẫn theo master; khoá lúc ký chỉ có unit test, chưa test đua PostgreSQL; chưa thử tay.
+- 2026-11-27 · Lượt 3 (Opus điều phối tự động, Sonnet code, không Codex): xem cuối `04-cau-hoi.md`.
+- 2026-11-27 · Lượt 3 xong: core `b23e25f` (UNLINKED/VACANT), `0679927` (roomCode); web `b5560d9`, `6f33ec1`, `e2c3ba0`; mobile `51979bd`, `02d25da`. Đã push cả ba. Chưa merge `master`; chưa thử tay giao diện mới.
