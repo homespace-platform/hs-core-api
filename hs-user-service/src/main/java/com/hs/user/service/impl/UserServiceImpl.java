@@ -276,6 +276,7 @@ public class UserServiceImpl implements UserService {
                                 .lastName(user.getLastName())
                                 .avatarUrl(user.getAvatarUrl())
                                 .kycVerified(identityVerified)
+                                .role(user.getRole() != null ? user.getRole().getName() : null)
                                 .createdAt(user.getCreatedAt())
                                 .provinceName(provinceName)
                                 .build();

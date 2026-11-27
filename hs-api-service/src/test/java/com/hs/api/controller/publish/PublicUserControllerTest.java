@@ -17,12 +17,13 @@ class PublicUserControllerTest {
     void servesProfileByUsernameWithProvinceName() throws Exception {
         var users = mock(UserService.class);
         when(users.getPublicUserProfileByUsername("an")).thenReturn(PublicUserProfileResponse.builder()
-                .id("u1").username("an").provinceName("Ha Noi").build());
+                .id("u1").username("an").role("ADMIN").provinceName("Ha Noi").build());
         var mvc = standaloneSetup(new PublicUserController(users)).build();
 
         mvc.perform(get("/public/users/an")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.result.username").value("an"))
                 .andExpect(jsonPath("$.result.provinceName").value("Ha Noi"))
+                .andExpect(jsonPath("$.result.role").value("ADMIN"))
                 .andExpect(jsonPath("$.result.email").doesNotExist());
     }
 }
