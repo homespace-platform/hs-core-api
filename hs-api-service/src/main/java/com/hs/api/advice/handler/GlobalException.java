@@ -32,7 +32,7 @@ public class GlobalException {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     Object handlingMaxUploadSizeExceeded(MaxUploadSizeExceededException exception, HttpServletRequest request) {
         log.warn("Max upload size exceeded: {}", exception.getMessage());
-        if (request != null && request.getRequestURI() != null && request.getRequestURI().startsWith("/u/")) {
+        if (isLegacyProofUploadPage(request)) {
             ModelAndView mav = new ModelAndView("proof-upload/mobile-upload-error");
             mav.addObject("errorTitle", "Dung lượng tệp quá lớn");
             mav.addObject("errorMessage", "Dung lượng tệp chứng từ vượt quá giới hạn cho phép (tối đa 15MB). Vui lòng chọn ảnh có dung lượng nhỏ hơn.");
@@ -44,7 +44,7 @@ public class GlobalException {
     @ExceptionHandler(MultipartException.class)
     Object handlingMultipartException(MultipartException exception, HttpServletRequest request) {
         log.warn("Multipart exception: {}", exception.getMessage());
-        if (request != null && request.getRequestURI() != null && request.getRequestURI().startsWith("/u/")) {
+        if (isLegacyProofUploadPage(request)) {
             ModelAndView mav = new ModelAndView("proof-upload/mobile-upload-error");
             mav.addObject("errorTitle", "Lỗi tải tệp");
             mav.addObject("errorMessage", "Không thể tiếp nhận tệp tải lên. Vui lòng thử lại với định dạng JPG, PNG hoặc PDF.");
@@ -138,6 +138,12 @@ public class GlobalException {
 
     private ApiResponse<Void> buildErrorResponse(int code, String message) {
         return ApiResponse.<Void>builder().code(code).message(message).build();
+    }
+
+    private static boolean isLegacyProofUploadPage(HttpServletRequest request) {
+        if (request == null || request.getRequestURI() == null) return false;
+        String uri = request.getRequestURI();
+        return uri.startsWith("/u/") && !uri.equals("/u/payment-proof/session");
     }
 
     private record FieldError(String field, String code, String message) {
