@@ -62,6 +62,7 @@ class AdminBlockchainPostgresTest {
         var queue=queries.queue(NOW); assertEquals(4,queue.counts().size());
         assertTrue(queue.counts().values().stream().allMatch(c->c==0)); assertNull(queue.oldest());
         assertEquals(0,queue.stuck()); assertEquals(0,eth.unsettledCount()); assertNull(queries.senderLease());
+        assertEquals(new AdminEthPaymentQueries.Counts(0,0,0),eth.counts());
         assertTrue(queries.proofs(null,null,null,null,PageRequest.of(0,20)).isEmpty());
     }
     @Test void queueUsesStrictRealTimeBoundaryAndTerminalStatesNeverRetry() {
@@ -112,12 +113,25 @@ class AdminBlockchainPostgresTest {
         order("expired","ETH","EXPIRED","0x"+"c".repeat(64)); order("cancelled","ETH","CANCELLED","0x"+"d".repeat(64));
         order("no-tx","ETH","PENDING",null); order("legacy","SEPAY","PENDING","0x"+"e".repeat(64));
         assertEquals(3,eth.unsettledCount());
+        assertEquals(new AdminEthPaymentQueries.Counts(4,1,3),eth.counts());
         var page=eth.payments(true,PageRequest.of(0,2),NOW); assertEquals(3,page.getTotalElements()); assertEquals(2,page.getNumberOfElements());
         assertTrue(page.stream().allMatch(p->!p.status().equals("PAID") && p.ageSeconds()==300));
         assertEquals("123456789123456789",page.getContent().getFirst().amountWei());
         assertEquals(0,new java.math.BigDecimal("123.45").compareTo(page.getContent().getFirst().amountVnd()));
         assertEquals(4,eth.payments(false,PageRequest.of(0,50),NOW).getTotalElements());
         assertFalse(page.toString().contains("private"));
+    }
+    @Test void paidEthRemainsVisibleWithoutAnyContractProofs() {
+        order("paid-only","ETH","PAID",HASH);
+        jdbc.update("update membership_eth_quotes set confirmed_at=? where membership_order_id='paid-only'",java.sql.Timestamp.from(NOW));
+        assertTrue(queries.queue(NOW).counts().values().stream().allMatch(c->c==0));
+        assertEquals(new AdminEthPaymentQueries.Counts(1,1,0),eth.counts());
+        var all=eth.payments(false,PageRequest.of(0,20),NOW);
+        assertEquals(1,all.getTotalElements());
+        assertEquals("PAID",all.getContent().getFirst().status());
+        assertEquals(HASH,all.getContent().getFirst().transactionHash());
+        assertEquals(NOW,all.getContent().getFirst().confirmedAt());
+        assertTrue(eth.payments(true,PageRequest.of(0,20),NOW).isEmpty());
     }
     @Test void migrationIsIdempotentOnCurrentSchema() {
         migration.migrate(); migration.migrate();

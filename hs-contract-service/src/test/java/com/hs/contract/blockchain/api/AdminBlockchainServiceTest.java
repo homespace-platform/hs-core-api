@@ -56,9 +56,11 @@ class AdminBlockchainServiceTest {
     @Test void summaryUsesRealOpsClockNoProvidersAndWhitelistedExplorer() {
         when(reads.queue(NOW)).thenReturn(new AdminBlockchainQueries.Queue(Map.of("PENDING",2L),1,NOW.minusSeconds(900),1,Map.of()));
         when(reads.integrityCounts()).thenReturn(Map.of("MISMATCH",1L));
+        when(payments.counts()).thenReturn(new AdminEthPaymentQueries.Counts(1,1,0));
         config.setRegistryAddress(ADDRESS); config.setRpcUrl("https://secret.example/key"); config.setPrivateKey("secret");
         var summary=service.summary(NOW);
         assertEquals(900,summary.oldestOpenAgeSeconds()); assertNull(summary.workerLastRunAgeSeconds());
+        assertEquals(1,summary.ethTotal()); assertEquals(1,summary.ethPaid()); assertEquals(0,summary.ethUnsettled());
         assertEquals("https://sepolia.etherscan.io",summary.network().explorerBaseUrl()); assertFalse(summary.toString().contains("secret"));
         config.setChainId(999); config.setRegistryAddress("https://evil.example");
         assertNull(service.summary(NOW).network().explorerBaseUrl()); assertNull(service.summary(NOW).network().registryAddress());

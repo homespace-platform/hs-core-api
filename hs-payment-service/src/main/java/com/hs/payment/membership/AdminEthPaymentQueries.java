@@ -19,6 +19,13 @@ public class AdminEthPaymentQueries {
     public record Payment(String orderId, String tier, String kind, BigDecimal amountVnd, String amountWei,
                           String transactionHash, Instant confirmedAt, String status, Instant orderCreatedAt,
                           long ageSeconds, long chainId, String chainSource) {}
+    public record Counts(long total, long paid, long unsettled) {}
+
+    public Counts counts() {
+        return jdbc.queryForObject("select count(*) total, count(*) filter (where o.status='PAID') paid,"
+                + " count(*) filter (where o.status<>'PAID') unsettled" + FROM,
+                (rs, n) -> new Counts(rs.getLong("total"), rs.getLong("paid"), rs.getLong("unsettled")));
+    }
 
     public long unsettledCount() {
         return jdbc.queryForObject("select count(*)" + FROM + " and o.status <> 'PAID'", Long.class);

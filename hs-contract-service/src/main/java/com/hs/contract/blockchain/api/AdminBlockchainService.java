@@ -34,12 +34,13 @@ public class AdminBlockchainService {
     }
     Summary summary(Instant now) {
         var queue = reads.queue(now);
+        var eth = payments.counts();
         return new Summary(now, new Network(config.getChainId(), config.getChainId() == 11155111 ? "Sepolia" : "UNKNOWN",
                 AdminBlockchainQueries.address(config.getRegistryAddress()), config.isEnabled(),
                 config.getChainId() == 11155111 ? "https://sepolia.etherscan.io" : null), queue.counts(), queue.stuck(),
                 queue.oldest() == null ? null : Math.max(0, Duration.between(queue.oldest(), now).getSeconds()), queue.retrying(),
                 queue.errors(), reads.openIncidents(), reads.senderLease(), new Integrity(reads.integrityCounts(),
-                "Latest explicit check only; results may be stale. UNCHECKED includes legacy documents."), payments.unsettledCount(),
+                "Latest explicit check only; results may be stale. UNCHECKED includes legacy documents."), eth.unsettled(), eth.total(), eth.paid(),
                 null, Map.of("workerLastRun", "UNAVAILABLE_NO_PERSISTED_JOB_RUNS", "integrity", "LATEST_EXPLICIT_CHECK_ONLY",
                         "ethChain", "ASSUMED_SEPOLIA_NO_STORED_CHAIN_ID"));
     }

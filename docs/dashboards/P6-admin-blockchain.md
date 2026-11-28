@@ -141,7 +141,7 @@ payment_id DESC`, so ties paginate consistently. `PageResponse` puts the row arr
 Response field inventory:
 
 - `Summary`: `asOf`, `network`, `counts`, `stuck`, `oldestOpenAgeSeconds`, `retrying`,
-  `byErrorCode`, `openIncidents`, `senderLeaseHeldUntil`, `integrity`, `ethUnsettled`,
+  `byErrorCode`, `openIncidents`, `senderLeaseHeldUntil`, `integrity`, `ethUnsettled`, `ethTotal`, `ethPaid`,
   `workerLastRunAgeSeconds`, `sourceCapabilities`.
 - `network`: `chainId`, `name` (Sepolia or UNKNOWN), `registryAddress`, `enabled`,
   `explorerBaseUrl`. Only chain 11155111 gets `https://sepolia.etherscan.io`; every other
@@ -161,6 +161,13 @@ Response field inventory:
 - `sourceCapabilities`: `workerLastRun=UNAVAILABLE_NO_PERSISTED_JOB_RUNS`,
   `integrity=LATEST_EXPLICIT_CHECK_ONLY`, `ethChain=ASSUMED_SEPOLIA_NO_STORED_CHAIN_ID`.
   `workerLastRunAgeSeconds` is null because job instrumentation is deferred.
+- `ethTotal` counts recorded ETH transactions across all order states. `ethPaid` counts the
+  subset whose order is `PAID`; `ethUnsettled` counts the remaining recorded transactions.
+  All three use the same quote/order join as the ETH list, excluding quotes without a transaction
+  hash and orders whose provider is not ETH. They do not depend on contract proofs or the
+  contract registry being enabled. The admin ETH tab defaults to `unsettled=false` and refreshes
+  every 15 seconds while visible, including when no contract proofs exist. Its optional unsettled
+  filter hides paid transactions explicitly; it does not change the summary totals.
 - `ProofRow`: `documentId`, `contractNumber`, `documentKind`, `status`, `transactionHash`,
   `blockNumber`, `createdAt`, `confirmedAt`, `errorCode`.
 - `ProofDetail`: row fields plus `documentHash`, `onChainDocumentId`, `chainId`,

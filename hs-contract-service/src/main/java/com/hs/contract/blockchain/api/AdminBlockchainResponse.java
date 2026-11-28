@@ -10,6 +10,7 @@ public final class AdminBlockchainResponse {
     public record Summary(Instant asOf, Network network, Map<String, Long> counts, long stuck,
                           Long oldestOpenAgeSeconds, long retrying, Map<String, Long> byErrorCode,
                           long openIncidents, Instant senderLeaseHeldUntil, Integrity integrity, long ethUnsettled,
+                          long ethTotal, long ethPaid,
                           Long workerLastRunAgeSeconds, Map<String, String> sourceCapabilities) {}
     public record ProofRow(String documentId, String contractNumber, Integer documentKind, String status,
                            String transactionHash, Long blockNumber, Instant createdAt, Instant confirmedAt, String errorCode) {}

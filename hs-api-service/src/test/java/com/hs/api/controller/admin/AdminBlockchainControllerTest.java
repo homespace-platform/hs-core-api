@@ -101,4 +101,20 @@ class AdminBlockchainControllerTest {
                 .andReturn().getResponse().getContentAsString();
         for(String forbidden:List.of("payerWallet","recipientWallet","signature","ownerId","privateKey")) assertFalse(body.contains(forbidden));
     }
+    @Test void defaultEthViewAndSummaryIncludePaidTransactionsWithoutContractProofs() throws Exception {
+        var now=Instant.parse("2026-11-28T00:00:00Z");
+        var payment=new AdminEthPaymentQueries.Payment("paid-order","PRO","PLAN",new BigDecimal("80000"),"123456789123456789",
+                "0x"+"a".repeat(64),now,"PAID",now,0,11155111,"ASSUMED_SEPOLIA_NO_STORED_CHAIN_ID");
+        when(service.payments(false,PageRequest.of(0,20))).thenReturn(new PageImpl<>(List.of(payment)));
+        when(service.summary()).thenReturn(new Summary(now,new Network(11155111,"Sepolia",null,false,"https://sepolia.etherscan.io"),
+                Map.of("PENDING",0L,"SUBMITTED",0L,"CONFIRMED",0L,"FAILED",0L),0,null,0,Map.of(),0,null,
+                new Integrity(Map.of(),"Latest explicit check only"),0,1,1,null,Map.of()));
+        mvc.perform(auth(request("/membership-eth-payments"),"ADMIN","BLOCKCHAIN_VIEW"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.result[0].status").value("PAID"));
+        mvc.perform(auth(request("/summary"),"ADMIN","BLOCKCHAIN_VIEW"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.result.ethTotal").value(1))
+                .andExpect(jsonPath("$.result.ethPaid").value(1)).andExpect(jsonPath("$.result.ethUnsettled").value(0))
+                .andExpect(jsonPath("$.result.counts.CONFIRMED").value(0));
+    }
 }
