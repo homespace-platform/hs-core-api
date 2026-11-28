@@ -9,6 +9,7 @@ import com.hs.payment.service.PaymentProofUploadSessionService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -33,6 +34,8 @@ public class MobilePaymentProofUploadController {
     private final PaymentRequestRepository paymentRequestRepository;
 
     private void applySecurityHeaders(HttpServletResponse response) {
+        response.setContentType("text/html;charset=UTF-8");
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "inline");
         response.setHeader("Cache-Control", "no-store, max-age=0");
         response.setHeader("Pragma", "no-cache");
         response.setHeader("Referrer-Policy", "no-referrer");

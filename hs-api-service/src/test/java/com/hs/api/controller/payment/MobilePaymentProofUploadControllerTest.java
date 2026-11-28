@@ -15,19 +15,28 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.ui.ExtendedModelMap;
 import org.springframework.ui.Model;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
+import org.thymeleaf.spring6.SpringTemplateEngine;
+import org.thymeleaf.spring6.view.ThymeleafViewResolver;
+import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @ExtendWith(MockitoExtension.class)
 class MobilePaymentProofUploadControllerTest {
@@ -43,7 +52,7 @@ class MobilePaymentProofUploadControllerTest {
 
     @Test
     @DisplayName("renderUploadPage returns mobile-upload view when session is valid")
-    void testRenderUploadPage_valid() {
+    void testRenderUploadPage_valid() throws Exception {
         String token = "valid-token";
         Instant expiresAt = Instant.now().plusSeconds(600);
         PaymentProofUploadSession session = PaymentProofUploadSession.builder()
@@ -76,6 +85,23 @@ class MobilePaymentProofUploadControllerTest {
         assertEquals("HS123456", model.getAttribute("transferReference"));
         assertTrue(((String) model.getAttribute("totalAmountFormatted")).contains("20.300.000"));
         assertEquals("no-store, max-age=0", response.getHeader("Cache-Control"));
+
+        var templates = new ClassLoaderTemplateResolver();
+        templates.setPrefix("templates/");
+        templates.setSuffix(".html");
+        templates.setCharacterEncoding("UTF-8");
+        var engine = new SpringTemplateEngine();
+        engine.setTemplateResolver(templates);
+        var views = new ThymeleafViewResolver();
+        views.setTemplateEngine(engine);
+        var mvc = MockMvcBuilders.standaloneSetup(controller).setViewResolvers(views).build();
+
+        mvc.perform(get("/u/payment-proof/{token}", token).accept(MediaType.ALL))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
+                .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "inline"))
+                .andExpect(content().string(containsString("action=\"/u/payment-proof/valid-token\"")))
+                .andExpect(content().string(containsString("name=\"file\"")));
     }
 
     @Test
