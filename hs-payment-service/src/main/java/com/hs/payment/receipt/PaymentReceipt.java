@@ -12,7 +12,11 @@ import lombok.*;
       @UniqueConstraint(name = "uq_receipt_payment", columnNames = "payment_request_id"),
       @UniqueConstraint(name = "uq_receipt_number", columnNames = "receipt_number")
     },
-    indexes = @Index(name = "idx_receipt_pdf_queue", columnList = "pdf_status,next_attempt_at"))
+    indexes = {
+      @Index(name = "idx_receipt_pdf_queue", columnList = "pdf_status,next_attempt_at"),
+      @Index(name = "idx_receipt_landlord_issued", columnList = "landlord_id, issued_at DESC"),
+      @Index(name = "idx_receipt_tenant_issued", columnList = "tenant_id, issued_at DESC")
+    })
 @Getter
 @Setter
 @NoArgsConstructor

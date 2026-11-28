@@ -15,6 +15,8 @@ import java.time.LocalTime;
 @Table(name = "viewing_appointments", indexes = {
         @Index(name = "idx_appointment_listing_date", columnList = "listing_id, appointment_date"),
         @Index(name = "idx_appointment_owner_status", columnList = "owner_id, status"),
+        @Index(name = "idx_appointment_owner_created", columnList = "owner_id, created_at"),
+        @Index(name = "idx_appointment_owner_status_date", columnList = "owner_id, status, appointment_date"),
         @Index(name = "idx_appointment_renter_status", columnList = "renter_id, status"),
         @Index(name = "idx_appointment_date_status", columnList = "appointment_date, status")
 })
@@ -109,6 +111,13 @@ public class ViewingAppointment extends BaseEntity {
 
     @Column(name = "completed_at")
     private Instant completedAt;
+
+    /** First explicit owner approve/reject/cancel, retained through subsequent rescheduling. */
+    @Column(name = "responded_at")
+    private Instant respondedAt;
+
+    @Column(name = "response_type", length = 10)
+    private String responseType;
 
     private LocalDate reminderAppointmentDate;
     private LocalTime reminderStartTime;

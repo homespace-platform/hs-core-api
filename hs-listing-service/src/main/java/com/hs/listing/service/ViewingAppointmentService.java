@@ -274,6 +274,7 @@ public class ViewingAppointmentService {
         }
 
         apt.setStatus(AppointmentStatus.CONFIRMED);
+        if (apt.getRespondedAt() == null) { apt.setRespondedAt(Instant.now()); apt.setResponseType("ACCEPTED"); }
         if (req != null && req.ownerNote() != null && !req.ownerNote().isBlank()) {
             apt.setOwnerNote(req.ownerNote().trim());
         }
@@ -297,6 +298,7 @@ public class ViewingAppointmentService {
         }
 
         apt.setStatus(AppointmentStatus.REJECTED);
+        if (apt.getRespondedAt() == null) { apt.setRespondedAt(Instant.now()); apt.setResponseType("REJECTED"); }
         apt.setRejectReason(req.rejectReason().trim());
         clearReschedule(apt);
         ViewingAppointment saved = appointmentRepository.save(apt);
@@ -465,6 +467,7 @@ public class ViewingAppointmentService {
 
         apt.setStatus(AppointmentStatus.CANCELLED);
         apt.setCancelledBy(AppointmentCancelledBy.OWNER);
+        if (apt.getRespondedAt() == null) { apt.setRespondedAt(Instant.now()); apt.setResponseType("CANCELLED"); }
         apt.setCancelReason(req != null && req.cancelReason() != null ? req.cancelReason().trim() : "Chủ nhà hủy lịch hẹn");
         clearReschedule(apt);
         ViewingAppointment saved = appointmentRepository.save(apt);

@@ -1,6 +1,6 @@
 # P3 — Phân tích & Báo cáo chủ nhà (`/dashboard/analytics`)
 
-Trạng thái: THIẾT KẾ, chờ chủ dự án duyệt (chưa code). Ngày 2026-11-28. Chỉ đọc code để viết.
+Trạng thái: ĐÃ DUYỆT (AUDIT_LOG 2026-11-28); API phase 1 được triển khai trong worktree P3. Frontend/mobile là đợt sau.
 Rút gọn: **API** = `hs-core-api`, **WEB** = `hs-web-app`, **CS** = `API/hs-contract-service/src/main/java/com/hs/contract`, **LS** = `API/hs-listing-service/src/main/java/com/hs/listing`, **PS** = `API/hs-payment-service/src/main/java/com/hs/payment`, **AC** = `API/hs-api-service/src/main/java/com/hs/api/controller`. Quy ước tiền/giờ/phạm vi như `P1-landlord-dashboard.md` mục 3 (Asia/Ho_Chi_Minh, `BillingTime`, doanh thu theo phiếu `payment_receipts`, cọc không tính doanh thu).
 
 ## 0. Thay đổi sau kiểm kê (28/11/2026, đã đối chiếu 5 file `inventory/`)
@@ -143,3 +143,79 @@ Bộ lọc áp dụng cho mọi khối: `branchId` (tin/hợp đồng/phòng c�
 | Lịch sử giá tin / cảnh báo đổi giá (T6) | Chưa có dữ liệu: `listing_price_history` ở mục 6 |
 | Sổ dùng lượt hội viên (C6) | Dùng để đối soát, không phải số liệu kinh doanh; thuộc `/dashboard/membership`; chưa có endpoint đọc |
 | Mẫu HĐ riêng (L13), bãi xe (C16) | Giá trị thấp ở trang phân tích; thuộc trang mẫu hợp đồng và trang chi nhánh |
+
+
+## 10. Hợp đồng API triển khai — phase 1 (Codex, 2026-11-28)
+
+Phạm vi thay đổi: controller API; DTO/service/query tổng hợp ở contract (đã có dependency listing/payment); entity/index listing/payment; ghi view và phản hồi trong các write path đang có; backfill phiếu; snapshot lấp đầy; unit/MockMvc/PostgreSQL tests. Không đổi trạng thái nghiệp vụ, không đọc `.env`, không gọi DB/dịch vụ ứng dụng hiện có.
+
+### Đọc
+
+`GET /dashboard/analytics` — `CurrentUser.requireUserId()` sau `UserContextFilter`, không nhận owner từ tham số. Cùng một người có quyền chủ nhà chỉ đọc dữ liệu có owner/payee/landlord tương ứng; không có quyền admin vượt qua scope. Bộ lọc chi nhánh active/tin active của người khác hoặc không tồn tại trả 404.
+
+| Tham số | Giá trị chính xác |
+|---|---|
+| `from`, `to` | Tháng `YYYY-MM` (0001–9999); mặc định `to` = tháng của BillingTime tại Asia/Ho_Chi_Minh, `from` = to−11; tối đa 24 tháng kể cả hai đầu, from≤to |
+| `branchId`, `listingId` | ID `[A-Za-z0-9_-]{1,36}`, tùy chọn; áp dụng đồng thời |
+| `include` | Danh sách không lặp, phân cách dấu phẩy: `revenue,occupancy,receivables,listings,funnel`; bỏ qua = cả 5; block không chọn = null |
+| `listingPage` | 1–10000, mặc định 1 |
+| `listingSize` | 1–50, mặc định 10 |
+| `noLeadsOnly` | `true` hoặc `false`, mặc định false; lọc bảng tin và xuất bảng tin |
+
+Tham số được hỗ trợ lặp/rỗng/sai định dạng trả INVALID_REQUEST (400); page/size được truyền bằng 0 cũng không hợp lệ. Bộ lọc không khớp nhau trả tập rỗng sau khi xác nhận quyền trên từng ID. Response giữ envelope `ApiResponse.result`, `Cache-Control: private, no-store`. Không thêm cache server vì tiền/công nợ cần dữ liệu hiện tại (cache 60 giây ở thiết kế ban đầu là giả định).
+
+DTO `LandlordAnalyticsResponse` (tên field JSON chính xác):
+
+- `billingNow: Instant`, `from/to: String YYYY-MM`, `receiptsSince: LocalDate|null` (phiếu đầu tiên của chính owner, không phụ thuộc bộ lọc).
+- `revenue[]`: `month`, `receivedVnd`, `refundedVnd`, `netVnd`, `dueVnd`, `dueCollectedVnd`, `lateCollectedVnd`, `lateFeeVnd`, `rolledOverVnd`, `membershipFeeVnd`. Mọi giá trị tiền là **BigDecimal**, giữ precision/scale từ nguồn, không đổi sang long/double. `netVnd=receivedVnd-refundedVnd`; INITIAL_PAYMENT_REFUND trừ **DEPOSIT_REFUND** trước khi trừ ròng. Phí hội viên là chi phí của owner, không có phân bổ giả cho chi nhánh/tin.
+- `occupancy[]`: `month`, `rooms:int`, `occupiedRoomDays:int`, `roomDays:int`, `rate:Double|null` (tỉ lệ 0..1, 3 chữ số); mẫu số 0 → null; tin không liên kết phòng → mảng rỗng.
+- `receivables`: `asOf:Instant`, `totalVnd:BigDecimal`, `count:int`, `buckets[] {key:D0_7|D8_30|D31_PLUS,count:int,vnd:BigDecimal}`, `top[] {paymentId,contractNumber,roomCode,tenantName,dueAt:Instant,daysLate:int,amountVnd:BigDecimal,status,href}`. Top tối đa 10, tiền giảm dần rồi hạn/ID. Tuổi nợ theo ngày lịch Việt Nam; due_at phải nhỏ hơn billingNow, không đổi status của khoản để tính báo cáo.
+- `listings`: `viewsSince:LocalDate|null`, `page,size:int`, `total:long`, `items[] {id,title,branchName,status,publishedAt,expiresAt,viewCountTotal:long,viewsInRange:Long|null,appointments:long,requests:long,contracts:long,favorites:long,noLeads:boolean,viewToRequestRate:Double|null}`, `dailyViews[] {day:LocalDate,views:long}`. Trend là tổng theo ngày của phạm vi lọc, chỉ có ngày đã ghi view (ngày vắng không tạo dòng giả); tối đa khoảng 24 tháng. `viewsSince` là ngày **đầu tiên có quan sát trong scope**, không phải mốc bật toàn hệ thống. Favorites chỉ trả số lượng, không trả user. NoLeads xét >=7×24h từ published_at và không có hẹn/yêu cầu suốt đời tin, kể cả tin hết hạn; bộ đếm lead hiển thị vẫn theo khoảng lọc.
+- `funnel`: `views {value:long,cumulative:boolean,since:LocalDate|null}`, `appointments,requests,contracts:long`. Khi có daily data trong scope, chỉ đếm view đã ghi trong khoảng và trả since; khi chưa có thì dùng view_count tích lũy và cumulative=true. Hẹn CANCELLED và yêu cầu CANCELLED_BY_SYSTEM bị loại; các dòng inactive bị loại. HĐ là root lease signed, ACTIVE/EXPIRED/CLOSED/TERMINATED, đúng landlord, không phải DEPOSIT hay phụ lục; cohort theo ngày tạo yêu cầu, không theo ngày ký.
+
+Khoảng tháng dùng `[đầu tháng, đầu tháng kế)` tại Asia/Ho_Chi_Minh. Due/aging/default month dùng BillingTime; lượt xem, ngày đăng và SLA phản hồi dùng đồng hồ thực. SQL đã đối chiếu entity: `listing_favorites.active` kế thừa BaseEntity; `monthly_invoices.active` có thật; membership `amount_vnd:int` được SUM thành BigDecimal; branch scope ưu tiên assignment → contract.branch_id → listing.branch_id. Không tạo API framework hay module dependency mới.
+
+### Xuất
+
+`GET /dashboard/analytics/export` dùng cùng auth, ownership và validation. Bắt buộc `report=revenue|receivables|occupancy|listings|funnel`, `format=csv|pdf`; tùy chọn `granularity=receipt|month` (mặc định receipt, month chỉ hợp lệ cho revenue), cùng from/to/branchId/listingId/noLeadsOnly. Report/format/granularity lạ → 400. Bộ lọc trang không làm mất dòng khi xuất: xuất cả bảng trong scope. Tối đa **20.000 dòng dữ liệu**; truy vấn receipt/debt chỉ đọc tối đa 20.001 để phát hiện tràn rồi trả 422. Footer Tổng của revenue chi tiết không tính trong trần dữ liệu. Occupancy xuất series tổng của phạm vi đang chọn, cột Chi nhánh là ID được chọn hoặc `Tất cả`.
+
+CSV dùng đúng thứ tự cột §4.3, UTF-8 BOM, CRLF, mọi ô quote/escape dấu quote, BigDecimal.toPlainString, ngày/giờ Việt Nam. Ô text bắt đầu bằng công thức (kể cả có whitespace đứng trước) hoặc tab/CR/LF được thêm dấu nháy đơn; số âm kiểu numeric vẫn là số. Revenue chi tiết chỉ lấy các field context/name cần thiết từ snapshot, không xuất bank snapshot/CCCD. Nhãn loại khoản hiện dùng mã nghiệp vụ `INITIAL`, `MONTHLY_RENT`, `UTILITY`, `OTHER_CHARGE`, `INITIAL_PAYMENT_REFUND`. Tổng là tiền ròng đã loại cọc. Revenue tháng không cộng riêng phí chậm/nợ chuyển kỳ/hội viên vào doanh thu.
+
+PDF dùng lại `PaymentReceiptPdfRenderer.renderHtml` (được mở public cho service nội bộ), cùng kiểm chữ ký `%PDF-`, giới hạn 25MB và timeout đang có. HTML escape mọi ô/bộ lọc, có khoảng/bộ lọc/ngày xuất/số dòng. Converter tắt/lỗi/đầu ra sai → 503; test không gọi Gotenberg thật. Header: `Content-Disposition: attachment; filename="homespace-{report}-{from}_{to}.{format}"`, `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`. Audit log chỉ user/report/from/to/số dòng, không log nội dung báo cáo.
+
+### Dữ liệu và tương thích tích hợp
+
+- Backfill: `PaymentReceiptBackfill` chạy startup, batch 50 theo ID, transaction riêng mỗi khoản và khóa payment theo đúng thứ tự confirmation. Chỉ CONFIRMED + confirmed_at không null + tiền >0 + chưa có receipt; kiểm lại status/receipt dưới khóa rồi gọi capture hiện có, giữ issued_at=confirmed_at. Unique receipt/payment giữ nguyên; chạy lại hoặc chạy đồng thời không tạo trùng. Lỗi item tăng failed và đi tiếp; lỗi quét cũng tăng failed, log kiểm đếm; khoản lỗi có thể retry ở lần chạy sau. Không render PDF/call network trong backfill. Property nội bộ `payment.receipts.backfill-enabled` mặc định true có thể tắt khi cần điều hành, không thêm env/dependency.
+- Daily views: `listing_view_daily` PK `(listing_id,view_date)` với `views`, `unique_logged_in_viewers`; `listing_view_daily_viewers` PK `(listing_id,view_date,viewer_id)` để uniqueness chính xác cho người đăng nhập. Một CTE `INSERT ... ON CONFLICT` ghi unique marker và upsert daily counters, cùng transaction increment view_count hiện có. Giữ nguyên chống spam 1 phút, dev/fallback và điều kiện PUBLISHED; không lưu IP trong bảng mới, không dùng lịch sử xem 30 ngày. Total/daily rollback cùng nhau và không mất increment khi concurrent. Các bảng mới không tham gia purge history, giữ dữ liệu từ khi bật; không backfill lượt xem quá khứ.
+- Lấp đầy: `branch_occupancy_monthly` PK `(branch_id,month_start)` đóng băng rooms/occupied_room_days/room_days. Job 00:10 Việt Nam mỗi ngày chụp tháng **trước**, batch 500 chi nhánh; retry các snapshot thiếu, `ON CONFLICT DO NOTHING` giữ snapshot cũ khi nhiều instance/lặp. Query thường dùng snapshot theo owner/branch cho tháng đã có, tính từ phòng hiện có khi chưa có; lọc riêng tin dùng phòng liên kết và không áp snapshot cả chi nhánh. Tháng trước lần đầu ghi snapshot vẫn dùng phòng hiện có; không thể khôi phục room history đã mất.
+- SLA: thêm nullable `responded_at` và `response_type` (ACCEPTED/REJECTED/CANCELLED) cho rental/viewing. Rental accept/reject và appointment approve/reject/owner-cancel ghi **lần đầu** bằng Instant.now trong transaction hiện có; reschedule/hủy sau đó giữ lần đầu. System expiry, hủy do renter, bulk từ chối contender không ghi là owner response. Không backfill từ accepted_at/updated_at theo mặc định đã duyệt của P4 §5.4b/P5 §8; mốc billing acceptedAt và deadline vẫn giữ nguyên. Migration `AnalyticsResponseSchemaMigration` ADD COLUMN IF NOT EXISTS, không sửa dữ liệu cũ.
+- DDL theo quy ước Hibernate của repo (`JPA_DDL_AUTO` update/create); các cột mới nullable tương thích dòng cũ. Khi vận hành dùng validate/none phải áp dụng DDL bảng/cột/index mới **trước** khởi động như mọi thay đổi entity khác; startup migration không chạy trước Hibernate validation. Test tạo schema bằng entity thật, chạy migration lặp trên bảng thiếu cột.
+- **Hợp nhất P1/P2:** giữ tất cả index cũ; thêm receipt landlord/tenant issued DESC; payment `(payee_id,status,due_at)` và `(payer_id,status,due_at)`; appointment owner_created và owner_status_date; rental owner_created; daily date. Không thay thế index queue/reminder/status. Khi cherry-pick cần hợp union annotation index ở PaymentReceipt, PaymentRequest, ViewingAppointment; service capture/unique receipt không thay đổi. P1 cần cùng quy tắc trừ DEPOSIT_REFUND khi tính INITIAL_PAYMENT_REFUND.
+- Để sau đúng phạm vi: Excel, frontend/mobile/chart library theo quyết định D4, năm sửa lỗi operations P4, lịch sử giá tin và trend receivables/ước tính hóa đơn chưa phát hành. Không thêm block SLA chưa có dữ liệu lịch sử vào P3.
+
+### Kiểm thử thực chạy
+
+L3: kiểm tiền, quyền/phạm vi, persistence/concurrency và migration. Lệnh reactor chọn lọc đã chạy thành công (exit 0):
+
+```powershell
+$env:HS_P3_TEST_PG_URL='jdbc:postgresql://127.0.0.1:64352/hs_analytics_test'
+.\mvnw.cmd -Pisolated-build -pl hs-api-service -am '-Dtest=LandlordAnalytics*Test,OccupancyCalcTest,ViewingAppointmentServiceTest,RentalRequestServiceTest,PaymentReceiptServiceTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+```
+
+**132 tests, 0 failure, 0 error, 0 skip**: listing 51 (rental + appointment lifecycle), payment 14 (receipt service), contract 45 (analytics/export/backfill/snapshot units + 9 PostgreSQL cases + occupancy), API 22 (MockMvc HTTP + filter xác thực thật). Tất cả 8 module trong reactor compile/test target thành công. Log cục bộ không commit: `hs-api-service/target/p3-unit-http-validation.log`.
+
+Các lần đầu phát hiện lỗi **fixture test**: tên biến fixture trong assert sai gây testCompile lỗi (đã sửa), export MockMvc thiếu X-User-Role nên filter trả 401 thay vì 200 (đã bổ sung header đúng). Lệnh thành công trên là lần chạy sau sửa các lỗi này; không bỏ qua failure hay tắt auth.
+
+Container riêng được tạo bởi worker: `hs-p3-codex-20261128-a71f`, image `postgres:16-alpine`, PostgreSQL 16.16, chỉ bind `127.0.0.1` qua port ngẫu nhiên Docker cấp 64352, database riêng `hs_analytics_test`. Không truy cập DB/dịch vụ ứng dụng, Redis/SmartCA/chain/Gotenberg/object storage thật.
+
+Unit/HTTP đã chứng minh: zero-fill 12–24 tháng theo clock và biên midnight Việt Nam; BigDecimal không mất phần thập phân; bucket 7/8 và 30/31; end-exclusive/handover/overlap phòng; owner/admin không vượt scope; forged/missing identity →401, foreign scope →404, tham số sai/lặp/rỗng →400; CSV BOM/quote/formula/whitespace và số âm; disabled PDF →503; response_type/timestamp chỉ ghi lần đầu trong write paths; failed backfill item/enumeration tăng failed và không ngăn cursor/branch tiếp theo.
+
+PostgreSQL chạy entity schema thật (Hibernate create-drop): trừ cọc INITIAL và cọc hoàn; ròng hoàn; receipt 23:59:59.999/00:00:00 Việt Nam, late-collection/due cohorts; membership và invoice late/rollover tách đúng tháng; CANCELLED/EXPIRED/unpaid không sinh phiếu; backfill đồng thời + chạy lại + snapshot hash/issued_at bất biến; concurrent lifetime/daily/unique counters + rollback + guest + không count DRAFT; scope owner/branch/listing; favorites/noLeads đúng biên 7 ngày; funnel cohort loại system cancellation/DEPOSIT/appendix/CANCELLED contracts; snapshot tháng bất biến và không lộ owner khác; migration ADD COLUMN lặp, dòng accepted/rejected cũ vẫn null; xuất 20.001 phiếu thật trả422.
+
+Không chạy full test suite, frontend/mobile hay provider thật; không benchmark tải production. Dữ liệu view/SLA chỉ có từ ngày ghi, thiếu lịch sử số phòng trước snapshot là giới hạn dữ liệu có thật; không phục dựng bằng ước lượng. Vòng PostgreSQL cuối sau khi thêm kiểm tra occupancy với assignment/handover thật và chặn legacy link lộ tên tenant khác owner:
+
+```powershell
+.\mvnw.cmd -Pisolated-build -pl hs-contract-service -am '-Dtest=LandlordAnalyticsPostgresTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+```
+
+**10 tests, 0 failure, 0 error, 0 skip, exit 0** (9 ca trước chạy lại + 1 ca occupancy mới). Log cục bộ: `hs-api-service/target/p3-postgres-final-validation.log`. Container trên đã được `docker rm --force hs-p3-codex-20261128-a71f` xóa thành công; không xóa container nào khác.
