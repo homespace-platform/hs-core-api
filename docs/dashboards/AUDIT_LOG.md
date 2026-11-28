@@ -62,3 +62,14 @@ Mỗi mục: ngày · model · việc · commit · test (số liệu thật) · 
 - Đợt 2: P5/P6 đã xác nhận đang viết code qua output worker; P4 còn bản nhiệm vụ trong composer, đã gửi yêu cầu tiếp tục qua orchestration. Không coi trạng thái start_unknown là đã chạy hoặc đã xong.
 - Đã xếp ba task giao diện phụ thuộc API P4/P5/P6: task_ee9e5aa51e5a (web P1/P2), task_c45d128c22d1 (web P3), task_86336892486d (admin P4/P5/P6 + KYC). Khi API hoàn tất sẽ gộp/kiểm tra rồi khởi động các task giao diện.
 - Điều kiện kết thúc: API/backend và giao diện khớp hợp đồng thực, route/quyền/drilldown hoạt động, kiểm tra trạng thái tải/trống/lỗi/unavailable, lint/typecheck/build phù hợp, kiểm tra browser và tích hợp sau gộp; ghi rõ giới hạn dữ liệu/provider. Không đánh dấu hoàn tất chỉ vì đã giao task. Mobile theo sau web như phê duyệt ban đầu; Excel và năm sửa lỗi operations vẫn để sau.
+
+## 2026-11-28 · Codex · Khôi phục P4 theo xác nhận chủ dự án
+- Chủ dự án đã cho phép khởi động lại P4. Dispatch cũ ctx_2d36c4bc6016 dừng thành công (ptyKilled=true), worktree giữ nguyên và sạch.
+- Khởi động lại cùng task task_3115d9b5a5cd trên cùng worktree, dispatch mới ctx_396a572d84b5, terminal term_94809536-2d16-4eff-9b7e-f11105282902. Orca trả turn_start_unobserved, chưa xác nhận bắt đầu; không coi là hoàn tất và không gửi trùng nhiệm vụ.
+- P5/P6 xác nhận đang làm qua transcript, P6 đang bổ sung kiểm tra PostgreSQL/HTTP sau compile và test notification. Chưa push.
+
+## 2026-11-28 · Codex · P4 chạy được, gộp API P5/P6 local
+- Chủ dự án yêu cầu tiếp tục P4. Lần khởi động mới vẫn mắc draft; đã dừng thành công dispatch ctx_396a572d84b5 và tái sử dụng phiên P5 đã hoàn tất, xác nhận idle/live trên cùng task P4. Dispatch mới ctx_b98c962205dd, task task_3115d9b5a5cd, terminal term_178f20d4-c640-4961-b3f6-82ca20b2733c, workspace dash-api-p5; worker-start xác nhận ready.
+- P5 commit worker 5dd6b18 gộp master 6e9fd94, P6 worker 4a61a6a gộp master 9fe60d8 không xung đột. Notification delivery-health ở commit local 0099286 trong repo notification. P4 sẽ bổ sung catalog quyền dùng chung.
+- Bằng chứng worker: P5 18 test qua (4 query, 4 HTTP, 10 PostgreSQL); P6 26 test trong lượt cuối (6 PostgreSQL) và 17 integrity test hồi quy trước đó; notification 11 endpoint + 12 guard test, tsc và build qua. Chưa chạy lại tích hợp P4/P5/P6 trên master vì P4 đang thực thi, chưa coi các kết quả riêng là kiểm tra bản gộp.
+- Yêu cầu chưa push giữ nguyên ở mọi repo; chờ kết quả P4 để gộp, kiểm tra đợt 2 rồi chạy các task giao diện đã xếp.
