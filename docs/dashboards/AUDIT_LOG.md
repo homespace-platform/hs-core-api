@@ -34,3 +34,25 @@ Mỗi mục: ngày · model · việc · commit · test (số liệu thật) · 
 - Ràng buộc: đóng `/actuator/**` ở gateway nhưng giữ `/api/v1/actuator/health` (admin + mobile đang gọi); SLA phản hồi cần cột `responded_at`; cần trang danh sách KYC cùng P4.
 - Giả định chưa kiểm (ghi trong file): số tin chat chưa đọc, cột `deposit_records`/`dispute_cases`, gateway có chuyển `X-User-Authorities` tới notification/chat/ai không.
 - Chờ chủ dự án: duyệt thiết kế, D1–D10, thứ tự sửa 5 lỗi trước.
+
+## 2026-11-28 · Opus 5.5 · Chủ dự án duyệt hướng làm, bắt đầu code
+- Chủ dự án: "chia sub-agent 3 lần/lượt viết API phục vụ bản thiết kế"; **xuất Excel .xlsx để đợt sau** (giao diện vẫn đặt sẵn nút "Xuất báo cáo" ở vị trí hợp lý); thiết kế giao diện đẹp bằng skill ui-ux-pro-max; **biểu đồ dùng thư viện cài thêm, không tự vẽ** (thay D4: web và admin đều dùng thư viện biểu đồ); backend + web (gồm admin portal) trước, mobile sau.
+- Áp dụng đề xuất mặc định cho D1–D3, D5–D10 (xem tin nhắn 28/11). D3 (backfill phiếu thu) và D5 (`listing_view_daily`) làm trong đợt API của P3.
+- 5 lỗi ở mục "Lỗi phải sửa trước" (P4) CHƯA làm, chờ chủ dự án đồng ý riêng.
+- Kế hoạch đợt:
+  - Đợt 1 (core, mỗi agent một worktree): API P1 (`wt/dash-p1`), API P2 (`wt/dash-p2`), API P3 + backfill phiếu thu + ghi lượt xem theo ngày (`wt/dash-p3`). Điều phối gộp vào master.
+  - Đợt 2 (core + notification): API P4 (gồm sức khoẻ hệ thống, danh sách KYC), API P5, API P6 (+ endpoint admin của notification).
+  - Đợt 3 (giao diện): web P1+P2, web P3, admin P4+P5+P6.
+
+## 2026-11-28 · Codex · Tiếp tục đợt API P1–P3 sau giới hạn tài khoản
+- Chủ dự án yêu cầu tiếp tục phần đang dừng. Ba worktree wt/dash-p1, wt/dash-p2, wt/dash-p3 còn code chưa commit, tiếp tục hoàn thiện từ các thay đổi này.
+- Phân công ba worker Codex hoàn thiện API theo thiết kế đã duyệt, kiểm tra quyền/phạm vi dữ liệu, unit/API test và truy vấn trên PostgreSQL tạm. Điều phối xử lý các file/index dùng chung rồi gộp và kiểm tra trên master.
+- Docker đã xác nhận hoạt động. Kết quả test và commit sẽ ghi khi worker hoàn tất. Báo kết quả gộp đợt 1 trước khi tiếp tục đợt 2 theo kế hoạch đã duyệt.
+
+## 2026-11-28 · Codex · Đợt 1 đã gộp và kiểm tra tích hợp
+- P3 `55e7cdf` → master `274e8bf`; P2 `b29a8b6` → `3f7fff7`; P1 `788c22f` → `6195ea4`; đối chiếu tiền hoàn P1/P3 `1582ac8` → `162e982`. Ba API đã có controller, DTO, service và truy vấn theo người dùng xác thực. Hợp đồng API thực tế ghi cuối từng thiết kế P1/P2/P3.
+- Gộp index PaymentReceipt giữ cả landlord/tenant-issued và hàng đợi PDF; ViewingAppointment giữ owner-created và owner-status-date; PaymentRequest giữ payer/payee-due và bỏ khai báo trùng cùng bộ cột. P1/P3 cùng loại phần DEPOSIT_REFUND khỏi INITIAL_PAYMENT_REFUND trước khi tính doanh thu ròng.
+- Kiểm tra trên master bằng `mvnw.cmd -Pisolated-build -pl hs-api-service -am -Dtest=LandlordDashboard*Test,TenantDashboard*Test,LandlordAnalytics*Test,OccupancyCalcTest,BranchAttention*Test,ViewingAppointmentServiceTest,RentalRequestServiceTest,PaymentReceiptServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`: BUILD SUCCESS, 250 test, 0 failure/error/skipped. Listing 51, payment 14, contract 119, API 66. Đây là bộ test chọn lọc tích hợp các phần vừa gộp, không phải toàn bộ suite.
+- PostgreSQL 16.16 trong container riêng `hs-dash-integration-20261128`, cổng loopback Docker cấp 49469, ba database test riêng cho P1/P2/P3. Đã chạy 30 ca PostgreSQL trong tổng 250 test, gồm BranchAttention hồi quy. Container và volume do điều phối tạo đã xóa. Log không commit tại `hs-api-service/target/dashboard-phase1-integration.log`.
+- Giới hạn đã xác minh: lượt xem/SLA bắt đầu từ khi ghi mới; không phục dựng lịch sử đã mất. Chế độ Hibernate validate/none cần áp dụng DDL mới trước boot. Chưa thử provider thật/production, chưa chạy full suite, chưa làm frontend/mobile. Chưa push.
+- Tiếp tục đợt 2 theo phê duyệt: P4 tổng quan/sức khoẻ đọc từ nguồn hiện có + danh sách KYC; P5 thống kê; P6 blockchain đọc + API admin delivery-health của notification. Năm sửa lỗi operations và Excel vẫn để sau. Những nguồn giám sát phụ thuộc năm sửa lỗi chưa có dữ liệu phải trả unavailable/null, không báo OK giả.
