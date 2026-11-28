@@ -8,7 +8,11 @@ import org.springframework.stereotype.Component;
 import java.time.*;
 import java.util.*;
 
-/** Reads the existing Eureka client cache only, never contacts registered services or exposes instance addresses. */
+/**
+ * Reads the existing Eureka client cache only, never contacts registered services or exposes instance addresses.
+ * Lease renewal times in that cache are not refreshed by delta fetches, so their age says nothing about health;
+ * the Eureka server already evicts instances whose lease expired.
+ */
 @Component
 public class AdminDiscoverySnapshot implements AdminServiceDiscovery {
     public static final List<String> EXPECTED=List.of("hs-gateway-server","hs-core-api","hs-chat-service","hs-news-service","hs-notification-service","hs-ai-service");
@@ -21,17 +25,15 @@ public class AdminDiscoverySnapshot implements AdminServiceDiscovery {
         for(String name:EXPECTED){
             var app=apps.getRegisteredApplications(name.toUpperCase(Locale.ROOT));var instances=app==null?List.<InstanceInfo>of():app.getInstances();
             if(instances.size()>100){result.add(new Service(name,"UNKNOWN",instances.size(),null,null));continue;}
-            Long oldestRenewal=null;Instant earliestRegistered=null;boolean up=false,stale=false,unknown=false;
+            Instant earliestRegistered=null;boolean up=false,notUp=false,unknown=false;
             for(var instance:instances){
                 var lease=instance.getLeaseInfo();
-                if(lease==null||lease.getRenewalTimestamp()<=0){unknown=true;continue;}
-                long age=Math.max(0,Duration.between(Instant.ofEpochMilli(lease.getRenewalTimestamp()),now).getSeconds());
-                oldestRenewal=oldestRenewal==null?age:Math.max(oldestRenewal,age);
-                if(lease.getRegistrationTimestamp()>0){var registered=Instant.ofEpochMilli(lease.getRegistrationTimestamp());if(earliestRegistered==null||registered.isBefore(earliestRegistered))earliestRegistered=registered;}
-                up|=instance.getStatus()==InstanceInfo.InstanceStatus.UP;stale|=age>90||instance.getStatus()!=InstanceInfo.InstanceStatus.UP;
+                if(instance.getStatus()==InstanceInfo.InstanceStatus.UNKNOWN){unknown=true;continue;}
+                if(lease!=null&&lease.getRegistrationTimestamp()>0){var registered=Instant.ofEpochMilli(lease.getRegistrationTimestamp());if(earliestRegistered==null||registered.isBefore(earliestRegistered))earliestRegistered=registered;}
+                up|=instance.getStatus()==InstanceInfo.InstanceStatus.UP;notUp|=instance.getStatus()!=InstanceInfo.InstanceStatus.UP;
             }
-            String status=instances.isEmpty()?"DOWN":!up&&!unknown?"DOWN":unknown?"UNKNOWN":stale?"DEGRADED":"UP";
-            result.add(new Service(name,status,instances.size(),oldestRenewal,earliestRegistered));
+            String status=instances.isEmpty()?"DOWN":!up&&!unknown?"DOWN":unknown?"UNKNOWN":notUp?"DEGRADED":"UP";
+            result.add(new Service(name,status,instances.size(),null,earliestRegistered));
         }
         return List.copyOf(result);
     }
