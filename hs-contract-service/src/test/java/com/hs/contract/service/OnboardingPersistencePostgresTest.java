@@ -274,6 +274,8 @@ class OnboardingPersistencePostgresTest {
             converter,storage,new ObjectMapper(),mock(ParkingReservationService.class),payments);
         org.springframework.test.util.ReflectionTestUtils.setField(target,"billingTime",clock);
         org.springframework.test.util.ReflectionTestUtils.setField(target,"entityManager",em);
+        // These fixtures isolate persistence; ContractPartyKycGuardTest covers identity policy.
+        org.springframework.test.util.ReflectionTestUtils.setField(target,"partyKyc",mock(ContractPartyKycGuard.class));
         org.springframework.test.util.ReflectionTestUtils.setField(target,"draftIntegrity",
             new ContractDraftIntegrity(new ObjectMapper(),rentals,revisions,signatures,payments,builder));
         var proxy=new org.springframework.aop.framework.ProxyFactory(target);proxy.setProxyTargetClass(true);

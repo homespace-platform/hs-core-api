@@ -12,7 +12,12 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController @RequiredArgsConstructor
-@PreAuthorize("hasAuthority('ADMIN')")
+@PreAuthorize("hasAuthority('ADMIN') and ("
+        + "hasAuthority('LISTING_VIEW') or hasAuthority('USER_VIEW') or "
+        + "hasAuthority('KYC_VIEW') or hasAuthority('COMPLAINT_VIEW') or "
+        + "hasAuthority('INCIDENT_VIEW') or hasAuthority('PAYMENT_VIEW') or "
+        + "hasAuthority('CONTRACT_VIEW') or hasAuthority('STATISTICS_VIEW') or "
+        + "hasAuthority('SYSTEM_HEALTH_VIEW'))")
 @RequestMapping({"/admin/dashboard","/api/v1/admin/dashboard"})
 public class AdminDashboardController {
     private final AdminDashboardService service;

@@ -39,11 +39,19 @@ class AdminDashboardControllerTest {
         verifyNoInteractions(service,kyc);}
     @Test void userCannotForgeAdminAndKycRequiresItsOwnPermission() throws Exception {for(String url:List.of(OVERVIEW,HEALTH,KYC,KYC+"/counts"))mvc.perform(auth(url,"USER","ADMIN,KYC_VIEW,SYSTEM_HEALTH_VIEW")).andExpect(status().isForbidden());
         mvc.perform(auth(KYC,"ADMIN","USER_VIEW")).andExpect(status().isForbidden());mvc.perform(auth(KYC+"/counts","ADMIN","USER_VIEW")).andExpect(status().isForbidden());verifyNoInteractions(service,kyc);}
-    @Test void adminMayViewOverviewWithoutSupplementaryPermissionsAndAliasesArePrivate() throws Exception {
+    @Test void narrowAdminMayViewPermittedEndpointsAndAliasesArePrivate() throws Exception {
         for(String url:List.of(OVERVIEW,"/admin/dashboard/overview"))mvc.perform(auth(url,"ADMIN","LISTING_VIEW")).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store"));
-        mvc.perform(auth(HEALTH,"ADMIN","")).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store"));
+        mvc.perform(auth(HEALTH,"ADMIN","SYSTEM_HEALTH_VIEW")).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store"));
         mvc.perform(auth(KYC,"ADMIN","KYC_VIEW")).andExpect(status().isOk()).andExpect(header().string("Cache-Control","no-store"));mvc.perform(auth("/admin/kyc/counts","ADMIN","KYC_VIEW")).andExpect(status().isOk());}
+    @Test void adminWithoutMatchingReadPermissionsIsForbidden() throws Exception {
+        for (String url : List.of(OVERVIEW, "/admin/dashboard/overview", HEALTH, "/admin/system-health")) {
+            mvc.perform(auth(url, "ADMIN", "")).andExpect(status().isForbidden());
+            mvc.perform(auth(url, "ADMIN", "ROLE_VIEW")).andExpect(status().isForbidden());
+        }
+        mvc.perform(auth(HEALTH, "ADMIN", "LISTING_VIEW")).andExpect(status().isForbidden());
+        verifyNoInteractions(service, kyc);
+    }
     @Test void unrecognizedRepeatedAndInvalidFiltersAre400() throws Exception {
-        for(String url:List.of(OVERVIEW,HEALTH)){mvc.perform(auth(url,"ADMIN","").param("userId","other")).andExpect(status().isBadRequest());mvc.perform(auth(url,"ADMIN","").param("fresh","true","false")).andExpect(status().isBadRequest());mvc.perform(auth(url,"ADMIN","").param("fresh","yes")).andExpect(status().isBadRequest());}
+        for(String url:List.of(OVERVIEW,HEALTH)){mvc.perform(auth(url,"ADMIN","LISTING_VIEW,SYSTEM_HEALTH_VIEW").param("userId","other")).andExpect(status().isBadRequest());mvc.perform(auth(url,"ADMIN","LISTING_VIEW,SYSTEM_HEALTH_VIEW").param("fresh","true","false")).andExpect(status().isBadRequest());mvc.perform(auth(url,"ADMIN","LISTING_VIEW,SYSTEM_HEALTH_VIEW").param("fresh","yes")).andExpect(status().isBadRequest());}
         mvc.perform(auth(KYC,"ADMIN","KYC_VIEW").param("size","51")).andExpect(status().isBadRequest());mvc.perform(auth(KYC,"ADMIN","KYC_VIEW").param("provider","unknown")).andExpect(status().isBadRequest());verifyNoInteractions(service,kyc);}
 }

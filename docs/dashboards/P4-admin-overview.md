@@ -214,8 +214,8 @@ Frontend (`node --test`): `overviewToCards()` ẩn khối `null`; `healthToChips
 
 | GET endpoint (cả hai alias) | Request | Quyền |
 |---|---|---|
-| `/admin/dashboard/overview`, `/api/v1/admin/dashboard/overview` | Chỉ `fresh=true|false`, mặc định false, đúng một giá trị. Controller parse thành boolean, không có body/identity DTO. | Verified-context ADMIN; quyền phụ lọc từng field/khối. |
-| `/admin/system-health`, `/api/v1/admin/system-health` | Như overview. | Verified-context ADMIN; quyền phụ bên dưới. |
+| `/admin/dashboard/overview`, `/api/v1/admin/dashboard/overview` | Chỉ `fresh=true|false`, mặc định false, đúng một giá trị. Controller parse thành boolean, không có body/identity DTO. | Verified-context ADMIN và ít nhất một quyền LISTING_VIEW, USER_VIEW, KYC_VIEW, COMPLAINT_VIEW, INCIDENT_VIEW, PAYMENT_VIEW, CONTRACT_VIEW, STATISTICS_VIEW, SYSTEM_HEALTH_VIEW; lọc quyền từng field/khối. |
+| `/admin/system-health`, `/api/v1/admin/system-health` | Như overview. | Verified-context ADMIN và ít nhất một quyền SYSTEM_HEALTH_VIEW, PAYMENT_VIEW, KYC_VIEW, COMPLAINT_VIEW, STATISTICS_VIEW; lọc quyền từng nhóm. |
 | `/admin/kyc`, `/api/v1/admin/kyc` | `AdminKycQueueService.Query(status:KycStatus?,provider:KycProvider?,overdue:Boolean?,page:int=0,size:int=20)`; page 0–10000, size 1–50. | ADMIN + KYC_VIEW. |
 | `/admin/kyc/counts`, `/api/v1/admin/kyc/counts` | Cùng DTO nhưng chỉ nhận status/provider/overdue; không nhận page/size. | ADMIN + KYC_VIEW. |
 
