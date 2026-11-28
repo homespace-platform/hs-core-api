@@ -1,6 +1,6 @@
 # P1 — Dashboard chủ nhà (`/dashboard/landlord`)
 
-Trạng thái: THIẾT KẾ, chờ chủ dự án duyệt (chưa code). Ngày 2026-11-28. Chỉ đọc code để viết.
+Trạng thái: thiết kế đã được duyệt theo AUDIT_LOG ngày 2026-11-28; API đợt 1 được triển khai trong worktree P1. Hợp đồng API thực tế và bằng chứng kiểm thử ở mục 10; frontend/mobile chưa triển khai.
 Đường dẫn rút gọn: **API** = `hs-core-api`, **WEB** = `hs-web-app`, **CS** = `API/hs-contract-service/src/main/java/com/hs/contract`, **LS** = `API/hs-listing-service/src/main/java/com/hs/listing`, **PS** = `API/hs-payment-service/src/main/java/com/hs/payment`, **AC** = `API/hs-api-service/src/main/java/com/hs/api/controller`.
 
 ## 0. Thay đổi sau kiểm kê (28/11/2026, đã đối chiếu 5 file `inventory/`)
@@ -219,4 +219,99 @@ Frontend: render từng khối ở 3 trạng thái (tải/trống/lỗi), một 
 | Thời gian phản hồi trung bình của chủ nhà (C17) | Chưa có dữ liệu: ghi `approved_at/rejected_at/cancelled_at` (lịch hẹn) và `responded_at` (yêu cầu thuê) trước; hiển thị ở P3 §6 |
 | Bãi xe: sức chứa so với đặt chỗ (C16) | Thuộc trang chi nhánh; chưa có API tổng hợp; không ảnh hưởng việc hôm nay |
 | Quyền hiện có (`/users/me/permissions`) | Giá trị thấp, chỉ để giải thích tính năng bị ẩn |
+
+## 10. Hợp đồng API đợt 1 (triển khai 2026-11-28)
+
+Mục này ghi hình dạng DTO thực tế, thay cho JSON minh họa và các giả định chưa đối chiếu ở trên.
+
+### Endpoint, quyền và tham số
+
+- Core `GET /dashboard/landlord/summary`; qua gateway `/api/v1/dashboard/landlord/summary`.
+- Danh tính duy nhất là `CurrentUser.requireUserId()` sau `UserContextFilter`: phải có secret gateway hợp lệ, user ID không rỗng và role USER/ADMIN hợp lệ. Không cần quyền admin để đọc dữ liệu của chính mình (giữ chính sách của `BranchAttentionController`); ADMIN cũng chỉ đọc phạm vi ID của chính mình. `ownerId`, `userId`, `branchId` không đổi phạm vi.
+- `month`: đúng một giá trị `YYYY-MM`, năm `0001`–`9999`, tháng `01`–`12`; bỏ qua thì tháng hiện tại của BillingTime tại `Asia/Ho_Chi_Minh`. Giá trị rỗng, lặp hoặc sai định dạng trả HTTP 400 / `INVALID_REQUEST` (`code=1001`).
+- `include`: đúng một chuỗi phân cách bằng dấu phẩy với các khóa `setup,money,todo,contracts,rooms,leads,complaints,membership`; bỏ qua thì tất cả. Khóa rỗng/lạ, sai hoa thường hoặc tham số lặp trả HTTP 400; khóa lặp bên trong một chuỗi được gộp. `include=setup` chỉ kiểm tài khoản nhận tiền, không quét attention hoặc chạy truy vấn của nhóm khác.
+- Không có danh tính đã xác minh: HTTP 401 / `UNAUTHENTICATED` (`code=1002`). Response thành công có envelope `ApiResponse.result` và `Cache-Control: private, no-store`.
+- `errors` có một cờ cho mỗi khóa include (ví dụ `money`, không phải `revenue`); cờ true khi nhóm lỗi. Trường của nhóm không được yêu cầu hoặc phép đọc lỗi là null; các phép đọc còn lại vẫn được thử. Không có cache server mới.
+
+### DTO chính xác
+
+Các số tiền là `BigDecimal` VND; các thời điểm là ISO-8601 Instant; trường nullable được trả null. Mọi response có `billingNow`, `realNow`, `month`, `errors` và các trường nhóm sau:
+
+| include | Trường trong result và các trường con |
+|---|---|
+| setup | `setup{hasReceivingAccount}` (boolean, không có số tài khoản) |
+| rooms | `rooms{total,occupied,vacant,reserved,other,byStatus}`; `listings{published,pendingReview,draft,oldestPendingSince,unplaced{listings,contracts},needsFix{rejected,violation,hidden,items}}`; `expiringListings[]` |
+| money | `revenue{receivedVnd,refundedVnd,expectedVnd,receiptCount,overdueCount,overdueVnd,depositReceivedVnd,awaitingConfirm,rejected,refundsOwed,lateFromPreviousVnd,autoConfirmed30d,lateFeeVnd,rolledOverVnd,receiptPdfIssues}` |
+| todo | `todo{total,urgent,groups,items}`; groups gồm `RENTAL_REQUEST,VIEWING,SIGN,PAYMENT_CONFIRM,OVERDUE,METER,AMENDMENT,OTHER,UNBRANCHED_RENTAL,UNBRANCHED_VIEWING,DEFAULT,COMPLAINT,CLOSURE` |
+| contracts | `contracts{byStatus{ACTIVE,SIGNING,DRAFT},closures{byStatus,endedNotClosed,refundVnd,nextRefundDueAt},signatureIssues{failed,pendingConfirm,nearestExpiresAt},depositAgreements{waitingSign,nextDueAt}}`; `expiringContracts[]` |
+| leads | `appointments[]`, `competing[]`, `holds[]` |
+| complaints | `complaints{openCount,dueFromMeCount,items}` |
+| membership | `membership{tier,remainingUses,reservedUses,expiresAt,quotaResetsAt,addonRemaining,addonReserved,addonExpiresAt,unlimited,pendingOrders,nextOrderExpiresAt,failedOrders30d,paidVndMonth}` |
+
+Các DTO dòng và giới hạn cố định:
+
+| Danh sách/DTO | Trường và giới hạn |
+|---|---|
+| todo.items | `{key,type,roomCode,contextLabel,dueAt,clock,priority,href}`, tối đa 10, gộp/sắp theo priority rồi thời gian còn lại đúng clock rồi key. `type` gồm 22 giá trị WorkType hiện có + `DEFAULT_NOTICE,COMPLAINT_RESPOND,CLOSURE_ACTION,SIGNATURE_FAILED,DEPOSIT_SIGN,UNBRANCHED_RENTAL,UNBRANCHED_VIEWING`. Hai loại UNBRANCHED là dòng điều hướng tổng hợp, tổng/count vẫn đếm số hồ sơ. |
+| expiringContracts | `{contractId,contractNumber,roomCode,tenantName,endDateExclusive,daysRemaining,band,href}`, tối đa 10; lấy trực tiếp từ cùng scope attention, ngày 1–60, band WITHIN_30/WITHIN_60. |
+| expiringListings | `{id,title,expiresAt,daysRemaining,viewCount,href,favorites,noLeads}`, tối đa 5; hiệu lực PUBLISHED (gồm PENDING_REVIEW có reviewOperationalStatus=PUBLISHED), `(realNow,realNow+7 ngày]`. |
+| listings.needsFix.items | `{id,title,status,reason,updatedAt,href}`, tối đa 5, reason cắt tại SQL 120 ký tự; count theo trạng thái hiệu lực REJECTED/VIOLATION/HIDDEN. |
+| appointments | `{id,at,listingTitle,renterName,status,href}`, tối đa 5; lọc/sắp tại DB theo thời gian đề xuất hợp lệ nếu có, kể cả ngày hẹn ban đầu đã qua. Chỉ PENDING/CONFIRMED; không giới hạn tạm 50 dòng rồi lọc trong Java. |
+| competing | `{listingId,title,pendingCount,nextRespondBy,href}`, tối đa 5; ≥2 PENDING chưa đến hạn, cả owner của yêu cầu và owner của tin phải khớp caller. |
+| holds | `{rentalRequestId,listingTitle,renterName,holdExpiresAt,waitingFor,href}`, tối đa 10 ACCEPTED chưa hết hạn; `waitingFor` lấy từ `RentalOnboardingService.get(...).nextAction.actor` (LANDLORD/TENANT/SYSTEM/NONE), chỉ dùng phương thức đọc không sync/ghi. |
+| complaints.items | `{id,contractNumber,category,status,respondBy,responseDueFor,href}`, tối đa 5; chỉ `subject_type=RENTAL`, chưa RESOLVED, caller là payer/payee; status là OPEN/ESCALATED, responseDueFor là YOU/OTHER. Không trả reason/decision/ID bên kia/contact. |
+| Pending | `{count,vnd,nextDueAt}`, dùng cho cả awaitingConfirm/rejected/refundsOwed; rejected dùng `nextDueAt` thay vì tên minh họa `oldestDueAt`. |
+| closures.byStatus | Các khóa `WAITING_HANDOVER,PROPOSED,REFUND_PENDING,BALANCE_PENDING,DISPUTED`; không đặt trực tiếp vào closures như JSON minh họa. |
+
+### Quy tắc đã đối chiếu schema và các khác biệt được chốt khi triển khai
+
+- `receivedVnd` là **ròng** (thu thuê/phí trừ hoàn INITIAL_PAYMENT_REFUND sau khi loại dòng DEPOSIT_REFUND); `refundedVnd` vẫn trả riêng để giải thích. `receiptCount` chỉ đếm phiếu thu thuê/phí, không đếm phiếu cọc/hoàn. `expectedVnd` không có CANCELLED/EXPIRED; không ước tính kỳ chưa phát hành. `lateFromPreviousVnd` là thu thuê/phí của phiếu trong tháng nhưng due_at trước đầu tháng.
+- `overdueCount` đếm đúng các work PAYMENT_OVERDUE của scope attention hiện tại, không viết lại điều kiện hạn/đối soát/gia hạn/thay thế việc. `overdueVnd` lấy khoản tương ứng bằng payment ID hoặc invoice ID, kiểm payee/direction/status rồi trừ cọc INITIAL; tiền cọc điều chỉnh không cộng vào số tiền thuê/phí. Như expiringContracts, phạm vi này là các chi nhánh active của caller, khác với doanh thu/expected bao phủ toàn bộ caller.
+- `BranchAttentionService.attention()` và `summary()` giữ nguyên DTO, loại việc và count; chỉ thêm `overview()` dùng cùng scan/scope để lấy phòng và hạn hợp đồng. Năm loại bổ sung không được đưa vào attention-summary. Hợp đồng hết hạn chưa có closure chỉ đếm khi được quản lý trong chi nhánh active của caller; SQL ngày kết thúc dùng đúng precedence của ContractLeaseCalc, có test ngày exclusive, agreedEarlyEndExclusive và effectiveLeaseMonths.
+- `unplaced.contracts` là số lease gốc active chưa có assignment tới chi nhánh active của chính caller (không cộng lại các hợp đồng đã ở khay của chi nhánh). `unplaced.listings` là tin active branch_id null.
+- Phiếu thu không có cột tiền; các truy vấn luôn join payment_requests. Cả landlord trên receipt và phía chủ nhà trên payment phải khớp caller, kể cả khi dữ liệu liên kết cũ bị sai. Không đọc snapshot_json để cộng tiền.
+- `autoConfirmed30d` đếm distinct payment được xác nhận bởi event `RECEIPT_CONFIRMED` / actor SYSTEM, hướng TENANT_TO_LANDLORD, cửa sổ 30 ngày theo **đồng hồ thật của PaymentEvent.createdAt**. Không phụ thuộc chuỗi reason và không cần thêm enum/migration event.
+- Phí chậm dùng due_at trong tháng và loại DRAFT/CANCELLED. Nợ chuyển kỳ cộng total_amount của invoice ROLLED_OVER khi invoice đích còn UNPAID/OVERDUE; không đếm hai lần các mắt xích đã được chuyển tiếp. Trả 0 khi đích đã PAID.
+- `receiptPdfIssues` dùng cửa sổ issued_at 90 ngày theo BillingTime (cùng đồng hồ với confirmedAt/issuedAt của phiếu); tuổi PENDING >5 phút dùng created_at theo thời gian thật, fallback issued_at cho hàng legacy thiếu created_at. Vì vậy receipt phát hành ở ngày mô phỏng tương lai vẫn báo đúng PDF worker bị chậm. Các phép đọc JDBC nhiều truy vấn trong một khối dùng transaction riêng read-only REPEATABLE_READ; lỗi khối đó không làm hỏng transaction của khối khác.
+- Membership quota/lease/deposit/default/complaint deadlines theo BillingTime. Đơn membership có createdAt/expiresAt/paidAt theo Instant.now của checkout/applier; pending/failed30d dùng realNow và chi phí PAID dùng biên tháng VN. SmartCA expiresAt là thời gian thật: SIGNATURE_FAILED có clock REAL, còn các loại việc bổ sung khác có clock BILLING. Signature chỉ xét request active của currentRevisionId, không báo lỗi của bản revision cũ.
+- KYC/onboarding, cờ thông báo và unread/chat vẫn gọi API riêng như mục 3.11–3.12; summary không gọi notification/chat/provider ngoài. Các link khiếu nại mở hồ sơ yêu cầu thuê có sẵn. Không tạo framework, dependency, job, cache, Excel hoặc frontend.
+- Index P1: `idx_appointment_owner_status_date(owner_id,status,appointment_date)`, `idx_payment_request_payee_status_due(payee_id,status,due_at)`, `idx_receipt_landlord_issued(landlord_id,issued_at)`, `idx_dispute_payer_status(payer_id,status)`, `idx_dispute_payee_status(payee_id,status)`, `idx_closure_status_refund_due(status,refund_due_at)`, `idx_sig_req_contract_status(contract_id,status)`. MembershipOrder đã có owner/status index nên không thêm bản trùng. Theo quy ước repo, index nằm trên @Table/@Index, không thêm một hệ migration riêng.
+- Tích hợp P3: ba file chung ViewingAppointment.java / PaymentRequest.java / PaymentReceipt.java ở P1 **chỉ** đổi index; giữ toàn bộ field/lifecycle/backfill của P3, gộp annotation theo tên/cột và chỉ giữ một index tương đương (index dài hơn cùng prefix có thể thay index P1 tương ứng).
+
+### Verification (L3)
+
+Không đọc .env, không truy cập database/dịch vụ ứng dụng sẵn có; PostgreSQL 16.16 là container riêng `hs-p1-codex-978ced4b`, random localhost port 64512, database `hs_branch_attention_test_p1_978ced4b` có guard localhost + tên trước khi chạy create-drop. Container/volume tạm được xóa sau kiểm thử; không xóa container khác.
+
+Lượt cuối kết thúc thành công (exit 0, BUILD SUCCESS) bằng PowerShell trong `D:/Projects/homespace/.wt-dash-p1`:
+
+```powershell
+$env:HS_TEST_PG_URL='jdbc:postgresql://127.0.0.1:64512/hs_branch_attention_test_p1_978ced4b'
+$env:HS_TEST_PG_USER='p1_test'
+$env:HS_TEST_PG_PASSWORD='p1_disposable' # chỉ credential container tạm
+.\mvnw.cmd -pl hs-api-service -am '-Dtest=LandlordDashboardPostgresTest,LandlordDashboardServiceTest,LandlordDashboardApiTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+```
+
+| Test thực sự chạy | Kết quả |
+|---|---|
+| LandlordDashboardServiceTest | 14 passed, 0 failures/errors/skipped |
+| LandlordDashboardApiTest | 19 passed, 0 failures/errors/skipped; MockMvc chạy UserContextFilter và GlobalException thật; thiếu identity, header giả, secret sai, role lạ, đổi owner/branch qua query, month/include sai/lặp đều được kiểm |
+| LandlordDashboardPostgresTest | 10 passed, 0 failures/errors/skipped; schema tạo từ entity thật; toàn bộ SQL native mới được thực thi |
+
+Các test hồi quy đã chạy và pass, code của chúng không thay đổi sau lượt đó:
+
+```powershell
+.\mvnw.cmd -pl hs-api-service -am '-Dtest=LandlordDashboardServiceTest,LandlordDashboardApiTest,BranchAttentionTest,BranchLeaseEndParityTest,BranchAttentionApiTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+# 31 contract + 29 API tests passed ở lượt đầu; P1 sau đó được mở rộng và kiểm lại như bảng trên.
+.\mvnw.cmd -pl hs-contract-service -am '-Dtest=LandlordDashboardPostgresTest,BranchAttentionPostgresTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+# BranchAttentionPostgresTest: 1 passed; P1 trong lượt này có lỗi SQL/fixture được sửa và kiểm lại thành công ở lượt cuối.
+```
+
+Riêng hồi quy hiện có: BranchAttentionTest **17 passed**, BranchLeaseEndParityTest **3 passed**, BranchAttentionApiTest **12 passed**, BranchAttentionPostgresTest **1 passed** (kiểm cô lập, không ghi/lock và số query không tăng khi tăng phòng). Tổng **76 test case khác nhau** có bằng chứng pass: 43 P1 ở lượt cuối + 33 hồi quy giữ nguyên; không coi lượt fail là pass.
+
+Bằng chứng PostgreSQL P1 gồm biên đầu/cuối tháng VN (23:59:59 / 00:00), tiền thập phân chính xác, loại cọc/hoàn cọc/cancelled/expired, phiếu khác owner và liên kết receipt hỏng, nguồn membership không lọt vào thu, count quá hạn bằng PAYMENT_OVERDUE, ngày exclusive 0/1/30/31/60/61, agreedEarlyEndExclusive/effectiveLeaseMonths, lịch đề xuất có ngày gốc đã qua, danh sách 5/10 dòng, complaint resolved và nguồn việc hoàn tất biến mất, revision ký cũ không báo lỗi, nợ chuyển kỳ hết khi PAID, dual clock của event/SmartCA/membership/PDF.
+
+- Fixture **100.000 payment_requests + 10.000 listings**: truy vấn expected/needsFix/extraWork hoàn tất trong **111 ms** ở container này, mọi câu có statement_timeout 10 giây; đây là benchmark aggregation, không phải cam kết latency production/toàn endpoint.
+- Tăng **3 → 30 chi nhánh**: cùng **16 Hibernate statements**; các projection JDBC chạy bộ truy vấn gộp cố định, không vòng lặp theo chi nhánh. Hibernate statistics không đo số statement JDBC; holds là ngoại lệ ≤10 lần gọi onboarding theo thiết kế.
+- Lỗi tìm được rồi sửa: quote tham số Maven có dấu chấm trên PowerShell; ép timestamptz cho CASE tham số native PostgreSQL; kỳ vọng fixture receipt liên kết owner sai; bulk fixture cần version=0 theo DDL Hibernate. Không còn validation exit khác 0 chưa giải quyết.
+- Không chạy toàn bộ reactor suite, không gọi live gateway/provider/database, không kiểm frontend/mobile, không đo production latency. Còn việc tích hợp P3/cherry-pick của điều phối; phạm vi overdue/expiry theo chi nhánh và các DTO khác JSON minh họa đã ghi rõ ở trên.
 | Số tin đã xem (`/history/count`) | Dành cho người thuê; tự xóa sau 30 ngày; thuộc trang lịch sử xem |

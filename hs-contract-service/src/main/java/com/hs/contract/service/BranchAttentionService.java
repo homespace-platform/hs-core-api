@@ -167,6 +167,7 @@ public class BranchAttentionService {
         Map<String, PaymentRequest> transfersByInvoice;
         Map<String, List<ContractAmendment>> amendments;
         List<RentalWorkflowRecord> earlyExits;
+        final Map<RoomStatus, Integer> roomStatuses = new EnumMap<>(RoomStatus.class);
 
         /** Branch of the request: through its lease when there is one, else through its listing. */
         String rentalBranch(RentalRow rental) {
@@ -210,6 +211,31 @@ public class BranchAttentionService {
 
     /** The sorted work of each branch. The caller has verified that the branches are the owner's. */
     private Map<String, List<Work>> collect(String ownerId, List<String> branchIds, Instant now, Instant realNow) {
+        return scan(ownerId, branchIds, now, realNow).work();
+    }
+
+    /** A lease inside the 30/60-day expiry bands, still ahead (days >= 1). */
+    public record ExpiringLease(String contractId, String contractNumber, String roomCode, String tenantName,
+                                LocalDate endDateExclusive, int daysRemaining, ExpiryStatus band, String href) {}
+
+    /** Everything one {@link #scan} found: work per branch, rooms per status, expiring leases (soonest first). */
+    public record Overview(Instant billingNow, Instant realNow, Map<String, List<Work>> work,
+                           Map<RoomStatus, Integer> rooms, List<ExpiringLease> expiring) {
+        /** The work of every branch in one list, in the order of a single branch list. */
+        public List<Work> allWork() {
+            Comparator<Work> order = Comparator.comparing(Work::priority)
+                    .thenComparingLong(w -> remaining(w, billingNow, realNow)).thenComparing(Work::key);
+            return work.values().stream().flatMap(List::stream).sorted(order).toList();
+        }
+    }
+
+    /** Every active branch of the owner in one pass: the same scan as {@link #summary}, nothing is recomputed. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Overview overview(String ownerId) {
+        return scan(ownerId, branches.findActiveIds(ownerId), billingTime.now(), Instant.now());
+    }
+
+    private Overview scan(String ownerId, List<String> branchIds, Instant now, Instant realNow) {
         Scope s = load(ownerId, branchIds, now, realNow);
         addMeterWork(s);
         Set<String> specificInvoices = addExtensionAndNoticeWork(s);
@@ -225,7 +251,21 @@ public class BranchAttentionService {
                 .thenComparingLong(w -> remaining(w, now, realNow)).thenComparing(Work::key);
         Map<String, List<Work>> result = new LinkedHashMap<>();
         s.work.forEach((branchId, items) -> result.put(branchId, items.values().stream().sorted(order).toList()));
-        return result;
+        return new Overview(now, realNow, result, s.roomStatuses, expiring(s));
+    }
+
+    private static List<ExpiringLease> expiring(Scope s) {
+        List<ExpiringLease> found = new ArrayList<>();
+        for (BranchLeaseRow lease : s.leases.values()) {
+            var expiry = BranchMonitoringService.expiry(lease, s.today);
+            if (expiry == null || expiry.status() == ExpiryStatus.LONG || expiry.daysRemaining() < 1) continue;
+            BranchSlot room = s.rooms.get(s.leaseRooms.get(lease.id()));
+            found.add(new ExpiringLease(lease.id(), lease.contractNumber(), room == null ? null : room.getRoomCode(),
+                    lease.tenantName(), expiry.endDateExclusive(), expiry.daysRemaining(), expiry.status(),
+                    expiry.target().href()));
+        }
+        found.sort(Comparator.comparingInt(ExpiringLease::daysRemaining).thenComparing(ExpiringLease::contractId));
+        return found;
     }
 
     private Scope load(String ownerId, List<String> branchIds, Instant now, Instant realNow) {
@@ -882,6 +922,7 @@ public class BranchAttentionService {
             // Both "no listing linked" and "linked but not shown" count: the attention item set is unchanged.
             RoomStatus status = BranchOverviewService.room(roomId, BranchRoomLinkService.flagOf(slot), room.occupants,
                     room.holds, room.upcoming, room.publicListings, room.linkedListings, List.of(), s.today).status();
+            s.roomStatuses.merge(status, 1, Integer::sum);
             if (status == RoomStatus.VACANT || status == RoomStatus.UNLINKED) {
                 String branchId = s.roomBranches.get(roomId);
                 s.add(branchId, WorkType.ROOM_VACANT_UNLISTED, roomId, roomId, null, null, null, Clock.REAL,

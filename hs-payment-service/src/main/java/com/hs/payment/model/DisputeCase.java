@@ -11,7 +11,9 @@ import java.util.UUID;
 /** Shared case foundation for payment disputes and rental complaints. */
 @Entity @Table(name="dispute_cases",indexes={
     @Index(name="idx_dispute_subject",columnList="subject_type,subject_id"),
-    @Index(name="idx_dispute_queue",columnList="status,opened_at")})
+    @Index(name="idx_dispute_queue",columnList="status,opened_at"),
+    @Index(name="idx_dispute_payer_status",columnList="payer_id,status"),
+    @Index(name="idx_dispute_payee_status",columnList="payee_id,status")})
 @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
 public class DisputeCase extends BaseEntity {
     @Id @Column(length=36,updatable=false) private String id;
