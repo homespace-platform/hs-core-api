@@ -286,6 +286,34 @@ public class PaymentReceiptService {
     return storage.downloadDirect(file.getId());
   }
 
+  /**
+   * Notification-only (no logged-in user). {@code id} is the payment request id the events carry
+   * ({@code data.paymentId}); a receipt id is accepted too. The recipient must be the receipt's payer or payee.
+   */
+  @Transactional(readOnly = true)
+  public com.hs.common.document.InternalDocumentFile pdfForRecipient(String id, String recipientId) {
+    var r = receipts.findByPaymentRequestId(id).or(() -> receipts.findById(id)).orElseThrow(
+        com.hs.common.document.InternalDocumentError.NOT_FOUND::exception);
+    if (recipientId == null || !recipientId.equals(r.getLandlordId()) && !recipientId.equals(r.getTenantId()))
+      throw com.hs.common.document.InternalDocumentError.RECIPIENT_FORBIDDEN.exception();
+    try {
+      snapshot(r);
+    } catch (IllegalStateException e) {
+      throw com.hs.common.document.InternalDocumentError.INTEGRITY_FAILED.exception();
+    }
+    if (r.getPdfStatus() != PaymentReceipt.PdfStatus.READY || r.getStorageObjectId() == null)
+      throw com.hs.common.document.InternalDocumentError.NOT_READY.exception();
+    var file = objects.findById(r.getStorageObjectId()).orElseThrow(
+        com.hs.common.document.InternalDocumentError.INTEGRITY_FAILED::exception);
+    if (file.getPurpose() != StoragePurpose.PAYMENT_RECEIPT
+        || file.getVisibility() != StorageVisibility.PRIVATE
+        || !"PAYMENT_RECEIPT".equals(file.getReferenceType())
+        || !r.getId().equals(file.getReferenceId()))
+      throw com.hs.common.document.InternalDocumentError.INTEGRITY_FAILED.exception();
+    return new com.hs.common.document.InternalDocumentFile(
+        r.getReceiptNumber() + ".pdf", storage.downloadDirect(file.getId()));
+  }
+
   private PaymentReceiptView view(PaymentReceipt r) {
     var s = snapshot(r);
     boolean refund = s.direction() == PaymentDirection.LANDLORD_TO_TENANT;

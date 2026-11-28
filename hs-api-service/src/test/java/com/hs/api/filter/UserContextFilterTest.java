@@ -109,7 +109,7 @@ class UserContextFilterTest {
 
     @Test
     void internalPathsRequireTheSecret() throws Exception {
-        for (String uri : new String[]{"/internal/users/u-1/permissions", "/api/v1/internal/users/u-1/permissions",
+        for (String uri : new String[]{"/internal/users/u-1/permissions", "/internal/documents/lease-bundles/c-1", "/api/v1/internal/users/u-1/permissions",
                 "/%69nternal/users/u-1/permissions", "/INTERNAL/users/u-1/permissions",
                 "/internal;x=1/users/1/permissions", "/api;a=b/internal;x=1", "/internal%3Bx=1/users/1/permissions"}) {
             var seen = run(request(uri, null, null, null, null));

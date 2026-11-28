@@ -26,11 +26,12 @@ class ContractDocumentIntegrityServiceTest {
     private static final String HASH = DocumentProofHash.sha256(PDF);
     private static final String OTHER = "0x" + "b".repeat(64);
     private final ContractService contracts = mock(ContractService.class);
+    private final com.hs.contract.repository.ContractRepository contractRepository = mock(com.hs.contract.repository.ContractRepository.class);
     private final ContractDocumentRepository documents = mock(ContractDocumentRepository.class);
     private final ContractDocumentProofRepository proofs = mock(ContractDocumentProofRepository.class);
     private final StorageService storage = mock(StorageService.class);
     private final RegistryClient registry = mock(RegistryClient.class);
-    private final ContractDocumentIntegrityService service = new ContractDocumentIntegrityService(contracts, documents, proofs, storage, registry);
+    private final ContractDocumentIntegrityService service = new ContractDocumentIntegrityService(contracts, contractRepository, documents, proofs, storage, registry);
     private ContractDocument document;
     private ContractDocumentProof proof;
 
@@ -75,6 +76,19 @@ class ContractDocumentIntegrityServiceTest {
         verify(storage, never()).getById(anyString());
         assertEquals("UNAVAILABLE", service.check("pdf").status());
         verify(storage).getById("storage");
+    }
+    @Test void systemModeNeedsNoLoggedInUserButRecipientMustBeAParty() {
+        UserContextHolder.clear();
+        var contract = com.hs.contract.model.Contract.builder().id("contract").landlordId("landlord").tenantId("tenant").build();
+        when(contractRepository.findById("contract")).thenReturn(Optional.of(contract));
+        StorageObjectResponse object = mock(StorageObjectResponse.class);
+        when(object.s3VersionId()).thenReturn("v1"); when(storage.getByIdAuthorized("storage")).thenReturn(object);
+        for (String party : new String[]{"landlord", "tenant"}) assertSame(PDF, service.contentForParty("pdf", party).bytes());
+        verify(storage, never()).getById(anyString()); verifyNoInteractions(contracts);
+        assertEquals(403, assertThrows(AppException.class, () -> service.contentForParty("pdf", "stranger")).getStatusCode().value());
+        assertEquals(403, assertThrows(AppException.class, () -> service.contentForParty("pdf", " ")).getStatusCode().value());
+        when(storage.downloadDirect("storage", 50L * 1024 * 1024)).thenReturn("substituted".getBytes(StandardCharsets.UTF_8));
+        assertEquals(6083, assertThrows(AppException.class, () -> service.contentForParty("pdf", "tenant")).getCode());
     }
     @Test void missingAuthenticationCannotUseSystemFallbackOrReadFile() {
         UserContextHolder.clear();

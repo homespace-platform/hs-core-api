@@ -9,11 +9,13 @@ import com.hs.contract.blockchain.persistence.ContractDocumentProof;
 import com.hs.contract.blockchain.persistence.ContractDocumentProofRepository;
 import com.hs.contract.blockchain.persistence.DocumentProofHash;
 import com.hs.contract.blockchain.persistence.ProofStatus;
+import com.hs.contract.dto.response.ContractDocumentResponse;
 import com.hs.contract.model.ContractDocument;
 import com.hs.contract.model.constant.ContractDocumentType;
 import com.hs.contract.model.constant.DocumentGenerationStatus;
 import com.hs.contract.model.constant.DocumentPurpose;
 import com.hs.contract.repository.ContractDocumentRepository;
+import com.hs.contract.repository.ContractRepository;
 import com.hs.contract.service.ContractService;
 import com.hs.storage.advice.entity.enums.StorageErrorCode;
 import com.hs.storage.service.StorageService;
@@ -30,6 +32,7 @@ import java.util.Objects;
 public class ContractDocumentIntegrityService {
     private static final long MAX_PDF_BYTES = 50L * 1024 * 1024;
     private final ContractService contracts;
+    private final ContractRepository contractRepository;
     private final ContractDocumentRepository documents;
     private final ContractDocumentProofRepository proofs;
     private final StorageService storage;
@@ -48,6 +51,14 @@ public class ContractDocumentIntegrityService {
         return verified(inspect(documentId, true));
     }
 
+    /**
+     * Internal notification API only: same verification as {@link #content}, but no logged-in user. The recipient
+     * must still be the landlord or tenant of the document's contract.
+     */
+    public VerifiedPdf contentForParty(String documentId, String recipientId) {
+        return verified(inspect(documentId, false, recipientId));
+    }
+
     private VerifiedPdf verified(Inspection checked) {
         return switch (checked.integrity().status()) {
             case "MATCH", "PENDING", "NOT_AVAILABLE" -> new VerifiedPdf(checked.bytes(), checked.fileName(), checked.integrity());
@@ -58,16 +69,34 @@ public class ContractDocumentIntegrityService {
     }
 
     private Inspection inspect(String documentId, boolean admin) {
-        var user = UserContextHolder.get();
-        if (user == null || user.userId() == null || user.userId().isBlank()) {
-            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        return inspect(documentId, admin, null);
+    }
+
+    /** {@code recipientId != null} is the system mode: party check against the contract instead of the user context. */
+    private Inspection inspect(String documentId, boolean admin, String recipientId) {
+        boolean system = recipientId != null;
+        ContractDocument document;
+        ContractDocumentResponse authorized = null;
+        if (system) {
+            document = documents.findById(documentId)
+                    .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_DOCUMENT_NOT_FOUND));
+            var contract = contractRepository.findById(document.getContractId())
+                    .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_NOT_FOUND));
+            if (recipientId.isBlank() || !recipientId.equals(contract.getLandlordId()) && !recipientId.equals(contract.getTenantId())) {
+                throw new AppException(ContractErrorCode.CONTRACT_FORBIDDEN);
+            }
+        } else {
+            var user = UserContextHolder.get();
+            if (user == null || user.userId() == null || user.userId().isBlank()) {
+                throw new AppException(ErrorCode.UNAUTHENTICATED);
+            }
+            authorized = admin ? contracts.getDocumentMetadataForAdmin(documentId) : contracts.getDocumentMetadata(documentId);
+            document = documents.findById(documentId)
+                    .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_DOCUMENT_NOT_FOUND));
         }
-        var authorized = admin ? contracts.getDocumentMetadataForAdmin(documentId) : contracts.getDocumentMetadata(documentId);
-        ContractDocument document = documents.findById(documentId)
-                .orElseThrow(() -> new AppException(ContractErrorCode.CONTRACT_DOCUMENT_NOT_FOUND));
-        if (!Objects.equals(document.getContractId(), authorized.getContractId())
+        if (!system && (!Objects.equals(document.getContractId(), authorized.getContractId())
                 || !Objects.equals(document.getRevisionId(), authorized.getRevisionId())
-                || !Objects.equals(document.getStorageObjectId(), authorized.getStorageObjectId())
+                || !Objects.equals(document.getStorageObjectId(), authorized.getStorageObjectId()))
                 || document.getDocumentType() != ContractDocumentType.PDF
                 || document.getPurpose() != DocumentPurpose.SIGNED_FINAL
                 || document.getStatus() != DocumentGenerationStatus.READY) {
@@ -85,7 +114,7 @@ public class ContractDocumentIntegrityService {
         try {
             if (document.getSignedS3VersionId() != null) {
                 // Admin path was already authorized by getDocumentMetadataForAdmin (ADMIN + CONTRACT_VIEW); users keep the storage ACL.
-                var object = admin ? storage.getByIdAuthorized(document.getStorageObjectId())
+                var object = admin || system ? storage.getByIdAuthorized(document.getStorageObjectId())
                         : storage.getById(document.getStorageObjectId());
                 if (!document.getSignedS3VersionId().equals(object.s3VersionId())) {
                     return outcome(document, "MISMATCH", null, null, null, "Phiên bản lưu trữ khác bản đã ký.");

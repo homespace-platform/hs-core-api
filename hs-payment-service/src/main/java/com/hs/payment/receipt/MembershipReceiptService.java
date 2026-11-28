@@ -209,6 +209,39 @@ public class MembershipReceiptService {
     return storage.downloadDirect(file.getId());
   }
 
+  /**
+   * Notification-only (no logged-in user). {@code id} is the order id (membership receipt) or the overpayment id
+   * (overpayment receipt); the receipt's buyer must be the recipient.
+   */
+  @Transactional(readOnly = true)
+  public com.hs.common.document.InternalDocumentFile pdfForRecipient(
+      String id, String recipientId, boolean overpayment) {
+    var r = receipts.findByOrderId(id).orElseThrow(
+        com.hs.common.document.InternalDocumentError.NOT_FOUND::exception);
+    if (recipientId == null || !recipientId.equals(r.getOwnerId()))
+      throw com.hs.common.document.InternalDocumentError.RECIPIENT_FORBIDDEN.exception();
+    MembershipReceiptSnapshot s;
+    try {
+      s = snapshot(r);
+    } catch (IllegalStateException e) {
+      throw com.hs.common.document.InternalDocumentError.INTEGRITY_FAILED.exception();
+    }
+    // Orders and overpayments share the order_id column; the id must match the requested kind.
+    if (overpayment != "OVERPAYMENT".equals(s.kind()))
+      throw com.hs.common.document.InternalDocumentError.NOT_FOUND.exception();
+    if (r.getPdfStatus() != PaymentReceipt.PdfStatus.READY || r.getStorageObjectId() == null)
+      throw com.hs.common.document.InternalDocumentError.NOT_READY.exception();
+    var file = objects.findById(r.getStorageObjectId()).orElseThrow(
+        com.hs.common.document.InternalDocumentError.INTEGRITY_FAILED::exception);
+    if (file.getPurpose() != StoragePurpose.PAYMENT_RECEIPT
+        || file.getVisibility() != StorageVisibility.PRIVATE
+        || !MembershipReceiptStorageAccess.REFERENCE_TYPE.equals(file.getReferenceType())
+        || !r.getId().equals(file.getReferenceId()))
+      throw com.hs.common.document.InternalDocumentError.INTEGRITY_FAILED.exception();
+    return new com.hs.common.document.InternalDocumentFile(
+        r.getReceiptNumber() + ".pdf", storage.downloadDirect(file.getId()));
+  }
+
   private Map<String, String> refundStatuses(java.util.Collection<MembershipReceipt> rows) {
     var ids = rows.stream().filter(r -> snapshot(r).kind().equals("OVERPAYMENT")).map(MembershipReceipt::getOrderId).toList();
     var out = new HashMap<String, String>();
