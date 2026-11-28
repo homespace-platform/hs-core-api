@@ -16,3 +16,13 @@ Mỗi mục: ngày · model · việc · commit · test (số liệu thật) · 
 - Files: P1-landlord-dashboard.md, P2-tenant-dashboard.md, P3-landlord-analytics.md, P4-admin-overview.md, P5-admin-statistics.md, P6-admin-blockchain.md (agent Sonnet, chỉ đọc code).
 - Phát hiện chung: web và admin chưa có thư viện biểu đồ; `payment_receipts`/`membership_receipts` không có cột tiền (doanh thu phải join `payment_requests` / `membership_orders`); phiếu thu không có backfill cho thanh toán cũ; lượt xem tin chỉ có tổng cộng dồn (cần bảng `listing_view_daily`, số liệu từ ngày bật); admin chưa có API xem bằng chứng blockchain; "Cần chú ý" của chi nhánh gom sẵn 22 loại việc của chủ nhà (P1 dùng lại).
 - Câu hỏi gom: xem tin nhắn gửi chủ dự án cùng ngày (10 quyết định D1–D10). Chưa code.
+
+## 2026-11-28 · Opus 5.5 · Kiểm kê toàn bộ API (inventory/)
+- 5 agent (chỉ đọc) lập `inventory/users-kyc-admin.md` (86 endpoint, 26 tín hiệu THIẾU), `listings-branches-rental.md` (120, 25 thiếu + 4 một phần), `contracts-billing.md` (117, 24 thiếu + 7 một phần), `payments-membership.md` (55, 24 thiếu + 5 chưa có dữ liệu), `services-ops.md` (85 + 14 route gateway, 18 thiếu, 7 chưa có dữ liệu).
+- Lỗi/rủi ro thật (điều phối đã kiểm 2 mục đầu):
+  1. Outbox thông báo hợp đồng chặn đầu hàng: `ContractNotificationPublisher.CLAIM_SQL` lấy `ORDER BY o.id LIMIT 1`; dòng cũ nhất gửi lỗi thì mọi dòng sau (kể cả hợp đồng khác) đứng yên. Cần kiểm các outbox khác cùng mẫu.
+  2. Gateway `SecurityConfig.java:32,40` mở công khai `/actuator/**` và `/api/v1/actuator/prometheus` (route sang core). Core chưa có registry Prometheus nên nhiều khả năng 404; vẫn nên đóng.
+  3. Rate limit gateway theo IP socket; sau proxy có thể gom mọi user vào một xô (chưa kiểm trên server).
+  4. 34 `@Scheduled` ở core + 4 vòng lặp Nest chỉ ghi log, không lưu lần chạy/lỗi.
+  5. Notification-service không có API admin (email/push/DLT); chỉ gateway được canh, các service khác chết không ai báo.
+- Tiếp: cập nhật P1–P6 với tín hiệu THIẾU (khối "Sức khoẻ hệ thống" ở P4), rồi gửi chủ dự án duyệt cùng D1–D10 và danh sách lỗi cần sửa trước.
