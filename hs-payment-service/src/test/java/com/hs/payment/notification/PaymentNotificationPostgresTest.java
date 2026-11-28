@@ -44,7 +44,7 @@ import static org.mockito.Mockito.*;
     PaymentProofUploadSessionService.class})
 class PaymentNotificationPostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs") @EnableJpaAuditing
-    @EnableJpaRepositories(basePackageClasses={PaymentRequestRepository.class,PaymentNotificationOutboxRepository.class,
+    @EnableJpaRepositories(basePackageClasses={PaymentRequestRepository.class,com.hs.payment.receipt.PaymentReceiptRepository.class,PaymentNotificationOutboxRepository.class,
         com.hs.listing.repository.RentalRequestRepository.class,RentalRequestNotificationOutboxRepository.class,StorageObjectRepository.class,
         com.hs.user.repository.UserRepository.class})
     static class Config {@Bean ObjectMapper mapper(){return new ObjectMapper().findAndRegisterModules();}}

@@ -31,10 +31,10 @@ public class MembershipPaymentApplier {
         if (tx.equals(o.getTransactionNo()) || orders.existsByProviderAndTransactionNo(o.getProvider(), tx)
                 || overpayments.existsByProviderAndTransactionNo(o.getProvider(), tx)) return; // replay
         if (o.getStatus() == MembershipOrder.Status.PAID || o.getStatus() == MembershipOrder.Status.REVIEW) {
-            overpay(o, tx);
+            overpay(o, tx, true);
             return;
         }
-        fulfil(o, tx);
+        fulfil(o, tx, true);
     }
 
     /** Legacy REVIEW row. {@code activated}: the original payment was already applied, so REVIEW marked a second one. */
@@ -42,22 +42,22 @@ public class MembershipPaymentApplier {
     public void resolveLegacyReview(MembershipOrder o, boolean activated) {
         if (o.getStatus() != MembershipOrder.Status.REVIEW) return;
         if (!activated) {
-            fulfil(o, o.getTransactionNo());
+            fulfil(o, o.getTransactionNo(), false); // legacy startup resolution must not email anyone
             return;
         }
         o.setStatus(MembershipOrder.Status.PAID);
         orders.save(o);
         String tx = "rv-" + o.getId(); // the second transaction id was never stored
-        if (!overpayments.existsByProviderAndTransactionNo(o.getProvider(), tx)) overpay(o, tx);
+        if (!overpayments.existsByProviderAndTransactionNo(o.getProvider(), tx)) overpay(o, tx, false);
     }
 
-    private void fulfil(MembershipOrder o, String tx) {
+    private void fulfil(MembershipOrder o, String tx, boolean notify) {
         MembershipOrder.Status before = o.getStatus();
         Instant now = Instant.now();
         if (!activate(o)) {
             o.setStatus(MembershipOrder.Status.FAILED); // the order cannot be fulfilled; the money is refunded
             orders.save(o);
-            overpay(o, tx);
+            overpay(o, tx, notify);
             return;
         }
         o.setTransactionNo(tx);
@@ -65,10 +65,10 @@ public class MembershipPaymentApplier {
         o.setStatus(MembershipOrder.Status.PAID);
         orders.save(o);
         receipts.capture(o);
-        notifications.enqueueTransition(o, before);
+        if (notify) notifications.enqueueTransition(o, before);
     }
 
-    private void overpay(MembershipOrder o, String tx) {
+    private void overpay(MembershipOrder o, String tx, boolean notify) {
         var p = new MembershipOverpayment();
         p.setId(UUID.randomUUID().toString().replace("-", ""));
         p.setOrderId(o.getId());
@@ -79,7 +79,7 @@ public class MembershipPaymentApplier {
         p.setReceivedAt(Instant.now());
         overpayments.save(p);
         receipts.captureOverpayment(p);
-        notifications.enqueueOverpayment(p);
+        if (notify) notifications.enqueueOverpayment(p);
     }
 
     private boolean activate(MembershipOrder o) {

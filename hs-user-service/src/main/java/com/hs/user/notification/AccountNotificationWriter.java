@@ -80,7 +80,7 @@ public class AccountNotificationWriter {
     @Transactional(propagation = Propagation.MANDATORY)
     public void enqueueMembershipExpiry(String ownerId, Instant expiry, MembershipExpiryEvent type) {
         if(expiry==null)throw new IllegalStateException("Membership expiry missing");
-        writeOnce(ownerId,type.name(),expiry.toString(),Map.of());
+        writeOnce(ownerId,type.name(),expiry.toString(),Map.of("expiresAt",TIMESTAMP.format(expiry))); // additive display date for the email
     }
 
     private void writeOnce(String recipientId,String type,String source,Map<String,String> data) {

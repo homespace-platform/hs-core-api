@@ -30,8 +30,8 @@ class AccountOutcomeNotificationWriterTest {
             var event=json.readTree(row.getPayload());assertEquals(6,event.size());assertEquals(1,event.get("version").asInt());
             assertEquals(row.getUserId(),event.get("recipients").get(0).asText());assertEquals(1,event.get("recipients").size());
             assertEquals(row.getEventId(),event.get("eventId").asText());assertNotNull(UUID.fromString(row.getEventId()));
-            boolean kyc=event.get("eventType").asText().startsWith("KYC_");assertEquals(kyc?1:0,event.get("data").size());
-            if(kyc)assertEquals(v.getId(),event.get("data").get("attemptId").asText());
+            boolean kyc=event.get("eventType").asText().startsWith("KYC_");assertEquals(1,event.get("data").size());
+            if(kyc)assertEquals(v.getId(),event.get("data").get("attemptId").asText());else assertEquals("2026-12-01T00:00:00.000Z",event.get("data").get("expiresAt").asText());
             assertFalse(row.getPayload().contains("PRIVATE"));assertFalse(row.getPayload().contains("VNPT"));fixtures.add(row.getPayload());
         }
         Path fixture=Path.of("target","account-outcome-event-contracts.json");Files.createDirectories(fixture.getParent());
@@ -47,6 +47,8 @@ class AccountOutcomeNotificationWriterTest {
         var v=KycVerification.builder().id("attempt").userId("user").provider(KycProvider.VNPT).status(KycStatus.VERIFIED).build();
         writer.enqueueKyc(v,AccountNotificationWriter.KycEvent.KYC_VERIFIED);writer.enqueueKyc(v,AccountNotificationWriter.KycEvent.KYC_VERIFIED);
         verify(rows,times(3)).save(any());assertEquals(3,sent.size());
+        var saved=org.mockito.ArgumentCaptor.forClass(AccountNotificationOutbox.class);verify(rows,times(3)).save(saved.capture());
+        assertTrue(saved.getAllValues().getFirst().getPayload().contains("\"data\":{\"expiresAt\":\"2026-12-01T00:00:00.000Z\"}"));
     }
     @Test void wrongKycOutcomeAndMissingRecipientAreRejected() {
         var v=KycVerification.builder().id("attempt").userId("user").provider(KycProvider.VNPT).status(KycStatus.PENDING).build();

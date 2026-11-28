@@ -21,7 +21,8 @@ import com.hs.payment.membership.MembershipOverpayment;
 /**
  * Enqueues v1 membership notifications for the persisted order owner when a verified provider outcome actually
  * changed the order status. The caller passes the status read under the order lock; same-status replays are silent.
- * The envelope data carries only the membership order id: no amount, tier, provider payload, hash or wallet.
+ * The envelope data carries the membership order id, the VND amount and, for overpayments, the overpayment id:
+ * no tier, provider payload, hash or wallet.
  */
 @Service
 public class MembershipNotificationWriter {
@@ -47,16 +48,17 @@ public class MembershipNotificationWriter {
             case PAID -> Event.MEMBERSHIP_ACTIVATED;
             default -> throw new IllegalStateException("Membership notification status unsupported");
         };
-        enqueue(type, order.getId(), order.getOwnerId());
+        enqueue(type, order.getId(), order.getOwnerId(), order.getAmountVnd(), null);
     }
 
-    /** Second or unappliable payment recorded for refund; the event carries the original order id only. */
+    /** Second or unappliable payment recorded for refund; the event carries the original order id and the overpayment id. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void enqueueOverpayment(MembershipOverpayment overpayment) {
-        enqueue(Event.MEMBERSHIP_OVERPAYMENT_RECEIVED, overpayment.getOrderId(), overpayment.getOwnerId());
+        enqueue(Event.MEMBERSHIP_OVERPAYMENT_RECEIVED, overpayment.getOrderId(), overpayment.getOwnerId(),
+                overpayment.getAmountVnd(), overpayment.getId());
     }
 
-    private void enqueue(Event type, String orderId, String recipient) {
+    private void enqueue(Event type, String orderId, String recipient, int amountVnd, String overpaymentId) {
         if (orderId == null || orderId.isBlank()) throw new IllegalStateException("Membership order missing");
         if (recipient == null || recipient.isBlank()) throw new IllegalStateException("Membership owner missing");
         String eventId = UUID.randomUUID().toString();
@@ -67,7 +69,11 @@ public class MembershipNotificationWriter {
         envelope.put("version", 1);
         envelope.put("occurredAt", TIMESTAMP.format(now));
         envelope.put("recipients", List.of(recipient));
-        envelope.put("data", Map.of("orderId", orderId));
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("orderId", orderId);
+        data.put("amount", amountVnd);
+        if (overpaymentId != null) data.put("overpaymentId", overpaymentId);
+        envelope.put("data", data);
         String payload;
         try {
             payload = json.writeValueAsString(envelope);

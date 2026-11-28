@@ -17,11 +17,13 @@ import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hs.payment.model.PaymentRequest;
+import com.hs.payment.receipt.PaymentReceiptRepository;
 
 /**
  * Enqueues v1 payment notifications for the stored payer/payee of a payment request. Callers decide which actual
  * transition produces an event; recipients are always validated against the persisted parties, never taken from input.
- * Each envelope has one recipient and data exactly {paymentId}: no amount, bank, reason, file or other-party identity.
+ * Each envelope has one recipient and data {paymentId} plus additive amount (VND), dueAt (request/due-soon/overdue only)
+ * and, for the two receipt events, receiptId and receiptNumber. Never bank, reason, file or other-party identity.
  */
 @Service
 public class PaymentNotificationWriter {
@@ -33,11 +35,13 @@ public class PaymentNotificationWriter {
     private static final DateTimeFormatter TIMESTAMP = new DateTimeFormatterBuilder().appendInstant(3).toFormatter();
     private final ObjectMapper json = new ObjectMapper();
     private final PaymentNotificationOutboxRepository outbox;
+    private final PaymentReceiptRepository receipts;
     private final String topic;
 
-    public PaymentNotificationWriter(PaymentNotificationOutboxRepository outbox,
+    public PaymentNotificationWriter(PaymentNotificationOutboxRepository outbox, PaymentReceiptRepository receipts,
             @Value("${notification.events-topic:homespace.notification.events.v1}") String topic) {
         this.outbox = outbox;
+        this.receipts = receipts;
         this.topic = topic;
     }
 
@@ -48,7 +52,7 @@ public class PaymentNotificationWriter {
         if (recipient == null || recipient.isBlank()
                 || !recipient.equals(payment.getPayerId()) && !recipient.equals(payment.getPayeeId()))
             throw new IllegalStateException("Payment notification recipient is not a stored party");
-        write(payment.getId(), type, recipient, UUID.randomUUID().toString());
+        write(payment, type, recipient, UUID.randomUUID().toString());
     }
 
     /**
@@ -63,7 +67,7 @@ public class PaymentNotificationWriter {
             throw new IllegalStateException("Payment notification recipient is not a stored party");
         String eventId = onceEventId(payment, type, dedupeKey);
         if (outbox.existsByEventId(eventId)) return false;
-        write(payment.getId(), type, recipient, eventId);
+        write(payment, type, recipient, eventId);
         return true;
     }
 
@@ -96,15 +100,29 @@ public class PaymentNotificationWriter {
             throw new IllegalStateException("Payment notification parties missing");
     }
 
-    private void write(String paymentId, Event type, String recipient, String eventId) {
+    private void write(PaymentRequest payment, Event type, String recipient, String eventId) {
+        String paymentId = payment.getId();
         Instant now = Instant.now();
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("paymentId", paymentId);
+        // VND is whole-dong; rounding is explicit so the JSON number never carries a scale.
+        if (payment.getTotalAmount() != null)
+            data.put("amount", payment.getTotalAmount().setScale(0, java.math.RoundingMode.HALF_UP).longValue());
+        if (payment.getDueAt() != null && (type == Event.PAYMENT_REQUEST_CREATED || type == Event.PAYMENT_DUE_SOON
+                || type == Event.PAYMENT_OBLIGATION_OVERDUE)) data.put("dueAt", TIMESTAMP.format(payment.getDueAt()));
+        if (type == Event.PAYMENT_RECEIPT_CONFIRMED || type == Event.PAYMENT_RECEIPT_AUTO_CONFIRMED)
+            // Captured earlier in the same transaction; absent (zero-amount payment) means no receipt, no attachment.
+            receipts.findByPaymentRequestId(paymentId).ifPresent(r -> {
+                data.put("receiptId", r.getId());
+                data.put("receiptNumber", r.getReceiptNumber());
+            });
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("eventId", eventId);
         envelope.put("eventType", type.name());
         envelope.put("version", 1);
         envelope.put("occurredAt", TIMESTAMP.format(now));
         envelope.put("recipients", List.of(recipient));
-        envelope.put("data", Map.of("paymentId", paymentId));
+        envelope.put("data", data);
         String payload;
         try {
             payload = json.writeValueAsString(envelope);

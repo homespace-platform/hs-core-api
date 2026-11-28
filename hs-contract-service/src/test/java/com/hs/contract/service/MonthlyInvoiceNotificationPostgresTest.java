@@ -84,7 +84,7 @@ class MonthlyInvoiceNotificationPostgresTest {
     @SpringBootConfiguration @EntityScan("com.hs") @EnableJpaAuditing
     @EnableJpaRepositories(basePackageClasses = {ContractNotificationOutboxRepository.class,
         com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,
-        com.hs.payment.notification.PaymentNotificationOutboxRepository.class, ContractRepository.class,
+        com.hs.payment.notification.PaymentNotificationOutboxRepository.class, com.hs.payment.receipt.PaymentReceiptRepository.class, ContractRepository.class,
         RentalRequestRepository.class, PaymentRequestRepository.class, StorageObjectRepository.class})
     static class Config {
         @Bean ObjectMapper mapper() { return new ObjectMapper().findAndRegisterModules(); }

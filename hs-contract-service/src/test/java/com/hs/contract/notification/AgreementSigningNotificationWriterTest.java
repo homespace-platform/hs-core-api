@@ -101,6 +101,20 @@ class AgreementSigningNotificationWriterTest {
         assertThrows(IllegalStateException.class, () -> writer.leaseActivated(contract("child", "root", null)));
     }
 
+    @Test void fullySignedAddsContractIdOnlyForTheLease() throws Exception {
+        writer.leaseActivated(root);
+        assertEquals(List.of("agreementId", "agreementKind", "contractId"), fields(event(0).get("data")));
+        assertEquals("LEASE", event(0).get("data").get("agreementKind").asText());
+        assertEquals(root.getId(), event(0).get("data").get("contractId").asText());
+        rows.clear();
+        writer.fullySigned(contract("deposit", null, "DEPOSIT"));
+        assertEquals(List.of("agreementId", "agreementKind"), fields(event(0).get("data")));
+        assertEquals("DEPOSIT", event(0).get("data").get("agreementKind").asText());
+        rows.clear();
+        writer.signingTurn(root); // other events keep the frozen shape
+        assertEquals(List.of("agreementId", "agreementKind"), fields(event(0).get("data")));
+    }
+
     @Test void dueSoonIsWrittenOncePerDeadlineForAStoredPartyWithTheFrozenDataShape() throws Exception {
         var deposit = contract("deposit", null, "DEPOSIT");
         var due = java.time.Instant.parse("2026-11-25T03:00:00Z");

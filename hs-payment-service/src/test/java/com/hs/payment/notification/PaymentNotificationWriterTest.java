@@ -21,7 +21,8 @@ class PaymentNotificationWriterTest {
         if(output!=null&&!output.isBlank())Files.write(Path.of(output),List.of(captured.getValue().getPayload()));
     }
     final PaymentNotificationOutboxRepository outbox=mock(PaymentNotificationOutboxRepository.class);
-    final PaymentNotificationWriter writer=new PaymentNotificationWriter(outbox,"test.payment.notifications");
+    final com.hs.payment.receipt.PaymentReceiptRepository receipts=mock(com.hs.payment.receipt.PaymentReceiptRepository.class);
+    final PaymentNotificationWriter writer=new PaymentNotificationWriter(outbox,receipts,"test.payment.notifications");
     final PaymentRequest payment=PaymentRequest.builder().id("cb856b21-5fbf-4d33-b7f7-fd54d5ce7867")
         .payerId("stored-payer").payeeId("stored-payee").rejectedReason("PRIVATE_REASON").build();
     final ObjectMapper json=new ObjectMapper();
@@ -69,6 +70,26 @@ class PaymentNotificationWriterTest {
         var recipients=new ArrayList<String>();for(var row:capture.getAllValues())recipients.add(json.readTree(row.getPayload()).get("recipients").get(0).asText());
         assertEquals(List.of("stored-payee","stored-payer","stored-payee"),recipients);
         assertEquals(3,capture.getAllValues().stream().map(PaymentNotificationOutbox::getEventId).distinct().count());
+    }
+    @Test void receiptEventsCarryReceiptIdNumberAndAmountButNoSensitiveFields() throws Exception {
+        payment.setTotalAmount(new java.math.BigDecimal("1500000.00"));payment.setDueAt(java.time.Instant.parse("2026-12-01T00:00:00Z"));
+        payment.setPayerBankAccountSnapshot("PAYER-BANK-9704");payment.setTransferReference("REF-SECRET");
+        var receipt=new com.hs.payment.receipt.PaymentReceipt();receipt.setId("receipt-1");receipt.setReceiptNumber("HS-TT-20261128-ABC");
+        when(receipts.findByPaymentRequestId(payment.getId())).thenReturn(Optional.of(receipt));
+        writer.enqueue(payment,PaymentNotificationWriter.Event.PAYMENT_RECEIPT_CONFIRMED,"stored-payer");
+        writer.enqueue(payment,PaymentNotificationWriter.Event.PAYMENT_RECEIPT_AUTO_CONFIRMED,"stored-payee");
+        writer.enqueue(payment,PaymentNotificationWriter.Event.PAYMENT_DUE_SOON,"stored-payer");
+        writer.enqueue(payment,PaymentNotificationWriter.Event.PAYMENT_TRANSFER_REPORTED,"stored-payee");
+        var capture=org.mockito.ArgumentCaptor.forClass(PaymentNotificationOutbox.class);verify(outbox,times(4)).save(capture.capture());
+        var rows=capture.getAllValues();
+        for(int i=0;i<2;i++){var d=json.readTree(rows.get(i).getPayload()).get("data");
+            assertEquals(Set.of("paymentId","amount","receiptId","receiptNumber"),fields(d));
+            assertEquals("receipt-1",d.get("receiptId").asText());assertEquals("HS-TT-20261128-ABC",d.get("receiptNumber").asText());
+            assertEquals(1500000L,d.get("amount").asLong());assertEquals(payment.getId(),d.get("paymentId").asText());}
+        var due=json.readTree(rows.get(2).getPayload()).get("data");
+        assertEquals(Set.of("paymentId","amount","dueAt"),fields(due));assertEquals("2026-12-01T00:00:00.000Z",due.get("dueAt").asText());
+        assertEquals(Set.of("paymentId","amount"),fields(json.readTree(rows.get(3).getPayload()).get("data")));
+        for(var row:rows)for(var secret:List.of("PAYER-BANK-9704","REF-SECRET","PRIVATE_REASON"))assertFalse(row.getPayload().contains(secret));
     }
     @Test void invalidRecipientOrMissingPaymentIdentityCannotEnqueue(){
         var type=PaymentNotificationWriter.Event.PAYMENT_RECEIPT_CONFIRMED;

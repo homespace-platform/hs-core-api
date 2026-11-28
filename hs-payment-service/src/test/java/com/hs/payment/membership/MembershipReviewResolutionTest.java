@@ -29,8 +29,9 @@ class MembershipReviewResolutionTest {
     final MembershipService memberships = mock(MembershipService.class);
     final MembershipReceiptService receipts = mock(MembershipReceiptService.class);
     final MembershipOverpaymentRepository overpayments = mock(MembershipOverpaymentRepository.class);
+    final MembershipNotificationWriter notifications = mock(MembershipNotificationWriter.class);
     final MembershipPaymentApplier applier = new MembershipPaymentApplier(orders, overpayments, memberships,
-            mock(MembershipNotificationWriter.class), receipts);
+            notifications, receipts);
     final TransactionTemplate tx = new TransactionTemplate() {
         @Override public <T> T execute(org.springframework.transaction.support.TransactionCallback<T> a) { return a.doInTransaction(null); }
     };
@@ -60,6 +61,7 @@ class MembershipReviewResolutionTest {
         assertEquals(1, job.run(10));
         assertEquals(MembershipOrder.Status.PAID, o.getStatus());
         verify(receipts).capture(o);
+        verifyNoInteractions(notifications); // legacy resolution must not trigger emails
         assertEquals(0, job.run(10));
         verify(memberships, times(1)).activate(anyString(), any(), anyBoolean(), anyString());
     }
@@ -74,6 +76,7 @@ class MembershipReviewResolutionTest {
         var saved = ArgumentCaptor.forClass(MembershipOverpayment.class);
         verify(overpayments).save(saved.capture());
         assertEquals("rv-b1", saved.getValue().getTransactionNo());
+        verifyNoInteractions(notifications);
         assertEquals(0, job.run(10));
         verify(memberships, never()).activate(anyString(), any(), anyBoolean(), anyString());
         verify(overpayments, times(1)).save(any());

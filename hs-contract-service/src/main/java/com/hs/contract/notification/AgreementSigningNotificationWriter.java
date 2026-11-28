@@ -31,7 +31,7 @@ import com.hs.contract.repository.WorkflowSigningDocumentRepository;
  * (the contract row that owns the signature requests; a child for amendment, renewal and early-exit documents).
  * Recipients are the stored landlord/tenant of that envelope, additionally asserted equal to the root lease parties for
  * children, never a request or actor value. Every envelope has one recipient and data exactly
- * {agreementId, agreementKind}; no text, date, amount, signature or failure code enters Kafka. Aggregate/Kafka key =
+ * {agreementId, agreementKind} (AGREEMENT_FULLY_SIGNED for the lease adds contractId); no text, date, amount, signature or failure code enters Kafka. Aggregate/Kafka key =
  * agreementId, so ordering is only promised among events of the same envelope.
  */
 @Service
@@ -189,6 +189,8 @@ public class AgreementSigningNotificationWriter {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("agreementId", envelope.getId());
         data.put("agreementKind", kind.name());
+        // Additive: lets the email attach the lease bundle (lease + deposit PDFs); agreementKind already says LEASE/DEPOSIT.
+        if (type == Event.AGREEMENT_FULLY_SIGNED && kind == Kind.LEASE) data.put("contractId", envelope.getId());
         Map<String, Object> message = new LinkedHashMap<>();
         message.put("eventId", eventId);
         message.put("eventType", type.name());

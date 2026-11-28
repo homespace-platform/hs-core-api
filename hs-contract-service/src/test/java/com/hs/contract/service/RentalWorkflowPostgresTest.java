@@ -72,7 +72,7 @@ class RentalWorkflowPostgresTest {
         registry.add("spring.datasource.password",()->legacy?"hs_workflow_test":System.getenv("HS_TEST_PG_PASSWORD"));
     }
     @SpringBootConfiguration @EntityScan("com.hs")
-    @EnableJpaRepositories(basePackageClasses={com.hs.contract.notification.ContractNotificationOutboxRepository.class,com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,com.hs.payment.notification.PaymentNotificationOutboxRepository.class,ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class,com.hs.contract.deposit.DepositAgreementRepository.class})
+    @EnableJpaRepositories(basePackageClasses={com.hs.contract.notification.ContractNotificationOutboxRepository.class,com.hs.listing.notification.RentalRequestNotificationOutboxRepository.class,com.hs.payment.notification.PaymentNotificationOutboxRepository.class,com.hs.payment.receipt.PaymentReceiptRepository.class,ContractRepository.class,RentalRequestRepository.class,PaymentRequestRepository.class,StorageObjectRepository.class,com.hs.contract.deposit.DepositAgreementRepository.class})
     @EnableJpaAuditing static class Config {
         @Bean ObjectMapper mapper(){return new ObjectMapper().findAndRegisterModules();}
         @Bean MutableTime time(Environment env){return new MutableTime(env);}
@@ -1078,7 +1078,7 @@ class RentalWorkflowPostgresTest {
     List<String> cashEvents(String paymentId){
         return paymentNotices.findAll().stream().filter(row->paymentId.equals(row.getPaymentId()))
                 .sorted(Comparator.comparing(com.hs.payment.notification.PaymentNotificationOutbox::getId)).map(row->{
-                    var e=NOTICE_JSON.readTree(row.getPayload());assertEquals(1,e.get("data").size());assertEquals(paymentId,e.get("data").get("paymentId").asText());
+                    var e=NOTICE_JSON.readTree(row.getPayload());assertEquals(paymentId,e.get("data").get("paymentId").asText());
                     assertEquals(1,e.get("recipients").size());return e.get("eventType").asText()+":"+e.get("recipients").get(0).asText();
                 }).toList();
     }

@@ -54,15 +54,18 @@ class MembershipNotificationAcceptanceTest {
         assertTrue(sepay.sepayIpn(callback("tx-one")));assertTrue(sepay.sepayIpn(callback("tx-one")));
         assertTrue(sepay.sepayIpn(callback("tx-two")));
         var rows=rows(2);verify(memberships,times(1)).activate(anyString(),any(),anyBoolean(),anyString());
+        var savedOverpayment=ArgumentCaptor.forClass(MembershipOverpayment.class);verify(overpayments).save(savedOverpayment.capture());
         assertEquals(MembershipOrder.Status.PAID,o.getStatus());assertNotNull(o.getPaidAt());assertEquals("tx-one",o.getTransactionNo());
         var fixtures=new ArrayList<Object>();
         for(int i=0;i<rows.size();i++){
             var row=rows.get(i);var e=json.readTree(row.getPayload());
             assertEquals(i==0?"MEMBERSHIP_ACTIVATED":"MEMBERSHIP_OVERPAYMENT_RECEIVED",e.get("eventType").asText());
             assertEquals("persisted-owner",e.get("recipients").get(0).asText());assertEquals(1,e.get("recipients").size());
-            assertEquals(json.valueToTree(Map.of("orderId",id)),e.get("data"));assertEquals(id,row.getOrderId());
+            var data=json.convertValue(e.get("data"),new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>(){});
+            if(i==1)assertEquals(savedOverpayment.getValue().getId(),data.remove("overpaymentId"));
+            assertEquals(Map.of("orderId",id,"amount",49000),data);assertEquals(id,row.getOrderId());
             assertTrue(e.get("occurredAt").asText().matches(".*\\.\\d{3}Z"));assertNull(row.getSentAt());
-            assertFalse(row.getPayload().contains("49000"));assertFalse(row.getPayload().contains("tx-one"));assertFalse(row.getPayload().contains("SEPAY"));fixtures.add(e);
+            assertFalse(row.getPayload().contains("tx-one"));assertFalse(row.getPayload().contains("SEPAY"));fixtures.add(e);
         }
         assertNotEquals(rows.getFirst().getEventId(),rows.getLast().getEventId());
         Path path=Path.of("target","membership-event-contracts.json");Files.createDirectories(path.getParent());Files.writeString(path,json.writeValueAsString(fixtures));
