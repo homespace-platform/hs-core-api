@@ -56,3 +56,9 @@ Mỗi mục: ngày · model · việc · commit · test (số liệu thật) · 
 - PostgreSQL 16.16 trong container riêng `hs-dash-integration-20261128`, cổng loopback Docker cấp 49469, ba database test riêng cho P1/P2/P3. Đã chạy 30 ca PostgreSQL trong tổng 250 test, gồm BranchAttention hồi quy. Container và volume do điều phối tạo đã xóa. Log không commit tại `hs-api-service/target/dashboard-phase1-integration.log`.
 - Giới hạn đã xác minh: lượt xem/SLA bắt đầu từ khi ghi mới; không phục dựng lịch sử đã mất. Chế độ Hibernate validate/none cần áp dụng DDL mới trước boot. Chưa thử provider thật/production, chưa chạy full suite, chưa làm frontend/mobile. Chưa push.
 - Tiếp tục đợt 2 theo phê duyệt: P4 tổng quan/sức khoẻ đọc từ nguồn hiện có + danh sách KYC; P5 thống kê; P6 blockchain đọc + API admin delivery-health của notification. Năm sửa lỗi operations và Excel vẫn để sau. Những nguồn giám sát phụ thuộc năm sửa lỗi chưa có dữ liệu phải trả unavailable/null, không báo OK giả.
+
+## 2026-11-28 · Codex · Chủ dự án yêu cầu điều phối đến hoàn tất, chưa push
+- Yêu cầu mới: hoàn thành toàn bộ phạm vi dashboard đã duyệt, giữ mọi thay đổi local; chưa push ở tất cả repo.
+- Đợt 2: P5/P6 đã xác nhận đang viết code qua output worker; P4 còn bản nhiệm vụ trong composer, đã gửi yêu cầu tiếp tục qua orchestration. Không coi trạng thái start_unknown là đã chạy hoặc đã xong.
+- Đã xếp ba task giao diện phụ thuộc API P4/P5/P6: task_ee9e5aa51e5a (web P1/P2), task_c45d128c22d1 (web P3), task_86336892486d (admin P4/P5/P6 + KYC). Khi API hoàn tất sẽ gộp/kiểm tra rồi khởi động các task giao diện.
+- Điều kiện kết thúc: API/backend và giao diện khớp hợp đồng thực, route/quyền/drilldown hoạt động, kiểm tra trạng thái tải/trống/lỗi/unavailable, lint/typecheck/build phù hợp, kiểm tra browser và tích hợp sau gộp; ghi rõ giới hạn dữ liệu/provider. Không đánh dấu hoàn tất chỉ vì đã giao task. Mobile theo sau web như phê duyệt ban đầu; Excel và năm sửa lỗi operations vẫn để sau.
