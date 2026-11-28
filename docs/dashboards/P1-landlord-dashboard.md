@@ -314,4 +314,14 @@ Bằng chứng PostgreSQL P1 gồm biên đầu/cuối tháng VN (23:59:59 / 00:
 - Tăng **3 → 30 chi nhánh**: cùng **16 Hibernate statements**; các projection JDBC chạy bộ truy vấn gộp cố định, không vòng lặp theo chi nhánh. Hibernate statistics không đo số statement JDBC; holds là ngoại lệ ≤10 lần gọi onboarding theo thiết kế.
 - Lỗi tìm được rồi sửa: quote tham số Maven có dấu chấm trên PowerShell; ép timestamptz cho CASE tham số native PostgreSQL; kỳ vọng fixture receipt liên kết owner sai; bulk fixture cần version=0 theo DDL Hibernate. Không còn validation exit khác 0 chưa giải quyết.
 - Không chạy toàn bộ reactor suite, không gọi live gateway/provider/database, không kiểm frontend/mobile, không đo production latency. Còn việc tích hợp P3/cherry-pick của điều phối; phạm vi overdue/expiry theo chi nhánh và các DTO khác JSON minh họa đã ghi rõ ở trên.
+
+### Đối chiếu hoàn tiền với P3 (2026-11-28)
+
+Đã đối chiếu `LandlordAnalyticsQueries.AMOUNT` tại P3 commit `55e7cdf`: P1 đã dùng cùng quy tắc loại cả dòng DEPOSIT/DEPOSIT_REFUND khỏi INITIAL_PAYMENT_REFUND trước khi trừ hoàn vào doanh thu ròng, nên không cần sửa code production hoặc index. Fixture PostgreSQL hiện có tạo khoản hoàn 80 VND chứa DEPOSIT_REFUND 50 VND, xác nhận refundedVnd=30 và receivedVnd ròng=70.75 (thu thuê/phí 100.75 trừ 30); phiếu DEPOSIT_REFUND riêng 900 VND không giảm doanh thu. Chạy lại bằng container mới riêng `hs-p1-refund-3d59d0a6`, random port 49411, database `hs_branch_attention_test_p1_refund_3d59d0a6` trên PostgreSQL 16.16:
+
+```powershell
+.\mvnw.cmd -pl hs-contract-service -am '-Dtest=LandlordDashboardPostgresTest#receiptsUseHalfOpenVietnamMonthsExactMoneyAndDoNotCrossOwnersOrCountDeposits' '-Dsurefire.failIfNoSpecifiedTests=false' test
+```
+
+Kết quả: **1 passed, 0 failures/errors/skipped**, BUILD SUCCESS, exit 0; đây là test cũ được chạy lại, không tăng số test case khác nhau. Container/volume tạm được xóa sau lượt chạy; không gọi DB/dịch vụ sẵn có và không sửa file index dùng chung với P3.
 | Số tin đã xem (`/history/count`) | Dành cho người thuê; tự xóa sau 30 ngày; thuộc trang lịch sử xem |
