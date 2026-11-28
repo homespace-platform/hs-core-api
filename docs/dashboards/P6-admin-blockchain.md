@@ -107,3 +107,153 @@ Frontend (`node --test`): `explorerLink(chainId, kind, value)` — chain 1115511
 | Tự động kiểm toàn vẹn định kỳ mọi tài liệu | Tốn S3 + RPC; giai đoạn 2 (Câu hỏi 6). `integrity` hiện chỉ phản ánh lần kiểm gần nhất. |
 | Thử lại proof FAILED | Giai đoạn 2, chỉ `TRANSACTION_REVERTED` (§4); bốn mã còn lại cấm thử lại bằng nút. |
 | IPN SePay, giá ETH/VND, ví hệ thống hết Sepolia ETH | Không có dữ liệu ghi; ví hết ETH chỉ lộ qua proof kẹt/`FAILED`. |
+
+## 10. API implemented (phase 2, 2026-11-28)
+
+This section is the exact backend contract for frontend integration. Retry remains deferred;
+no retry endpoint or blockchain/contract/payment state transition was added. The five P4
+operations fixes, frontend/chart work, mobile and Excel are outside this change.
+
+All six endpoints support both `/admin/blockchain` and `/api/v1/admin/blockchain` prefixes.
+Every endpoint requires a verified Gateway user context, `ADMIN` role and `BLOCKCHAIN_VIEW`.
+Integrity additionally requires `CONTRACT_VIEW`. Checks exist in method security and the service;
+an authority naming ADMIN cannot promote a USER role. No permission catalog edit is included
+here: P4 owns `Permissions.java` and activation of `BLOCKCHAIN_VIEW` in the shared catalog.
+All successful responses set `Cache-Control: private, no-store`. Missing identity is 401,
+insufficient permission is 403, invalid input is 400, and missing proof is 404 (code 6011).
+
+| Method/path after prefix | Request DTO/validation | Response DTO/envelope |
+|---|---|---|
+| `GET /summary` | No parameters | `ApiResponse<AdminBlockchainResponse.Summary>` |
+| `GET /proofs` | `AdminBlockchainController.ProofQuery`: optional `status=PENDING/SUBMITTED/CONFIRMED/FAILED`, `contractNumber` literal prefix (1–64 chars, no controls), `from`/`to` ISO instants, `page=1`, `size=20`; size clamped to 50 | `PageResponse<AdminBlockchainResponse.ProofRow>` |
+| `GET /proofs/{documentId}` | No parameters/body | `ApiResponse<AdminBlockchainResponse.ProofDetail>` |
+| `POST /proofs/{documentId}/verify` | No parameters/body; client hash input is rejected | `ApiResponse<AdminBlockchainResponse.Verification>` |
+| `POST /proofs/{documentId}/integrity` | No parameters/body; both view permissions | `ApiResponse<DocumentIntegrityResponse>` |
+| `GET /membership-eth-payments` | Optional `unsettled=true/false` (default false), `page=1`, `size=20`; size clamped to 50 | `PageResponse<AdminEthPaymentQueries.Payment>` |
+
+Unknown/repeated query keys are rejected. Page/size must be positive decimal integers (up to
+7 digits). Proof dates use the half-open interval `[from,to)` and require `from < to` when both
+exist. Prefix `%`, `_` and `!` are literal, never SQL wildcards. Proof ordering is
+`created_at DESC, document_id DESC`; ETH ordering is `membership_orders.created_at DESC,
+payment_id DESC`, so ties paginate consistently. `PageResponse` puts the row array directly in
+`result`, with root `page`, `size`, `totalElements`, `totalPages`, `hasMore` (1-based page).
+
+Response field inventory:
+
+- `Summary`: `asOf`, `network`, `counts`, `stuck`, `oldestOpenAgeSeconds`, `retrying`,
+  `byErrorCode`, `openIncidents`, `senderLeaseHeldUntil`, `integrity`, `ethUnsettled`,
+  `workerLastRunAgeSeconds`, `sourceCapabilities`.
+- `network`: `chainId`, `name` (Sepolia or UNKNOWN), `registryAddress`, `enabled`,
+  `explorerBaseUrl`. Only chain 11155111 gets `https://sepolia.etherscan.io`; every other
+  chain gets null. Malformed addresses/hashes become null. No RPC URL/private key is exposed.
+- `counts`: PENDING/SUBMITTED/CONFIRMED/FAILED, including zero buckets on an empty database.
+  `stuck` is PENDING/SUBMITTED with `created_at < asOf - 15 minutes` (strict boundary);
+  `retrying` counts nonterminal rows with `attempts > 0`. Empty open queue age is null.
+- `byErrorCode`: all currently stored non-null error-code counts, allowlisted and grouped into
+  `OTHER` for unknown codes in SQL; no raw messages. It describes current proof state, not
+  historical failures. `openIncidents` counts only open BLOCKCHAIN incidents. Lease expiry
+  comes only from ID `contract-document-proof-sender`, null if absent; an expired recorded
+  expiry stays visible, without returning token/lease-owner details.
+- `integrity`: `{counts, note}`. Fixed buckets MATCH/MISMATCH/MISSING/UNAVAILABLE/PENDING/
+  NOT_AVAILABLE/UNCHECKED; null legacy status maps to UNCHECKED, unknown values to OTHER.
+  These count `contract_documents` and reflect only the latest explicit check, which can be
+  stale; null history never becomes a healthy zero check. There is no periodic integrity job.
+- `sourceCapabilities`: `workerLastRun=UNAVAILABLE_NO_PERSISTED_JOB_RUNS`,
+  `integrity=LATEST_EXPLICIT_CHECK_ONLY`, `ethChain=ASSUMED_SEPOLIA_NO_STORED_CHAIN_ID`.
+  `workerLastRunAgeSeconds` is null because job instrumentation is deferred.
+- `ProofRow`: `documentId`, `contractNumber`, `documentKind`, `status`, `transactionHash`,
+  `blockNumber`, `createdAt`, `confirmedAt`, `errorCode`.
+- `ProofDetail`: row fields plus `documentHash`, `onChainDocumentId`, `chainId`,
+  `registryAddress`, `blockHash`, `registeredAt`, `caseId`, `attempts`, `submittedAt`.
+  It never loads a proof entity with a raw signed transaction and never creates/enqueues a
+  missing proof. Existing party endpoints remain unchanged.
+- `Verification`: `documentId`, `status=AVAILABLE/UNAVAILABLE`, nullable `registered`,
+  `matches`, `conflict`, `onChainHash`, `registeredAt`. A registered different hash gives
+  `matches=false, conflict=true`; a zero on-chain hash gives `registered=false, conflict=false`.
+  RPC failure, unsupported chain or malformed provider data gives UNAVAILABLE with null
+  result fields, never a false mismatch or raw exception. Input hash comes only from DB.
+- `DocumentIntegrityResponse`: `documentId`, `status`, `documentHash`, `onChainDocumentHash`,
+  `checkedAt`, `message`; it returns no PDF bytes. `checkForAdmin` reuses pinned-version
+  inspection and only updates the existing integrity result fields. Signed SHA-256, S3
+  version, proof hashes and lifecycle states remain immutable.
+- `Payment`: `orderId`, `tier`, `kind`, `amountVnd` (exact decimal from quote), `amountWei`
+  (integer string), `transactionHash`, `confirmedAt`, `status`, `orderCreatedAt`, `ageSeconds`,
+  `chainId=11155111`, `chainSource=ASSUMED_SEPOLIA_NO_STORED_CHAIN_ID`. Includes only quotes
+  with a non-null transaction hash joined to provider ETH orders. Unsettled means status is
+  anything except PAID, including legacy REVIEW and CANCELLED. Age uses quote confirmed_at
+  or order created_at because quotes have no created_at column. Neither age nor presence of
+  a transaction hash independently proves on-chain payment finality. Wallets/signatures/
+  owner identifiers never enter the projection.
+
+Operations use real `Instant.now()`; no contract/payment deadline is recalculated, so BillingTime
+does not alter queue ages or ETH reconciliation ages. Summary/list paths make no RPC or S3
+calls. Explicit verify uses the existing bounded RegistryClient; explicit integrity uses the
+existing pinned PDF inspection (50 MiB maximum). Both actions share a rolling quota of 10
+checks/minute/admin, HTTP 429/code 4290 when exceeded. The bounded in-memory limiter is per
+instance; shared quota across replicas requires a shared limiter later. Existing RPC timeout
+configuration remains unchanged. No new environment variables or `.env` reads were added.
+
+SQL lives in contract and payment modules respectively; result sets are scalar aggregates or
+bounded projections, with no per-row calls. New idempotent index migration creates
+`idx_proof_status_created(status,created_at DESC,document_id DESC)` and
+`idx_proof_created(created_at DESC,document_id DESC)` on the existing proof table. Normal
+ApplicationReady migration follows repository conventions; deployments that apply DDL
+separately should create these before serving large datasets. The initial index creation can
+briefly lock writes and should run in the deployment maintenance window.
+
+### Notification delivery health (exclusive companion change)
+
+Implemented separately in `hs-notification-service`: `GET /admin/delivery-health`, through
+Gateway `GET /api/v1/notifications/admin/delivery-health`, no input DTO/body. Requires
+GatewayAuthenticationGuard (valid internal secret), AdminGuard and `SYSTEM_HEALTH_VIEW`
+parsed from the verified context. Existing authentication guards are unchanged. Response
+`ApiResponseDto<DeliveryHealthResponse>` has `asOf`, `windowStart`, `email`, `push`, `kafka`,
+`loops`, `notes`; full fields and source semantics are documented in that repository's
+`docs/ADMIN_DELIVERY_HEALTH.md`.
+
+Email/push aggregates expose configured enabled flags, current pending/processing, current
+failed/skipped/sent/accepted rows updated in `[asOf-24h,asOf)`, retry-due counts, oldest pending
+age and a bounded safe error-code map. These are current-state counters, not transition history.
+Each channel runs one projected Mongo aggregate with a 2.5-second server limit and 3-second
+source deadline, cached/coalesced for 15 seconds. Errors produce null counts/source unavailable,
+independently per channel. No recipients/payloads/tokens/provider-message IDs are returned.
+Kafka lag/DLT counters, loop heartbeat timestamps and device deactivation history are unavailable
+and explicitly null; no deferred instrumentation, live broker/provider query or invented zero/OK
+was added. Gateway was inspected read-only: it strips client identity headers and forwards
+verified authorities/internal secret on notification routes, and already restricts admin paths.
+Deployed Gateway forwarding and real Mongo pipeline integration still need consumer/environment
+validation. Notification local commit: `009928627233ca25dde871c58394040b1d3e4090`
+(`Add permission-scoped admin delivery health aggregates`); no push.
+
+### Validation actually run
+
+- `mvnw.cmd -Pisolated-build -pl hs-api-service -am -DskipTests compile`: BUILD SUCCESS;
+  all upstream modules and downstream API assembly compiled.
+- With `HS_P6_TEST_PG_URL=jdbc:postgresql://127.0.0.1:51938/hs_p6_test`,
+  `mvnw.cmd -Pisolated-build -pl hs-api-service -am "-Dtest=AdminBlockchain*Test,ContractBlockchainProofControllerTest,ContractDocumentIntegrityControllerTest" "-Dsurefire.failIfNoSpecifiedTests=false" test`:
+  BUILD SUCCESS, 26 tests, zero failures/errors/skips (contract 13, API 13).
+- `AdminBlockchainPostgresTest`: all six tests executed on disposable PostgreSQL 16,
+  container `hs-p6-pg-1837b32d`, random loopback port 51938. Hibernate generated the actual
+  entity schema with constraints, not an approximate hand-built schema. The worker verified
+  the container ID/task label and removed that container and its own volume after testing.
+  Tests cover empty
+  counts/null age, strict stuck boundary, retries excluding terminal rows, safe unknown codes,
+  literal prefix escaping/injection, half-open time range, deterministic tied pagination,
+  legacy unchecked documents, incident scope, exact sender lease, paid/unpaid/cancelled ETH
+  and no-tx/non-ETH exclusions, exact decimal/wei, totals before pagination, idempotent indexes.
+- `ContractDocumentIntegrityServiceTest`: 17 passed in the earlier focused run, unchanged
+  afterward, including new admin permission/baseline immutability coverage. That earlier run
+  failed two new fixture tests (invalid GOLD tier and Mockito re-stubbing an exception); both
+  fixtures were corrected and their affected suites passed in the final command above.
+- HTTP tests use real UserContextFilter and method-security proxy, including absent/forged
+  identity, USER carrying ADMIN in permission headers, narrow ADMIN, integrity without
+  CONTRACT_VIEW, authorized routes, whitelisted list JSON, size cap, invalid/repeated inputs,
+  rejected client hashes, 404 and unchanged party-controller envelopes.
+- Notification initial focused Jest run (delivery health plus existing gateway/admin guard
+  suites): 22 passed. After adding source timeout coverage, final endpoint suite:
+  `npm test -- --runInBand src/modules/notification-delivery/delivery-health.spec.ts`: 11 passed;
+  `npx tsc --noEmit --incremental false` and `npm run build`: passed on final source.
+
+No `.env` files, existing databases/services or live providers were accessed. Tests do not
+certify real Sepolia/S3/Firebase/email delivery, actual Mongo pipeline execution or deployed
+Gateway/consumer integration. No full repository suite, frontend/mobile or Excel check ran.
