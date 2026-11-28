@@ -1,6 +1,6 @@
 # P5 · Thống kê (admin) — `hs-admin-portal` `/analytics/statistics`
 
-File hiện tại: `src/pages/analytics/StatisticsPage.tsx` (7 dòng, trang trắng). Route có sẵn (`router/index.tsx`, trong `<Route path="analytics">`), chưa gắn quyền; sidebar "Báo cáo & Phân tích → Thống kê số liệu" (`layouts/Sidebar.tsx:90`). Trạng thái: **THIẾT KẾ (bản sau kiểm kê 28/11/2026), chờ duyệt**. Không làm "Dự báo AI" (trang `ai-forecast` giữ nguyên).
+File frontend khi kiểm kê: `src/pages/analytics/StatisticsPage.tsx` (7 dòng, trang trắng). Route có sẵn (`router/index.tsx`, trong `<Route path="analytics">`), chưa gắn quyền; sidebar "Báo cáo & Phân tích → Thống kê số liệu" (`layouts/Sidebar.tsx:90`). Trạng thái: **THIẾT KẾ ĐÃ DUYỆT; API phase 2 triển khai tại §10; frontend phase 3**. Không làm "Dự báo AI" (trang `ai-forecast` giữ nguyên).
 
 ## 0. Thay đổi sau kiểm kê
 - Thêm 5 khối xu hướng: (10) sự cố vận hành + thời gian khắc phục, (11) hiệu suất kiểm duyệt tin, (12) yêu cầu thuê & lịch hẹn + SLA phản hồi, (13) gói hội viên đang hiệu lực, (14) hóa đơn tháng; mở rộng (2), (4), (5b), (7), (8), (9) như bảng §4.
@@ -151,3 +151,71 @@ Frontend (`node --test`): hàm `buildCsv()` — BOM, escape dấu phẩy/ngoặc
 | Phễu yêu cầu thuê theo từng chủ nhà, tỉ lệ từ chối theo chủ nhà | Là dữ liệu cá nhân; P5 chỉ tổng hợp toàn hệ thống. |
 | HĐ sắp hết hạn theo kỳ, thời gian ở mỗi trạng thái HĐ | `contracts` không có ngày kết thúc và không có lịch sử chuyển trạng thái; cần cột `lease_end_exclusive` và bảng lịch sử trước. |
 | Sự cố SmartCA/VNPT, tỉ lệ lỗi ký số theo ngày | Chưa có thành phần sự cố `SMARTCA` và bộ đếm; sức khoẻ hiện tại ở P4 §4.1.4. Sau khi có, có thể thêm vào khối 10. |
+
+## 10. Hợp đồng API thực tế — phase 2, 28/11/2026
+
+Backend đã triển khai trong `hs-contract-service` (DTO/service/native SQL/index), controller tại `hs-api-service`. Không sửa luồng ghi nghiệp vụ hoặc các file P1–P4/P6. Quyền `STATISTICS_VIEW` dùng literal theo catalog P4 §6; P4 chịu trách nhiệm đăng ký quyền chung.
+
+### Endpoint và request
+
+- `GET /admin/statistics` và alias `GET /api/v1/admin/statistics`.
+- Response envelope `ApiResponse<AdminStatisticsResponse>`, `code=1000`, header `Cache-Control: no-store`.
+- Cần identity từ Gateway đã kiểm secret, role `ADMIN` **và** `STATISTICS_VIEW`; không đăng nhập/identity giả → 401, thiếu role/quyền → 403. Service cũng kiểm cùng điều kiện, không nhận identity từ query.
+- DTO `com.hs.contract.dto.statistics.AdminStatisticsQuery(LocalDate from, LocalDate to, Granularity granularity)`; enum `DAY|MONTH`. Controller parse query vào DTO; chỉ nhận ba key này, mỗi key đúng một giá trị, không rỗng. Key lạ, lặp, ngày sai, enum sai → 400/code 1001. Không nhận body hoặc `userId`.
+- Mặc định `to=BillingTime.today()`, `from=to-29 ngày`, `granularity=DAY`. Hai đầu inclusive theo Việt Nam; SQL dùng `[00:00 from,00:00 to+1)` UTC. `from<=to`, năm 1–9999, `to<=BillingTime.today()`, DAY ≤92 ngày, MONTH ≤36 tháng lịch giao với khoảng. MONTH giữ hai đầu ngày đã chọn, không tự mở rộng ra trọn tháng. Kỳ trước có cùng số ngày và kết thúc ngay trước `from`.
+
+### Response DTO chính xác
+
+`AdminStatisticsResponse(range, generatedAt, businessAsOf, kpi, series, breakdown, funnel, sources, degraded)`; mọi số tiền là JSON numeric chính xác bằng VND, giữ phần lẻ có trong dữ liệu, không chuyển sang double/không tự làm tròn. Count là numeric nguyên. Không trả danh sách bản ghi hoặc định danh cá nhân.
+
+| Field | Shape/ý nghĩa |
+|---|---|
+| `range` | `{from,to,granularity,timezone:"Asia/Ho_Chi_Minh"}` |
+| `generatedAt`, `businessAsOf` | ISO Instant; lần tạo snapshot theo giờ thật và giờ BillingTime. Snapshot cache giữ nguyên hai mốc này. |
+| `kpi` | `newUsers`, `submittedListings`, `signedContracts`, `gmvVnd`, `membershipRevenueVnd`: mỗi field `{value,previous}` hoặc null khi truy vấn lỗi. |
+| `series.buckets` | Chuỗi liên tục `YYYY-MM-DD` hoặc `YYYY-MM`, kể cả bucket trống. |
+| `series` đếm | `newUsers`, `newLandlords`, `submittedListings`, `signedContracts`, `kycAdminManual`: mảng theo buckets, zero-fill. |
+| `series.gmvByType` | Map `INITIAL`, `RESERVATION_DEPOSIT`, `MONTHLY_RENT`, `UTILITY`, `OTHER_CHARGE` → mảng VND; đủ 5 key dù rỗng. |
+| `series.membershipByTier` | Map `FREE`, `STARTER`, `PRO`, `BUSINESS`, `ADDON` → mảng VND; tier legacy không rõ dùng `UNKNOWN`. |
+| `series.autoConfirmedRent`, `autoConfirmedRefund` | Mảng số event `RECEIPT_CONFIRMED`, actor `SYSTEM`, phân theo direction; null nếu thiếu PAYMENT_VIEW hoặc source lỗi. |
+| `breakdown.listingsByStatus`, `contractsByStatus`, `contractsByKind`, `kycRejectByCategory` | Map dimension → count. Kind null legacy trả `LEGACY_UNSPECIFIED`, không giả định là LEASE. Lý do KYC chỉ `DUPLICATE_ID`, `DOCUMENT_OR_FACE`, `OTHER`, không chuỗi thô. |
+| `breakdown.listingsByCity` | `[{city,count}]`, top 10 nhãn tỉnh + phần còn lại `Khác`; không có địa chỉ active → `Chưa rõ`. Không trả đường/số nhà. |
+| `breakdown.listingSupply` | `{expiringIn7d,overdueUnswept}` snapshot **giờ thật**, PUBLISHED hoặc PENDING_REVIEW có operational status PUBLISHED. |
+| `breakdown.gmv` | `{confirmedTransactions,grossVnd,currency:"VND"}`. Gross gồm tiền cọc theo D2, không phải doanh thu thuần P3. Chỉ active CONFIRMED, VND, TENANT_TO_LANDLORD, 5 loại trên, theo confirmed_at; loại mọi khoản hoàn/chênh lệch cọc. Không đổi công thức P1/P3. |
+| `breakdown.terminations` | `{mutual,unilateral,declined,proposed,early:null,rejectRate:{num,den}}`; completed_at không có forced_at vào mutual; forced_at vào unilateral, không đếm kép. Đây là timestamp lưu trên root contract (kể cả HĐ cọc); không phải lịch sử đầy đủ mọi lần đề xuất. `early` unavailable vì không có timestamp hoàn tất chấm dứt sớm riêng; ngày hiệu lực/đồng ý trả nhà không được dùng thay. |
+| `breakdown.membershipByProvider` | `[{provider,orders,amountVnd}]`, PAID theo paid_at; provider null → UNKNOWN, gồm provider legacy VNPAY; tiền ETH là VND đã lưu. |
+| `breakdown.membershipCheckout` | `[{provider,created,paid}]`, cohort theo created_at, paid là trạng thái hiện tại. |
+| `breakdown.kycByProvider` | `[{provider,total,verified,rejected,pending}]`; pending = tất cả trạng thái ngoài VERIFIED/REJECTED, bao gồm EXPIRED/NOT_VERIFIED; UI không gắn nhãn "đang xử lý" cho toàn bộ nhóm này. |
+| `breakdown.rentalRequests` | `{byStatus,acceptRate:{num,den}}` cohort created_at; số active ACCEPTED / mọi active request trong cohort. |
+| `breakdown.appointments` | `{byStatus,completedMeaning:"PAST_SCHEDULE_NOT_ATTENDANCE"}` cohort created_at; COMPLETED không xác nhận khách thực đến. |
+| `breakdown.responseSla` | `{available,rentalRequests,appointments}`; mỗi con `{observations,medianSec,p90Sec,unmeasured,invalid}` hoặc null khi thiếu source. Chỉ dùng responded_at thật ≥created_at; unmeasured là null, invalid là timestamp trước created_at. Thiếu cột ở một bảng → available false, con đó null, giữ con còn đo được. |
+| `breakdown.moderation` | `{approved,rejected,violation,observations,reviewMedianSec,reviewP90Sec,approveRate,rejectRate,violationRate}`; ba mảng cùng buckets, rate `{num,den}`. Chỉ history ADMIN từ PENDING_REVIEW sang ba đích; latency dùng history.created_at − listings.submitted_at nếu không âm. |
+| `breakdown.membershipActive` | `{byTier,exhausted,expiring7d}`; BillingTime snapshot, `start_at<=now<end_at`; hết lượt `quota-used-reserved<=0`, hết hạn `end_at<=now+7 ngày`; ADDON tách riêng. Đây là số period, không phải số chủ nhà. |
+| `breakdown.invoices` | `{byStatus,draftOverdue,lateFeeVnd}`; active invoice có due_at trong kỳ, DRAFT due_at<BillingTime.now, cộng late_fee_amount đã lưu (null=0), không dự phóng phí tương lai. |
+| `breakdown.paymentEvents` | `{rejectRate:{num,den}}` hoặc null; RECEIPT_REJECTED / TRANSFER_REPORTED theo cửa sổ event, **không phải matched cohort**, có thể vượt 100% khi nhiều lần báo/chuyển kỳ. Cần PAYMENT_VIEW. |
+| `breakdown.incidents` | `{byComponent,open,observations,mttrMedianSec,mttrP90Sec,repeatComponents}` hoặc null; cohort opened_at, MTTR chỉ open=false và resolved_at>=opened_at; component lặp ≥2. Cần INCIDENT_VIEW. Không có sourceKey/resourceId. |
+| `funnel` | Năm field `registeredToOnboarded`, `registeredToKyc`, `submittedToPublished`, `contractCreatedToSigned`, `signedToPaid`; mỗi field `{num,den}`. Mẫu số 0 vẫn `{num:0,den:0}`; UI hiển thị “—”. Registration chỉ USER active, KYC VERIFIED active qua EXISTS; hợp đồng chỉ root active; signedToPaid dùng INITIAL CONFIRMED active, VND, TENANT_TO_LANDLORD qua EXISTS, không đếm số khoản. |
+| `sources` | Map theo tên khối → `{available,source,limit}`. available cho biết nguồn query được, không đảm bảo dữ liệu lịch sử đầy đủ. `earlyTerminations` luôn unavailable; thiếu quyền phụ có limit `PAYMENT_VIEW_REQUIRED`/`INCIDENT_VIEW_REQUIRED`. |
+| `degraded` | Tên query lỗi/thiếu schema, không có SQL hay dữ liệu nhạy cảm. Khối lỗi null; thiếu quyền không được coi là sự cố degraded. |
+
+Nguồn timeline và breakdown lỗi trả null thay vì zero giả. Median null khi không có mẫu hợp lệ; p90 null khi <2 mẫu. `observations` đi kèm để UI phân biệt chưa đo được và số 0 thật. Mọi series sẵn có có cùng độ dài buckets; series bị che quyền hoặc unavailable là null.
+
+### Phạm vi, clock, giới hạn nguồn và hiệu năng
+
+- Áp dụng active=true cho các entity có cột active; order/period/event/history/incident không có cột này dùng tập của chính bảng. First-landlord = MIN(created_at) của **tin active**, gồm tin nháp; loại owner đã có tin active trước kỳ trước. Không phải số KYC/role LANDLORD hoặc số chủ nhà còn dùng sản phẩm. Truy vấn chỉ xét cohort thời gian + indexed EXISTS; không tải toàn bộ lịch sử vào Java.
+- Hợp đồng không tính appendix (`parent_contract_id IS NOT NULL`). Không loại root DEPOSIT khỏi thống kê hợp đồng; kind null legacy không đoán. Termination rejection là tỷ số event-window; nguồn contracts giữ mốc mới nhất, không phục dựng các lần đề xuất cũ.
+- SLA bắt đầu từ phase1 responded_at, không backfill accepted_at/updated_at. Moderation không đo được mẫu cũ đã resubmit làm submitted_at hiện tại sau decision; bỏ mẫu thời gian âm nhưng vẫn đếm decision. Source limit nêu rõ. Không thống kê theo nhân viên/người thuê/chủ nhà.
+- Incident source chỉ các component đã có bản ghi từ monitor hiện hữu. Không thêm bảng incident giả, không mở rộng monitor, không ghi job runs, không suy ra trạng thái dịch vụ khỏe khi chưa có nguồn.
+- Một transaction chỉ đọc, repeatable-read, grouped native Postgres SQL (~32 query khi có đủ hai quyền phụ, không truy vấn theo từng hàng). Mỗi statement timeout 5s; savepoint cô lập lỗi PostgreSQL/thiếu cột legacy, source `SOURCE_UNAVAILABLE` hoặc `QUERY_FAILED`, phần còn lại tiếp tục.
+- Cache nội bộ tối đa 32 snapshot, key gồm toàn bộ DTO, ngày BillingTime và hai quyền phụ; quyền luôn được kiểm trước cache. TTL 60s khi kỳ kết thúc hôm nay, 600s cho kỳ quá khứ; không cache response degraded. Cache dùng giờ thật, snapshot giữ generatedAt; các snapshot hiện tại trong báo cáo quá khứ cũng có thể cũ tối đa 600s.
+- `AdminStatisticsIndexMigration` tạo idempotent 16 index `idx_stats_*` trên created/signed/confirmed/paid/verified/due/opened và listing-owner-created; bỏ qua bảng nguồn chưa tồn tại để source unavailable không chặn boot. Không sửa schema entity thuộc module dưới; không ghi/chỉnh dữ liệu nghiệp vụ. Chưa đo mục tiêu 800ms ở 100k dòng hoặc lock khi tạo index trên production; cần kiểm hoạch định triển khai trước production.
+- Tất cả số theo trạng thái hiện tại trong cohort, không phải lịch sử trạng thái ở thời điểm kết thúc kỳ. Tài khoản/tin/payment inactive bị loại; PAID không có paid_at legacy không được bịa ngày doanh thu, CONFIRMED thiếu confirmed_at không được bịa bucket.
+
+### Exports và kiểm thử
+
+- CSV đúng thiết kế §5 là **client-side từ JSON vừa tải**, nên backend không thêm endpoint xuất. Frontend phase3 phải giữ quyền/source null, BOM, escaping và chống CSV injection cho nhãn tỉnh; không xuất PII. Thiết kế P5 không có PDF; không thêm PDF backend. Excel vẫn hoãn.
+- Tests: `AdminStatisticsQueryTest` (contract module) kiểm mặc định/giới hạn/kỳ trước/bucket MONTH/ngày Việt Nam/query lạ hoặc lặp; `AdminStatisticsControllerTest` (API module) dùng proxy method-security thật + Gateway filter kiểm 401/403, ADMIN + permission, cả hai alias, no-store, 400 query invalid.
+- `AdminStatisticsPostgresTest` (API module) dùng schema Hibernate thật trong PostgreSQL disposable, chạy tất cả query trên tập rỗng và hỗn hợp: tiền/refund/direction/currency/inactive, ngày/tháng Việt Nam, membership legacy status, funnel root/appendix, city top cap, responded_at legacy/null/âm, percentile 0/1/3 mẫu, moderation ADMIN/SYSTEM, incident open/closed/âm, ngày hết hạn business vs operational, invoice due cohort, thiếu cột/bảng, idempotent index, cache giới hạn và cô lập quyền, HTTP 401/403/quyền phụ/không lộ dữ liệu.
+- Kết quả thật: `mvnw.cmd -Pisolated-build -pl hs-api-service -am -DskipTests compile` → BUILD SUCCESS, compile cả assembly và upstream. `mvnw.cmd -Pisolated-build -pl hs-api-service -am "-Dtest=AdminStatistics*Test" "-Dsurefire.failIfNoSpecifiedTests=false" test` cho 4 query unit + 4 HTTP test PASS; lần gộp này phát hiện lỗi setup PostgreSQL đã sửa, không coi lần gộp đó là BUILD SUCCESS. Giữ lại kết quả 8 test này vì input không đổi.
+- Sau sửa setup/fixture và hoàn tất migration: đặt `HS_P5_TEST_PG_URL=jdbc:postgresql://127.0.0.1:51602/hs_statistics_test`, chạy `mvnw.cmd -Pisolated-build -pl hs-api-service -am "-Dtest=AdminStatisticsPostgresTest" "-Dsurefire.failIfNoSpecifiedTests=false" test` → **BUILD SUCCESS, 10 PostgreSQL test, 0 failure/error/skipped**, gồm timeout thật 5s và query tiếp theo sau rollback savepoint. Tổng evidence 18 test PASS (8 kết quả dùng lại + 10 final), không phải full suite. Log cục bộ không commit: `hs-api-service/target/p5-compile.log`, `p5-tests.log`, `p5-pg-final.log`; kết quả chi tiết trong `target/isolated/surefire-reports` của module tương ứng.
+- PostgreSQL **16.16**, container riêng `hs-p5-stats-83f370bd`, random loopback port 51602, database riêng `hs_statistics_test`; không dùng DB/service đang chạy, `.env` hay provider thật. Chỉ xóa container/volume do worker này tạo sau kiểm thử. Không benchmark 100k dòng, không thử production/provider hoặc frontend; CSV/Excel theo phạm vi phase3/hoãn nêu trên.
