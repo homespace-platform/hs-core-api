@@ -82,6 +82,25 @@ class ViewingAppointmentServiceTest {
         assertNotNull(appointmentService.getAvailability(LISTING_ID, day, OWNER_ID));
     }
 
+    @Test
+    void firstOwnerResponseIsStampedAndReschedulingOrCancellationKeepsIt() {
+        var apt=ViewingAppointment.builder().id("first-response").ownerId(OWNER_ID).renterId("tenant").listing(testListing)
+                .appointmentDate(LocalDate.now().plusDays(2)).startTime(LocalTime.NOON).endTime(LocalTime.of(13,0))
+                .status(AppointmentStatus.PENDING).build();
+        when(appointmentRepository.findByIdForUpdate(apt.getId())).thenReturn(Optional.of(apt));
+        when(appointmentRepository.save(any(ViewingAppointment.class))).thenAnswer(i->i.getArgument(0));
+        appointmentService.approveAppointment(OWNER_ID,apt.getId(),null);
+        var first=apt.getRespondedAt();assertNotNull(first);assertEquals("ACCEPTED",apt.getResponseType());
+        appointmentService.cancelByOwner(OWNER_ID,apt.getId(),null);
+        assertEquals(first,apt.getRespondedAt());assertEquals("ACCEPTED",apt.getResponseType());
+        apt.setStatus(AppointmentStatus.PENDING);apt.setRespondedAt(null);apt.setResponseType(null);
+        appointmentService.rejectAppointment(OWNER_ID,apt.getId(),new RejectAppointmentRequest("No"));
+        assertNotNull(apt.getRespondedAt());assertEquals("REJECTED",apt.getResponseType());
+        apt.setStatus(AppointmentStatus.PENDING);apt.setRespondedAt(null);apt.setResponseType(null);
+        appointmentService.cancelByOwner(OWNER_ID,apt.getId(),null);
+        assertNotNull(apt.getRespondedAt());assertEquals("CANCELLED",apt.getResponseType());
+    }
+
     @Nested
     @DisplayName("1. Availability Tests (0/1/2/3 appointments & counting PENDING + CONFIRMED)")
     class AvailabilityTests {
@@ -291,6 +310,7 @@ class ViewingAppointmentServiceTest {
             assertNotNull(res);
             assertEquals(AppointmentStatus.CONFIRMED, res.status());
             assertEquals("Nho den dung gio nhe", res.ownerNote());
+            assertNotNull(aptToApprove.getRespondedAt());
 
             // Verify findConflictingPendingAppointments is NOT called / other appointments are not touched
             verify(appointmentRepository, never()).findConflictingPendingAppointments(any(), any(), any(), any());

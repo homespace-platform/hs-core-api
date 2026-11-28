@@ -42,6 +42,12 @@ public class ContractDocumentIntegrityService {
         return inspect(documentId, false).integrity();
     }
 
+    public DocumentIntegrityResponse checkForAdmin(String documentId) {
+        com.hs.common.context.CurrentUser.requireAdminWith("BLOCKCHAIN_VIEW");
+        com.hs.common.context.CurrentUser.requireAdminWith("CONTRACT_VIEW");
+        return inspect(documentId, true).integrity();
+    }
+
     public VerifiedPdf content(String documentId) {
         return verified(inspect(documentId, false));
     }

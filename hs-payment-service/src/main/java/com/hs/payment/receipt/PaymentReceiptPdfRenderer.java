@@ -104,7 +104,7 @@ public class PaymentReceiptPdfRenderer {
     return renderHtml(membershipHtml(snapshot, hash));
   }
 
-  private byte[] renderHtml(String html) {
+  public byte[] renderHtml(String html) {
     if (!enabled) throw new IllegalStateException("Receipt PDF converter is disabled");
     var body = new LinkedMultiValueMap<String, Object>();
     body.add("files", file("index.html", html.getBytes(StandardCharsets.UTF_8)));

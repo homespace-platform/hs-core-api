@@ -322,6 +322,7 @@ public class RentalRequestService {
 
         req.setStatus(RentalRequestStatus.ACCEPTED);
         req.setAcceptedAt(now);
+        if (req.getRespondedAt() == null) { req.setRespondedAt(Instant.now()); req.setResponseType("ACCEPTED"); }
         req.setHoldExpiresAt(holdExpiresAt);
         req.setListingSnapshot(buildListingSnapshotJson(listing));
         // Pending requests created before the billing change must match the new initial payment.
@@ -388,6 +389,7 @@ public class RentalRequestService {
         }
 
         req.setStatus(RentalRequestStatus.REJECTED);
+        if (req.getRespondedAt() == null) { req.setRespondedAt(Instant.now()); req.setResponseType("REJECTED"); }
         req.setRejectReason(rejectReq != null && rejectReq.rejectReason() != null && !rejectReq.rejectReason().isBlank()
                 ? rejectReq.rejectReason().trim() : "Chủ nhà từ chối yêu cầu thuê");
         RentalRequest saved = rentalRequestRepository.save(req);

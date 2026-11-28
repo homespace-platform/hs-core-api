@@ -24,6 +24,7 @@ import java.util.UUID;
 @Entity
 @Table(name = "signature_requests", indexes = {
         @Index(name = "idx_sig_req_contract", columnList = "contract_id, signer_role"),
+        @Index(name = "idx_sig_req_contract_status", columnList = "contract_id, status"),
         @Index(name = "idx_sig_req_status", columnList = "status"),
         @Index(name = "idx_sig_req_doc_id", columnList = "doc_id"),
         @Index(name = "idx_sig_req_tran_code", columnList = "provider_tran_code")

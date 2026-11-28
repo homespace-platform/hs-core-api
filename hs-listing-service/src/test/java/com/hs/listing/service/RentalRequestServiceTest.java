@@ -355,6 +355,10 @@ class RentalRequestServiceTest {
                 "RENTAL_REQUEST_AUTO_REJECTED:RENTER:renter-req-2:req-2",
                 "RENTAL_REQUEST_AUTO_REJECTED:RENTER:renter-req-3:req-3"), events());
         assertEquals(RentalRequestStatus.ACCEPTED, res.status());
+        assertNotNull(req1.getRespondedAt());
+        assertEquals("ACCEPTED",req1.getResponseType());
+        assertNull(contender1.getRespondedAt());
+        assertNull(contender2.getRespondedAt());
         assertNotNull(res.acceptedAt());
         assertNotNull(res.holdExpiresAt());
         assertEquals(new BigDecimal("10000000"), res.estimatedInitialTotal());
@@ -468,6 +472,8 @@ class RentalRequestServiceTest {
 
         assertEquals(RentalRequestStatus.REJECTED, res.status());
         assertEquals("Khong phu hop", res.rejectReason());
+        assertNotNull(req.getRespondedAt());
+        assertEquals("REJECTED",req.getResponseType());
         // Only the renter is told; the reason never reaches the payload.
         assertEquals(List.of("RENTAL_REQUEST_REJECTED:RENTER:renter-1:req-1"), events());
         verify(outbox).save(argThat(row -> !row.getPayload().contains("Khong phu hop")));

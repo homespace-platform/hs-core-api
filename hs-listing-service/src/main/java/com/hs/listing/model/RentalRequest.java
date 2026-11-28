@@ -12,6 +12,7 @@ import java.time.LocalDate;
 @Table(name = "rental_requests", indexes = {
         @Index(name = "idx_rental_request_listing_status", columnList = "listing_id, status"),
         @Index(name = "idx_rental_request_owner_status", columnList = "owner_id, status"),
+        @Index(name = "idx_rental_request_owner_created", columnList = "owner_id, created_at"),
         @Index(name = "idx_rental_request_renter_status", columnList = "renter_id, status"),
         @Index(name = "idx_rental_request_expires_status", columnList = "hold_expires_at, status"),
         @Index(name = "idx_rental_request_response_status", columnList = "status, respond_by")
@@ -118,6 +119,13 @@ public class RentalRequest extends BaseEntity {
 
     @Column(name = "accepted_at")
     private Instant acceptedAt;
+
+    /** First explicit owner accept/reject; system cleanup and competing auto-rejections are not responses. */
+    @Column(name = "responded_at")
+    private Instant respondedAt;
+
+    @Column(name = "response_type", length = 10)
+    private String responseType;
 
     @Column(name = "hold_expires_at")
     private Instant holdExpiresAt;

@@ -3,6 +3,7 @@ package com.hs.listing.service;
 import com.hs.listing.model.Listing;
 import com.hs.listing.model.constant.ListingStatus;
 import com.hs.listing.repository.ListingRepository;
+import com.hs.listing.repository.ListingViewDailyRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.env.Environment;
@@ -11,6 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Arrays;
 
 @Service
@@ -25,6 +28,9 @@ public class ListingViewService {
     private final StringRedisTemplate redisTemplate;
     private final Environment environment;
     private final ListingViewHistoryService viewHistoryService;
+    private final ListingViewDailyRepository dailyViews;
+
+    private static final ZoneId VN = ZoneId.of("Asia/Ho_Chi_Minh");
 
     public record ViewRecordResult(long viewCount, boolean counted) {}
 
@@ -49,6 +55,7 @@ public class ListingViewService {
         // Nếu môi trường là DEV (SPRING_PROFILES_ACTIVE=dev): Cứ ấn vào là tăng view ngay
         if (isDevProfile()) {
             listingRepository.incrementViewCount(listingId);
+            recordDaily(listingId, viewerId);
             long newCount = currentCount + 1;
             log.info("[DEV] Incremented view directly for listing {}, new count: {}", listingId, newCount);
             return new ViewRecordResult(newCount, true);
@@ -76,10 +83,16 @@ public class ListingViewService {
         }
 
         listingRepository.incrementViewCount(listingId);
+        recordDaily(listingId, viewerId);
         long newCount = currentCount + 1;
         log.info("Incremented view for listing {} by viewer {}, new count: {}", listingId, identifier, newCount);
 
         return new ViewRecordResult(newCount, true);
+    }
+
+    private void recordDaily(String listingId, String viewerId) {
+        dailyViews.record(listingId, LocalDate.now(VN),
+                viewerId == null || viewerId.isBlank() ? null : viewerId);
     }
 
     private boolean isDevProfile() {

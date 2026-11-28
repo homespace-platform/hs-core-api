@@ -102,5 +102,11 @@ public interface PaymentRequestRepository extends JpaRepository<PaymentRequest, 
 
     boolean existsByTransferReference(String transferReference);
 
+    /** Receipt backfill cursor: confirmed payments that {@code PaymentReceiptService.capture} would freeze but have no receipt yet. */
+    @Query("select p.id from PaymentRequest p where p.status = com.hs.payment.model.constant.PaymentStatus.CONFIRMED "
+            + "and p.confirmedAt is not null and p.totalAmount > 0 and p.id > :after "
+            + "and not exists (select 1 from PaymentReceipt r where r.paymentRequestId = p.id) order by p.id")
+    List<String> findConfirmedWithoutReceipt(@Param("after") String after, Pageable page);
+
     List<PaymentRequest> findByRentalRequestIdInAndType(Collection<String> rentalRequestIds, PaymentType type);
 }

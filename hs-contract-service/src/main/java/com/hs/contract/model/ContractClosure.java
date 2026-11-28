@@ -9,7 +9,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.hs.contract.dto.billing.ClosureDeduction;
 import com.hs.contract.dto.billing.ClosureEvent;
 
-@Entity @Table(name="contract_closures")
+@Entity @Table(name="contract_closures", indexes=@Index(name="idx_closure_status_refund_due",columnList="status,refund_due_at"))
 @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
 public class ContractClosure {
     @Id @Column(length=36) private String contractId;

@@ -54,7 +54,24 @@ class ContractDocumentIntegrityServiceTest {
         when(proofs.findById("pdf")).thenReturn(Optional.of(proof));
         when(registry.readDocument(11155111, "registry", "chain-id")).thenReturn(new RegistryClient.ChainProof(HASH, Instant.now()));
     }
-    @AfterEach void clear() { UserContextHolder.clear(); }
+    @AfterEach void clear() { UserContextHolder.clear(); org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+
+    @Test void adminCheckRequiresBothPermissionsAndPreservesSignedBaseline() {
+        assertThrows(AppException.class, () -> service.checkForAdmin("pdf"));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated("admin", null,
+                        java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ADMIN"),
+                                new org.springframework.security.core.authority.SimpleGrantedAuthority("BLOCKCHAIN_VIEW"),
+                                new org.springframework.security.core.authority.SimpleGrantedAuthority("CONTRACT_VIEW"))));
+        when(contracts.getDocumentMetadataForAdmin("pdf")).thenReturn(ContractDocumentResponse.builder()
+                .id("pdf").contractId("contract").revisionId("revision").storageObjectId("storage").build());
+        StorageObjectResponse object = mock(StorageObjectResponse.class);
+        when(object.s3VersionId()).thenReturn("v1"); when(storage.getByIdAuthorized("storage")).thenReturn(object);
+        assertEquals("MATCH", service.checkForAdmin("pdf").status());
+        assertEquals(HASH, document.getSignedSha256()); assertEquals("v1", document.getSignedS3VersionId());
+        verify(proofs, never()).save(any()); verify(documents, never()).save(any());
+        verify(contracts, never()).getDocumentMetadata(anyString());
+    }
 
     @Test void matchedPdfReturnsExactlyTheBytesThatWereCheckedAndPersistsSeparateResult() {
         var content = service.content("pdf");
