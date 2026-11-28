@@ -1,0 +1,91 @@
+# P6 · Blockchain Explorer (admin) — `hs-admin-portal` `/blockchain`
+
+File hiện tại: `src/pages/blockchain/BlockchainExplorerPage.tsx` (7 dòng, trang trắng). Route `<Route path="blockchain" element={<BlockchainExplorerPage />} />` (`router/index.tsx`), chưa gắn quyền; sidebar "Blockchain Explorer" (`layouts/Sidebar.tsx:83`). Trạng thái: **THIẾT KẾ, chờ duyệt**. Nền tảng nghiệp vụ: `docs/BLOCKCHAIN_INTEGRATION.md` (§1 luồng, §5 trạng thái).
+
+## 1. Mục đích & người xem
+- Người xem: quản trị có `BLOCKCHAIN_VIEW` (mới). Quyết định trong 10 giây: "Có hợp đồng nào ký xong mà chưa được ghi lên blockchain, hoặc ghi thất bại, cần đối soát không? Một hợp đồng cụ thể đã được ghi chưa và hash có khớp on-chain không?"
+- Đây là trang vận hành/đối soát, **không** là trình duyệt blockchain chung: chỉ proof của hợp đồng HomeSpace (bảng `contract_document_proofs`) và thanh toán hội viên ETH. Không hiển thị nội dung PDF, không hiển thị thông tin các bên (chỉ số hợp đồng).
+
+## 2. Bố cục (desktop)
+```
++--------------------------------------------------------------------------+
+| Blockchain Explorer                      Mạng: Sepolia (11155111)  [Tải lại]|
+| Registry: 0x12ab…89ef [Etherscan ↗]      Ghi nhận: BẬT/TẮT               |
++--------------------------------------------------------------------------+
+| [Chờ 3] [Đang xác nhận 2] [Đã xác nhận 148] [Thất bại 1 ●đỏ]  (bấm = lọc)  |
+| Cảnh báo: 2 proof chờ > 15 phút                                           |
++--------------------------------------------------------------------------+
+| Tab: [Proof tài liệu hợp đồng] [Thanh toán hội viên ETH]                  |
+| Lọc: Trạng thái [Tất cả v]  Số HĐ [____]  Từ ngày..Đến ngày               |
++--------------------------------------------------------------------------+
+| Số HĐ        | Loại      | Trạng thái | Tx hash     | Block   | Tạo  | Xác nhận|
+| HS-2611-0042 | Thuê gốc  | CONFIRMED  | 0x9f3a…c1 ↗ | 7312045 | 27/11| 27/11   |
+| HS-2611-0043 | Cọc       | FAILED     | 0x77b0…de ↗ | —       | 28/11| —       |
+|  ... phân trang 20/trang ...                                              |
++--------------------------------------------------------------------------+
+Drawer chi tiết (bên phải, mở khi bấm một dòng):
+ [x] HS-2611-0042 · Hợp đồng thuê gốc · CONFIRMED
+ - Hash tài liệu (SHA-256) / ID on-chain / Registry / Chain 11155111
+ - Tx hash ↗ | Block ↗ | Block hash | Registered at | Confirmed at
+ - Xác minh on-chain: [Kiểm tra ngay] -> "Khớp: hash lưu = hash on-chain" 
+ - Kiểm tra tệp đã lưu: [Kiểm tra tệp] -> MATCH/MISMATCH/... (không tải PDF)
+ - Lỗi: mã + mô tả (nếu FAILED)   [Thử lại] (chỉ hiện khi đủ điều kiện, §4)
+```
+Màn nhỏ: bốn thẻ trạng thái thành lưới 2x2; bảng chuyển thành danh sách thẻ (số HĐ, trạng thái, tx rút gọn); drawer thành toàn màn hình; hash luôn rút gọn `0x1234…abcd` kèm nút sao chép.
+
+## 3. Từng khối
+Đồng hồ: thời gian hiển thị `vi-VN`, `Asia/Ho_Chi_Minh`; "chờ quá lâu" dùng giờ thật (`Instant.now()`), vì worker chạy theo giờ thật (`ContractDocumentProofWorker.nextAttempt`, `ContractDocumentProofWorker.java` cuối file). Không dùng BillingTime.
+
+| # | Khối | Định nghĩa | Nguồn | Bấm vào |
+|---|---|---|---|---|
+| H | Đầu trang | Mạng/Chain ID lấy từ cấu hình `homespace.blockchain.chain-id=11155111` (`application.properties:196`), địa chỉ registry `homespace.blockchain.registry-address` (dòng 194), cờ `homespace.blockchain.enabled` (dòng 192). **Không trả** `rpc-url`, `private-key` (dòng 193, 195). Liên kết registry = `https://sepolia.etherscan.io/address/{registry}`. | NEW `summary` | Etherscan (tab mới, `rel="noopener noreferrer"`) |
+| S | 4 thẻ đếm theo trạng thái | `COUNT(*) GROUP BY status` trên `contract_document_proofs` (`ContractDocumentProof.java:12-22,54-56`; enum `ProofStatus` PENDING, SUBMITTED, CONFIRMED, FAILED, `ProofStatus.java:3-8`). `NOT_AVAILABLE` (chưa có proof) **không đếm được ở backend** vì không có hàng — không hiển thị. Thẻ FAILED đỏ nếu > 0. Dòng cảnh báo = số proof `status IN (PENDING,SUBMITTED)` có `created_at < now() - 15 phút` (ngưỡng giả định). | NEW `summary` | lọc bảng theo trạng thái |
+| T | Bảng proof | Mỗi hàng = một `contract_document_proofs`: `status`, `transaction_hash`, `block_number`, `created_at`, `confirmed_at`, `document_kind` (1 = Cọc, 2 = Thuê gốc, 3 = Phụ lục/văn bản bổ sung; `ContractDocumentProofEnqueuer.java:40-41`), `error_code`; **số hợp đồng** = `contracts.contract_number` qua `contract_id` (`Contract.java:34`, unique `idx_contract_number`). Sắp xếp `created_at desc`. Lọc: `status` (enum), `contractNumber` (khớp chính xác hoặc tiền tố, không `LIKE '%x%'`), khoảng `created_at`. | NEW `proofs` | mở drawer |
+| D | Drawer chi tiết | Trường lấy từ `BlockchainProofResponse` (`BlockchainProofResponse.java:6-10`: `documentHash`, `onChainDocumentId`, `chainId`, `registryAddress`, `transactionHash`, `blockNumber`, `blockHash`, `registeredAt`, `confirmedAt`, `errorCode`, `caseId`, `documentKind`) cộng `contractNumber`, `attempts`, `submittedAt`. Liên kết: tx `https://sepolia.etherscan.io/tx/{transactionHash}`, block `…/block/{blockNumber}`, registry `…/address/{registryAddress}`. Chỉ tạo liên kết khi `chainId = 11155111` (bảng ánh xạ `chainId → baseUrl` trong frontend; chain lạ → hiện hash, không có link). Hash hợp lệ phải khớp `^0x[0-9a-f]{64}$` trước khi nối vào URL. | NEW `proofs/{documentId}` | Etherscan |
+| V | Xác minh on-chain | Nút "Kiểm tra ngay": backend đọc registry (`RegistryClient.readDocument(chainId, registry, onChainDocumentId)`, `RegistryClient.java:20`) và so `ChainProof.documentHash` với `proof.documentHash` trong DB; trả `registered`, `matches`, `onChainHash`, `registeredAt`. Lỗi RPC → `UNAVAILABLE` (không kết luận "sai"), đúng quy tắc `ContractDocumentProofQueryService.verify` (`…QueryService.java:96-102`, không lan nguyên nhân gốc vì có thể chứa URL/khoá). Không tự gọi khi mở drawer (tốn RPC); chỉ khi bấm. | NEW `proofs/{id}/verify` | — |
+| F | Kiểm tra tệp đã lưu | Nút "Kiểm tra tệp": backend tính SHA-256 của PDF theo `signed_s3_version_id` và so với baseline (`ContractDocumentIntegrityService.check`, `ContractDocumentIntegrityService.java:41`), trả `DocumentIntegrityResponse` (`status`, `documentHash`, `onChainDocumentHash`, `checkedAt`, `message`). **Không trả bytes PDF.** Hàm `check` hiện chỉ cho bên hợp đồng (`inspect(documentId,false)`), cần thêm `checkForAdmin` gọi `inspect(documentId, true)` giống `contentForAdmin` (dòng 50). Cần cả `BLOCKCHAIN_VIEW` và `CONTRACT_VIEW`. | NEW `proofs/{id}/integrity` | — |
+| E | Tab thanh toán hội viên ETH | Hàng = `membership_eth_quotes` có `transaction_hash IS NOT NULL` (`EthPaymentQuote.java` ~16-58; unique `uk_membership_eth_quote_tx`) ⋈ `membership_orders` (qua `membership_order_id`, `provider = ETH`): hiển thị mã đơn, gói (`tier`/`kind`), `amount_vnd`, `amount_wei`, `transaction_hash` + Etherscan, `confirmed_at`, trạng thái đơn. Chain mặc định Sepolia (cấu hình `homespace.eth-payment.*` không khai báo chain id; giả định cùng Sepolia, dòng 178 `# ETH payment (Sepolia)`; nên bổ sung cột/cấu hình chain id khi có mạng khác — Câu hỏi 4). **Không hiển thị** `payer_wallet`, `signature`, `owner_id`; địa chỉ nhận/hợp đồng thanh toán chỉ hiển thị dạng rút gọn nếu cần (thông tin công khai on-chain nhưng liên kết được tới một người dùng). | NEW `membership-eth-payments` | Etherscan tx |
+
+Trạng thái chung: đang tải = skeleton hàng bảng; trống = "Chưa có proof nào" (kèm gợi ý nếu `enabled=false`: "Ghi nhận blockchain đang tắt"); lỗi API = banner thử lại; lỗi RPC ở khối V/F là trạng thái `UNAVAILABLE` nhẹ nhàng (màu vàng), không phải lỗi trang. Tự làm mới `summary` + trang hiện tại mỗi 15 giây **chỉ khi** tab hiển thị và còn proof PENDING/SUBMITTED; dừng khi không còn (theo cách web tự cập nhật ở `docs/BLOCKCHAIN_INTEGRATION.md` §5).
+
+## 4. API mới
+Không có endpoint admin nào hiện có cho danh sách proof: `ContractBlockchainProofController` (`hs-api-service/.../controller/contract/ContractBlockchainProofController.java:15-32`) chỉ có `GET/POST /contracts/documents/{documentId}/blockchain-proof[/verify]` và dùng `authorizedDocument` → `contracts.getDocument` (`ContractDocumentProofQueryService.java:103-109`), tức quyền **bên hợp đồng**, admin không dùng được. `ContractDocumentAdminController` (`:27`) chỉ trả PDF. Vì vậy cần controller mới `AdminBlockchainController` (`@RequestMapping({"/admin/blockchain","/api/v1/admin/blockchain"})`).
+
+Quyền mới trong `Permissions.java` (+`CATALOG`, tự gán ADMIN ở `PermissionDataInitializer.java:55`, phản chiếu `config/permissions.ts`): `BLOCKCHAIN_VIEW` "Xem proof blockchain và thanh toán ETH hội viên"; `BLOCKCHAIN_MANAGE` "Thử lại proof blockchain thất bại" (giai đoạn 2). Frontend: `ROUTE_PERMISSIONS["/blockchain"] = { permission: PERMISSIONS.BLOCKCHAIN_VIEW }` và `guard("/blockchain", <BlockchainExplorerPage />)` ở router; nút "Thử lại" bọc `<Can permission={PERMISSIONS.BLOCKCHAIN_MANAGE}>` (`components/common/Can.tsx`).
+
+| Endpoint | Quyền | Mô tả |
+|---|---|---|
+| `GET /api/v1/admin/blockchain/summary` | ADMIN + `BLOCKCHAIN_VIEW` | `{ "network":{"chainId":11155111,"name":"Sepolia","registryAddress":"0x…","enabled":true,"explorerBaseUrl":"https://sepolia.etherscan.io"}, "counts":{"PENDING":3,"SUBMITTED":2,"CONFIRMED":148,"FAILED":1}, "stuck":2, "oldestOpenAgeSeconds":1320 }`. `explorerBaseUrl` do **backend** quyết định từ chain id (bảng cố định `11155111 → https://sepolia.etherscan.io`), frontend chỉ kiểm tra chuỗi bắt đầu bằng `https://` đã biết. Query: `select status, count(*) from contract_document_proofs group by status` + `min(created_at) where status in (PENDING,SUBMITTED)`. |
+| `GET /api/v1/admin/blockchain/proofs?status=&contractNumber=&from=&to=&page=1&size=20` | `BLOCKCHAIN_VIEW` | Trả `PageResponse` (cùng kiểu `PageResponse` của `ContractAdminController.java:197`); `size` ≤ 50. Mỗi phần tử: `documentId`, `contractNumber`, `documentKind`, `status`, `transactionHash`, `blockNumber`, `createdAt`, `confirmedAt`, `errorCode`. JPQL/native: `from contract_document_proofs p join contracts c on c.id = p.contract_id where (:status is null or p.status = :status) …` — chỉ `select` cột phía trên, **không** nạp entity có `signed_raw_transaction`, `nonce`, `signer_address`. Index mới: `(status, created_at desc)` (hiện có `idx_document_proof_due(status,next_attempt_at,created_at)` và `idx_document_proof_contract(contract_id)`, `ContractDocumentProof.java:13-14`). |
+| `GET /api/v1/admin/blockchain/proofs/{documentId}` | `BLOCKCHAIN_VIEW` | Chi tiết như khối D (`BlockchainProofResponse` + `contractNumber`, `attempts`, `submittedAt`). 404 nếu không có; không tự tạo proof (khác `ContractDocumentProofQueryService.get` vốn tự enqueue — admin chỉ đọc). |
+| `POST /api/v1/admin/blockchain/proofs/{documentId}/verify` | `BLOCKCHAIN_VIEW` | Khối V. Không có body (hash lấy từ DB, không nhận hash từ client). Timeout RPC theo `homespace.blockchain.rpc-timeout-seconds=15` (`application.properties:198`); giới hạn tần suất 10 lần/phút/admin để không đốt quota RPC (giả định cần thêm bộ giới hạn). |
+| `POST /api/v1/admin/blockchain/proofs/{documentId}/integrity` | `BLOCKCHAIN_VIEW` + `CONTRACT_VIEW` | Khối F, qua `checkForAdmin`. Chỉ trả `DocumentIntegrityResponse`. |
+| `GET /api/v1/admin/blockchain/membership-eth-payments?page=&size=` | `BLOCKCHAIN_VIEW` | Khối E; tổng hợp 2 bảng, cột giới hạn như trên. Index có sẵn: unique `transaction_hash`, `idx_membership_eth_quote_order`. |
+| **Thử lại FAILED** `POST /api/v1/admin/blockchain/proofs/{documentId}/retry` | ADMIN + `BLOCKCHAIN_MANAGE` — **chưa tồn tại; chỉ là đề xuất, giai đoạn 2** | Không có hành động admin nào hiện nay: `ContractDocumentProofWorker.mutate` bỏ qua mọi proof đã `CONFIRMED/FAILED` (`ContractDocumentProofWorker.java:188`), tức FAILED là trạng thái cuối. Các mã lỗi terminal: `DOCUMENT_HASH_CONFLICT`, `DOCUMENT_LINEAGE_CONFLICT`, `SOURCE_PDF_CHANGED`, `TRANSACTION_MISMATCH`, `TRANSACTION_REVERTED` (`ContractDocumentProofWorker.java:78,104,132`; `Web3jRegistryClient.java:132,136,160`). Chỉ **`TRANSACTION_REVERTED`** được phép thử lại (có thể do gas/ví/RPC); bốn mã còn lại là dấu hiệu toàn vẹn/xung đột, **cấm** thử lại bằng nút, phải điều tra thủ công (đúng nguyên tắc "không tự tạo ID mới", `docs/BLOCKCHAIN_INTEGRATION.md` §4). Điều kiện server kiểm trong cùng transaction: `findByIdForUpdate` (`ContractDocumentProofRepository.java:19-21`); `status=FAILED` và `error_code=TRANSACTION_REVERTED`; tính năng đang bật; `checkForAdmin` trả `MATCH` hoặc `PENDING` (tệp còn khớp hash lúc ký); `readDocument` on-chain chưa đăng ký **hoặc** đã đăng ký đúng hash (nếu đã đúng hash thì chuyển worker đối soát, không gửi lại). Hành động: đặt `status=PENDING`, xoá `nonce`, `signed_raw_transaction`, `transaction_hash`, `block_number`, `block_hash`, `submitted_at`, `error_code/message`, `attempts=0`, `next_attempt_at=now` (nonce phải xoá vì có unique `uq_document_proof_nonce`, `ContractDocumentProof.java:17`); không đụng `document_hash`, `on_chain_document_id`, `case_id`. Worker lo phần on-chain dưới lease sẵn có (`blockchain_sender_leases`); sự cố `proof:{id}` (`OperationalIncidentService.observe`, mở bởi dòng 194) **giữ mở** cho tới khi worker xác nhận thành công (worker tự đóng). Ghi audit log (dùng cùng cơ chế audit của `CONTRACT_DOCUMENT_INTEGRITY`, giả định) gồm admin id, documentId, mã lỗi cũ. Idempotent: gọi lại khi đã `PENDING` → 409. Giao diện: hộp xác nhận nêu rõ "sẽ gửi giao dịch mới, tốn Sepolia ETH của ví hệ thống". |
+
+## 5. Biểu đồ
+Không có biểu đồ (trang bảng/đối soát). Bốn thẻ đếm là phần tử số + màu trạng thái kèm chữ (không chỉ màu): xám=PENDING, xanh dương=SUBMITTED, xanh lá=CONFIRMED, đỏ=FAILED, dùng `Badge` có sẵn (`components/ui/badge.tsx`), bảng dùng `components/ui/table.tsx`. Drawer: `package.json` có `radix-ui` nhưng `components/ui/` chưa có `sheet/dialog` — dùng `Dialog` của `radix-ui` tạo kiểu panel phải (không thêm phụ thuộc). Dịch vụ frontend mới `src/services/admin-blockchain.service.ts` theo mẫu `admin-complaint.service.ts` (`axiosClient`, đường dẫn `/api/v1/admin/blockchain/...`).
+
+## 6. Hiệu năng & bảo mật
+- Chi phí ở 100k thanh toán / vài chục nghìn proof: `summary` là một `GROUP BY status` trên bảng nhỏ (cả đời hợp đồng, mỗi PDF cuối một hàng); `proofs` phân trang theo `(status, created_at desc)` + join `contracts` bằng khoá chính → O(size). Không N+1 (một câu join, không `getContract` từng dòng). Tìm theo số HĐ dùng index unique `idx_contract_number`.
+- **Không bao giờ trả**: `signed_raw_transaction`, `nonce`, `signer_address` (nội bộ; đúng nhận xét "không đưa private key, nonce hay raw transaction ra API", `BlockchainProofResponse.java:5`), `storage_object_id`, `revision_id` (không cần), nội dung/bytes PDF, tên/CCCD/email/ID các bên (`landlord_id`, `tenant_id`), `payer_wallet`, `signature`. Chỉ `contract_number` làm định danh hợp đồng. Thông báo lỗi lấy từ `error_code` ánh xạ sang mô tả cố định phía server; không trả `error_message` thô nếu mã không thuộc danh sách đã biết (tránh rò chi tiết RPC/URL).
+- Không có URL RPC/khoá ở bất kỳ phản hồi nào; `explorerBaseUrl` từ bảng cố định phía backend (không nhận từ DB hay client) để chống link độc; mọi liên kết ngoài `target="_blank" rel="noopener noreferrer"`. Kiểm `^0x[0-9a-fA-F]{64}$` (tx/hash) và `^0x[0-9a-fA-F]{40}$` (địa chỉ) trước khi nối vào URL.
+- Xác minh on-chain tốn RPC → giới hạn tần suất; mọi hành động đọc/kiểm tra ghi log mức INFO không kèm hash đầy đủ nếu cần (không bắt buộc, hash là công khai).
+- `retry` là DEEP (tiền Sepolia, trạng thái hợp đồng): theo `AGENTS.md` phải có kiểm thử đường từ chối và đua luồng (hai admin bấm cùng lúc), không làm ở giai đoạn 1.
+
+## 7. Kiểm thử cần viết
+Backend (`AdminBlockchainControllerTest`, mẫu `ContractBlockchainProofControllerTest`; query test theo `ContractDocumentProofPostgresTest`):
+1. 401 chưa đăng nhập; 403 USER; 403 ADMIN thiếu `BLOCKCHAIN_VIEW` cho mọi endpoint GET/POST; `integrity` 403 khi chỉ có `BLOCKCHAIN_VIEW` mà thiếu `CONTRACT_VIEW`.
+2. `proofs`: lọc `status`, lọc `contractNumber`, phân trang, `size=500` bị chặn còn 50; response JSON **không chứa** khoá `signedRawTransaction`, `nonce`, `signerAddress`, `landlordId`, `tenantId` (so khớp danh sách khoá cho phép).
+3. `summary`: không có hàng → mọi `counts` bằng 0; không lộ `rpcUrl/privateKey`; `explorerBaseUrl` đúng với chain 11155111 và rỗng với chain lạ.
+4. `verify`: on-chain khớp → `matches=true`; hash on-chain khác hash DB → `matches=false` + cờ xung đột; `RegistryClient` ném `RuntimeException` → `UNAVAILABLE`, thông điệp không chứa URL; `documentId` không tồn tại → 404; không nhận hash từ client.
+5. Tab ETH: chỉ hàng có `transaction_hash`; không có `payer_wallet` trong JSON.
+6. (Giai đoạn 2) `retry`: chỉ `FAILED` + `TRANSACTION_REVERTED` thành công; `SOURCE_PDF_CHANGED`/`DOCUMENT_HASH_CONFLICT` → 409; thiếu `BLOCKCHAIN_MANAGE` → 403; gọi hai lần song song chỉ một lần thành công (khoá `findByIdForUpdate`); sau retry `nonce`, `signed_raw_transaction` là null và `document_hash` không đổi; sự cố vẫn mở.
+Frontend (`node --test`): `explorerLink(chainId, kind, value)` — chain 11155111 đúng URL, chain lạ trả `null`, giá trị không hợp lệ (có `/`, `?`, thiếu `0x`) trả `null`; `shortHash`; `statusBadge` có nhãn chữ; bảng không render khi thiếu `BLOCKCHAIN_VIEW`; nút "Thử lại" ẩn khi thiếu `BLOCKCHAIN_MANAGE` và khi `errorCode` khác `TRANSACTION_REVERTED`.
+
+## 8. Câu hỏi mở
+1. Có cho thử lại proof FAILED không? Mặc định: **giai đoạn 1 chỉ đọc**, không có nút; thêm `retry` (giai đoạn 2) chỉ cho `TRANSACTION_REVERTED` như §4 sau khi chủ dự án duyệt.
+2. Quyền riêng `BLOCKCHAIN_VIEW`/`BLOCKCHAIN_MANAGE` hay dùng lại `CONTRACT_VIEW`? Mặc định: quyền riêng (tab ETH là dữ liệu tài chính, không thuộc quyền xem hợp đồng).
+3. Ngưỡng "kẹt": 15 phút cho PENDING/SUBMITTED? Mặc định 15 phút, cấu hình `homespace.blockchain.stuck-minutes` (theo quy ước env: `${VAR}` trong properties, không default trong compose, đủ mọi file env).
+4. Mạng của thanh toán ETH hội viên: hiện không có `chain-id` trong `homespace.eth-payment.*`. Mặc định: coi là Sepolia 11155111 và hiển thị nhãn "Sepolia"; thêm cấu hình `homespace.eth-payment.chain-id` khi thật sự đổi mạng.
+5. Có cần xuất danh sách proof ra CSV để đối soát? Mặc định: không ở giai đoạn 1 (tránh thêm bề mặt dữ liệu); nếu cần, xuất ở client từ trang đang xem với cùng cột bị giới hạn.
