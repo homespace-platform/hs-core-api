@@ -26,3 +26,11 @@ Mỗi mục: ngày · model · việc · commit · test (số liệu thật) · 
   4. 34 `@Scheduled` ở core + 4 vòng lặp Nest chỉ ghi log, không lưu lần chạy/lỗi.
   5. Notification-service không có API admin (email/push/DLT); chỉ gateway được canh, các service khác chết không ai báo.
 - Tiếp: cập nhật P1–P6 với tín hiệu THIẾU (khối "Sức khoẻ hệ thống" ở P4), rồi gửi chủ dự án duyệt cùng D1–D10 và danh sách lỗi cần sửa trước.
+
+## 2026-11-28 · Opus 5.5 · Bổ sung giám sát vào P1–P6 sau kiểm kê (chờ duyệt)
+- P1 (222 dòng): 7 nhóm (Thiết lập, Việc cần làm, Tiền, Hợp đồng, Phòng & tin, Khách & lịch hẹn, Khiếu nại), +~28 tín hiệu, endpoint tổng hợp có `include`.
+- P2 (175): +~14 tín hiệu (việc mới, cọc/hoàn cọc, "đang chờ chủ nhà", khiếu nại, tin đã lưu). P3 (145): phí chậm, nợ chuyển kỳ, chi phí hội viên, lượt lưu, cờ "chưa có khách".
+- P4 (209): khối "Sức khoẻ hệ thống" 10 nhóm, mục "Lỗi phải sửa trước" (5 rủi ro), bảng quyền admin duy nhất (§6). P5 (153): +5 khối (sự cố/MTTR, duyệt tin, SLA yêu cầu thuê & lịch hẹn, hội viên hiệu lực, hoá đơn tháng). P6 (109): integrity, lỗi theo mã, ETH chưa settle, lần chạy worker.
+- Ràng buộc: đóng `/actuator/**` ở gateway nhưng giữ `/api/v1/actuator/health` (admin + mobile đang gọi); SLA phản hồi cần cột `responded_at`; cần trang danh sách KYC cùng P4.
+- Giả định chưa kiểm (ghi trong file): số tin chat chưa đọc, cột `deposit_records`/`dispute_cases`, gateway có chuyển `X-User-Authorities` tới notification/chat/ai không.
+- Chờ chủ dự án: duyệt thiết kế, D1–D10, thứ tự sửa 5 lỗi trước.
