@@ -1,6 +1,6 @@
 # P2 — Dashboard người thuê (`/dashboard/tenant`)
 
-Trạng thái: THIẾT KẾ, chờ chủ dự án duyệt. Web: `hs-web-app/app/dashboard/tenant/page.tsx` (hiện chỉ có dòng "đang được xây dựng", file dòng 1-30). Backend: `hs-core-api`. Mọi `file:line` dưới đây đã đọc ngày 28/11/2026; "(giả định)" = chưa kiểm chứng được bằng code.
+Trạng thái: ĐÃ DUYỆT theo AUDIT_LOG ngày 28/11/2026; triển khai API phase 1. Mục 10 là hợp đồng API thực tế, hiệu chỉnh các giả định bên dưới theo schema. Web/mobile ở đợt sau. Mọi `file:line` dưới đây là tham chiếu thiết kế ngày 28/11/2026; "(giả định)" không thay thế schema thực tế.
 
 ## 0. Thay đổi sau kiểm kê (28/11/2026, đã đối chiếu 5 file `inventory/`)
 - Bố cục gom thành nhóm, gấp nhất trước: **Thiết lập → Việc cần làm/hạn chót → Tiền → Hợp đồng → Khách & lịch hẹn → Khiếu nại** (mục 2); mỗi nhóm có huy hiệu "n việc · m gấp".
@@ -130,7 +130,7 @@ Truy vấn (tất cả theo lô, không N+1; mẫu `BranchAttentionService.load`
 Hợp đồng/hạn dùng đúng `ContractLeaseCalc`; hạn tiền dùng `PaymentTimePolicy.usesBillingTime`.
 
 ## 5. Biểu đồ
-`hs-web-app/package.json` (mục dependencies) **không có thư viện biểu đồ** (không recharts/chart.js/visx; chỉ `date-fns`, `lucide-react`). Không thêm thư viện: vẽ cột chồng bằng SVG/CSS thuần (≤12 cột x 3 nhóm). Trục X: tháng `MM/YY` (6 hoặc 12); trục Y: VND, rút gọn "tr"/"k", đường lưới 3 mức, tối thiểu 0. Màu: 3 token Tailwind sẵn có, nhóm "Cọc & tháng đầu" nhạt hơn (có thể hoàn lại); có `<title>`/bảng ẩn cho trình đọc màn hình, tooltip hiện số đúng từng nhóm. Không dùng biểu đồ khác.
+Quyết định D4 đã duyệt thay thế đề xuất SVG/CSS ban đầu: dùng thư viện biểu đồ ở đợt frontend. API trả 6 hoặc 12 tháng và 3 nhóm tiền; chưa cài thư viện hay làm frontend trong phase 1.
 
 ## 6. Hiệu năng & bảo mật
 - Chi phí: ~12 truy vấn có index, mọi tập theo `userId` nên độc lập với 10k tin đăng (chỉ W9 đụng `listing_favorites`, idx `idx_favorite_user`). Với 100k thanh toán: W3 theo `idx_payment_request_payer_status` (chỉ hàng chưa hoàn tất), W7 giới hạn cửa sổ 12 tháng nhờ index mới trên biên nhận; thiếu index này W7 quét toàn bảng biên nhận. N+1: chỉ `RentalOnboardingService.get` cho ≤10 yêu cầu ACCEPTED (chấp nhận, ghi chú tối ưu ở W4). Giới hạn cứng: 50 hợp đồng, 20 việc, 5 lịch, 3 yêu cầu mở, 10 mục chờ chủ nhà, 5 khiếu nại, 5 hoàn tiền, 5 khoản chờ xác nhận. Sau kiểm kê thêm 5 truy vấn có chỉ mục; `RentalOnboardingService.get` ≤10 vẫn là N+1 duy nhất (cũng cấp `startChanges`).
@@ -173,3 +173,82 @@ Frontend (`hs-web-app/lib/*.test.ts` — repo chỉ có test lib, ví dụ `appo
 | Cảnh báo tin đã lưu đổi giá/hạ tin (T6 tin) | Chưa có dữ liệu: ghi `listing_price_history` (giá, thời điểm đổi) và lịch sử `expires_at` trước; W9 chỉ hiện trạng thái hiện tại |
 | Tin đã xem gần đây (T7 tin, `/history/count`) | Tiện ích, tự xóa sau 30 ngày; thuộc trang lịch sử xem |
 | Quyền hiện có (`/users/me/permissions`) | Giá trị thấp, chỉ để giải thích tính năng bị ẩn |
+
+## 10. Hợp đồng API phase 1 thực tế (Codex, 28/11/2026)
+
+`GET /dashboard/tenant/summary` và alias `GET /api/v1/dashboard/tenant/summary` trả `ApiResponse<TenantDashboardResponse>` trong `result`, header `Cache-Control: private, no-store`. Chỉ đọc trong transaction `REPEATABLE_READ`; không gọi refresh/sync, provider, ngân hàng hoặc storage API. Danh tính chỉ từ `CurrentUser` sau `UserContextFilter` kiểm shared-secret của gateway và role USER/ADMIN hợp lệ. Không thêm permission mới cho việc đọc dữ liệu của chính mình (đúng mục 4); ADMIN cũng chỉ đọc phạm vi cá nhân của mình ở endpoint này.
+
+Tham số duy nhất: `spendMonths=6|12`, mặc định `12`. Giá trị rỗng, lặp tham số, số ngoài hai giá trị này, dạng `06`, và mọi tham số lạ (kể cả `userId`, `role`) trả HTTP 400 / code 1001. Thiếu danh tính đã xác thực, header giả mạo hoặc role không hợp lệ trả HTTP 401 / code 1002; không gọi service.
+
+DTO bên dưới ghi đầy đủ tên trường; `Instant` là ISO-8601 UTC, ngày `YYYY-MM-DD`, giờ local ISO, tiền là JSON number từ `BigDecimal` (VND). Mọi khối/list có mặt, list rỗng/tiền 0 khi không có dữ liệu; giá trị không tồn tại là null.
+
+| DTO / khối | Trường |
+|---|---|
+| `TenantDashboardResponse` | `billingNow, realNow, timezone, setup, leases, payables, tasks, holds, visits, requests, spending, deposits, waiting, complaints, saved` |
+| `setup` | `onboarded` (boolean từ `users.on_boarded`, thiếu user = false) |
+| `leases` | `activeCount, items[]` |
+| `Lease` | `contractId, contractNumber, listingId, listingTitle, listingAddress, listingThumbnail, landlordName, startsOn, endExclusive, daysRemaining, expiry, monthlyRent, nextPayment, href` |
+| `payables` | `overdueCount, overdueAmount, dueSoonAmount, next, items[], awaiting, refundsIncoming` |
+| `Payable` | `paymentId, type, contractId, contractNumber, listingTitle, invoiceId, periodIndex, amount, dueAt, clock, overdue, rejectedReason, href` |
+| `awaiting` | `count, amount, items[{paymentId, contractNumber, amount, payerReportedAt, confirmationDueAt, href}]` |
+| `refundsIncoming` | `count, amount, items[{paymentId, contractNumber, type, status, amount, dueAt, autoConfirmAt, href}]` |
+| `tasks` | `total, urgentCount, items[{key, type, contractId, rentalRequestId, contextLabel, dueAt, clock, priority, href}]` |
+| `holds[]` | `rentalRequestId, listingTitle, thumbnail, holdExpiresAt, remainingSeconds, critical, amountDue, href` |
+| `visits` | `upcomingCount, items[{id, listingId, listingTitle, listingAddress, thumbnail, appointmentDate, startTime, endTime, status, rescheduleRequested, proposedDate, proposedStartTime}]` |
+| `requests` | `counts{PENDING, ACCEPTED, REJECTED, CANCELLED, EXPIRED, COMPLETED}, open[{id, listingTitle, thumbnail, status, createdAt, respondBy, holdExpiresAt, href}]` |
+| `spending` | `currency, total, totalExcludingDeposit, total12m, total12mExcludingDeposit, months[{month, total, byGroup{DEPOSIT_FIRST, RENT, UTILITY_OTHER}}], receiptPdfIssues` |
+| `deposits` | `heldTotal, items[{contractId, contractNumber, amount, status, closure, href}]`; `closure` = null hoặc `{status, refundAmount, refundDueAt}` |
+| `waiting` | `count, items[{type, contractId, contractNumber, sentAt, respondBy, clock, href}]` |
+| `complaints` | `openCount, dueFromMeCount, items[{id, contractNumber, category, status, respondBy, responseDueFor, href}]` |
+| `saved` | `total, available, unavailable` (đếm favorite active / listing active, available khi PUBLISHED; 4 thẻ vẫn lấy API favorites riêng) |
+
+Quy tắc đã đối chiếu schema/code:
+
+- `billingNow` là tên thực tế thay cho `serverNow` trong ví dụ thiết kế; `timezone=Asia/Ho_Chi_Minh`. Hạn tiền theo `PaymentTimePolicy.BILLING_TYPES` và OTHER_CHARGE có contract; utility theo giờ thật. Lịch xem dùng **ngày và giờ thật chính xác đến giây**, không ngày BillingTime hay cắt về phút. SmartCA `expiresAt` dùng giờ thật, hạn ký hợp đồng dùng BillingTime. Biên nhận được nhóm ngay trong PostgreSQL theo tháng VN, tối đa 12 × 6 nhóm loại tiền, không tải từng biên nhận.
+- `total` và `totalExcludingDeposit` ứng với cửa sổ `spendMonths`; `total12m` và `total12mExcludingDeposit` luôn ứng với 12 tháng, kể cả khi chọn 6. Không cộng hội viên, tiền hoàn hoặc khoản mình là bên nhận. Cửa sổ từ đầu tháng thứ 12 (inclusive) đến đầu tháng sau (exclusive). `receiptPdfIssues` dùng cửa sổ 90 ngày BillingTime, FAILED hoặc PENDING **hơn** 5 phút.
+- Lease gốc ACTIVE, không DEPOSIT/phụ lục; `ContractLeaseCalc.end` giữ ưu tiên early-end/ngày-tháng đã thoả thuận/effective/original, ngày kết thúc exclusive. `nextPayment` của từng lease và `payables.next` bỏ qua khoản quá hạn, đã báo hoặc chưa mở. OVERDUE lưu cũ nhưng hạn tương lai không bị tính quá hạn. Tổng tiền/count được aggregate trước cap chi tiết, bao gồm đủ cả khoản ngoài danh sách hiển thị.
+- `DepositRecord` thực tế có `heldAmount`, `originalAmount`, `refundableAmount`, `contractId`, `rentalRequestId`, `tenantId`. `deposits.amount` là **heldAmount hiện tại**, kể cả 0 khi đã REFUNDED. Không suy số đang giữ từ tổng INITIAL vì tổng đó có cả tiền thuê. Bản ghi cũ không có ledger chỉ được bổ sung từ dòng `payment_line_items.type=DEPOSIT` của tiền đã CONFIRMED, nhãn `CONFIRMED_PAYMENT`; số đó là nguyên gốc đã thu, **không vào heldTotal**, vì không có bằng chứng số dư cọc hiện tại. Ledger và contract đều phải thuộc tenant hiện tại. Closure thuộc cả hợp đồng EXPIRED, không chỉ những lease còn ACTIVE.
+- `CLOSURE_RESPONSE` chỉ khi closure PROPOSED của hợp đồng EXPIRED; DISPUTED chuyển sang `CLOSURE_DISPUTED` đang chờ chủ nhà. Waiting còn ba loại `RENEWAL_REQUESTED`, `AMENDMENT_WAITING`, `EARLY_EXIT_PROPOSED`; không lặp yêu cầu thuê PENDING. Schema workflow không có cột `proposedAt`, closure không có `disputedAt`, nên `sentAt=null` cho hai loại tương ứng thay vì bịa ngày; ngày gửi renewal/amendment lấy `requestedAt/submittedAt`.
+- `RentalOnboardingService.get` tái sử dụng NextAction của tối đa 10 ACCEPTED: PAY_DEPOSIT, PAY_FIRST_RENT, SIGN_DEPOSIT, SIGN_LEASE, RESPOND_DEFAULT_NOTICE; PAY không lặp tiền đã ở payables. Refund confirmation lấy một lần từ payment truth. **Hiệu chỉnh giả định START_CHANGE_RESPONSE:** code hiện tại chỉ cho tenant yêu cầu đổi ngày, và chỉ owner được quyết định (`RentalOnboardingService.requestEarlierStart/decideStartChange`); không có yêu cầu do owner gửi tới tenant, không tạo nhiệm vụ giả cho tenant. `startChanges` không được trả nguyên văn vì có reason/responseNote.
+- `SIGN_ANNEX` lấy signBy từ amendment/renewal APPROVED. `SIGN_CONFIRM_APP` chỉ đọc signature của chính tenant trên current revision của hợp đồng còn TENANT_SIGNATURE_PENDING; pending chưa hết hạn hoặc lần ký mới nhất FAILED/EXPIRED/REJECTED để thử lại. Không đọc CCCD/certificate hay gọi VNPT. `TERMINATION_RESPONSE` có cả early-exit và đề nghị tháng còn mở; NOTICE còn hạn và chưa trả được đọc từ lịch sử thực, REVIEW_REQUESTED không còn việc của tenant. Legacy mutual proposal không có hạn thì dueAt=null, không bịa SLA.
+- Complaint chỉ khi active, một bên là user hiện tại, chưa RESOLVED; chỉ trả category/status/deadline, `responseDueFor=YOU|OTHER`. Không trả reason/decision, bank/QR/snapshot, phone/email/CCCD hoặc ID người đối diện. `rejectedReason` duy nhất là lý do payment REJECTED của **payer hiện tại**, cắt 160 ký tự. `ContractServiceImpl.getContract` đã xác nhận gọi `findContractAndCheckAccess` → `checkContractAccess` kiểm landlord/tenant hoặc admin có quyền; không cần đổi endpoint đích.
+- Cap đầu ra: 50 leases/cọc, 20 tasks/payables/holds, 5 lịch/complaints/refunds/awaiting, 3 yêu cầu mở, 10 waiting; UI tự giới hạn lease cards 6. Nguồn ký/closure/renewal/waiting 50 mỗi loại, amendment/early-exit theo tối đa 50 lease, complaints 100, onboarding 10. Monetary totals, số lịch, số lease và số complaint là query aggregate độc lập; task/waiting total đếm nguồn đã nạp trong giới hạn thiết kế. Open payment detail đọc 200, next đọc tối đa 50 lease hiện tại + 1 khoản kế tiếp toàn cục, refunds 50; aggregate tiền không bị các cap này cắt. Batch metadata không tạo query theo từng lease; ngoại lệ onboarding ≤10 như thiết kế.
+
+`TenantDashboardIndexMigration` chạy idempotent theo convention ApplicationReadyEvent: `idx_receipt_tenant_issued`, `idx_dispute_payer_status`, `idx_dispute_payee_status`, `idx_closure_status_refund_due`, `idx_sig_contract_status`. `contract_closures.contract_id` đã là primary key, không thêm index trùng. **Điều phối cần hoà giải PaymentReceipt/index này với P3/P1:** thay đổi annotation `idx_receipt_tenant_issued` là phần có sẵn của worker trước, được giữ lại; không tạo hai index cùng cột với tên khác khi gộp.
+
+KYC, notification preferences/unread-count và chat vẫn dùng API độc lập đã chỉ định ở W0/W0b, không tạo phụ thuộc ngược tới notification/chat. Chưa có frontend/mobile/Excel trong phase 1. Không đọc `.env`, không truy cập DB/service của ứng dụng.
+
+### Bằng chứng kiểm thử thực chạy — L3
+
+Lượt cuối trên đúng source cuối: PowerShell, cwd `D:/Projects/homespace/.wt-dash-p2`:
+
+```powershell
+$env:HS_TENANT_TEST_PG_URL='jdbc:postgresql://127.0.0.1:64304/hs_tenant_dashboard_test_fd274c3f'
+.\mvnw.cmd -Pisolated-build -pl hs-api-service -am '-Dtest=TenantDashboardServiceTest,TenantDashboardControllerTest,TenantDashboardPostgresTest,BranchLeaseEndParityTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
+```
+
+Kết quả **exit 0 / BUILD SUCCESS, 47 tests, 0 failures, 0 errors, 0 skipped**:
+
+| Test | Thực chạy / kết quả |
+|---|---|
+| `TenantDashboardServiceTest` | 22 passed: phân nhóm/lấp tháng, tổng 6/12 tháng, BillingTime khác giờ thật, OVERDUE cũ đã gia hạn, loại reported/refund khỏi phải trả, cắt rejectedReason, giữ chỗ ngưỡng 15 phút, lease end parity/tháng đã thoả thuận, next riêng theo lease, ưu tiên/de-duplicate/cap task, amendment/waiting, complaint/refund/signature/expiry/default notice/NextAction và monthly termination NOTICE → REVIEW_REQUESTED |
+| `TenantDashboardControllerTest` | 13 passed qua MockMvc + UserContextFilter + GlobalException: caller được xác thực, cache-private/JSON, anonymous, header giả/secret sai/role sai, userId/role injection, tham số lạ/rỗng/sai/lặp; denied không gọi service |
+| `TenantDashboardPostgresTest` | 9 passed trên **PostgreSQL 16.16**, entity/schema thật: cross-tenant contracts/payables/deposits/complaints (cả tài khoản vừa là landlord vừa là tenant), JSON không lộ bank/reason/PII; tháng VN 23:59:59→00:00, biên dưới/trên exclusive, cancelled/refund/payee loại khỏi chi tiêu; PDF PENDING đúng biên 5 phút; lịch thật chính xác giây và trạng thái cancelled/rejected/expired/completed; renewal/early exit/closure phản hồi và biến mất; số SQL bằng nhau khi tăng 3→30 leases và chỉ SELECT/CTE, không DML/lock; migration chạy 2 lần; **205 khoản quá hạn, 6 reported, 55 refunds** vẫn tổng đúng ngoài cap; SmartCA đúng tenant/current revision/latest request và biến mất sau SIGNED/CANCELLED; legacy deposit line-item đúng principal; annex chỉ hiện khi source APPROVED và parent ACTIVE |
+| `BranchLeaseEndParityTest` (có sẵn) | 3 passed: giữ công thức ngày kết thúc dùng chung |
+
+Container do worker tạo duy nhất: `hs-p2-codex-fd274c3f`, image `postgres:16-alpine`, bind localhost random port do Docker cấp (64304), database chỉ dùng test có regex guard. Container được xoá sau kiểm thử; không dừng/xoá container của worker khác. Log các lượt nằm trong `target/p2-evidence/` (không commit). Hai lỗi đã xử lý trong quá trình chạy: PowerShell tách `-Dsurefire.failIfNoSpecifiedTests=false` khi không quote; guard SQL ban đầu chỉ nhận SELECT nên loại nhầm CTE chỉ đọc. Lượt cuối quote đúng tham số, guard nhận SELECT/CTE và vẫn cấm INSERT/UPDATE/DELETE/MERGE/row lock; không còn validation lỗi chưa giải quyết.
+
+10 đường dẫn thay đổi để điều phối tích hợp:
+
+- `docs/dashboards/P2-tenant-dashboard.md`
+- `hs-api-service/src/main/java/com/hs/api/controller/contract/TenantDashboardController.java`
+- `hs-api-service/src/test/java/com/hs/api/controller/contract/TenantDashboardControllerTest.java`
+- `hs-contract-service/src/main/java/com/hs/contract/config/TenantDashboardIndexMigration.java`
+- `hs-contract-service/src/main/java/com/hs/contract/dto/tenant/TenantDashboardResponse.java`
+- `hs-contract-service/src/main/java/com/hs/contract/repository/TenantDashboardReadRepository.java`
+- `hs-contract-service/src/main/java/com/hs/contract/service/TenantDashboardService.java`
+- `hs-contract-service/src/test/java/com/hs/contract/service/TenantDashboardServiceTest.java`
+- `hs-contract-service/src/test/java/com/hs/contract/service/TenantDashboardPostgresTest.java`
+- `hs-payment-service/src/main/java/com/hs/payment/receipt/PaymentReceipt.java`
+
+Chưa chạy full suite, frontend/mobile/Excel hoặc dịch vụ ngoài; không ghi AUDIT_LOG/master và không push. Điều phối cần hoà giải index PaymentReceipt trùng phạm vi P1/P3. Giới hạn nguồn task/waiting, START_CHANGE_RESPONSE không tồn tại trong nghiệp vụ hiện tại và số dư legacy thiếu ledger đã nêu rõ ở trên, không che bằng dữ liệu ước lượng.
