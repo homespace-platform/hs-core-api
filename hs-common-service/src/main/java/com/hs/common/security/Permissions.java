@@ -41,6 +41,11 @@ public final class Permissions {
     public static final String NOTIFICATION_BROADCAST = "NOTIFICATION_BROADCAST";
     public static final String INCIDENT_VIEW = "INCIDENT_VIEW";
     public static final String STORAGE_VIEW = "STORAGE_VIEW";
+    public static final String STATISTICS_VIEW = "STATISTICS_VIEW";
+    public static final String SYSTEM_HEALTH_VIEW = "SYSTEM_HEALTH_VIEW";
+    public static final String PAYMENT_VIEW = "PAYMENT_VIEW";
+    public static final String BLOCKCHAIN_VIEW = "BLOCKCHAIN_VIEW";
+    public static final String BLOCKCHAIN_MANAGE = "BLOCKCHAIN_MANAGE";
 
     // User scope: feature toggles for the USER role (ADMIN also holds them for its own account).
     public static final String LISTING_POST = "LISTING_POST";
@@ -94,6 +99,11 @@ public final class Permissions {
         m.put(NOTIFICATION_BROADCAST, "Gửi thông báo toàn hệ thống");
         m.put(INCIDENT_VIEW, "Xem sự cố vận hành");
         m.put(STORAGE_VIEW, "Xem tệp của người dùng (quản trị)");
+        m.put(STATISTICS_VIEW, "Xem thống kê doanh thu, tăng trưởng và SLA toàn hệ thống");
+        m.put(SYSTEM_HEALTH_VIEW, "Xem sức khỏe dịch vụ, outbox và công việc nền");
+        m.put(PAYMENT_VIEW, "Xem số liệu tổng hợp tiền chờ xử lý");
+        m.put(BLOCKCHAIN_VIEW, "Xem bằng chứng blockchain và thanh toán ETH hội viên");
+        m.put(BLOCKCHAIN_MANAGE, "Thử lại bằng chứng blockchain thất bại");
         m.put(LISTING_POST, "Đăng tin, đổi trạng thái/ẩn tin của mình, quản lý chi nhánh");
         m.put(APPOINTMENT_BOOK, "Đặt, đổi, hủy lịch xem nhà");
         m.put(APPOINTMENT_MANAGE, "Chủ nhà duyệt, từ chối, hoàn tất lịch xem nhà");
